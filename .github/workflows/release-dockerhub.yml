@@ -1,9 +1,9 @@
 name: release-dockerhub
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  # push:
+  #   tags:
+  #     - "v*.*.*"
 
 env:
   RELEASE_NAME: my_game
