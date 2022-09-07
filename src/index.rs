@@ -36,6 +36,6 @@ fn Init(mut commands: Commands) {
 
 fn UiExample(mut egui_context: ResMut<EguiContext>) {
     egui::Window::new("Hello").show(egui_context.ctx_mut(), |ui| {
-        ui.label("world");
+        ui.label("test");
     });
 }
