@@ -124,6 +124,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -136,6 +137,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "arrayvec"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -805,7 +808,11 @@ dependencies = [
  "bevy_input",
  "bevy_math",
  "bevy_utils",
+<<<<<<< HEAD
  "raw-window-handle 0.4.3",
+=======
+ "raw-window-handle",
+>>>>>>> template/main
  "web-sys",
 ]
 
@@ -823,10 +830,17 @@ dependencies = [
  "bevy_utils",
  "bevy_window",
  "crossbeam-channel",
+<<<<<<< HEAD
  "raw-window-handle 0.4.3",
  "wasm-bindgen",
  "web-sys",
  "winit 0.26.1",
+=======
+ "raw-window-handle",
+ "wasm-bindgen",
+ "web-sys",
+ "winit",
+>>>>>>> template/main
 ]
 
 [[package]]
@@ -942,6 +956,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "calloop"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -955,6 +970,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "cc"
 version = "1.0.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1008,6 +1025,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "cmake"
 version = "0.1.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1017,6 +1035,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "cocoa"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1027,7 +1047,11 @@ dependencies = [
  "cocoa-foundation",
  "core-foundation 0.9.3",
  "core-graphics 0.22.3",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "libc",
  "objc",
 ]
@@ -1042,7 +1066,11 @@ dependencies = [
  "block",
  "core-foundation 0.9.3",
  "core-graphics-types",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "libc",
  "objc",
 ]
@@ -1144,7 +1172,11 @@ checksum = "b3889374e6ea6ab25dba90bb5d96202f61108058361f6dc72e8b03e6f8bbe923"
 dependencies = [
  "bitflags",
  "core-foundation 0.7.0",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "libc",
 ]
 
@@ -1157,7 +1189,11 @@ dependencies = [
  "bitflags",
  "core-foundation 0.9.3",
  "core-graphics-types",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "libc",
 ]
 
@@ -1169,6 +1205,7 @@ checksum = "3a68b68b3446082644c91ac778bf50cd4104bfb002b5a6a7c44cca5a2c70788b"
 dependencies = [
  "bitflags",
  "core-foundation 0.9.3",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
  "libc",
 ]
@@ -1182,6 +1219,9 @@ dependencies = [
  "core-foundation 0.9.3",
  "core-graphics 0.22.3",
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "libc",
 ]
 
@@ -1298,6 +1338,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "crossfont"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1321,6 +1362,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "cty"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1403,6 +1446,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
+<<<<<<< HEAD
 name = "dwrote"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1417,6 +1461,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "either"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1489,6 +1535,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
+<<<<<<< HEAD
 name = "expat-sys"
 version = "2.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1499,6 +1546,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "exr"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1576,6 +1625,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
 dependencies = [
+<<<<<<< HEAD
  "foreign-types-shared 0.1.1",
 ]
 
@@ -1598,6 +1648,9 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+=======
+ "foreign-types-shared",
+>>>>>>> template/main
 ]
 
 [[package]]
@@ -1607,6 +1660,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
+<<<<<<< HEAD
 name = "foreign-types-shared"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1635,6 +1689,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2355,6 +2411,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "memmap2"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2364,6 +2421,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "memoffset"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2381,7 +2440,11 @@ dependencies = [
  "bitflags",
  "block",
  "core-graphics-types",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "log",
  "objc",
 ]
@@ -2419,7 +2482,11 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "image",
+<<<<<<< HEAD
  "winit 0.27.2",
+=======
+ "winit",
+>>>>>>> template/main
 ]
 
 [[package]]
@@ -2460,7 +2527,11 @@ dependencies = [
  "bevy",
  "image",
  "my-game",
+<<<<<<< HEAD
  "winit 0.26.1",
+=======
+ "winit",
+>>>>>>> template/main
 ]
 
 [[package]]
@@ -2490,6 +2561,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "ndk"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2504,6 +2576,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2541,6 +2615,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "ndk-glue"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2557,6 +2632,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "ndk-macro"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2585,6 +2662,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "ndk-sys"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2594,6 +2672,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "nix"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2628,7 +2708,10 @@ dependencies = [
  "bitflags",
  "cfg-if 1.0.0",
  "libc",
+<<<<<<< HEAD
  "memoffset",
+=======
+>>>>>>> template/main
 ]
 
 [[package]]
@@ -3007,6 +3090,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "raw-window-handle"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3016,6 +3100,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "rayon"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3131,6 +3217,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4501abdff3ae82a1c1b477a17252eb69cee9e66eb915c1abaa4f44d873df9f09"
 
 [[package]]
+<<<<<<< HEAD
 name = "safe_arch"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3140,6 +3227,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3173,6 +3262,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
+<<<<<<< HEAD
 name = "sctk-adwaita"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3185,6 +3275,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "serde"
 version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3216,6 +3308,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "servo-fontconfig"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3237,6 +3330,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "sharded-slab"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3285,11 +3380,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a28f16a97fa0e8ce563b2774d1e732dd5d4025d2772c5dba0a41a0f90a29da3"
 dependencies = [
  "bitflags",
+<<<<<<< HEAD
  "calloop 0.9.3",
  "dlib",
  "lazy_static",
  "log",
  "memmap2 0.3.1",
+=======
+ "calloop",
+ "dlib",
+ "lazy_static",
+ "log",
+ "memmap2",
+>>>>>>> template/main
  "nix 0.22.3",
  "pkg-config",
  "wayland-client",
@@ -3298,6 +3401,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "smithay-client-toolkit"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3317,6 +3421,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "spin"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3416,7 +3522,11 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec27dea659b100d489dffa57cf0efc6d7bfefb119af817b92cc14006c0b214e3"
 dependencies = [
+<<<<<<< HEAD
  "arrayvec 0.7.2",
+=======
+ "arrayvec",
+>>>>>>> template/main
  "hash32",
  "hash32-derive",
  "num-traits",
@@ -3482,6 +3592,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "tiny-skia"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3507,6 +3618,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "tinyvec"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3858,12 +3971,20 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "277e967bf8b7820a76852645a6bce8bbd31c32fda2042e82d8e3ea75fda8892d"
 dependencies = [
+<<<<<<< HEAD
  "arrayvec 0.7.2",
+=======
+ "arrayvec",
+>>>>>>> template/main
  "js-sys",
  "log",
  "naga",
  "parking_lot 0.12.1",
+<<<<<<< HEAD
  "raw-window-handle 0.4.3",
+=======
+ "raw-window-handle",
+>>>>>>> template/main
  "smallvec",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3879,7 +4000,11 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89b92788dec9d0c1bed849a1b83f01b2ee12819bf04a79c90f68e4173f7b5ba2"
 dependencies = [
+<<<<<<< HEAD
  "arrayvec 0.7.2",
+=======
+ "arrayvec",
+>>>>>>> template/main
  "bit-vec",
  "bitflags",
  "cfg_aliases",
@@ -3890,7 +4015,11 @@ dependencies = [
  "naga",
  "parking_lot 0.12.1",
  "profiling",
+<<<<<<< HEAD
  "raw-window-handle 0.4.3",
+=======
+ "raw-window-handle",
+>>>>>>> template/main
  "smallvec",
  "thiserror",
  "web-sys",
@@ -3905,14 +4034,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20cbdfc3d0637dba3d5536b93adef3d26023a0b96f0e1ee5ee9560a401d9f646"
 dependencies = [
  "android_system_properties",
+<<<<<<< HEAD
  "arrayvec 0.7.2",
+=======
+ "arrayvec",
+>>>>>>> template/main
  "ash",
  "bit-set",
  "bitflags",
  "block",
  "core-graphics-types",
  "d3d12",
+<<<<<<< HEAD
  "foreign-types 0.3.2",
+=======
+ "foreign-types",
+>>>>>>> template/main
  "fxhash",
  "glow",
  "gpu-alloc",
@@ -3928,7 +4065,11 @@ dependencies = [
  "parking_lot 0.12.1",
  "profiling",
  "range-alloc",
+<<<<<<< HEAD
  "raw-window-handle 0.4.3",
+=======
+ "raw-window-handle",
+>>>>>>> template/main
  "renderdoc-sys",
  "thiserror",
  "wasm-bindgen",
@@ -4043,8 +4184,13 @@ dependencies = [
  "objc",
  "parking_lot 0.11.2",
  "percent-encoding",
+<<<<<<< HEAD
  "raw-window-handle 0.4.3",
  "smithay-client-toolkit 0.15.4",
+=======
+ "raw-window-handle",
+ "smithay-client-toolkit",
+>>>>>>> template/main
  "wasm-bindgen",
  "wayland-client",
  "wayland-protocols",
@@ -4054,6 +4200,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "winit"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4096,6 +4243,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> template/main
 name = "x11-dl"
 version = "2.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

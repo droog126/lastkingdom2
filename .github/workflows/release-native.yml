@@ -7,7 +7,11 @@ on:
 
 env:
   RELEASE_NAME: my_game
+<<<<<<< HEAD
   PUBLIC_URL: /lastkingdom2/
+=======
+  PUBLIC_URL: /bevy-shell-template/
+>>>>>>> template/main
 
 jobs:
   setup:

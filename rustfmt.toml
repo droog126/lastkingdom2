@@ -1,9 +1,13 @@
 # Wrap all comments and lines to 80 characters
 max_width = 80
 comment_width = 80
+<<<<<<< HEAD
 wrap_comments = true
 tab_spaces = 4
 struct_lit_width = 100
 chain_width = 100
 use_field_init_shorthand = true
 newline_style = "Unix"
+=======
+wrap_comments = true
+>>>>>>> template/main
