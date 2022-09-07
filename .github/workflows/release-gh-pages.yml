@@ -3,7 +3,7 @@ name: release-gh-pages
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "*"
 
 env:
   PUBLIC_URL: /bevy-shell-template/
