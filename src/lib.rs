@@ -1,10 +1,6 @@
 use bevy::prelude::*;
 
-<<<<<<< HEAD
 pub const LAUNCHER_TITLE: &str = "Bevy Shell - Template12";
-=======
-pub const LAUNCHER_TITLE: &str = "Bevy Shell - Template";
->>>>>>> template/main
 
 pub fn app() -> App {
     let mut app = App::new();

@@ -23,8 +23,4 @@ lto = true
 [dependencies]
 bevy = "0.8.1"
 image = "0.24.3"
-<<<<<<< HEAD
-winit = "0.27.2"
-=======
 winit = "0.26.1"
->>>>>>> template/main
