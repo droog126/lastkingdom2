@@ -1,6 +1,7 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PresentMode};
+pub mod index;
 
-pub const LAUNCHER_TITLE: &str = "Bevy Shell - Template12";
+pub const LAUNCHER_TITLE: &str = "LastKingdom";
 
 pub fn app() -> App {
     let mut app = App::new();
@@ -8,17 +9,10 @@ pub fn app() -> App {
         title: LAUNCHER_TITLE.to_string(),
         canvas: Some("#bevy".to_string()),
         fit_canvas_to_parent: true,
+        present_mode: PresentMode::Immediate,
+        resizable: true,
         ..Default::default()
-    })
-    .add_plugins(DefaultPlugins)
-    .add_startup_system(load_icon);
-    app
-}
-
-fn load_icon(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn_bundle(Camera2dBundle::default());
-    commands.spawn_bundle(SpriteBundle {
-        texture: asset_server.load("bevy.png"),
-        ..default()
     });
+    index::entry(&mut app);
+    app
 }
