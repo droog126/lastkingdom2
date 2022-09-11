@@ -1,6 +1,6 @@
 # Wrap all comments and lines to 80 characters
-max_width = 80
-comment_width = 80
+max_width = 100
+comment_width = 100
 wrap_comments = true
 tab_spaces = 4
 struct_lit_width = 100

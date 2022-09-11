@@ -1,5 +1,7 @@
 use bevy::{prelude::*, window::PresentMode};
 pub mod index;
+pub mod instance;
+pub mod system;
 
 pub const LAUNCHER_TITLE: &str = "LastKingdom";
 
