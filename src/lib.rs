@@ -1,3 +1,13 @@
+#![allow(
+    dead_code,
+    unused_variables,
+    unused_mut,
+    unused_imports,
+    non_snake_case,
+    unused_assignments,
+    non_camel_case_types
+)]
+
 use bevy::{prelude::*, window::PresentMode};
 pub mod index;
 pub mod instance;

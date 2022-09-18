@@ -1,5 +1,7 @@
 ### 巨神峰
 
+https://mm.edrawsoft.cn/map.html?obj=qq159560A96324E74E448428137707B62E/Personal/%E6%9C%AA%E5%91%BD%E5%90%8D%E6%96%87%E4%BB%B62.emmx
+
 通过命令行创建 1W 只蛇,每只蛇具有隐藏血条会跳出伤害,lowHp 会跳出别的属性,有声音类似于 apex，玩家具有体力,双人同步旋风斩割 1W 只蛇。性能要求是达标 40fps,完美情况是 60fps。
 
 ### 开发主旨

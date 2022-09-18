@@ -1,10 +1,11 @@
-#[allow(
+#![allow(
     dead_code,
     unused_variables,
     unused_mut,
     unused_imports,
-    non_snake_case
-    unused_assignments
+    non_snake_case,
+    unused_assignments,
+    non_camel_case_types
 )]
 use bevy::app::App;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, render::texture::ImageSettings};
