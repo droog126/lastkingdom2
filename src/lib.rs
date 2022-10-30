@@ -5,13 +5,16 @@
     unused_imports,
     non_snake_case,
     unused_assignments,
-    non_camel_case_types
+    non_camel_case_types,
+    unused_must_use
 )]
 
 use bevy::{prelude::*, window::PresentMode};
+pub mod constant;
 pub mod index;
 pub mod instance;
 pub mod system;
+pub mod utils;
 
 pub const LAUNCHER_TITLE: &str = "LastKingdom";
 

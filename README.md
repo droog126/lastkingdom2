@@ -97,6 +97,8 @@ bevy_ecs_ldtk= "0.3.0" 性能也有点烂
 4. 镜头需要跟着 y+z 移动才行
 
 # 启动
+cargo install cargo-watch
+cargo watch -x 'run'
 
 cargo run
 cargo run --features bevy/trace_chrome
@@ -184,3 +186,7 @@ only snake_step
 2.  完成碰撞效果(done)
 3.  重写怪物 Ai(done)
 4.  人物需要增加脚下阴影(done)
+
+
+### 性能分析工具
+https://github.com/bevyengine/bevy/blob/main/docs/profiling.md

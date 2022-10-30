@@ -8,7 +8,6 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy-inspector-egui",
- "bevy_derive",
  "bevy_rapier2d",
  "broccoli",
  "crossbeam-channel",

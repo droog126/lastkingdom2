@@ -14,6 +14,13 @@ use bevy_inspector_egui::{
     WorldInspectorPlugin,
 };
 
+use crate::system::animation::init_animation;
+use crate::system::assets::init_assets;
+use crate::system::camera::init_camera_system;
+use crate::system::instanceInput::init_instanceInput;
+use crate::system::state::init_state;
+use crate::system::testSystem::init_test_system;
+use crate::system::timeLine::init_timeLine_system;
 use crate::system::{
     collision::init_ins_collision_dependence, factory::init_ins_factory_dependence,
 };
@@ -23,29 +30,35 @@ pub fn entry(app: &mut App) {
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
         .add_plugins(DefaultPlugins);
-    // 依赖初始化的系统
+
+    // 依赖初始化+外部插件的系统
     init_dependence(app);
+
+    // 相机系统
+    init_camera_system(app);
+
+    // 设置状态系统
+    init_state(app);
+    // 设置时间轴
+    init_timeLine_system(app);
+    // 资源加载系统
+    init_assets(app);
+
     // 实例创建相关的系统
     init_ins_factory_dependence(app);
     // 碰撞相关的系统
     init_ins_collision_dependence(app);
+    // 动画系统
+    init_animation(app);
+    // 输入系统
+    init_instanceInput(app);
 
-    app.add_system(ui_example);
+    // 线性系统
+    init_test_system(app);
 }
 
 fn init_dependence(app: &mut App) {
     app.add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(EguiPlugin)
         .add_plugin(WorldInspectorPlugin::new());
-    app.add_startup_system(init);
-}
-
-fn init(mut commands: Commands) {
-    commands.spawn_bundle(Camera2dBundle::default());
-}
-
-fn ui_example(mut egui_context: ResMut<EguiContext>) {
-    egui::Window::new("Hello").show(egui_context.ctx_mut(), |ui| {
-        ui.label("test");
-    });
 }

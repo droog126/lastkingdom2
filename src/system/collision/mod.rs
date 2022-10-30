@@ -156,51 +156,80 @@ pub struct CollisionInter {
     need: CollisionNeedConfig,
 }
 
-pub struct CollisionTransferHashMap(
-    HashMap<(Entity, String), Vec<(Entity, String, CollisionNeedConfig)>>,
-);
-impl CollisionTransferHashMap {
-    fn add(&mut self, aEntity: Entity, aName: String, bEntity: Entity, bName: String) {}
-    fn clear() {}
+pub struct CollisionMid(HashMap<(Entity, String), Vec<(Entity, String, CollisionNeedConfig)>>);
+
+impl CollisionMid { 
+    pub fn new() -> Self {
+        let mut hashmap: HashMap<(Entity, String), Vec<(Entity, String, CollisionNeedConfig)>> =
+            HashMap::new();
+        Self(hashmap)
+    }
+
+    fn add(
+        &mut self,
+        aEntity: Entity,
+        aName: String,
+        bEntity: Entity,
+        bName: String,
+        collisionNeedConfig: CollisionNeedConfig,
+    ) {
+        self.0
+            .entry((aEntity, aName))
+            .and_modify(|vec| vec.push((bEntity, bName.clone(), collisionNeedConfig)))
+            .or_insert([(bEntity, bName.clone(), collisionNeedConfig)].to_vec());
+    }
+    fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 pub fn init_ins_collision_dependence(app: &mut App) {
     app.add_system_to_stage(CoreStage::PostUpdate, collision_handle.exclusive_system());
     app.insert_resource(CollisionInput::new());
+    app.insert_resource(CollisionMid::new());
 }
 
 // 碰撞结果加工厂
 pub fn collision_handle(world: &mut World) {
     let mut aabbs: Vec<ManySwappable<(Rect<f32>, CollisionInter)>> = Vec::new();
-    let collisionInput = world.get_resource_mut::<CollisionInput>().unwrap();
-    // 获取是否碰撞，再去查找
-    let mut aabbs = Vec::new();
-    for ((entity, name), collisionUnit) in collisionInput.0.iter() {
-        let mut rect = collisionUnit.shape.rect.toRect();
-        let mut inner = CollisionInter {
-            entity: entity.clone(),
-            name: name.clone(),
-            filterFunc: collisionUnit.filterFunc,
-            instanceUnitType: collisionUnit.insType,
-            ext: collisionUnit.shape.ext.clone(),
-            need: collisionUnit.need.clone(),
-        };
-        aabbs.push(ManySwappable((rect, inner)));
-    }
+    {
+        let worldCell = world.cell();
+        let mut collisionInput = worldCell.resource_mut::<CollisionInput>();
+        let mut collisionMid = worldCell.resource_mut::<CollisionMid>();
 
-    let mut tree = broccoli::Tree::new(&mut aabbs);
-    tree.find_colliding_pairs(|a, b| {
-        let mut newA = &mut *a.unpack_inner();
-        let mut newB = &mut *b.unpack_inner();
-        // 处理A
-        let mut aShape = newA.ext.transform();
-        let mut bShape = newB.ext.transform();
-        if sat_overlap(&*aShape, &*bShape) {
-            if (newA.filterFunc)(newB.instanceUnitType) {}
-
-            if (newB.filterFunc)(newA.instanceUnitType) {}
+        // 获取是否碰撞，再去查找   
+        let mut aabbs = Vec::new();
+        for ((entity, name), collisionUnit) in collisionInput.0.iter() {
+            let mut rect = collisionUnit.shape.rect.toRect();
+            let mut inner = CollisionInter {
+                entity: entity.clone(),
+                name: name.clone(),
+                filterFunc: collisionUnit.filterFunc,
+                instanceUnitType: collisionUnit.insType,
+                ext: collisionUnit.shape.ext.clone(),
+                need: collisionUnit.need.clone(),
+            };
+            aabbs.push(ManySwappable((rect, inner)));
         }
-    })
+    
+        let mut tree = broccoli::Tree::new(&mut aabbs);
+        tree.find_colliding_pairs(|a, b| {
+            let mut newA = &mut *a.unpack_inner();
+            let mut newB = &mut *b.unpack_inner();
+            // 处理A
+            let mut aShape = newA.ext.transform();
+            let mut bShape = newB.ext.transform();
+            if sat_overlap(&*aShape, &*bShape) {
+                if (newA.filterFunc)(newB.instanceUnitType) {
+                    collisionMid.add(newA.entity, newA.name.clone(), newB.entity, newB.name.clone(), newB.need);
+                }
+    
+                if (newB.filterFunc)(newA.instanceUnitType) {
+                    collisionMid.add(newB.entity, newB.name.clone(), newA.entity, newA.name.clone(), newA.need);
+                }
+            }
+        });
+    }    
 }
 
 // 碰撞查询实际加工厂

@@ -1,12 +1,20 @@
 use std::hash::Hash;
 
 use bevy::{
-    prelude::{App, Component},
+    prelude::{App, Component, SystemSet},
+    time::FixedTimestep,
     utils::hashbrown::HashSet,
 };
+
+use crate::constant::FPS;
 pub mod player;
 pub fn ins_added_dependence(app: &mut App) {
-    app.add_system(player::player_add);
+    app.add_system(player::on_player_add);
+    app.add_system_set(
+        SystemSet::new()
+            .with_run_criteria(FixedTimestep::step((1.0 / FPS).into()))
+            .with_system(player::on_player_step),
+    );
     app.insert_resource(InstancePermanentClassMap::default());
 }
 

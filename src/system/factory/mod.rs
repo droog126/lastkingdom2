@@ -11,11 +11,9 @@ pub struct InsFactoryData {}
 pub fn init_ins_factory_dependence(app: &mut App) {
     let (s, r) = unbounded::<CreateInsEnum>();
     app.insert_resource(r);
-    app.insert_resource(s);
+    app.insert_resource(s); 
     app.add_system_to_stage(CoreStage::PostUpdate, ins_factory.exclusive_system());
     ins_added_dependence(app);
-
-    app.add_startup_system(test_system);
 }
 fn ins_factory(world: &mut World) {
     let event_receiver = world.resource_mut::<Receiver<CreateInsEnum>>().clone();
@@ -40,6 +38,4 @@ fn ins_factory(world: &mut World) {
     }
 }
 
-fn test_system(create_ins: ResMut<Sender<CreateInsEnum>>) {
-    create_ins.send(CreateInsEnum::Player { x: 1.0, y: 2.0, z: 0.0 }).unwrap();
-}
+
