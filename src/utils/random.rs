@@ -47,3 +47,8 @@ pub fn random_Vec2() -> Vec2 {
     let mut randy = rng.gen_range(-1.0..1.0);
     Vec2::new(randx, randy).normalize()
 }
+
+// pub fn distance_2d(a: Vec2, b: Vec2) -> f32 {
+//     let c = a - b;
+//     c.distance(rhs)
+// }

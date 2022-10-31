@@ -27,10 +27,10 @@ pub fn debug_system(mut context: ResMut<EguiContext>, timeLine: Res<TimeLine>, t
     let mut timeLine = timeLine.0;
     egui::Window::new("timeLine").show(context.ctx_mut(), |ui| {
         ui.horizontal(|ui| {
-            ui.label(format!("timeLine:{:#?}", timeLine));
+            ui.label(format!("timeLine:{:.1}", timeLine));
         });
         ui.horizontal(|ui| {
-            ui.label(format!("fps:{:#?}", 1.0 / time.delta_seconds()));
+            ui.label(format!("fps:{:.1}", 1.0 / time.delta_seconds()));
         });
     });
 }

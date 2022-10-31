@@ -3,6 +3,7 @@ pub mod assets;
 pub mod camera;
 pub mod collision;
 pub mod factory;
+pub mod inViewPort;
 pub mod instanceInput;
 pub mod props;
 pub mod state;

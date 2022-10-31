@@ -17,6 +17,7 @@ use bevy_inspector_egui::{
 use crate::system::animation::init_animation;
 use crate::system::assets::init_assets;
 use crate::system::camera::init_camera_system;
+use crate::system::inViewPort::init_inViewPortInstanceList_system;
 use crate::system::instanceInput::init_instanceInput;
 use crate::system::state::init_state;
 use crate::system::testSystem::init_test_system;
@@ -30,12 +31,11 @@ pub fn entry(app: &mut App) {
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
         .add_plugins(DefaultPlugins);
+    // 相机系统
+    init_camera_system(app);
 
     // 依赖初始化+外部插件的系统
     init_dependence(app);
-
-    // 相机系统
-    init_camera_system(app);
 
     // 设置状态系统
     init_state(app);
@@ -52,6 +52,8 @@ pub fn entry(app: &mut App) {
     init_animation(app);
     // 输入系统
     init_instanceInput(app);
+    // 计算在1000.0的实例
+    init_inViewPortInstanceList_system(app);
 
     // 线性系统
     init_test_system(app);

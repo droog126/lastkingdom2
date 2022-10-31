@@ -1,10 +1,15 @@
-use std::{time::Instant, f32::consts::E};
+use std::{f32::consts::E, time::Instant};
 
 use bevy::prelude::*;
-use bevy_inspector_egui::{egui::Key, bevy_egui::EguiContext,egui};
+use bevy_inspector_egui::{bevy_egui::EguiContext, egui, egui::Key};
 use crossbeam_channel::Sender;
 
 use crate::utils::num::bool_to_f32;
+
+use super::{
+    camera::CursorPosition,
+    inViewPort::{CurEntity, CurHoverEntity, InViewPortInstanceList},
+};
 
 pub enum NormalInputClickType {
     SomeTime(f32),
@@ -12,7 +17,7 @@ pub enum NormalInputClickType {
 }
 // 按住 一次  频率
 
-#[derive(Component, Clone,Debug)]
+#[derive(Component, Clone, Debug)]
 pub struct InstanceInput {
     pub dir: Option<Vec2>,
     pub attack: (bool, bool),
@@ -25,7 +30,6 @@ pub struct InstanceInput {
     pub dance: bool,
     pub laugh: bool,
 }
-
 
 impl Default for InstanceInput {
     fn default() -> Self {
@@ -68,17 +72,8 @@ impl Default for CurInput {
     }
 }
 
-#[derive(Default,Debug)]
-pub struct CurEntity(pub Option<Entity>);
-
-
-#[derive(Default,Debug)]
-pub struct CurHoverEntity(pub Option<Entity>);
-
 pub fn init_instanceInput(app: &mut App) {
-    app.insert_resource(CurEntity::default())
-        .insert_resource(CurHoverEntity::default())
-        .insert_resource(CurInput::default());
+    app.insert_resource(CurInput::default());
     app.add_system(index);
     #[cfg(debug_assertions)]
     {
@@ -86,25 +81,13 @@ pub fn init_instanceInput(app: &mut App) {
     }
 }
 
-pub fn debug(mut egui_context:ResMut<EguiContext>,curEntity:Res<CurEntity>,curHoverEntity:Res<CurHoverEntity>,curInput:Res<CurInput>){
-    egui::Window::new("inputSystem").show(egui_context.ctx_mut(),|ui|{
-        ui.horizontal(|ui|{
-            ui.label("input");
-            ui.set_width(200.0);
+pub fn debug(mut egui_context: ResMut<EguiContext>, curInput: Res<CurInput>) {
+    egui::Window::new("inputSystem").show(egui_context.ctx_mut(), |ui| {
+        ui.horizontal(|ui| {
             ui.wrap_text();
-            ui.set_height(400.0);
-            ui.label(format!("{:#?}",curInput.0));
-        });
-        ui.horizontal(|ui|{
-            ui.label("curEntity:");
-            ui.label(format!("{:?}",curEntity.0));
-        });
-        ui.horizontal(|ui|{
-            // ui.label("curHoverEntity");
-            ui.text_edit_singleline(&mut format!("{:?}",curHoverEntity.0));
+            ui.label(format!("{:#?}", curInput.0));
         });
     });
-
 }
 
 pub fn index(
@@ -124,9 +107,9 @@ pub fn index(
             - bool_to_f32(keyboardInput.pressed(KeyCode::A));
         let mut y = bool_to_f32(keyboardInput.pressed(KeyCode::W))
             - bool_to_f32(keyboardInput.pressed(KeyCode::S));
-        if x==0.0 && y==0.0{
+        if x == 0.0 && y == 0.0 {
             curInput.dir = None;
-        }else{
+        } else {
             curInput.dir = Some(Vec2::new(x, y).normalize())
         }
     } else {
@@ -184,5 +167,3 @@ pub fn index(
     // }
     // query.get_mut(*curEntity);
 }
-
-// 目标是做所有游戏的基础
