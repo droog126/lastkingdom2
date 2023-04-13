@@ -1496,9 +1496,9 @@ checksum = "cfa8873f51c92e232f9bac4065cddef41b714152812bfc5f7672ba16d6ef8cd9"
 
 [[package]]
 name = "broccoli"
-version = "6.0.2"
+version = "6.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83629ad677c5ae614adc2536be0345f4ccece257bd08152a6589481cbc4b3ec5"
+checksum = "ec03537b2d14270baddbd1c4a2ad1df5aa051e6776c920b5b7a994a929ae54ca"
 dependencies = [
  "axgeom",
  "compt",
