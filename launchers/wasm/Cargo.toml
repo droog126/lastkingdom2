@@ -7,6 +7,6 @@ workspace = "../.."
 [dependencies]
 LastKingdom = { package = "LastKingdom", path = "../.." }
 bevy = "0.8"
-web-sys = { version="0.3.61", features=["Document", "Window"] }
+web-sys = { version="0.3.62", features=["Document", "Window"] }
 yew = "0.19.3"
 stylist = { version= "0.10.1", features=["yew_integration"] }
