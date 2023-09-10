@@ -7,5 +7,5 @@ workspace = "../.."
 [dependencies]
 LastKingdom = { package = "LastKingdom", path = "../.." }
 bevy = "0.8"
-image = "0.24.6"
+image = "0.24.7"
 winit = "0.26.1"
