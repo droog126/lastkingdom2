@@ -243,13 +243,12 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "axgeom"
-version = "1.12.1"
+version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db217c826c3f4cb10bb278b0fe0c6e17483bb1e9213709d229d2f18fa90cdca5"
+checksum = "bad454bd71b49853e983e797cbeaff788c41ae5d000fe38588099efef1b0789d"
 dependencies = [
  "num-traits",
  "partial-min-max",
- "serde",
 ]
 
 [[package]]
@@ -1496,9 +1495,9 @@ checksum = "cfa8873f51c92e232f9bac4065cddef41b714152812bfc5f7672ba16d6ef8cd9"
 
 [[package]]
 name = "broccoli"
-version = "6.0.3"
+version = "6.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec03537b2d14270baddbd1c4a2ad1df5aa051e6776c920b5b7a994a929ae54ca"
+checksum = "9ca486941fb11a79e86d9c16712e0a380a4497281c04d4f5266f10a5b80d2458"
 dependencies = [
  "axgeom",
  "compt",

@@ -33,7 +33,7 @@ rand = "0.8.5"
 rust-ini = "0.19.0"
 bevy_rapier2d = {version = "0.19.0",features = ["debug-render"]}
 sepax2d = "0.3.8"
-broccoli = "6.0.3"
+broccoli = "6.3.0"
 
 [profile.dev.package."*"]
 opt-level = 1
