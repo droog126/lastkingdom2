@@ -28,6 +28,7 @@ pub struct RenderConfig {
     pub auto_orbit_distance: f32,
     pub auto_walk: bool,
     pub auto_walk_interval_secs: f32,
+    pub auto_keys: bool,             // --auto-demo 时自动按 F/J 测功能（不靠人按键）
 }
 
 impl Default for RenderConfig {
@@ -45,6 +46,7 @@ impl Default for RenderConfig {
             auto_orbit_distance: 15.0,
             auto_walk: false,             // 默认玩家控制；--auto-demo 开启
             auto_walk_interval_secs: 1.2,
+            auto_keys: false,             // --auto-demo 开启：自动按 F/J 验证
         }
     }
 }
@@ -196,44 +198,45 @@ pub fn setup_atmosphere(
     // 这里用简化版 ClearColor
     commands.insert_resource(ClearColor(cfg.sky_color));
 
-    // ── 武器：剑（handle 棕 + blade 银）— 大尺寸怼屏幕中央，第一眼就能看见 ──
-    let handle_mesh = meshes.add(Cuboid::new(0.40, 1.20, 0.40));
+    // ── 武器：剑（handle 棕 + blade 银）— 小尺寸贴屏幕右下角，斜 15° ──
+    let handle_mesh = meshes.add(Cuboid::new(0.18, 0.55, 0.18));
     let handle_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.45, 0.28, 0.12),
         perceptual_roughness: 0.6,
         emissive: Color::srgb(0.10, 0.06, 0.02).into(),
         ..default()
     });
-    let blade_mesh = meshes.add(Cuboid::new(0.40, 2.00, 0.12));
+    let blade_mesh = meshes.add(Cuboid::new(0.18, 1.20, 0.08));
     let blade_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.92, 0.94, 1.00),
         perceptual_roughness: 0.20,
         metallic: 0.90,
-        emissive: Color::srgb(0.20, 0.22, 0.30).into(),
+        emissive: Color::srgb(0.25, 0.27, 0.40).into(),
         ..default()
     });
-    // 把剑挂到相机子节点：放在屏幕中央偏下、明显位置
     let Ok(cam_entity) = camera.single() else {
         warn!("setup_atmosphere: 找不到 Camera3d 实体，剑不 spawn");
         return;
     };
-    // 把手：相机本地 (0.0, -0.8, -1.5) — 中央、下、前
+    // 斜 15°（绕 Z 轴），让剑看起来"握着"
+    let tilt = Quat::from_rotation_z(15_f32.to_radians());
+    // 把手：相机本地，右下角
     let handle = commands.spawn((
         HeldWeaponPart,
         Mesh3d(handle_mesh),
         MeshMaterial3d(handle_mat),
-        Transform::from_translation(Vec3::new(0.0, -0.80, -1.50)),
+        Transform::from_translation(Vec3::new(0.45, -0.55, -0.75)).with_rotation(tilt),
     )).id();
-    // 刀刃：叠在把手上方
+    // 刀刃：把手正上方叠
     let blade = commands.spawn((
         HeldWeaponPart,
         Mesh3d(blade_mesh),
         MeshMaterial3d(blade_mat),
-        Transform::from_translation(Vec3::new(0.0, 0.10, -1.50)),
+        Transform::from_translation(Vec3::new(0.45, 0.10, -0.75)).with_rotation(tilt),
     )).id();
     commands.entity(cam_entity).add_child(handle);
     commands.entity(cam_entity).add_child(blade);
-    info!("⚔ 大剑已 spawn 作为 Camera3d 的子节点（屏幕中央）");
+    info!("⚔ 剑已 spawn（缩小到右下角，斜 15°）");
 }
 
 /// 武器 marker：被 held_weapon_follow 系统认领
@@ -245,6 +248,77 @@ pub struct HeldWeaponPart;
 pub fn held_weapon_follow() {
     // 剑现在是 Camera3d 的子节点，bevy 自动按相机本地坐标渲染
     // 后续如果要加挥剑动画：query 剑的 Transform + 计时器 + 修改 local Y rotation
+}
+
+/// 动物方向指示器系统：每帧找最近的动物 + 算相对相机的屏幕方向 → 更新顶部 HUD 文字
+pub fn update_animal_indicator(
+    mut q_text: Query<&mut Text, With<crate::AnimalIndicatorText>>,
+    player: Res<PlayerState>,
+    camera: Query<&Transform, With<Camera3d>>,
+    creatures: Query<&Creature>,
+) {
+    let Ok(mut text) = q_text.single_mut() else { return; };
+    let px = player.block_pos[0] as f32 + 0.5;
+    let pz = player.block_pos[2] as f32 + 0.5;
+
+    // 找最近的动物（水平距离，限 30 格）
+    let mut best: Option<(&Creature, f32)> = None;
+    for c in creatures.iter() {
+        let dx = c.block_pos[0] as f32 + 0.5 - px;
+        let dz = c.block_pos[2] as f32 + 0.5 - pz;
+        let d2 = dx * dx + dz * dz;
+        if d2 < 900.0 && (best.is_none() || d2 < best.unwrap().1) {
+            best = Some((c, d2));
+        }
+    }
+
+    let Some((c, d2)) = best else {
+        text.0 = "🔍 附近无动物（>30 格）".to_string();
+        return;
+    };
+    let dist = d2.sqrt();
+    let animal_v = Vec2::new(
+        c.block_pos[0] as f32 + 0.5 - px,
+        c.block_pos[2] as f32 + 0.5 - pz,
+    );
+    if animal_v.length() < 0.01 {
+        text.0 = format!("· {} 就在脚下", c.kind.label_zh());
+        return;
+    }
+
+    // 算相对相机的方向（→ 屏幕箭头）
+    let arrow = if let Ok(tf) = camera.single() {
+        let f = tf.forward();
+        let cam = Vec2::new(f.x, f.z);
+        let cam_n = if cam.length() > 0.01 { cam.normalize() } else { Vec2::new(1.0, 0.0) };
+        let dot = animal_v.dot(cam_n);
+        let cross = animal_v.x * cam_n.y - animal_v.y * cam_n.x;
+        // cross < 0 = 动物在右；angle 量化到 8 方向
+        let angle = cross.atan2(dot);
+        let oct = ((-angle).to_degrees() / 45.0).round() as i32;
+        match oct.rem_euclid(8) {
+            0 => "↑",
+            1 => "↗",
+            2 => "→",
+            3 => "↘",
+            4 => "↓",
+            5 => "↙",
+            6 => "←",
+            7 => "↖",
+            _ => "·",
+        }
+    } else {
+        "·"
+    };
+
+    // 用英文标签（默认字体没 CJK，全显示成 ↑ 难看）
+    let label = match c.kind {
+        crate::creature::CreatureKind::Pig => "Pig",
+        crate::creature::CreatureKind::Sheep => "Sheep",
+        crate::creature::CreatureKind::Cow => "Cow",
+        crate::creature::CreatureKind::Chicken => "Chicken",
+    };
+    text.0 = format!("{}  {}  {:.1}m", arrow, label, dist);
 }
 
 /// 玩家最后移动的方向（用于第一人称相机看向方向）
@@ -460,14 +534,32 @@ pub fn auto_demo(
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
     cfg: Res<RenderConfig>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
     mut last: ResMut<LastMoveDirection>,
     mut walk_timer: Local<f32>,
     mut walk_step: Local<u32>,
+    mut auto_frame: Local<u32>,
 ) {
+    // ── auto-demo 自动测试 F / J（不靠人按键，loop 也能验证）────────────
+    // 注意：放在 auto_walk 检查之前 — auto-demo 模式下 auto_walk=false，
+    // 但我们仍想跑 keypress 模拟来验证造国/杀怪逻辑。
+    if cfg.auto_keys {
+        *auto_frame += 1;
+        // t=1.0s: 按 F（第一次造国，应成功 +20 souls）
+        if *auto_frame == 60 { keys.press(KeyCode::KeyF); }
+        if *auto_frame == 62 { keys.release(KeyCode::KeyF); }
+        // t=4.0s: 按 J（杀怪 — 玩家身边可能没怪，info 一下即可）
+        if *auto_frame == 240 { keys.press(KeyCode::KeyJ); }
+        if *auto_frame == 242 { keys.release(KeyCode::KeyJ); }
+        // t=8.0s: 再按 F（应失败：已有国家）
+        if *auto_frame == 480 { keys.press(KeyCode::KeyF); }
+        if *auto_frame == 482 { keys.release(KeyCode::KeyF); }
+    }
+
     if !cfg.auto_walk {
         return;
     }
+
     // 玩家按了任何移动键 → 让位给真实输入
     if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::KeyA)
         || keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::KeyD)

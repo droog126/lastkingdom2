@@ -35,7 +35,8 @@ if (-not (Test-Path $exePath)) {
 }
 
 Write-Host ">>> Start demo (${Seconds}s, --auto-demo) ..." -ForegroundColor Green
-$proc = Start-Process -FilePath $exePath -ArgumentList "--auto-demo" -PassThru -NoNewWindow
+$logPath = Join-Path $ProjectRoot "screenshots\loop_run.log"
+$proc = Start-Process -FilePath $exePath -ArgumentList "--auto-demo" -PassThru -NoNewWindow -RedirectStandardOutput $logPath -RedirectStandardError "$logPath.err"
 Start-Sleep -Seconds $Seconds
 $proc | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1

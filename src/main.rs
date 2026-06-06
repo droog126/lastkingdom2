@@ -30,7 +30,7 @@ use crate::resource::{GlobalResourcePool, ResourceKind};
 use crate::world::{BlockType, World as GameWorld, WorldGenerator};
 use crate::render::{
     auto_demo, first_person_camera, held_weapon_follow, player_input, setup_atmosphere,
-    spawn_terrain_around_player, PlayerState, RenderConfig, SpawnedBlocks,
+    spawn_terrain_around_player, update_animal_indicator, PlayerState, RenderConfig, SpawnedBlocks,
 };
 use crate::pretty::{spawn_pretty, animate_avatar, PrettyConfig};
 use crate::creature::{player_attack_creatures, spawn_creatures, update_creatures, CreatureSpawnerDone};
@@ -131,6 +131,7 @@ fn main() {
                 // 相机用第一人称不旋转。loop.ps1 用来做 AI 迭代和截图。
                 cfg.auto_walk = false;
                 cfg.auto_orbit = false;
+                cfg.auto_keys = true;  // 自动按 F/J 测造国 + 杀怪
             }
         })
         .init_resource::<SpawnedBlocks>()
@@ -178,6 +179,7 @@ fn main() {
                 simulation_tick,
                 end_tick_system,
                 update_hud,
+                update_animal_indicator,
                 tick_recorder,
                 periodic_screenshot,
                 update_creatures,
@@ -352,7 +354,37 @@ fn setup_hud(mut commands: Commands) {
         },
         HudFooter,
     ));
+    // 顶部居中：动物方向指示器（被 update_animal_indicator 刷新）
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(56),
+            left: px(0),
+            right: px(0),
+            height: px(36),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        children![(
+            Text::new("🔍 搜索中…"),
+            TextFont {
+                font_size: 24.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.9, 0.4)),
+            TextShadow {
+                offset: Vec2::new(1.5, 1.5),
+                color: Color::srgba(0.0, 0.0, 0.0, 0.9),
+            },
+            AnimalIndicatorText,
+        )],
+    ));
 }
+
+/// 动物方向指示器 marker
+#[derive(Component)]
+pub struct AnimalIndicatorText;
 
 fn update_hud(
     mut q_top: Query<&mut Text, With<HudText>>,
