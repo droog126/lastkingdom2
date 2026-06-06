@@ -4,6 +4,8 @@
 //! 性能：3D scene 持 ~2000 个 entity 没问题；超过会卡
 
 use bevy::prelude::*;
+use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::{HashMap, HashSet};
 
 use crate::constant;
@@ -29,6 +31,7 @@ pub struct RenderConfig {
     pub auto_walk: bool,
     pub auto_walk_interval_secs: f32,
     pub auto_keys: bool,             // --auto-demo 时自动按 F/J 测功能（不靠人按键）
+    pub mouse_look: bool,            // 默认开：鼠标转视角；--auto-demo 关：用动物自动跟随
 }
 
 impl Default for RenderConfig {
@@ -47,9 +50,21 @@ impl Default for RenderConfig {
             auto_walk: false,             // 默认玩家控制；--auto-demo 开启
             auto_walk_interval_secs: 1.2,
             auto_keys: false,             // --auto-demo 开启：自动按 F/J 验证
+            mouse_look: true,             // 默认开：鼠标转视角（FPS 标准）
         }
     }
 }
+
+/// 相机朝向（鼠标累积的 yaw + pitch）。mouse_look 系统读，first_person_camera 用
+#[derive(Resource, Default)]
+pub struct CameraAngles {
+    pub yaw: f32,    // 绕 +Y 轴，0 = 相机看 -Z；右转为负
+    pub pitch: f32,  // 绕相机右轴，0 = 水平；上视为正
+}
+
+const MOUSE_SENS: f32 = 0.0022;     // 弧度/像素（≈ 0.13°/像素）
+const PITCH_LIMIT: f32 = 1.483;     // ≈ 85°（防止翻转）
+const YAW_QE_STEP: f32 = 22.5_f32.to_radians();  // Q/E 步进 22.5°（备胎）
 
 /// 已 spawn 的方块 entity 列表（用于 despawn 重生）
 #[derive(Resource, Default)]
@@ -250,6 +265,31 @@ pub fn held_weapon_follow() {
     // 后续如果要加挥剑动画：query 剑的 Transform + 计时器 + 修改 local Y rotation
 }
 
+/// 鼠标视角系统：读 AccumulatedMouseMotion 资源（bevy 0.18 每帧自动累加并清零）→ 累积到 CameraAngles
+pub fn mouse_look_system(
+    motion: Res<AccumulatedMouseMotion>,
+    mut angles: ResMut<CameraAngles>,
+    cfg: Res<RenderConfig>,
+) {
+    if !cfg.mouse_look { return; }
+    if motion.delta == Vec2::ZERO { return; }
+    angles.yaw -= motion.delta.x * MOUSE_SENS;
+    angles.pitch -= motion.delta.y * MOUSE_SENS;
+    angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
+}
+
+/// 锁光标到窗口中央 + 隐藏（FPS 标准）。mouse_look 关时不锁
+pub fn setup_cursor_grab(
+    mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    cfg: Res<RenderConfig>,
+) {
+    if !cfg.mouse_look { return; }
+    if let Ok(mut cursor) = cursors.single_mut() {
+        cursor.grab_mode = CursorGrabMode::Locked;
+        cursor.visible = false;
+    }
+}
+
 /// 动物方向指示器系统：每帧找最近的动物 + 算相对相机的屏幕方向 → 更新顶部 HUD 文字
 pub fn update_animal_indicator(
     mut q_text: Query<&mut Text, With<crate::AnimalIndicatorText>>,
@@ -331,7 +371,7 @@ pub fn player_input(
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
     mut pool: ResMut<crate::resource::GlobalResourcePool>,
-    mut last: ResMut<LastMoveDirection>,
+    mut angles: ResMut<CameraAngles>,
     mut nations: ResMut<NationRegistry>,
     mut monsters: ResMut<MonsterEcosystem>,
     camera: Query<&Transform, With<Camera3d>>,
@@ -360,23 +400,11 @@ pub fn player_input(
     if keys.just_pressed(KeyCode::Space)    { d += Vec3::Y; }
     if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) { d -= Vec3::Y; }
 
-    // 转向：Q 左转 22.5°，E 右转 22.5°（修玩家朝向 + 写入 LastMoveDirection 让相机跟）
-    if (keys.just_pressed(KeyCode::KeyQ) || keys.just_pressed(KeyCode::KeyE))
-        && cam_tf.is_some()
-    {
-        let sign: f32 = if keys.just_pressed(KeyCode::KeyQ) { 1.0 } else { -1.0 };
-        let yaw = sign * 22.5_f32.to_radians();
-        let cos = yaw.cos();
-        let sin = yaw.sin();
-        // 在 XZ 平面绕 Y 轴旋转 forward 向量
-        let old_f = last.0;
-        let base = if old_f.length() > 0.01 { old_f } else { forward };
-        let new_f = Vec3::new(
-            base.x * cos + base.z * sin,
-            0.0,
-            -base.x * sin + base.z * cos,
-        );
-        last.0 = new_f.normalize();
+    // 转向：Q 左转 22.5°，E 右转 22.5°（改 CameraAngles.yaw，相机跟）
+    if keys.just_pressed(KeyCode::KeyQ) {
+        angles.yaw += YAW_QE_STEP;
+    } else if keys.just_pressed(KeyCode::KeyE) {
+        angles.yaw -= YAW_QE_STEP;
     }
 
     // 把 d 量化成 [i32; 3] 1-格移动（选主轴）
@@ -642,15 +670,17 @@ pub fn auto_demo(
     }
 }
 
-/// 第一人称相机：把相机放到玩家头部位置，朝玩家最近一次移动的方向看（略向下倾）
-/// 强制第一帧对准最近的动物（保证玩家起手就能看见动物）
+/// 第一人称相机：
+/// - mouse_look=true  → 用 CameraAngles（鼠标控制 yaw/pitch）
+/// - mouse_look=false → 自动跟最近的可见动物（auto-demo 模式）
 pub fn first_person_camera(
     mut q: Query<&mut Transform, With<Camera3d>>,
     player: Res<PlayerState>,
+    angles: Res<CameraAngles>,
+    cfg: Res<RenderConfig>,
     last: Res<LastMoveDirection>,
     creatures: Query<&Creature>,
     world: Res<GameWorld>,
-    mut debug_count: Local<u32>,
 ) {
     let Ok(mut tf) = q.single_mut() else { return; };
     let eye = Vec3::new(
@@ -658,59 +688,47 @@ pub fn first_person_camera(
         player.block_pos[1] as f32 + 0.5 + 1.3,
         player.block_pos[2] as f32 + 0.5,
     );
-    // 找最近的、未被墙挡住的动物，30 格内
-    // 简化：只挑前 3 个最近的，逐一检查视线（中间 5 格都空就行）
-    let mut candidates: Vec<(f32, [i32; 3])> = Vec::new();
-    for c in creatures.iter() {
-        let dx = (c.block_pos[0] as f32 + 0.5) - eye.x;
-        let dz = (c.block_pos[2] as f32 + 0.5) - eye.z;
-        let d2 = dx * dx + dz * dz;
-        if d2 < 900.0 {
-            candidates.push((d2, c.block_pos));
-        }
-    }
-    candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    let mut best: Option<[i32; 3]> = None;
-    for (_d2, c) in candidates.iter().take(5) {
-        // 检查视线：眼睛到目标，沿途 5 格每格必须空
-        let tx = c[0] as f32 + 0.5;
-        let tz = c[2] as f32 + 0.5;
-        let steps = 5;
-        let mut clear = true;
-        for i in 1..=steps {
-            let t = i as f32 / steps as f32;
-            let x = eye.x + (tx - eye.x) * t;
-            let z = eye.z + (tz - eye.z) * t;
-            let bx = x.floor() as i32;
-            let bz = z.floor() as i32;
-            if world.in_bounds(bx, player.block_pos[1], bz)
-                && world.get(bx, player.block_pos[1], bz).is_solid()
-            {
-                clear = false;
-                break;
-            }
-        }
-        if clear {
-            best = Some(*c);
-            break;
-        }
-    }
-    if *debug_count < 3 {
-        *debug_count += 1;
-        info!(
-            "🎥 第一人称: 玩家={:?} 候选={} 选中={:?}",
-            player.block_pos,
-            candidates.len(),
-            best
-        );
-    }
-    let dir = if let Some(c) = best {
-        let v = Vec3::new((c[0] as f32 + 0.5) - eye.x, 0.0, (c[2] as f32 + 0.5) - eye.z);
-        if v.length() > 0.01 { v.normalize() } else { Vec3::new(1.0, 0.0, 0.0) }
-    } else if last.0.length() < 0.01 {
-        Vec3::new(1.0, 0.0, 0.0)
+
+    let dir = if cfg.mouse_look {
+        // 鼠标视角：forward = (sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch))
+        let (sy, cy) = angles.yaw.sin_cos();
+        let (sp, cp) = angles.pitch.sin_cos();
+        Vec3::new(sy * cp, sp, -cy * cp)
     } else {
-        last.0.normalize()
+        // 自动跟动物（auto-demo 模式）：找最近可见动物
+        let mut candidates: Vec<(f32, [i32; 3])> = Vec::new();
+        for c in creatures.iter() {
+            let dx = (c.block_pos[0] as f32 + 0.5) - eye.x;
+            let dz = (c.block_pos[2] as f32 + 0.5) - eye.z;
+            let d2 = dx * dx + dz * dz;
+            if d2 < 900.0 { candidates.push((d2, c.block_pos)); }
+        }
+        candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut best: Option<[i32; 3]> = None;
+        for (_d2, c) in candidates.iter().take(5) {
+            let tx = c[0] as f32 + 0.5;
+            let tz = c[2] as f32 + 0.5;
+            let mut clear = true;
+            for i in 1..=5 {
+                let t = i as f32 / 5.0;
+                let x = eye.x + (tx - eye.x) * t;
+                let z = eye.z + (tz - eye.z) * t;
+                let bx = x.floor() as i32;
+                let bz = z.floor() as i32;
+                if world.in_bounds(bx, player.block_pos[1], bz)
+                    && world.get(bx, player.block_pos[1], bz).is_solid()
+                { clear = false; break; }
+            }
+            if clear { best = Some(*c); break; }
+        }
+        if let Some(c) = best {
+            let v = Vec3::new((c[0] as f32 + 0.5) - eye.x, 0.0, (c[2] as f32 + 0.5) - eye.z);
+            if v.length() > 0.01 { v.normalize() } else { Vec3::new(1.0, 0.0, 0.0) }
+        } else if last.0.length() < 0.01 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            last.0.normalize()
+        }
     };
     let look_target = eye + dir * 5.0 - Vec3::new(0.0, 1.0, 0.0);
     tf.translation = eye;

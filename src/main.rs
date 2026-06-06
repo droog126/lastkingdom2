@@ -29,8 +29,9 @@ use crate::nation::{NationId, NationRegistry};
 use crate::resource::{GlobalResourcePool, ResourceKind};
 use crate::world::{BlockType, World as GameWorld, WorldGenerator};
 use crate::render::{
-    auto_demo, first_person_camera, held_weapon_follow, player_input, setup_atmosphere,
-    spawn_terrain_around_player, update_animal_indicator, PlayerState, RenderConfig, SpawnedBlocks,
+    auto_demo, first_person_camera, held_weapon_follow, mouse_look_system, player_input,
+    setup_atmosphere, setup_cursor_grab, spawn_terrain_around_player, update_animal_indicator,
+    CameraAngles, PlayerState, RenderConfig, SpawnedBlocks,
 };
 use crate::pretty::{spawn_pretty, animate_avatar, PrettyConfig};
 use crate::creature::{player_attack_creatures, spawn_creatures, update_creatures, CreatureSpawnerDone};
@@ -125,13 +126,15 @@ fn main() {
             ..default()
         }))
         .init_resource::<RenderConfig>()
+        .init_resource::<CameraAngles>()
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
                 // --auto-demo：玩家不动（保留在出生点附近，能看见起始牧场），
-                // 相机用第一人称不旋转。loop.ps1 用来做 AI 迭代和截图。
+                // 相机用动物自动跟随（不要 mouse-look，无人按键）。loop 用来 AI 迭代。
                 cfg.auto_walk = false;
                 cfg.auto_orbit = false;
                 cfg.auto_keys = true;  // 自动按 F/J 测造国 + 杀怪
+                cfg.mouse_look = false; // 关掉鼠标视角，用自动动物跟随
             }
         })
         .init_resource::<SpawnedBlocks>()
@@ -155,6 +158,7 @@ fn main() {
                 setup_camera,
                 setup_light,
                 setup_atmosphere,
+                setup_cursor_grab,        // ← mouse_look 开时锁光标
                 setup_world,
                 spawn_pretty,
                 spawn_creatures,
@@ -170,6 +174,7 @@ fn main() {
                 scenario::simulate_player_actions,
                 scenario::scenario_tick_recorder,
                 auto_demo,
+                mouse_look_system,           // ← 鼠标累积到 yaw/pitch（先于 camera）
                 first_person_camera,
                 held_weapon_follow,
                 player_input,
