@@ -1,4 +1,4 @@
-use bevy::utils::HashMap;
+use std::collections::HashMap;
 use crossbeam_channel::Receiver;
 
 pub fn if_channels_has_message<T>(channels: &HashMap<usize, Receiver<T>>) -> bool

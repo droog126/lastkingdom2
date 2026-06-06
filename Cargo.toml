@@ -1,43 +1,26 @@
 [package]
-name = "LastKingdom"
+name = "minecraft_bevy"
 version = "0.1.0"
-edition = "2021"
-
-[workspace]
-members = [
-    "launchers/wasm",
-    "launchers/native",
-]
-
-[[bin]]
-name="native-launcher"
-path="launchers/native/src/main.rs"
-
-# Optimizations for WASM
-[profile.release]
-panic = 'abort'
-codegen-units = 1
-opt-level = 'z'
-lto = true
+edition = "2024"
 
 [dependencies]
-bevy = "0.8.1"
-image = "0.24.9"
-winit = "0.26.1"
-crossbeam-channel = "0.5"
-bevy-inspector-egui = "0.13.0"
-# bevy_egui="0.16.0"
-# bevy_derive="0.8"
-serde_json="1.0.114"
+bevy = "0.18.1"
+avian3d = "0.5"
 rand = "0.8.5"
-rust-ini = "0.20.0"
-bevy_rapier2d = {version = "0.19.0",features = ["debug-render"]}
-sepax2d = "0.3.8"
-broccoli = "6.3.0"
+broccoli = "0.6"
+sepax2d = "0.3"
+bevy-inspector-egui = "0.36"
+crossbeam-channel = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
-[profile.dev.package."*"]
-opt-level = 1
+# broccoli 0.6.x 的源码没适配 compt 1.10（compt 1.10 把 `convert` 改成 `unsafe fn`），必须锁 <1.10
+compt = ">=1.9, <1.10"
+
 
 [profile.dev]
-opt-level = 1
+opt-level = 2
+incremental = true
 
+[profile.dev.package."*"]
+opt-level = 3

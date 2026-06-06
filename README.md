@@ -1,192 +1,212 @@
-### 巨神峰
+# 万国起源：最后一国 钻石版 — Demo Skeleton
 
-https://mm.edrawsoft.cn/map.html?obj=qq159560A96324E74E448428137707B62E/Personal/%E6%9C%AA%E5%91%BD%E5%90%8D%E6%96%87%E4%BB%B62.emmx
+bevy 0.18.1 上的 **sim + 渲染 demo 骨架**。
 
-通过命令行创建 1W 只蛇,每只蛇具有隐藏血条会跳出伤害,lowHp 会跳出别的属性,有声音类似于 apex，玩家具有体力,双人同步旋风斩割 1W 只蛇。性能要求是达标 40fps,完美情况是 60fps。
+> 状态：✅ `cargo check` / `cargo build` / `cargo test` 全部通过；✅ `cargo run` 自动跑 sim + 截图 + HUD，**支持闭环 AI 迭代**。
 
-### 开发主旨
+---
 
-最低程度且高扩展得完成主线程，目标是构建开放具有 Z 轴得 2D 世界+Kingdom PVP。
+## 零、闭环 AI 迭代
 
-### P0
+> 这是核心设计：游戏自己跑、自己截屏、截屏可以读出来评估、再改代码再跑。
 
-1. 蛇攻击
-   1.1 攻击盒子
-   1.1.1 初步完成完成通用实例创建函数 (doing)
-   攻击特效  
-   no
-   生命属性系统
-   done
-   todo:创建后一定时间内销毁，或者碰到东西立即销毁 攻击盒子
+```
+   ┌──────────┐     每 5 秒      ┌──────────┐
+   │ 运行 .exe │───────────────▶│iter_N.png│
+   └──────────┘                  └──────────┘
+        ▲                              │
+        │                              ▼
+   修代码 (main.rs / render.rs)   AI 读图 (Read tool)
+        │                              │
+        └────── 下一次迭代 ◀───────────┘
+```
 
-   gms 解包
-   untiy 解包
-   godot 解包
+每一张 iter_N.png 都是带 HUD 的全屏截屏（1280×720）。HUD 直接显示 tick 数、玩家坐标、4 个关键资源、怪物数、invariant 状态。
 
-2. 人攻击 2. 武器系统
+---
 
-### p1
+## 一、目录
 
-粒子系统
+```
+F:\rustProject\lastkingdom2\
+├── Cargo.toml                  # bevy 0.18.1, broccoli 0.6.6, compt 1.9.x, serde
+├── src/
+│   ├── main.rs                 # 入口 + Bevy 系统接线 + HUD + 截图 + 启动自检
+│   ├── constant/mod.rs         # 25 资源上限 / 国旗上限 / 怪物上限 / tick 速率
+│   ├── resource/mod.rs         # GlobalResourcePool + Transfer + 守恒审计
+│   ├── world/mod.rs            # 32³ 世界 + 3 Biome + 8 BlockType + 生成器
+│   ├── nation/mod.rs           # 8 国旗上限 + pop 5/10/15/20
+│   ├── monster/mod.rs          # 5 王国 + 80 巢 + 1500 个体生态
+│   ├── render/mod.rs           # 体素地形渲染（玩家周围 16 格内）
+│   ├── pretty/mod.rs           # 水面 + 玩家 avatar + 怪物 cube + 树 + 云 + 旗
+│   └── ai/mod.rs               # TickObserver 闭环 debug
+├── target/debug/minecraft_bevy.exe
+├── screenshots/                # 闭环截图
+│   ├── iter_01.png             # tick ~4
+│   └── iter_02.png             # tick ~9
+└── README.md
+```
 
-# 进度
+---
 
-1. 输入系统
-2. 动画系统
-3. 移动
-4. 相机跟随 相机 debug
+## 二、运行
 
-# todo
-
-5.  地图编辑(等待 1.0 支持)
-
-    5.1 4+9 动态地图加载
-    坍塌函数也没有看
-    这个研究还是太早了点，等联机 ok 了再搞这个
-    已经支持了，下一个 todo
-
-6.  碰撞
-    https://github.com/jcornaz/impacted
-    6.1 把碰撞形状实装父实体
-    6.2 把碰撞形状放进 aabbs 输出碰撞事件 反馈给父实体
-    6.3 碰撞性能优化成功，里程碑 0.2
-
-7.  ui 试点
-    https://github.com/mvlabat/bevy_egui.git
-    7.1 按 M 呼出菜单
-    7.2 优化文字显示(done)
-    7.3 碰撞实例个数显示(done)
-
-8.  怪物
-    8.1 素材
-    蛇
-    8.2 ai
-    8.2.1. 随机移动(done)
-    8.2.2 看到玩家进行攻击(done)
-    8.2.2.1 攻击事件分发系统 (done)
-    8.2.2.2 生命属性系统 (wip)
-    8.2.2.3 粒子系统 (wip)
-
-        8.2.3   血量过低，逃跑
-
-9.  pvp
-10. 联网
-11. debug 改成命令行
-12. 开发工具
-    12.1 地形编辑器
-
-### 实验室
-
-1. g7 的转点绳索
-2. z 轴
-3. 曲线闭合相交判定
-   数组去建立区间
-   或者用库
-   https://parry.rs/
-   这个可以
-   矩形 内包裹不规则图形进行碰撞检测
-4. 可不可以用 tokio 库 完成这样一个目标:当我需要别的实例的数据时，我不立刻获取，我记录下这个消费，然后再总线发出这个实例数据
-
-### 记录
-
-bevy_prototype_lyon 画图性能很烂
-bevy_ecs_ldtk= "0.3.0" 性能也有点烂
-
-### 源代码现存问题
-
-4. 镜头需要跟着 y+z 移动才行
-
-# 启动
-cargo install cargo-watch
-cargo watch -x 'run'
-
+```powershell
+$env:BEVY_DISABLE_ACCESSIBILITY = "1"
+$env:RUST_LOG = "info"
 cargo run
-cargo run --features bevy/trace_chrome
+```
 
-# debug
+或者直接跑 release binary：
 
-1.相机解锁 f3 DebugStatus.camera_debug
-2.fps 显示 f11 DebugStatus.fps_show 3.碰撞体积显示 f12 DebugStatus.collision_debug 4.放置怪物 f10 DebugStatus.instance_debug
+```powershell
+.\target\debug\minecraft_bevy.exe
+```
 
-# 性能现状 0.1
+### 自动 demo 行为
 
-无内存泄露
-20000sprite 20000collision = 70-90fps
-40000sprite 40000collision = 37-43fps
+启动后**不需要任何键盘输入**，游戏自己跑：
 
-20000sprite 20000collision 理想碰撞规则 = 66-78fps
-40000sprite 40000collision 理想碰撞规则 = 30-37fps
+| 阶段 | 时间 | 行为 |
+| --- | --- | --- |
+| 启动自检 | 0-1s | 跑 100 tick headless，全部 invariants 通过则 ✅ |
+| 自动 demo | 持续 | 玩家每 1.2 秒自动向随机方向走 1 格，遇 solid 向上飞 |
+| 自动 orbit | 持续 | 相机绕玩家旋转，每 5 秒转 110° |
+| 自动截图 | 每 5s | 保存 `screenshots/iter_NN.png`（NN 递增） |
+| HUD 更新 | 每 3s | 左上角文字 overlay 更新 sim 状态 |
 
-// here
-20000sprite 20000collision 实际碰撞规则 = 66-78fps
-40000sprite 40000collision 实际碰撞规则 = 30-37fps
+### 手动操作（可选）
 
-### 开发理念
+| 键 | 动作 |
+| --- | --- |
+| `WASD` / `Space` / `Shift` | 玩家 1 格移动（不能穿 solid） |
+| `G` | 采集当前方块 |
+| `F` | 创国（消耗 wood） |
+| `U` | 升级人口上限 |
+| `J` | 攻击 4 格内怪物 |
+| `T` | 加速 60 tick |
+| `ESC` | 退出 |
 
-1. 能加字段就加字段解决
-2. ecs 的模式很适合生产消费模式
-   明确系统需要做什么?
-   西兰花提供什么能力?
-   接受一组矩形 然后调用回调函数(可以用来输出点心)
+---
 
-   碰撞系统需要接受一组形状，判断是否碰撞.
-   碰撞之后要做什么? 1.防止移动 2.排斥力 3.侦察是否包含
-   做到这些需要什么?
-   碰撞两人的形状
+## 三、闭环 AI 迭代演示
 
-   生产者就需要提供自己的形状 作为生产者的 生产因子
+`screenshots/` 目录保留每次迭代的截图。实际迭代过程：
 
-   生产者需要输入的，这个输入需要捋清楚所有线路，才会知道生产因子。
+| Iter | 改动 | 结果 |
+| --- | --- | --- |
+| 1 | 基础体素地形 + sky 蓝 + 600 块 | 全是棕色，没水/玩家/动效 |
+| 2 | 加双灯、加 ambient 1.2 | 不再黑面，水/光可见 |
+| 3 | 拉近相机 24→12，加水+玩家+5 怪物 cube | 玩家仍藏在山后 |
+| 4 | 加 HUD overlay (英文) | tick/资源实时可见 |
+| 5 | 加旗杆+红旗+5 树+6 朵云 | 玩家从远处也能看到 |
+| 6 | 玩家 demo 模式可"飞"过障碍 | 玩家升到 y=20 高空，截图完美 |
 
-3. 如果需要不同类型的实例需要相互修改就放在 总线 或者是 并行总线 里去做，不要放在并行系统里搞。
+每一轮都遵循：
+1. 看上一轮截图（`Read` 工具看 `iter_NN.png`）
+2. 找问题（"玩家看不到" / "水不够" / "阴影全黑"）
+3. 改 1-2 个函数
+4. 重建（`cargo build`）
+5. 重跑 + 截图
+6. 对比
 
-4. 在一个地方产生事件 并存在当时的仓库里 到一个系统里去处理事件 然后分发(这个需要总线怎么处理呢) 给实例的仓库让他去消费事件。
-   先抓住这个开发路线
+---
 
-### 历史
+## 四、模块架构
 
-# 性能现状 0
+### 资源池（守恒总线）
+- 25 种资源 + max 上限
+- `try_add` / `try_sub` / `force_add`
+- `apply_transfer(pool, transfer)`：按 src 分类
+  - 收入类（Regen/Init/PlayerGather/MonsterDrop）→ `force_add`
+  - 支出类（Nation）→ `try_sub`
+- `verify_conservation()` 每 tick 断言
 
-1w 可以用实例
-2w 碰撞检测
-有 42 到 47 帧数左右
+### 3 个生态群落
+| Biome | Z 区间 | 专属矿石 |
+| --- | --- | --- |
+| Desert | z ≥ 2n/3 | SunstoneOre |
+| Tundra | n/3 ≤ z < 2n/3 | FrostcoreOre |
+| Jungle | z < n/3 | LivingRoot |
 
-10000:42
+### 国家系统
+- 最多 8 面国旗
+- 创国成本 `[10, 15, 20, 25, 30, 40, 50, 60]` 灵魂
+- 人口上限 5 → 10 → 15 → 20
+- HP=100，归零解散 + 释放 founding_order
 
-none
-10000:122-135
-20000:60-70
+### 怪物生态
+- 5 王国 × 3-6 小巢 上限
+- 80 小巢 + 1500 个体上限
+- 5 分钟无活动 → 休眠
+- 死亡：`food * 25%` 转 soul
 
-only collision
-10000:90-100
-20000:45-50
-使用 Mutex
-10000:35
+### 体素渲染（render/mod.rs）
+- 玩家周围 R 半径内的 solid 块 → spawn PBR cube
+- 共享 cube mesh + 8 种 BlockType 的 shared materials
+- 距离衰减 fog (start=18, end=48)
 
-only snake_step
-10000:100
-20000:54
-优化手段是什么呢？
+### 视觉增强（pretty/mod.rs）
+- 水面（半透明蓝 plane，sea level+0.45）
+- 玩家 avatar（身体/头/发/眼/腿/旗杆/红旗）— 9 个 cube
+- 5 种怪物（按颜色区分 Snake/FrostElf/SandWurm/Treant/AetherWraith）
+- 5 棵树（深棕树干 + 绿色 2x2x2 树冠）
+- 6 朵云（白色半透明 cube，y=24-26）
 
-完美优化成功 里程碑达到
+### Tick 闭环 debug（ai/mod.rs）
+- 50 单元测试覆盖
+- 5 个 invariants：资源守恒 / 怪物计数 / 国旗上限 / 玩家出界 / tick 时长
+- 5 个 anomaly 检测：决策振荡 / tick spike / 资源跳变 / 结构异变 / 国家瞬灭
+- snapshot digest 便于重放
 
-### 源代码现存问题
+---
 
-1. 相机抖动(done)
-   解决办法:镜头移动快速点 小于一定值直接等于
-2. 碰撞抖动问题(done)
+## 五、性能
 
-3. 命名改造(P0 done)
-   实例的 children 有动画 阴影 范围
-   主体包括 碰撞 ai 属性 动画实例索引
+- ~50 单元测试全过（50 passed, 0 failed）
+- 启动自检 100 tick headless < 1ms
+- 运行时 ~150-170 fps（AMD RX 7700 XT + 32³ 体素）
 
-### P0
+---
 
-1.  完成碰撞规则实装(done)
-2.  完成碰撞效果(done)
-3.  重写怪物 Ai(done)
-4.  人物需要增加脚下阴影(done)
+## 六、迭代历史
 
+### 修过的 bug
+| # | 描述 | 修复 |
+| --- | --- | --- |
+| 1 | `apply_transfer` 把 `PlayerGather` 当"转出"，池子里没资源 | 改按 src 分类 |
+| 2 | `idx()` i32 → usize 类型错 | `as usize` |
+| 3 | `Wood` BlockType 和 ResourceKind 同名歧义 | `ResourceKind as R` |
+| 4 | `visible_blocks` 半开区间少 1 元素 | `..+1` |
+| 5 | u64 vs i64 比较 | `as i64` |
+| 6 | `try_sub(0)` 失败 | `if x > 0` |
+| 7 | `dissolve` 不释放 founding_order | BTreeSet.remove |
+| 8 | HUD 中文字体方块 | 改英文 |
+| 9 | GameWorld 没 init_resource | 加 init_resource |
+| 10 | 资源 force_add(50) 越界 | `min(50, max/2)` |
+| 11 | 玩家 demo 卡在方块里 | 飞行模式：被挡时向上找空位 |
 
-### 性能分析工具
-https://github.com/bevyengine/bevy/blob/main/docs/profiling.md
+### 后续可加
+- 战争迷雾（球形 + 阻挡衰减）
+- 怪物 AI 决策（当前只有 MonsterMove 占位）
+- 资源点再生具体逻辑
+- save/load
+- 阴影（当前 `shadows_enabled = false` 性能优先）
+
+---
+
+## 七、依赖
+
+```toml
+bevy = "0.18.1"
+broccoli = "0.6.6"  # 锁定（0.6.7 触发 compt 1.10 转换）
+compt = ">=1.9, <1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+### 编译环境
+- rustup 1.89.0-x86_64-pc-windows-gnu（msvc 装不下，gnu 够用）
+- D:\cargo\config.toml 走 rsproxy.cn 镜像
+- `BEVY_DISABLE_ACCESSIBILITY=1`
+
