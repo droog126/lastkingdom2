@@ -1,0 +1,551 @@
+﻿cargo :    Compiling bevy_asset v0.18.1
+所在位置 行:1 字符: 80
++ ... v:BEVY_DISABLE_ACCESSIBILITY='1'; cargo test --workspace 2>&1 | Out-F ...
++                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling bevy_asset v0.18.1:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling lightyear_transport v0.26.4
+   Compiling sled v0.34.7
+   Compiling criterion v0.8.2
+   Compiling lightyear_messages v0.26.4
+   Compiling lightyear_sync v0.26.4
+   Compiling lightyear_replication v0.26.4
+   Compiling bevy_image v0.18.1
+   Compiling bevy_mesh v0.18.1
+   Compiling bevy_window v0.18.1
+   Compiling bevy_shader v0.18.1
+   Compiling bevy_text v0.18.1
+   Compiling bevy_animation v0.18.1
+   Compiling bevy_camera v0.18.1
+   Compiling bevy_render v0.18.1
+   Compiling bevy_picking v0.18.1
+   Compiling bevy_sprite v0.18.1
+   Compiling bevy_input_focus v0.18.1
+   Compiling bevy_light v0.18.1
+   Compiling bevy_ui v0.18.1
+   Compiling bevy_core_pipeline v0.18.1
+   Compiling bevy_gizmos v0.18.1
+   Compiling bevy_sprite_render v0.18.1
+   Compiling bevy_pbr v0.18.1
+   Compiling bevy_ui_render v0.18.1
+   Compiling bevy_winit v0.18.1
+   Compiling bevy_scene v0.18.1
+   Compiling bevy_post_process v0.18.1
+   Compiling bevy_anti_alias v0.18.1
+   Compiling bevy_audio v0.18.1
+   Compiling lightyear_interpolation v0.26.4
+   Compiling bevy_egui v0.39.1
+   Compiling lightyear_frame_interpolation v0.26.4
+   Compiling lightyear_prediction v0.26.4
+   Compiling bevy_gizmos_render v0.18.1
+   Compiling bevy_gltf v0.18.1
+   Compiling bevy_internal v0.18.1
+   Compiling bevy-inspector-egui v0.36.0
+   Compiling bevy v0.18.1
+   Compiling bevy_transform_interpolation v0.4.0
+   Compiling avian3d v0.6.1
+   Compiling leafwing-input-manager v0.20.0
+   Compiling bevy_panorbit_camera v0.34.0
+   Compiling lightyear v0.26.4
+   Compiling minecraft_bevy v0.1.0 (F:\rustProject\lastkingdom2)
+warning: unused import: `std::collections::HashMap`
+  --> src\main.rs:11:5
+   |
+11 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `apply_transfer`
+  --> src\nation\mod.rs:26:86
+   |
+26 |     GlobalResourcePool, PoolError, ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer,
+   |                                                                                      ^^^^^^^^^^^^^^
+
+warning: unused import: `Biome`
+   --> src\ai\mod.rs:553:24
+    |
+553 |     use crate::world::{Biome, World, WorldGenerator};
+    |                        ^^^^^
+
+warning: unused import: `HashSet`
+ --> src\render\mod.rs:9:33
+  |
+9 | use std::collections::{HashMap, HashSet};
+  |                                 ^^^^^^^
+
+warning: unused import: `crate::constant`
+  --> src\render\mod.rs:13:5
+   |
+13 | use crate::constant;
+   |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::resource::ResourceKind`
+  --> src\creature\mod.rs:10:5
+   |
+10 | use crate::resource::ResourceKind;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Biome`
+  --> src\pretty\mod.rs:12:20
+   |
+12 | use crate::world::{Biome, World as GameWorld};
+   |                    ^^^^^
+
+warning: unused import: `std::collections::HashMap`
+  --> src\scenario\mod.rs:27:5
+   |
+27 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `lightyear::prelude::*`
+ --> src\network\protocol.rs:8:5
+  |
+8 | use lightyear::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CombatReady`
+  --> src\pvp\systems_client.rs:12:45
+   |
+12 | use crate::network::protocols::components::{CombatReady, Health};
+   |                                             ^^^^^^^^^^^
+
+warning: unused import: `CombatReady`
+  --> src\pvp\systems_server.rs:12:45
+   |
+12 | use crate::network::protocols::components::{CombatReady, Health, KnockbackImmunity};
+   |                                             ^^^^^^^^^^^
+
+warning: unused import: `Ping`
+  --> src\pvp\systems_server.rs:15:39
+   |
+15 |     CombatState, DamageEvent, Hitbox, Ping, PositionHistory, PositionSnapshot, WeaponStats,
+   |                                       ^^^^
+
+warning: unused import: `los::*`
+  --> src\pvp\mod.rs:19:9
+   |
+19 | pub use los::*;
+   |         ^^^^^^
+
+warning: unused import: `systems_server::*`
+  --> src\pvp\mod.rs:21:9
+   |
+21 | pub use systems_server::*;
+   |         ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::network::protocols::components::CombatReady`
+   --> src\pvp\mod.rs:131:5
+    |
+131 | use crate::network::protocols::components::CombatReady;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `avian3d::prelude::LinearVelocity`
+ --> src\controller\components.rs:5:5
+  |
+5 | use avian3d::prelude::LinearVelocity;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GroundHit`
+ --> src\controller\systems.rs:9:37
+  |
+9 | use crate::controller::components::{GroundHit, PvPController, PlayerCollider};
+  |                                     ^^^^^^^^^
+
+warning: unused import: `systems::*`
+  --> src\controller\mod.rs:22:9
+   |
+22 | pub use systems::*;
+   |         ^^^^^^^^^^
+
+warning: unused imports: `AiDecisionKind` and `AiDecision`
+  --> src\main.rs:28:17
+   |
+28 | use crate::ai::{AiDecision, AiDecisionKind, TickObserver};
+   |                 ^^^^^^^^^^  ^^^^^^^^^^^^^^
+
+warning: unused imports: `ScenarioState` and `Scenario`
+  --> src\main.rs:29:23
+   |
+29 | use crate::scenario::{Scenario, ScenarioState};
+   |                       ^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused import: `NationId`
+  --> src\main.rs:31:21
+   |
+31 | use crate::nation::{NationId, NationRegistry};
+   |                     ^^^^^^^^
+
+warning: unused import: `BlockType`
+  --> src\main.rs:33:20
+   |
+33 | use crate::world::{BlockType, World as GameWorld, WorldGenerator};
+   |                    ^^^^^^^^^
+
+warning: unused import: `FixedTick`
+  --> src\main.rs:41:96
+   |
+41 | use crate::pvp::{PvPPlugin, WeaponId, WeaponStats, Hitbox, CombatState, Ping, PositionHistory, FixedTick};
+   |                                                                                                ^^^^^^^^^
+
+error[E0599]: no variant, associated function, or constant named `Grass` found for enum `world::BlockType` in the curre
+nt scope
+   --> src\pvp\los.rs:129:43
+    |
+129 |                 w.set(x, 0, z, BlockType::Grass);
+    |                                           ^^^^^ variant, associated function, or constant not found in `world::Bl
+ockType`
+    |
+   ::: src\world\mod.rs:78:1
+    |
+ 78 | pub enum BlockType {
+    | ------------------ variant, associated function, or constant `Grass` not found for this enum
+
+warning: unused import: `leafwing_input_manager::prelude`
+  --> src\controller\systems.rs:13:5
+   |
+13 | use leafwing_input_manager::prelude::*;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `x`
+  --> src\world\mod.rs:35:20
+   |
+35 |     pub fn from_xz(x: i32, z: i32) -> Self {
+   |                    ^ help: if this is intentional, prefix it with an underscore: `_x`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `t`
+   --> src\nation\mod.rs:190:13
+    |
+190 |         let t = Transfer {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_t`
+
+warning: variable does not need to be mutable
+   --> src\nation\mod.rs:431:13
+    |
+431 |         let mut reg = NationRegistry::new();
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `pool`
+   --> src\monster\mod.rs:309:28
+    |
+309 |     pub fn tick(&mut self, pool: &mut GlobalResourcePool) {
+    |                            ^^^^ help: if this is intentional, prefix it with an underscore: `_pool`
+
+warning: unused variable: `world`
+  --> src\ai\mod.rs:59:9
+   |
+59 |         world: &World,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_world`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:584:14
+    |
+584 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:584:35
+    |
+584 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:597:14
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:597:35
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:597:48
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:620:14
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:620:25
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:620:48
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:633:14
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:633:25
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:633:35
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:633:48
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:651:14
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:651:25
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:651:35
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:712:14
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:712:25
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\ai\mod.rs:712:48
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\render\mod.rs:144:5
+    |
+144 |     mut last_warn_time: Local<f32>,
+    |     ----^^^^^^^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `last_warn_time`
+   --> src\render\mod.rs:144:5
+    |
+144 |     mut last_warn_time: Local<f32>,
+    |     ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_last_warn_time`
+
+warning: variable does not need to be mutable
+   --> src\creature\mod.rs:187:5
+    |
+187 |     mut q: Query<(Entity, &mut Creature, &mut CreatureAI)>,
+    |     ----^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `name`
+   --> src\pretty\mod.rs:166:25
+    |
+166 |         for (i, (color, name)) in monster_kinds.iter().enumerate() {
+    |                         ^^^^ help: if this is intentional, prefix it with an underscore: `_name`
+
+warning: unused variable: `i`
+   --> src\pretty\mod.rs:201:10
+    |
+201 |     for (i, (tx, tz)) in tree_positions.iter().enumerate() {
+    |          ^ help: if this is intentional, prefix it with an underscore: `_i`
+
+warning: unused variable: `right`
+  --> src\pvp\los.rs:89:9
+   |
+89 |     let right = forward.cross(Vec3::Y).normalize();
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_right`
+
+warning: variable does not need to be mutable
+  --> src\pvp\systems_client.rs:29:5
+   |
+29 |     mut input_manager: Option<ResMut<ActionState<PlayerAction>>>,
+   |     ----^^^^^^^^^^^^^
+   |     |
+   |     help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src\pvp\systems_client.rs:35:14
+   |
+35 |     let Some(mut input_manager) = input_manager else { return; };
+   |              ----^^^^^^^^^^^^^
+   |              |
+   |              help: remove this `mut`
+
+warning: unused variable: `kb_immune`
+   --> src\pvp\systems_server.rs:130:57
+    |
+130 |         for (victim_entity, _, hitbox, health, history, kb_immune) in victims.iter() {
+    |                                                         ^^^^^^^^^ help: if this is intentional, prefix it with an
+ underscore: `_kb_immune`
+
+warning: unused variable: `voxel_colliders`
+  --> src\controller\systems.rs:31:5
+   |
+31 |     voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
+   |     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_voxel_colliders`
+
+warning: unused variable: `time`
+  --> src\controller\systems.rs:92:5
+   |
+92 |     time: Res<Time>,
+   |     ^^^^ help: if this is intentional, prefix it with an underscore: `_time`
+
+warning: unused variable: `transform`
+   --> src\controller\systems.rs:136:40
+    |
+136 |     for (mut velocity, mut controller, transform) in controllers.iter_mut() {
+    |                                        ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tr
+ansform`
+
+warning: variable does not need to be mutable
+   --> src\controller\systems.rs:196:24
+    |
+196 |     for (mut velocity, mut controller, transform, collider) in controllers.iter_mut() {
+    |                        ----^^^^^^^^^^
+    |                        |
+    |                        help: remove this `mut`
+
+warning: unused variable: `voxel_colliders`
+   --> src\controller\systems.rs:194:5
+    |
+194 |     voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
+    |     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_voxel_colliders`
+
+warning: variable does not need to be mutable
+   --> src\controller\systems.rs:323:5
+    |
+323 |     mut commands: Commands,
+    |     ----^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `commands`
+   --> src\controller\systems.rs:323:5
+    |
+323 |     mut commands: Commands,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_commands`
+
+warning: unused variable: `game_world`
+   --> src\controller\systems.rs:324:5
+    |
+324 |     game_world: Res<GameWorld>,
+    |     ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_game_world`
+
+warning: unused variable: `player`
+   --> src\controller\systems.rs:325:5
+    |
+325 |     player: Query<&Transform, With<PvPController>>,
+    |     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_player`
+
+warning: unused variable: `existing_colliders`
+   --> src\controller\systems.rs:326:5
+    |
+326 |     existing_colliders: Query<&Transform, (With<Collider>, Without<PvPController>)>,
+    |     ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_existing_colliders`
+
+warning: unused variable: `has_scenario_file`
+   --> src\main.rs:118:9
+    |
+118 |     let has_scenario_file = args.iter().skip(1).any(|a| a.ends_with(".json"));
+    |         ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_has_scenario_file`
+
+warning: variable does not need to be mutable
+   --> src\main.rs:491:5
+    |
+491 |     mut commands: Commands,
+    |     ----^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `commands`
+   --> src\main.rs:491:5
+    |
+491 |     mut commands: Commands,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_commands`
+
+warning: variable does not need to be mutable
+   --> src\main.rs:726:5
+    |
+726 |     mut clock: ResMut<SimClock>,
+    |     ----^^^^^
+    |     |
+    |     help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `minecraft_bevy` (bin "minecraft_bevy" test) generated 70 warnings
+error: could not compile `minecraft_bevy` (bin "minecraft_bevy" test) due to 1 previous error; 70 warnings emitted
+E X I T = 0  
+ 

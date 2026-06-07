@@ -8,12 +8,17 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::{HashMap, HashSet};
 
+use avian3d::prelude::{Collider, RigidBody};
+
 use crate::constant;
 use crate::creature::Creature;
 use crate::monster::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::resource::ResourceKind;
 use crate::world::{BlockType, World as GameWorld};
+
+mod greedy_mesh;
+use greedy_mesh::build_all_terrain_meshes_aabb;
 
 /// 体素渲染配置
 #[derive(Resource, Debug, Clone)]
@@ -37,7 +42,7 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
-            radius: 16,
+            radius: 20,  // 之前 16，玩家只能看到 ±16 方块。升到 20 让世界看起来更辽阔
             max_blocks: 3000,
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
@@ -45,10 +50,10 @@ impl Default for RenderConfig {
             fog_start: 18.0,
             fog_end: 48.0,
             auto_orbit: false,            // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
-            auto_orbit_speed: 0.22,
-            auto_orbit_distance: 15.0,
+            auto_orbit_speed: 0.30,       // 0.22 太慢看不清全貌,0.30 12s 内能转接近半圈
+            auto_orbit_distance: 6.5,     // 15 太远,玩家在画面里就是个黑点;6.5 能看清 avatar + 周边
             auto_walk: false,             // 默认玩家控制；--auto-demo 开启
-            auto_walk_interval_secs: 1.2,
+            auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
             auto_keys: false,             // --auto-demo 开启：自动按 F/J 验证
             mouse_look: true,             // 默认开：鼠标转视角（FPS 标准）
         }
@@ -56,20 +61,71 @@ impl Default for RenderConfig {
 }
 
 /// 相机朝向（鼠标累积的 yaw + pitch）。mouse_look 系统读，first_person_camera 用
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct CameraAngles {
     pub yaw: f32,    // 绕 +Y 轴，0 = 相机看 -Z；右转为负
     pub pitch: f32,  // 绕相机右轴，0 = 水平；上视为正
 }
 
+impl Default for CameraAngles {
+    fn default() -> Self {
+        // 出生时明显俯视（约 -35°），让玩家第一眼看到脚下 + 远处地形
+        Self { yaw: 0.0, pitch: -0.6 }
+    }
+}
+
+/// 相机视角模式：C 键切换
+#[derive(Resource, Default, PartialEq, Eq, Debug, Clone, Copy)]
+pub enum CameraMode {
+    /// 第一人称：相机在玩家眼睛位置
+    #[default]
+    FirstPerson,
+    /// 第三人称：相机在玩家身后 3m，俯视玩家
+    ThirdPerson,
+}
+
+/// 第三人称：相机到玩家的水平距离（m）+ 垂直抬高
+const TP_DISTANCE: f32 = 4.0;
+const TP_HEIGHT: f32 = 2.0;
+
+/// 自由视角模式（F3 切换）：灵魂出窍，无视玩家位置和物理，自由飞
+#[derive(Resource)]
+pub struct FreeFlyState {
+    pub enabled: bool,
+    /// 世界坐标下的相机位置（独立于 PlayerState）
+    pub position: Vec3,
+    /// WASD 速度向量（用于平滑加减速）
+    pub velocity: Vec3,
+    /// 进入 freefly 时存的玩家位置，退出时还原。灵魂出窍不能让玩家身体被其他系统挪走。
+    pub saved_player_pos: Option<[i32; 3]>,
+}
+
+impl Default for FreeFlyState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            position: Vec3::new(48.5, 18.0, 48.5), // 默认从玩家出生点上方起
+            velocity: Vec3::ZERO,
+            saved_player_pos: None,
+        }
+    }
+}
+
+/// 自由视角移动速度（m/s）— 比步行快 20x，方便快速遍历
+const FREEFLY_SPEED: f32 = 30.0;
+/// Shift 加速倍率
+const FREEFLY_BOOST: f32 = 3.0;
+
 const MOUSE_SENS: f32 = 0.0022;     // 弧度/像素（≈ 0.13°/像素）
 const PITCH_LIMIT: f32 = 1.483;     // ≈ 85°（防止翻转）
 const YAW_QE_STEP: f32 = 22.5_f32.to_radians();  // Q/E 步进 22.5°（备胎）
 
-/// 已 spawn 的方块 entity 列表（用于 despawn 重生）
+/// 已 spawn 的 terrain entity 列表（用于 despawn 重生）
+/// 视觉 + 碰撞 分开存：视觉走 greedy mesh 出 mesh3d 实体，碰撞走 trimesh 实体
 #[derive(Resource, Default)]
 pub struct SpawnedBlocks {
-    pub entities: Vec<Entity>,
+    pub visual_entities: Vec<Entity>,
+    pub collider_entities: Vec<Entity>,
     /// 上次 spawn 时用的玩家位置（玩家移动 > 1 格才重新 spawn）
     pub last_player_block: [i32; 3],
 }
@@ -78,7 +134,10 @@ pub struct SpawnedBlocks {
 #[derive(Component)]
 pub struct PlayerCube;
 
-/// 启动时 spawn 玩家周围方块
+/// 启动时 spawn 玩家周围方块（Greedy Mesh + Trimesh 碰撞版）
+///
+/// 每个 renderable block type → 1 个 Mesh3d 实体（视觉）+ 1 个 Trimesh 实体（碰撞）。
+/// 之前 naive 做法每方块一个 entity（3000+）→ 现在 ~12 个。
 pub fn spawn_terrain_around_player(
     mut commands: Commands,
     game_world: Res<GameWorld>,
@@ -90,18 +149,31 @@ pub fn spawn_terrain_around_player(
     time: Res<Time>,
     // 限流：同一次刷屏只 warn 一次（1 秒间隔，按真实时间）
     mut last_warn_time: Local<f32>,
+    // 节流：最近一次 re-mesh 用了多少 ms。60fps + Greedy Mesh ≈ 600-1200ms 一次，
+    // 所以按帧调会被卡成 1fps。用真实时间节流，0.5s 内不重复 re-mesh。
+    mut last_mesh_wall: Local<f32>,
 ) {
-    // 如果上次就在这，skip（玩家没移动）
-    if spawned.last_player_block == player.block_pos && !spawned.entities.is_empty() {
+    // 1) 玩家没动 + 上次有 mesh → skip
+    // 2) 玩家动了 + 距离上次 re-mesh < 0.5s → skip（防 auto-walk 每步卡顿）
+    // 3) 否则 re-mesh
+    let now = time.elapsed_secs();
+    let moved = spawned.last_player_block != player.block_pos;
+    if !moved && !spawned.visual_entities.is_empty() {
         return;
     }
+    if moved && now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
+        return;  // 0.5s → 1.5s 留时间给更大的 40³ re-mesh (12 type * 40³)
+    }
 
-    // 清掉上一次的
-    for e in spawned.entities.drain(..) {
+    // 清掉上一次的（视觉 + 碰撞）
+    for e in spawned.visual_entities.drain(..) {
+        commands.entity(e).despawn();
+    }
+    for e in spawned.collider_entities.drain(..) {
         commands.entity(e).despawn();
     }
 
-    // 准备 12 种 BlockType 对应的材质（共享，减少 GPU 状态切换）
+    // 1. 准备 12 种 BlockType 对应的材质（共享，减少 GPU 状态切换）
     let mut mats: HashMap<BlockType, Handle<StandardMaterial>> = HashMap::new();
     for bt in [
         BlockType::Dirt,
@@ -146,58 +218,74 @@ pub fn spawn_terrain_around_player(
         mats.insert(bt, materials.add(material));
     }
 
-    // 共享的 cube mesh
-    let cube_mesh: Handle<Mesh> = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    // 2. Greedy Mesh：每个 block type 一个 mesh（玩家周围 AABB，41³ = ~70KB）
+    let started = time.elapsed_secs();
+    let r = cfg.radius as i32;
+    let py = player.block_pos[1];
+    // Y 范围：以玩家为中心 ±20，但 clamp 到 [0, world.size-1]
+    let y_min = (py - 20).max(0);
+    let y_max = (py + 20).min(game_world.size as i32 - 1);
+    let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
+    let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
+    let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
+    let mesh_count = block_meshes.len();
+    let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
+    let mesh_secs = time.elapsed_secs() - started;
 
-    // 收集要 spawn 的方块（按 z 排序，远的先画）
-    let [px, py, pz] = player.block_pos;
-    let r = cfg.radius;
-    let s = game_world.size;
-    let mut candidates: Vec<(i32, i32, i32, BlockType)> = Vec::new();
-    for y in (py - r).max(0)..(py + r + 1).min(s) {
-        for z in (pz - r).max(0)..(pz + r + 1).min(s) {
-            for x in (px - r).max(0)..(px + r + 1).min(s) {
-                let b = game_world.get(x, y, z);
-                if b.is_renderable() {  // 包括 Water（半透明但要画）
-                    candidates.push((x, y, z, b));
-                }
-            }
-        }
-    }
-    // 远到近排序：先画远的（z 大的），painter's algorithm
-    candidates.sort_by_key(|(_, y, z, _)| -(*y + *z));
+    // 3. Spawn 每个 mesh（视觉 + 碰撞）
+    for bm in block_meshes {
+        let mat = mats[&bm.block_type].clone();
+        let bevy_mesh = bm.to_bevy_mesh();
 
-    // 限流：warn 至少 1 秒间隔（按真实时间，不按帧——demo 跑 200fps 时 30 帧节流变 150ms 太短）
-    if candidates.len() > cfg.max_blocks {
-        candidates.truncate(cfg.max_blocks);
-        let now = time.elapsed_secs();
-        if now - *last_warn_time > 1.0 {
-            warn!("体素过多 ({}+), 截断到 {}", candidates.len(), cfg.max_blocks);
-            *last_warn_time = now;
-        }
-    }
+        // 碰撞：跳过 water（玩家应该能穿过水；且 Trimesh 不适合双面薄面）
+        let collider_opt = if matches!(bm.block_type, BlockType::Water) {
+            None
+        } else {
+            Collider::trimesh_from_mesh(&bevy_mesh)
+        };
 
-    // Spawn
-    for (x, y, z, b) in candidates {
-        let mat = mats[&b].clone();
-        let pos = Vec3::new(
-            x as f32 + 0.5,
-            y as f32 + 0.5 + cfg.y_offset,
-            z as f32 + 0.5,
-        );
-        let e = commands
+        // 把 mesh 加进 assets（视觉用 handle；碰撞用 mesh 引用）
+        let mesh_handle = meshes.add(bevy_mesh);
+
+        // 视觉：Mesh3d + MeshMaterial3d，identity transform
+        let visual = commands
             .spawn((
-                Mesh3d(cube_mesh.clone()),
+                Mesh3d(mesh_handle),
                 MeshMaterial3d(mat),
-                Transform::from_translation(pos),
+                Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                TerrainChunk,
             ))
             .id();
-        spawned.entities.push(e);
+        spawned.visual_entities.push(visual);
+
+        if let Some(collider) = collider_opt {
+            let collider_ent = commands
+                .spawn((
+                    RigidBody::Static,
+                    collider,
+                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                    TerrainChunk,
+                ))
+                .id();
+            spawned.collider_entities.push(collider_ent);
+        }
     }
 
     spawned.last_player_block = player.block_pos;
-    info!("🧱 spawn 了 {} 个方块（玩家 {:?}）", spawned.entities.len(), player.block_pos);
+    // 改 debug! — 每次跳/走都打太吵，按需用 RUST_LOG=minecraft_bevy::render=debug 看
+    debug!(
+        "🧱 greedy mesh: {} type(s), {} tris, 耗时 {:.0}ms（玩家 {:?}）",
+        mesh_count,
+        total_tris,
+        mesh_secs * 1000.0,
+        player.block_pos
+    );
+    *last_mesh_wall = time.elapsed_secs();
 }
+
+/// Terrain chunk marker（greedy mesh 出的视觉/碰撞实体）
+#[derive(Component)]
+pub struct TerrainChunk;
 
 /// 天空颜色 + 雾 + 武器 spawn（spawn 时把剑挂到相机子节点上，跟着相机走）
 pub fn setup_atmosphere(
@@ -270,12 +358,158 @@ pub fn mouse_look_system(
     motion: Res<AccumulatedMouseMotion>,
     mut angles: ResMut<CameraAngles>,
     cfg: Res<RenderConfig>,
+    freefly: Res<FreeFlyState>,
 ) {
-    if !cfg.mouse_look { return; }
+    // 自由视角下强制开（脱离玩家也想用鼠标看）
+    if !cfg.mouse_look && !freefly.enabled { return; }
     if motion.delta == Vec2::ZERO { return; }
-    angles.yaw -= motion.delta.x * MOUSE_SENS;
+    // FPS 标准：鼠标右滑 → 视角右转（yaw+）；鼠标上滑 → 抬头（pitch+）
+    angles.yaw += motion.delta.x * MOUSE_SENS;
     angles.pitch -= motion.delta.y * MOUSE_SENS;
     angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
+}
+
+/// F3 切换自由视角（灵魂出窍）。切换时把相机放到玩家头顶上方 18m
+///
+/// 重要：进入时**快照玩家位置**到 freefly.saved_player_pos，scenario / 玩家输入
+/// 等其他系统继续运行可能挪动玩家；退出时**还原**到快照，保证身体没漂。
+pub fn freefly_toggle(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut freefly: ResMut<FreeFlyState>,
+    mut player: ResMut<PlayerState>,
+) {
+    if !keys.just_pressed(KeyCode::F3) { return; }
+    freefly.enabled = !freefly.enabled;
+    if freefly.enabled {
+        // 进入：快照玩家位置，相机从玩家头顶 18m 起飞
+        freefly.saved_player_pos = Some(player.block_pos);
+        freefly.position = Vec3::new(
+            player.block_pos[0] as f32 + 0.5,
+            player.block_pos[1] as f32 + 0.5 + 18.0,
+            player.block_pos[2] as f32 + 0.5,
+        );
+        freefly.velocity = Vec3::ZERO;
+        info!(
+            "🕊 FreeFly ON — 玩家身体冻结在 {:?}，WASD 飞 / Space↑ / Shift↓ / 鼠标视角 / F3 回本体",
+            player.block_pos
+        );
+    } else {
+        // 退出：还原玩家位置（block_pos 和 pos 同步）
+        if let Some(saved) = freefly.saved_player_pos.take() {
+            info!("🕊 FreeFly OFF — 还原玩家 {:?} -> {:?}", player.block_pos, saved);
+            player.block_pos = saved;
+            player.pos = Vec3::new(
+                saved[0] as f32 + 0.5,
+                saved[1] as f32 + 0.5,
+                saved[2] as f32 + 0.5,
+            );
+        } else {
+            info!("🕊 FreeFly OFF");
+        }
+        freefly.velocity = Vec3::ZERO;
+    }
+}
+
+/// C 键切换 1st / 3rd person 视角
+pub fn camera_mode_toggle(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mode: ResMut<CameraMode>,
+    freefly: Res<FreeFlyState>,
+) {
+    // FreeFly 模式下禁用 C 切换（避免模式冲突）
+    if freefly.enabled { return; }
+    if !keys.just_pressed(KeyCode::KeyC) { return; }
+    *mode = match *mode {
+        CameraMode::FirstPerson => {
+            info!("📷 CameraMode → 3rd person");
+            CameraMode::ThirdPerson
+        }
+        CameraMode::ThirdPerson => {
+            info!("📷 CameraMode → 1st person");
+            CameraMode::FirstPerson
+        }
+    };
+}
+
+/// F5 紧急传送：把玩家传回出生点上方 30m（卡在山里/找不到自己时救命用）
+pub fn emergency_teleport(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut player: ResMut<PlayerState>,
+) {
+    if !keys.just_pressed(KeyCode::F5) { return; }
+    let safe = [
+        crate::constant::WORLD_SIZE / 2,
+        30,  // 出生点正上方 30m，半空，自由落体
+        crate::constant::WORLD_SIZE / 2,
+    ];
+    warn!("🚨 F5 紧急传送： {:?} -> {:?}", player.block_pos, safe);
+    player.block_pos = safe;
+    player.pos = Vec3::new(safe[0] as f32 + 0.5, safe[1] as f32 + 0.5, safe[2] as f32 + 0.5);
+}
+
+/// F8 循环切换地形 preset
+pub fn cycle_terrain_preset(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut game_world: ResMut<GameWorld>,
+) {
+    if !keys.just_pressed(KeyCode::F8) { return; }
+    let names = crate::world::terrain::presets::preset_names();
+    let current = game_world.pipeline.name.clone();
+    let next_idx = names.iter().position(|n| *n == current)
+        .map(|i| (i + 1) % names.len())
+        .unwrap_or(0);
+    let next_name = names[next_idx];
+    let new_pipeline = crate::world::terrain::presets::by_name(next_name);
+    let new_name = new_pipeline.name.clone();
+    game_world.pipeline = std::sync::Arc::new(new_pipeline);
+    info!("🌍 F8 切 preset: {} -> {}", current, new_name);
+}
+
+/// 自由视角下的移动：WASD + Space/Shift，按住持续移动（不像 player_input 那种按一下走一格）
+pub fn freefly_movement(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut freefly: ResMut<FreeFlyState>,
+    angles: Res<CameraAngles>,
+    time: Res<Time>,
+) {
+    if !freefly.enabled { return; }
+
+    // 视野方向（完整 3D，包括 pitch — freefly 应该能飞高飞低）
+    let (sy, cy) = angles.yaw.sin_cos();
+    let (sp, cp) = angles.pitch.sin_cos();
+    let forward = Vec3::new(sy * cp, sp, -cy * cp);
+    // right = forward × Y（Y 是世界 up，freefly 也遵守世界 up 不翻滚）
+    let right = forward.cross(Vec3::Y);
+    // up = Y（不要 roll）
+    let up = Vec3::Y;
+
+    // 累加意图（按住 = 持续）
+    let mut wish = Vec3::ZERO;
+    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp)    { wish += forward; }
+    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)  { wish -= forward; }
+    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) { wish += right; }
+    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)  { wish -= right; }
+    if keys.pressed(KeyCode::Space) { wish += up; }
+    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { wish -= up; }
+    // Q/E = 加速
+    let speed = if keys.pressed(KeyCode::KeyQ) || keys.pressed(KeyCode::KeyE) {
+        FREEFLY_SPEED * FREEFLY_BOOST
+    } else {
+        FREEFLY_SPEED
+    };
+
+    // 平滑加减速：往 wish 方向 lerp
+    let target = if wish.length() > 0.01 {
+        wish.normalize() * speed
+    } else {
+        Vec3::ZERO
+    };
+    let dt = time.delta_secs();
+    // 简化：直接 = target（无 lerp，避免复杂；玩家想要"立刻响应"）
+    let v = target;
+    freefly.velocity = v;
+    let pos = freefly.position + v * dt;
+    freefly.position = pos;
 }
 
 /// 锁光标到窗口中央 + 隐藏（FPS 标准）。mouse_look 关时不锁
@@ -376,7 +610,13 @@ pub fn player_input(
     mut monsters: ResMut<MonsterEcosystem>,
     camera: Query<&Transform, With<Camera3d>>,
     time: Res<Time>,
+    freefly: Res<FreeFlyState>,
 ) {
+    // FreeFly 模式下，WASD/Space/Shift/QE 全部交给 freefly_movement
+    // 这里只保留鼠标视角外的「功能键」（G/F/J/K）
+    let freefly_active = freefly.enabled;
+
+    // 读相机当前朝向 → 算 forward / right（水平）
     // 读相机当前朝向 → 算 forward / right（水平）
     let cam_tf = camera.single().ok();
     let (forward, right) = if let Some(tf) = cam_tf {
@@ -384,27 +624,33 @@ pub fn player_input(
         let f = tf.forward();
         let f_h = Vec3::new(f.x, 0.0, f.z);
         let f_n = if f_h.length() > 0.01 { f_h.normalize() } else { Vec3::new(1.0, 0.0, 0.0) };
-        // right = Y.cross(forward) — +Y 上方系，forward=(1,0,0) → right=(0,0,-1)
-        let r = Vec3::Y.cross(f_n);
+        // right = fwd × Y：看着 -Z 时 right = +X（D 往右移，符合 FPS 习惯）
+        let r = f_n.cross(Vec3::Y);
         (f_n, r)
     } else {
         (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0))
     };
 
     // 移动：W = +forward, S = -forward, A = -right, D = +right；相对相机方向
+    // FreeFly 模式下 WASD/Space/Shift/QE 全部跳过（由 freefly_movement 处理）
     let mut d = Vec3::ZERO;
-    if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp)    { d += forward; }
-    if keys.just_pressed(KeyCode::KeyS) || keys.just_pressed(KeyCode::ArrowDown)  { d -= forward; }
-    if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft)  { d -= right; }
-    if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) { d += right; }
-    if keys.just_pressed(KeyCode::Space)    { d += Vec3::Y; }
-    if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) { d -= Vec3::Y; }
+    if !freefly_active {
+        if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp)    { d += forward; }
+        if keys.just_pressed(KeyCode::KeyS) || keys.just_pressed(KeyCode::ArrowDown)  { d -= forward; }
+        if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft)  { d -= right; }
+        if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) { d += right; }
+        if keys.just_pressed(KeyCode::Space)    { d += Vec3::Y; }
+        if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) { d -= Vec3::Y; }
+    }
 
     // 转向：Q 左转 22.5°，E 右转 22.5°（改 CameraAngles.yaw，相机跟）
-    if keys.just_pressed(KeyCode::KeyQ) {
-        angles.yaw += YAW_QE_STEP;
-    } else if keys.just_pressed(KeyCode::KeyE) {
-        angles.yaw -= YAW_QE_STEP;
+    // FreeFly 下 Q/E 是加速键（见 freefly_movement），跳过这里
+    if !freefly_active {
+        if keys.just_pressed(KeyCode::KeyQ) {
+            angles.yaw -= YAW_QE_STEP;
+        } else if keys.just_pressed(KeyCode::KeyE) {
+            angles.yaw += YAW_QE_STEP;
+        }
     }
 
     // 把 d 量化成 [i32; 3] 1-格移动（选主轴）
@@ -544,6 +790,11 @@ fn try_player_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32
 // 相机：auto_orbit 时绕玩家慢转；玩家控制时停在固定俯瞰角跟随玩家
 // ---------------------------------------------------------------------------
 
+/// 玩家 entity 的标记 component（和 PlayerState Resource 配合用）
+#[derive(Component)]
+pub struct Player;
+
+/// 玩家状态（Resource，不是 Component）
 #[derive(Resource, Default)]
 pub struct PlayerState {
     pub pos: Vec3,
@@ -675,14 +926,64 @@ pub fn auto_demo(
 /// - mouse_look=false → 自动跟最近的可见动物（auto-demo 模式）
 pub fn first_person_camera(
     mut q: Query<&mut Transform, With<Camera3d>>,
+    time: Res<Time>,
     player: Res<PlayerState>,
     angles: Res<CameraAngles>,
     cfg: Res<RenderConfig>,
     last: Res<LastMoveDirection>,
     creatures: Query<&Creature>,
     world: Res<GameWorld>,
+    freefly: Res<FreeFlyState>,
+    mode: Res<CameraMode>,
+    mut orbit_angle: Local<f32>,
 ) {
     let Ok(mut tf) = q.single_mut() else { return; };
+
+    // F3 自由視点：相机从 freefly.position 起飞，完全脱离玩家
+    if freefly.enabled {
+        let (sy, cy) = angles.yaw.sin_cos();
+        let (sp, cp) = angles.pitch.sin_cos();
+        let dir = Vec3::new(sy * cp, sp, -cy * cp);
+        let look_target = freefly.position + dir * 5.0;
+        tf.translation = freefly.position;
+        tf.look_at(look_target, Vec3::Y);
+        return;
+    }
+
+    // auto-demo + auto-orbit：俯瞰 orbit 模式（之前这个分支不存在，玩家被第一人称贴脸，
+    // 根本看不到自己的 avatar，所以 iter_85/90/96 的 player 维度都只拿 2-3 分）
+    // 相机绕玩家在水平面上慢转，抬高 3m 俯视，dist 默认 6.5m
+    if cfg.auto_orbit && !cfg.mouse_look {
+        *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
+        let a = *orbit_angle;
+        let target = Vec3::new(
+            player.block_pos[0] as f32 + 0.5,
+            player.block_pos[1] as f32 + 0.5 + 0.5, // 看向玩家胸口/头部高度
+            player.block_pos[2] as f32 + 0.5,
+        );
+        let cam_pos = target
+            + Vec3::new(a.cos() * cfg.auto_orbit_distance, 3.0, a.sin() * cfg.auto_orbit_distance);
+        tf.translation = cam_pos;
+        tf.look_at(target, Vec3::Y);
+        return;
+    }
+
+    // C 切 3rd person：相机放玩家身后 4m + 高 2m，俯视玩家
+    if *mode == CameraMode::ThirdPerson {
+        let (sy, cy) = angles.yaw.sin_cos();
+        // yaw 对应水平 forward = (sy, 0, -cy)；相机在玩家身后 = -forward
+        let back = Vec3::new(-sy, 0.0, cy);
+        let target = Vec3::new(
+            player.block_pos[0] as f32 + 0.5,
+            player.block_pos[1] as f32 + 0.5 + 1.0,
+            player.block_pos[2] as f32 + 0.5,
+        );
+        let cam_pos = target + back * TP_DISTANCE + Vec3::new(0.0, TP_HEIGHT, 0.0);
+        tf.translation = cam_pos;
+        tf.look_at(target, Vec3::Y);
+        return;
+    }
+
     let eye = Vec3::new(
         player.block_pos[0] as f32 + 0.5,
         player.block_pos[1] as f32 + 0.5 + 1.3,

@@ -1,0 +1,445 @@
+﻿cargo :     Blocking waiting for file lock on package cache
+所在位置 行:1 字符: 1
++ cargo test --workspace 2>&1 | Out-File -Encoding utf8 test_ws.txt; Ge ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Blocking wa...n package cache:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling lk2-core v0.1.0 (F:\rustProject\lastkingdom2\crates\core)
+warning: variable does not need to be mutable
+   --> crates\core\src\creature\mod.rs:187:5
+    |
+187 |     mut q: Query<(Entity, &mut Creature, &mut CreatureAI)>,
+    |     ----^
+    |     |
+    |     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `pool`
+   --> crates\core\src\monster\mod.rs:309:28
+    |
+309 |     pub fn tick(&mut self, pool: &mut GlobalResourcePool) {
+    |                            ^^^^ help: if this is intentional, prefix it with an underscore: `_pool`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `t`
+   --> crates\core\src\nation\mod.rs:190:13
+    |
+190 |         let t = Transfer {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_t`
+
+warning: unused variable: `x`
+  --> crates\core\src\world\mod.rs:35:20
+   |
+35 |     pub fn from_xz(x: i32, z: i32) -> Self {
+   |                    ^ help: if this is intentional, prefix it with an underscore: `_x`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\nation\mod.rs:431:13
+    |
+431 |         let mut reg = NationRegistry::new();
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `cell_seed`
+   --> crates\core\src\world\terrain\mod.rs:353:13
+    |
+353 |         let cell_seed = (cell_x as u64).wrapping_mul(0x9E3779B1)
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cell_seed`
+
+warning: unused variable: `x`
+   --> crates\core\src\world\mod.rs:230:29
+    |
+230 |     pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
+    |                             ^ help: if this is intentional, prefix it with an underscore: `_x`
+
+warning: unused variable: `z`
+   --> crates\core\src\world\mod.rs:230:45
+    |
+230 |     pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
+    |                                             ^ help: if this is intentional, prefix it with an underscore: `_z`
+
+warning: unused variable: `world`
+  --> crates\core\src\ai\mod.rs:59:9
+   |
+59 |         world: &World,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_world`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:584:14
+    |
+584 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:584:35
+    |
+584 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:597:14
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:597:35
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:597:48
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:620:14
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:620:25
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:620:48
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:14
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:25
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:35
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:48
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:651:14
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:651:25
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:651:35
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:712:14
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:712:25
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:712:48
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: `lk2-core` (lib) generated 8 warnings (run `cargo fix --lib -p lk2-core` to apply 8 suggestions)
+   Compiling minecraft_bevy v0.1.0 (F:\rustProject\lastkingdom2)
+error[E0583]: file not found for module `constant`
+  --> src\main.rs:14:1
+   |
+14 | mod constant;
+   | ^^^^^^^^^^^^^
+   |
+   = help: to create the module `constant`, create file "src\constant.rs" or "src\constant\mod.rs"
+   = note: if there is a `mod constant` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `resource`
+  --> src\main.rs:15:1
+   |
+15 | mod resource;
+   | ^^^^^^^^^^^^^
+   |
+   = help: to create the module `resource`, create file "src\resource.rs" or "src\resource\mod.rs"
+   = note: if there is a `mod resource` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `world`
+  --> src\main.rs:16:1
+   |
+16 | mod world;
+   | ^^^^^^^^^^
+   |
+   = help: to create the module `world`, create file "src\world.rs" or "src\world\mod.rs"
+   = note: if there is a `mod world` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `nation`
+  --> src\main.rs:17:1
+   |
+17 | mod nation;
+   | ^^^^^^^^^^^
+   |
+   = help: to create the module `nation`, create file "src\nation.rs" or "src\nation\mod.rs"
+   = note: if there is a `mod nation` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `monster`
+  --> src\main.rs:18:1
+   |
+18 | mod monster;
+   | ^^^^^^^^^^^^
+   |
+   = help: to create the module `monster`, create file "src\monster.rs" or "src\monster\mod.rs"
+   = note: if there is a `mod monster` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `ai`
+  --> src\main.rs:19:1
+   |
+19 | mod ai;
+   | ^^^^^^^
+   |
+   = help: to create the module `ai`, create file "src\ai.rs" or "src\ai\mod.rs"
+   = note: if there is a `mod ai` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `creature`
+  --> src\main.rs:21:1
+   |
+21 | mod creature;
+   | ^^^^^^^^^^^^^
+   |
+   = help: to create the module `creature`, create file "src\creature.rs" or "src\creature\mod.rs"
+   = note: if there is a `mod creature` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `scenario`
+  --> src\main.rs:23:1
+   |
+23 | mod scenario;
+   | ^^^^^^^^^^^^^
+   |
+   = help: to create the module `scenario`, create file "src\scenario.rs" or "src\scenario\mod.rs"
+   = note: if there is a `mod scenario` elsewhere in the crate already, import it with `use crate::...` instead
+
+warning: unused import: `std::collections::HashMap`
+  --> src\main.rs:11:5
+   |
+11 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `HashSet`
+ --> src\render\mod.rs:9:33
+  |
+9 | use std::collections::{HashMap, HashSet};
+  |                                 ^^^^^^^
+
+warning: unused import: `crate::constant`
+  --> src\render\mod.rs:13:5
+   |
+13 | use crate::constant;
+   |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `lightyear::prelude::*`
+ --> src\network\protocol.rs:8:5
+  |
+8 | use lightyear::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CombatReady`
+  --> src\pvp\systems_client.rs:12:45
+   |
+12 | use crate::network::protocols::components::{CombatReady, Health};
+   |                                             ^^^^^^^^^^^
+
+warning: unused import: `CombatReady`
+  --> src\pvp\systems_server.rs:12:45
+   |
+12 | use crate::network::protocols::components::{CombatReady, Health, KnockbackImmunity};
+   |                                             ^^^^^^^^^^^
+
+warning: unused import: `Ping`
+  --> src\pvp\systems_server.rs:15:39
+   |
+15 |     CombatState, DamageEvent, Hitbox, Ping, PositionHistory, PositionSnapshot, WeaponStats,
+   |                                       ^^^^
+
+warning: unused import: `los::*`
+  --> src\pvp\mod.rs:19:9
+   |
+19 | pub use los::*;
+   |         ^^^^^^
+
+warning: unused import: `systems_server::*`
+  --> src\pvp\mod.rs:21:9
+   |
+21 | pub use systems_server::*;
+   |         ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::network::protocols::components::CombatReady`
+   --> src\pvp\mod.rs:131:5
+    |
+131 | use crate::network::protocols::components::CombatReady;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `avian3d::prelude::LinearVelocity`
+ --> src\controller\components.rs:5:5
+  |
+5 | use avian3d::prelude::LinearVelocity;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GroundHit`
+ --> src\controller\systems.rs:9:37
+  |
+9 | use crate::controller::components::{GroundHit, PvPController, PlayerCollider};
+  |                                     ^^^^^^^^^
+
+warning: unused import: `systems::*`
+  --> src\controller\mod.rs:22:9
+   |
+22 | pub use systems::*;
+   |         ^^^^^^^^^^
+
+warning: unused import: `FixedTick`
+  --> src\main.rs:41:96
+   |
+41 | use crate::pvp::{PvPPlugin, WeaponId, WeaponStats, Hitbox, CombatState, Ping, PositionHistory, FixedTick};
+   |                                                                                                ^^^^^^^^^
+
+warning: unused import: `leafwing_input_manager::prelude`
+  --> src\controller\systems.rs:13:5
+   |
+13 | use leafwing_input_manager::prelude::*;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `right`
+  --> src\pvp\los.rs:89:9
+   |
+89 |     let right = forward.cross(Vec3::Y).normalize();
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_right`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src\pvp\systems_client.rs:29:5
+   |
+29 |     mut input_manager: Option<ResMut<ActionState<PlayerAction>>>,
+   |     ----^^^^^^^^^^^^^
+   |     |
+   |     help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src\pvp\systems_client.rs:35:14
+   |
+35 |     let Some(mut input_manager) = input_manager else { return; };
+   |              ----^^^^^^^^^^^^^
+   |              |
+   |              help: remove this `mut`
+
+warning: unused variable: `voxel_colliders`
+  --> src\controller\systems.rs:31:5
+   |
+31 |     voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
+   |     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_voxel_colliders`
+
+warning: unused variable: `time`
+  --> src\controller\systems.rs:92:5
+   |
+92 |     time: Res<Time>,
+   |     ^^^^ help: if this is intentional, prefix it with an underscore: `_time`
+
+warning: unused variable: `transform`
+   --> src\controller\systems.rs:136:40
+    |
+136 |     for (mut velocity, mut controller, transform) in controllers.iter_mut() {
+    |                                        ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tr
+ansform`
+
+warning: variable does not need to be mutable
+   --> src\controller\systems.rs:196:24
+    |
+196 |     for (mut velocity, mut controller, transform, collider) in controllers.iter_mut() {
+    |                        ----^^^^^^^^^^
+    |                        |
+    |                        help: remove this `mut`
+
+warning: unused variable: `voxel_colliders`
+   --> src\controller\systems.rs:194:5
+    |
+194 |     voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
+    |     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_voxel_colliders`
+
+For more information about this error, try `rustc --explain E0583`.
+warning: `minecraft_bevy` (bin "minecraft_bevy" test) generated 23 warnings
+error: could not compile `minecraft_bevy` (bin "minecraft_bevy" test) due to 8 previous errors; 23 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `lk2-core` (lib test) generated 27 warnings (8 duplicates) (run `cargo fix --lib -p lk2-core --tests` to apply
+ 19 suggestions)

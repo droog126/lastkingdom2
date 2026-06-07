@@ -1,0 +1,20 @@
+{
+  "name": "iter07_flat_spawn",
+  "record_window": null,
+  "steps": [
+    { "type": "log", "msg": "=== ITER 07: 验证平出生地 + 走到边界 ===" },
+    { "type": "wait_ticks", "ticks": 2 },
+    { "type": "screenshot", "name": "iter07_spawn" },
+    { "type": "record_begin" },
+    { "type": "move_to", "pos": [22, 14, 16] },
+    { "type": "screenshot", "name": "iter07_walked" },
+    { "type": "gather", "count": 3 },
+    { "type": "screenshot", "name": "iter07_gathered" },
+    { "type": "found_nation" },
+    { "type": "wait_ticks", "ticks": 3 },
+    { "type": "screenshot", "name": "iter07_nation" },
+    { "type": "record_end" },
+    { "type": "log", "msg": "=== 完成 ===" },
+    { "type": "quit" }
+  ]
+}

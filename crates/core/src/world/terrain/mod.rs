@@ -33,6 +33,9 @@ pub trait TerrainModule: Send + Sync + std::fmt::Debug {
     fn weight(&self) -> f32 { 1.0 }
     /// 返回 `Some(b)` = 放这个 block；`None` = 我不管，让下一个
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType>;
+    /// 如果这个模块定义 (x, z) 处的"软地表 f32 高度"（多维 heightmap 用），返回 Some
+    /// 默认 None — 只有 HeightmapModule / SpawnHillModule 覆写
+    fn surface_f32(&self, _x: i32, _z: i32) -> Option<f32> { None }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +115,19 @@ impl TerrainModule for SpawnHillModule {
         if ctx.y >= surface - 3 { return Some(BlockType::Dirt); }
         Some(BlockType::Stone)
     }
+
+    /// 圆顶山 f32 高度（不截断） — 多维 heightmap 的 dim 2
+    fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
+        if !self.enabled { return None; }
+        let dx = x - self.center_x;
+        let dz = z - self.center_z;
+        let dist2 = dx * dx + dz * dz;
+        let r = self.radius;
+        if dist2 > r * r { return None; }
+        let dist = (dist2 as f32).sqrt();
+        let dome_h = (1.0 - dist / r as f32) * self.max_height as f32;
+        Some(SEA_LEVEL as f32 + 1.0 + dome_h)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -146,8 +162,9 @@ impl Default for HeightmapModule {
 }
 
 impl HeightmapModule {
-    /// 算 (x, z) 处的地表 Y 高度
-    pub fn compute_surface(&self, x: i32, z: i32) -> i32 {
+    /// 算 (x, z) 处的地表 Y 高度（f32，不截断）— 给 scalar_field / 玩家物理用
+    /// "多维 heightmap" 的 dim 1：保留 noise 公式的 f32 渐变
+    pub fn compute_surface_f32(&self, x: i32, z: i32) -> f32 {
         let fx_big = (x as f32 * self.frequency_big) as i32;
         let fz_big = (z as f32 * self.frequency_big) as i32;
         let h_big = noise3(fx_big, 0, fz_big, self.seed as u32);
@@ -158,11 +175,15 @@ impl HeightmapModule {
             Biome::Jungle =>  0.0,
             Biome::Tundra =>  3.0,
         };
-        let h = h_big * self.amplitude_big
+        h_big * self.amplitude_big
              + h_detail * self.amplitude_detail
              + self.base_height
-             + bias;
-        h as i32
+             + bias
+    }
+
+    /// 算 (x, z) 处的地表 Y 高度（i32，给 BlockType 生成用）
+    pub fn compute_surface(&self, x: i32, z: i32) -> i32 {
+        self.compute_surface_f32(x, z) as i32
     }
 
     pub fn surface_block(&self, biome: Biome) -> BlockType {
@@ -197,6 +218,11 @@ impl TerrainModule for HeightmapModule {
         }
         // 地下 = stone
         Some(BlockType::Stone)
+    }
+
+    /// f32 软地表 — 多维 heightmap 的 dim 1
+    fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
+        Some(self.compute_surface_f32(x, z))
     }
 }
 
@@ -488,6 +514,19 @@ impl TerrainPipeline {
             }
         }
         BlockType::Air
+    }
+
+    /// 软地表 f32 高度（按 weight 取第一个 Some）— 多维 heightmap 入口
+    /// 返回 None = pipeline 没有任何模块定义 surface_f32（比如纯矿/树 pipeline）
+    pub fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
+        let mut sorted: Vec<&Box<dyn TerrainModule>> = self.modules.iter().collect();
+        sorted.sort_by(|a, b| b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal));
+        for m in sorted {
+            if let Some(h) = m.surface_f32(x, z) {
+                return Some(h);
+            }
+        }
+        None
     }
 }
 

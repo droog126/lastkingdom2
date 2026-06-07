@@ -21,6 +21,9 @@ mod render;
 mod creature;
 mod pretty;
 mod scenario;
+mod network;
+mod pvp;
+mod controller;
 
 use crate::ai::{AiDecision, AiDecisionKind, TickObserver};
 use crate::scenario::{Scenario, ScenarioState};
@@ -31,10 +34,13 @@ use crate::world::{BlockType, World as GameWorld, WorldGenerator};
 use crate::render::{
     auto_demo, first_person_camera, held_weapon_follow, mouse_look_system, player_input,
     setup_atmosphere, setup_cursor_grab, spawn_terrain_around_player, update_animal_indicator,
-    CameraAngles, PlayerState, RenderConfig, SpawnedBlocks,
+    CameraAngles, Player, PlayerState, RenderConfig, SpawnedBlocks,
 };
 use crate::pretty::{spawn_pretty, animate_avatar, PrettyConfig};
 use crate::creature::{player_attack_creatures, spawn_creatures, update_creatures, CreatureSpawnerDone};
+use crate::pvp::{PvPPlugin, WeaponId, WeaponStats, Hitbox, CombatState, Ping, PositionHistory, FixedTick};
+use crate::controller::{ControllerPlugin, PvPController, PlayerCollider};
+use avian3d::prelude::{LinearVelocity, RigidBody, Collider, PhysicsPlugins, Gravity};
 
 // ---------------------------------------------------------------------------
 // SimClock
@@ -51,12 +57,26 @@ pub struct SimClock {
 
 impl Default for SimClock {
     fn default() -> Self {
+        // 扫 screenshots/iter_NN/ 找最大编号, 让 screenshot_count 接着涨 (避免覆盖老 iter)
+        // loop.ps1 期望每轮一个独立目录, 但 SimClock 是 in-process 重置, 所以这里手动接力
+        let mut max_iter: u32 = 0;
+        if let Ok(entries) = std::fs::read_dir("screenshots") {
+            for e in entries.flatten() {
+                if let Some(name) = e.file_name().to_str() {
+                    if let Some(rest) = name.strip_prefix("iter_") {
+                        if let Ok(n) = rest.parse::<u32>() {
+                            if n > max_iter { max_iter = n; }
+                        }
+                    }
+                }
+            }
+        }
         Self {
             tick: 0,
             last_tick_wall: 0.0,
             last_hud_wall: 0.0,
             last_screenshot_wall: 0.0,
-            screenshot_count: 0,
+            screenshot_count: max_iter,  // 接力，避免覆盖
         }
     }
 }
@@ -92,10 +112,45 @@ impl Default for CameraOrbit {
 // main
 // ---------------------------------------------------------------------------
 
+/// 启动时解析的 preset 名（setup_world 系统要读）
+static PRESET_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn preset_name_static() -> &'static str {
+    PRESET_NAME.get().map(|s| s.as_str()).unwrap_or("default")
+}
+
+/// --walk=x,z 解析的 spawn 位置
+static WALK_OVERRIDE: std::sync::OnceLock<Option<(i32, i32)>> = std::sync::OnceLock::new();
+
+fn walk_override_static() -> Option<(i32, i32)> {
+    WALK_OVERRIDE.get().copied().flatten()
+}
+
 fn main() {
     // 读取剧本（从 argv[1] 加载，否则用默认）
     let args: Vec<String> = std::env::args().collect();
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
+    // 地形 preset：--preset=default | flat | mountainous | lold_arena | random
+    let preset_name = args.iter()
+        .find(|a| a.starts_with("--preset="))
+        .map(|a| a.trim_start_matches("--preset=").to_string())
+        .unwrap_or_else(|| "default".to_string());
+    let _ = PRESET_NAME.set(preset_name.clone());
+    println!("[terrain] preset = {}", preset_name);
+
+    // --walk=x,z：玩家在指定 XZ 出生（验证无限世界）
+    let walk_pos = args.iter()
+        .find(|a| a.starts_with("--walk="))
+        .map(|a| a.trim_start_matches("--walk=").to_string());
+    if let Some(s) = walk_pos {
+        let parts: Vec<&str> = s.split(',').collect();
+        if parts.len() == 2 {
+            if let (Ok(x), Ok(z)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
+                let _ = WALK_OVERRIDE.set(Some((x, z)));
+                println!("[terrain] --walk override: spawn at ({}, ?, {})", x, z);
+            }
+        }
+    }
     let scenario = if auto_demo_mode {
         // --auto-demo：用原地待命剧本（不 MoveTo），玩家就留在出生点看动物
         scenario::Scenario {
@@ -129,12 +184,11 @@ fn main() {
         .init_resource::<CameraAngles>()
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
-                // --auto-demo：玩家不动（保留在出生点附近，能看见起始牧场），
-                // 相机用动物自动跟随（不要 mouse-look，无人按键）。loop 用来 AI 迭代。
-                cfg.auto_walk = false;
-                cfg.auto_orbit = false;
-                cfg.auto_keys = true;  // 自动按 F/J 测造国 + 杀怪
-                cfg.mouse_look = false; // 关掉鼠标视角，用自动动物跟随
+                // --auto-demo：玩家到处走走看地形（不按键），让截图能看到不同 preset/区域
+                cfg.auto_walk = true;    // 让玩家自己随机走
+                cfg.auto_orbit = true;   // 相机跟随（已被 auto_walk 接管时几乎不动）
+                cfg.auto_keys = true;    // 自动按 F/J 测造国 + 杀怪
+                cfg.mouse_look = false;  // 关掉鼠标视角
             }
         })
         .init_resource::<SpawnedBlocks>()
@@ -150,11 +204,21 @@ fn main() {
         .init_resource::<TickRecorder>()
         .init_resource::<TimeOfDay>()
         .init_resource::<crate::render::LastMoveDirection>()
+        .init_resource::<crate::render::FreeFlyState>()
+        .init_resource::<crate::render::CameraMode>()
         .init_resource::<CreatureSpawnerDone>()
         .insert_resource(scenario_state)
+        // avian3d 物理引擎
+        .add_plugins(PhysicsPlugins::default())
+        .insert_resource(Gravity::default())
+        // PvP 系统（服务端权威 + 客户端预测）
+        .add_plugins(PvPPlugin)
+        // 角色控制器（体素友好 + PvP）
+        .add_plugins(ControllerPlugin)
         .add_systems(
             Startup,
             (
+                setup_fonts,
                 setup_camera,
                 setup_light,
                 setup_atmosphere,
@@ -164,6 +228,7 @@ fn main() {
                 spawn_creatures,
                 setup_hud,
                 self_check,
+                setup_player_pvp,
             )
                 .chain(),
         )
@@ -181,6 +246,12 @@ fn main() {
                 player_attack_creatures,
                 animate_avatar,
                 spawn_terrain_around_player,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 simulation_tick,
                 end_tick_system,
                 update_hud,
@@ -193,6 +264,17 @@ fn main() {
             )
                 .chain(),
         )
+        // F3 自由视角 + C 切 3rd person + F5 紧急传送 + F8 切地形 preset
+        .add_systems(
+            Update,
+            (
+                render::freefly_toggle,
+                render::camera_mode_toggle,
+                render::emergency_teleport,
+                render::cycle_terrain_preset,
+                render::freefly_movement.before(first_person_camera),
+            ),
+        )
         .run();
 }
 
@@ -204,6 +286,7 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        render::Player, // PvP 系统的玩家 entity 标记
     ));
 }
 
@@ -305,11 +388,24 @@ struct HudText;
 #[derive(Component)]
 struct HudFooter;
 
-fn setup_hud(mut commands: Commands) {
+/// 字体资源：HUD 全部走思源黑体（含完整 CJK 字形）。默认 FiraSans/Mono 不含中文字形 → 豆腐块。
+#[derive(Resource)]
+struct UiFonts { cn: Handle<Font> }
+
+fn setup_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // 用 bevy 内置默认字体 (Fira Mono)，不再依赖外部 NotoSansCJKsc 字体文件 —
+    // 之前找不到 fonts/NotoSansCJKsc-Regular.otf 导致 HUD 全部渲染成豆腐方块
+    let cn: Handle<Font> = Handle::default();
+    let _ = asset_server;  // 保留 import 以防别处用
+    commands.insert_resource(UiFonts { cn });
+}
+
+fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     // 左上：状态 HUD
     commands.spawn((
         Text::new("WANGUO ORIGINS v0.4  loading..."),
         TextFont {
+            font: fonts.cn.clone(),
             font_size: 22.0,
             ..default()
         },
@@ -327,22 +423,52 @@ fn setup_hud(mut commands: Commands) {
         HudText,
     ));
     // 屏幕中心：十字准星（瞄准提示）
+    // 用 Val::Percent(50.0) + 负 margin 居中（之前 px(50.0) 是离左上 50px 的位置）
+    // 两条十字线（横+竖），用 Node + 高对比颜色，浅色方块上也能看见
+    let cross_size = 16.0_f32;
+    let cross_thickness = 2.0_f32;
+    let cross_offset = -cross_size / 2.0;  // 居中
+    // 水平横线
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            left: px(50.0),
-            top: px(50.0),
-            width: px(12.0),
-            height: px(12.0),
-            margin: UiRect::all(Val::Px(-6.0)),  // 居中
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            width: px(cross_size),
+            height: px(cross_thickness),
+            margin: UiRect {
+                left: Val::Px(cross_offset),
+                top: Val::Px(cross_offset + (cross_size - cross_thickness) / 2.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+            },
             ..default()
         },
-        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.95)),
+    ));
+    // 垂直竖线
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            width: px(cross_thickness),
+            height: px(cross_size),
+            margin: UiRect {
+                left: Val::Px(cross_offset + (cross_size - cross_thickness) / 2.0),
+                top: Val::Px(cross_offset),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+            },
+            ..default()
+        },
+        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.95)),
     ));
     // 底部：操作 + 目标
     commands.spawn((
         Text::new(""),
         TextFont {
+            font: fonts.cn.clone(),
             font_size: 18.0,
             ..default()
         },
@@ -372,8 +498,9 @@ fn setup_hud(mut commands: Commands) {
             ..default()
         },
         children![(
-            Text::new("🔍 搜索中…"),
+            Text::new("[scanning...]"),
             TextFont {
+                font: fonts.cn.clone(),
                 font_size: 24.0,
                 ..default()
             },
@@ -427,14 +554,14 @@ fn update_hud(
         format!("{}{}", "█".repeat(filled), "░".repeat(16 - filled))
     };
     let status = if wood >= goal {
-        "🎉 胜利！采集满 10 块木头。试试造国（F）？"
+        "*** WIN! 10 wood collected. Try Found Nation (F) ***"
     } else {
         ""
     };
     if let Ok(mut text) = q_bot.single_mut() {
         **text = format!(
-            "WASD/方向键 移动  ·  Space 跳  ·  Shift 下  ·  G 采集  ·  K 挥剑  ·  Esc 退出\n\
-             🎯 目标: 采集 10 块木头    {wood}/{goal}  {progress_bar}\n\
+            "[WASD] move  [Space] jump  [Shift] sneak  [G] gather  [K] sword  [Esc] quit\n\
+             Goal: gather 10 wood    {wood}/{goal}  {progress_bar}\n\
              {status}",
         );
     }
@@ -448,7 +575,10 @@ fn setup_world(
     mut monsters: ResMut<MonsterEcosystem>,
     mut player: ResMut<PlayerState>,
 ) {
-    *game_world = WorldGenerator::default().generate(constant::WORLD_SIZE);
+    // 用 CLI 选择的 preset 生成地形（如果 preset=lold_arena 每次会随机）
+    let pipeline = crate::world::terrain::presets::by_name(preset_name_static());
+    *game_world = crate::world::World::with_pipeline(constant::WORLD_SIZE, pipeline);
+    info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     for k in ResourceKind::ALL {
         let init = 50.min(k.max() / 2).max(10);
@@ -461,10 +591,14 @@ fn setup_world(
         constant::WORLD_SIZE / 2,
     ]);
 
+    // 出生点：地图正中心 + Y=15（接近地面，让玩家直接看到起始牧场动物和方块）
+    // 之前是 Y=80 太高（看不到细节），然后 Y=25 还是偏上（牧场动物在 Y=12 被相机边缘切掉）
+    // 如果用户传了 --walk=x,z，则在指定 XZ 出生（验证无限世界）
+    let (sx, sz) = walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
     let spawn = [
-        constant::WORLD_SIZE / 2,
-        constant::SEA_LEVEL + 1,  // 直接站在平地上
-        constant::WORLD_SIZE / 2,
+        sx,
+        30,  // 之前是 15，太低看不到山；30 起步 + 相机略俯视，出生第一眼就看到地形
+        sz,
     ];
     player.block_pos = spawn;
     player.pos = Vec3::new(
@@ -487,7 +621,7 @@ fn self_check(
 ) {
     info!(">>> 启动自检 100 tick ...");
     let mut pool = pool.clone();
-    let mut monsters = monsters.clone();
+    let mut monsters = MonsterEcosystem::clone(&*monsters);
     let mut violations: Vec<String> = Vec::new();
     for tick in 0..100 {
         obs.begin_tick();
@@ -574,6 +708,12 @@ fn periodic_screenshot(
     time: Res<Time>,
     mut clock: ResMut<SimClock>,
     mut commands: Commands,
+    player: Res<PlayerState>,
+    pool: Res<GlobalResourcePool>,
+    nations: Res<NationRegistry>,
+    monsters: Res<MonsterEcosystem>,
+    obs: Res<TickObserver>,
+    game_world: Res<GameWorld>,
 ) {
     let now = time.elapsed_secs();
     if now - clock.last_screenshot_wall < 5.0 {
@@ -581,16 +721,77 @@ fn periodic_screenshot(
     }
     clock.last_screenshot_wall = now;
     clock.screenshot_count += 1;
-    let path: PathBuf = format!("screenshots/iter_{:02}.png", clock.screenshot_count).into();
-    info!("📸 截图 #{} → {}", clock.screenshot_count, path.display());
+
+    // Sprint 1: 改为 iter_NN/ 子目录（每轮一个独立目录）
+    // 用 :02 与 loop.ps1 对齐, 排序稳定。
+    let iter_id = clock.screenshot_count;
+    let iter_dir = format!("screenshots/iter_{:02}", iter_id);
+    let _ = std::fs::create_dir_all(&iter_dir);
+    let png_path: PathBuf = format!("{}/iter_{:02}.png", iter_dir, iter_id).into();
+    let state_path = format!("{}/final_state.json", iter_dir);
+
+    // 1) 截图
+    info!("📸 截图 #{} → {}", iter_id, png_path.display());
     commands
         .spawn(Screenshot::primary_window())
-        .observe(save_to_disk(path));
+        .observe(save_to_disk(png_path));
+
+    // 2) 顺便 dump 本轮 final_state.json（AI 直接读这个就知道"这轮游戏死没死"）
+    let state = build_state_json(&time, &clock, &player, &pool, &nations, &monsters, &obs, &game_world);
+    if let Ok(s) = serde_json::to_string_pretty(&state) {
+        if let Err(e) = std::fs::write(&state_path, s) {
+            warn!("写 final_state.json 失败: {}", e);
+        } else {
+            info!("📝 final_state dumped → {}", state_path);
+        }
+    }
 }
 
 fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
     if keys.just_pressed(KeyCode::Escape) {
         std::process::exit(0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PvP 初始化：给玩家 entity 挂上战斗组件
+// ---------------------------------------------------------------------------
+
+fn setup_player_pvp(
+    mut commands: Commands,
+    player: Query<Entity, With<Player>>,
+) {
+    // 玩家已经在 Startup 时 spawn 了（通过 render 模块）
+    // 这里给它们加上 PvP 组件 + 物理组件
+    let iron = WeaponId::IronSword.stats();
+    for entity in player.iter() {
+        commands.entity(entity).insert((
+            // avian3d 物理组件
+            RigidBody::Kinematic,  // Kinematic 角色控制器（不受物理力影响）
+            Collider::capsule(0.3, 0.9), // 胶囊体：半径 0.3m，半高 0.9m
+            LinearVelocity::default(),
+            // 角色控制器组件
+            PvPController::new()
+                .with_speed(5.0)
+                .with_jump(8.0)
+                .with_knockback_resistance(0.1),
+            PlayerCollider::default(),
+            // PvP 战斗组件
+            CombatState::default(),
+            WeaponStats {
+                reach: iron.reach,
+                damage: iron.damage,
+                knockback: iron.knockback,
+                attack_speed: iron.attack_speed,
+                sweep_angle_deg: iron.sweep_deg,
+                sweep_range: iron.reach,
+            },
+            Hitbox::default(),
+            Ping(0.0),
+            PositionHistory::new(60),
+            crate::network::protocols::components::Health(20.0),
+        ));
+        info!("⚔ PvP 组件已挂载（铁剑 reach={}, dmg={}）+ 角色控制器", iron.reach, iron.damage);
     }
 }
 
@@ -616,13 +817,34 @@ fn tick_recorder(
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
 ) {
-    // 每 5 tick dump 一次
-    if clock.tick % 5 != 0 || clock.tick == 0 {
+    // 每 5 tick dump 一次（按 clock.tick 变化触发，不能按帧判，否则 clock.tick=10 时
+    // 每帧都满足 % 5==0，会每帧写文件）
+    if clock.tick == 0 || clock.tick % 5 != 0 || clock.tick == rec.last_dump_tick {
         return;
     }
+    rec.last_dump_tick = clock.tick;
     rec.current_iter = clock.tick as u32;
     let path = format!("screenshots/state_t{}.json", clock.tick);
-    let state = serde_json::json!({
+    let state = build_state_json(&time, &clock, &player, &pool, &nations, &monsters, &obs, &game_world);
+    if let Ok(s) = serde_json::to_string_pretty(&state) {
+        let _ = std::fs::write(&path, s);
+        info!("📝 tick state dumped → {}", path);
+    }
+}
+
+/// 构造完整 sim state JSON（被 tick_recorder + periodic_screenshot 复用）
+/// schema: { tick, wall_secs, player, pool, nations, monsters, observer, world }
+fn build_state_json(
+    time: &Time,
+    clock: &SimClock,
+    player: &PlayerState,
+    pool: &GlobalResourcePool,
+    nations: &NationRegistry,
+    monsters: &MonsterEcosystem,
+    obs: &TickObserver,
+    game_world: &GameWorld,
+) -> serde_json::Value {
+    serde_json::json!({
         "tick": clock.tick,
         "wall_secs": time.elapsed_secs(),
         "player": {
@@ -657,9 +879,5 @@ fn tick_recorder(
         "world": {
             "size": game_world.size,
         },
-    });
-    if let Ok(s) = serde_json::to_string_pretty(&state) {
-        let _ = std::fs::write(&path, s);
-        info!("📝 tick state dumped → {}", path);
-    }
+    })
 }

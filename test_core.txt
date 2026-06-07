@@ -1,0 +1,282 @@
+﻿cargo : warning: variable does not need to be mutable
+所在位置 行:1 字符: 38
++ ... v:BEVY_DISABLE_ACCESSIBILITY="1"; cargo test -p lk2-core 2>&1 | Out-F ...
++                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: variab...d to be mutable:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   --> crates\core\src\creature\mod.rs:187:5
+    |
+187 |     mut q: Query<(Entity, &mut Creature, &mut CreatureAI)>,
+    |     ----^
+    |     |
+    |     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `pool`
+   --> crates\core\src\monster\mod.rs:309:28
+    |
+309 |     pub fn tick(&mut self, pool: &mut GlobalResourcePool) {
+    |                            ^^^^ help: if this is intentional, prefix it with an underscore: `_pool`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `t`
+   --> crates\core\src\nation\mod.rs:190:13
+    |
+190 |         let t = Transfer {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_t`
+
+warning: unused variable: `x`
+  --> crates\core\src\world\mod.rs:35:20
+   |
+35 |     pub fn from_xz(x: i32, z: i32) -> Self {
+   |                    ^ help: if this is intentional, prefix it with an underscore: `_x`
+
+warning: unused variable: `cell_seed`
+   --> crates\core\src\world\terrain\mod.rs:353:13
+    |
+353 |         let cell_seed = (cell_x as u64).wrapping_mul(0x9E3779B1)
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cell_seed`
+
+warning: unused variable: `x`
+   --> crates\core\src\world\mod.rs:230:29
+    |
+230 |     pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
+    |                             ^ help: if this is intentional, prefix it with an underscore: `_x`
+
+warning: unused variable: `z`
+   --> crates\core\src\world\mod.rs:230:45
+    |
+230 |     pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
+    |                                             ^ help: if this is intentional, prefix it with an underscore: `_z`
+
+warning: unused variable: `world`
+  --> crates\core\src\ai\mod.rs:59:9
+   |
+59 |         world: &World,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_world`
+
+   Compiling lk2-core v0.1.0 (F:\rustProject\lastkingdom2\crates\core)
+warning: `lk2-core` (lib) generated 8 warnings (run `cargo fix --lib -p lk2-core` to apply 8 suggestions)
+warning: variable does not need to be mutable
+   --> crates\core\src\nation\mod.rs:431:13
+    |
+431 |         let mut reg = NationRegistry::new();
+    |             ----^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:584:14
+    |
+584 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:584:35
+    |
+584 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:597:14
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:597:35
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:597:48
+    |
+597 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:620:14
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:620:25
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:620:48
+    |
+620 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:14
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:25
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:35
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:633:48
+    |
+633 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:651:14
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:651:25
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:651:35
+    |
+651 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                   ----^^^^^^^
+    |                                   |
+    |                                   help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:712:14
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |              ----^^^^^
+    |              |
+    |              help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:712:25
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                         ----^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates\core\src\ai\mod.rs:712:48
+    |
+712 |         let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+    |                                                ----^^^^^^^^
+    |                                                |
+    |                                                help: remove this `mut`
+
+warning: `lk2-core` (lib test) generated 27 warnings (8 duplicates) (run `cargo fix --lib -p lk2-core --tests` to apply
+ 19 suggestions)
+    Finished `test` profile [optimized + debuginfo] target(s) in 19.52s
+     Running unittests src\lib.rs (target\debug\deps\lk2_core-ab71bbc9d88bfec6.exe)
+
+running 50 tests
+test ai::tests::oscillation_detected_after_5_same_decisions ... ok
+test ai::tests::end_tick_detects_flag_cap_violation ... ok
+test monster::tests::demo_init_creates_60_individuals ... ok
+test ai::tests::end_tick_detects_player_out_of_bounds ... ok
+test monster::tests::tick_with_decay_progresses ... ok
+test monster::tests::destroy_kingdom_releases_individual_quota ... ok
+test ai::tests::report_includes_inv_count_and_anomalies ... ok
+test ai::tests::end_tick_detects_monster_count_mismatch ... ok
+test ai::tests::end_tick_passes_for_clean_state ... ok
+test ai::tests::snapshot_digest_changes_with_pool ... ok
+test monster::tests::kill_individual_yields_souls_and_keeps_conservation ... ok
+test ai::tests::end_tick_detects_overdrawn_pool ... ok
+test monster::tests::verify_count_always_holds ... ok
+test nation::tests::cannot_exceed_8_flags ... ok
+test nation::tests::cannot_found_if_already_in_nation ... ok
+test ai::tests::no_oscillation_when_decisions_vary ... ok
+test nation::tests::damage_flag_dissolves_nation_at_zero_hp ... ok
+test ai::tests::snapshot_digest_is_stable ... ok
+test nation::tests::dissolve_releases_founding_order ... ok
+test nation::tests::find_player_returns_correct_nation ... ok
+test nation::tests::flag_costs_follow_doc_table ... ok
+test nation::tests::found_first_nation_costs_10_souls ... ok
+test nation::tests::found_increments_id ... ok
+test nation::tests::found_nation_incremental_cost ... ok
+test nation::tests::insufficient_souls_fails ... ok
+test nation::tests::join_respects_population_cap ... ok
+test nation::tests::new_registry_is_empty ... ok
+test nation::tests::upgrade_population_consumes_resources ... ok
+test resource::tests::add_then_get_works ... ok
+test resource::tests::all_25_resources_present ... ok
+test resource::tests::all_resource_maxes_match_doc ... ok
+test resource::tests::cannot_exceed_max ... ok
+test resource::tests::cannot_force_add_past_max_during_init ... ok
+test resource::tests::cannot_subtract_more_than_have ... ok
+test resource::tests::conservation_audit_works ... ok
+test resource::tests::conservation_fails_on_overdraw ... ok
+test resource::tests::new_pool_is_all_zero ... ok
+test resource::tests::regen_via_force_add_increases ... ok
+test resource::tests::transfer_waste_removes_from_pool ... ok
+test world::tests::biome_from_xz_3_zones ... ok
+test world::tests::block_yields_match ... ok
+test world::tests::all_3_biomes_have_ore ... ok
+test world::tests::blocks_in_bounds_default_air ... ok
+test world::tests::gather_air_returns_none ... ok
+test world::tests::gather_wood_adds_to_pool ... ok
+test world::tests::gather_ore_adds_to_biome_resource ... ok
+test world::tests::set_get_round_trip ... ok
+test world::tests::visible_blocks_in_radius ... ok
+test world::tests::generator_is_deterministic ... ok
+test world::tests::generator_with_different_seeds_differ ... ok
+
+test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests lk2_core
+
+running 2 tests
+test crates\core\src\ai\mod.rs - ai (line 15) ... ignored
+test crates\core\src\world\terrain\mod.rs - world::terrain (line 9) ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.78s; merged doctests compilation took 0.54s
