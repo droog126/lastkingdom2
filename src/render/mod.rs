@@ -20,6 +20,10 @@ use crate::world::{BlockType, World as GameWorld};
 mod greedy_mesh;
 use greedy_mesh::build_all_terrain_meshes_aabb;
 
+mod scalar_field;
+mod marching_cubes;
+mod smooth_mesh;
+
 /// 体素渲染配置
 #[derive(Resource, Debug, Clone)]
 pub struct RenderConfig {
@@ -37,6 +41,9 @@ pub struct RenderConfig {
     pub auto_walk_interval_secs: f32,
     pub auto_keys: bool,             // --auto-demo 时自动按 F/J 测功能（不靠人按键）
     pub mouse_look: bool,            // 默认开：鼠标转视角；--auto-demo 关：用动物自动跟随
+    pub smooth_terrain: bool,        // 默认 true：标量场 + Marching Cubes 平滑地形（解决 cube 边角卡脚）
+    pub smooth_passes: u32,          // Laplacian 平滑次数（0..=3），默认 0
+    pub ground_step_threshold: f32,  // 玩家移动"被卡"的高度差阈值（默认 0.5 — "跨度 0.5 才不能走"）
 }
 
 impl Default for RenderConfig {
@@ -56,6 +63,9 @@ impl Default for RenderConfig {
             auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
             auto_keys: false,             // --auto-demo 开启：自动按 F/J 验证
             mouse_look: true,             // 默认开：鼠标转视角（FPS 标准）
+            smooth_terrain: true,         // 默认开：scalar field + MC
+            smooth_passes: 0,             // v1 不平滑（先看效果）
+            ground_step_threshold: 0.5,   // "跨度 0.5 才不能走"
         }
     }
 }
