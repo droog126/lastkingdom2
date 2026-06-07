@@ -1,0 +1,24 @@
+[package]
+name = "lk2-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+# 默认 lib 入口为 src/lib.rs
+path = "src/lib.rs"
+
+[dependencies]
+# bevy — sim crate 需要 ECS + 一些常用的 render types (Color / Transform / Mesh3d)
+# 暂时不剔 default features，留给后续 server binary (MinimalPlugins) 时再切到
+# default-features = false + 显式 features 列表
+bevy = { workspace = true }
+
+# 纯数据 / 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+rand = { workspace = true }
+
+# **不引** lightyear / avian3d / bevy_panorbit_camera / bevy-inspector-egui
+# (那些是 client / server 各自需要的, 不该污染 core)
+
+[dev-dependencies]
