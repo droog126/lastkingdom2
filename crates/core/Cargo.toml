@@ -18,7 +18,17 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
 
-# **不引** lightyear / avian3d / bevy_panorbit_camera / bevy-inspector-egui
+# networking (跨 server/client 共享的协议 + 输入抽象)
+# lightyear 0.26 没有 protocol! 宏 (0.27+ 才有), 走 Plugin + register_message /
+# register_component 风格 — 见 src/protocol.rs::ProtocolPlugin
+# 'leafwing' feature 启用 lightyear_inputs_leafwing (用 InputPlugin 接入 PlayerAction)
+lightyear = { workspace = true, features = ["leafwing"] }
+lightyear_inputs_leafwing = { workspace = true }
+# leafwing-input-manager 的 Actionlike 给 PlayerAction 用, 加上
+# lightyear_inputs_leafwing::InputPlugin 自动序列化输入到服务端
+leafwing-input-manager = { workspace = true }
+
+# **不引** avian3d / bevy_panorbit_camera / bevy-inspector-egui
 # (那些是 client / server 各自需要的, 不该污染 core)
 
 [dev-dependencies]
