@@ -110,6 +110,13 @@ fn main() {
         // 物理确定性 (server 跑 step, 不插值)
         .add_plugins(PhysicsPlugins::default())
         // lightyear 0.26 服务端权威
+        // ⚠️ 顺序 (lightyear-0.26.4/src/lib.rs:96 强制约束):
+        //   1) ServerPlugins 先 (装 netcode / link / sync / replication 系统)
+        //   2) ProtocolPlugin 后 (register_message / register_component / InputPlugin)
+        //   3) 之后才 spawn Server entity (后续 wire-network-and-loop task 做)
+        // 缺步骤 1 时, 编译能过 (register_message lazy init MessageRegistry),
+        // 但运行时 server 缺 link/sync/netcode, netcode 起不来。
+        .add_plugins(lightyear::prelude::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
         .add_plugins(ServerPvPPlugin)
         // ====== Resources ======
