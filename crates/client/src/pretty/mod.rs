@@ -9,7 +9,7 @@
 
 use bevy::prelude::*;
 use crate::render::PlayerState;
-use crate::world::{Biome, World as GameWorld};
+use lk2_core::world::{Biome, World as GameWorld};
 
 /// 视觉增强配置
 #[derive(Resource, Debug, Clone)]
@@ -53,7 +53,7 @@ pub fn spawn_pretty(
     // ---- 水面 ----
     if cfg.show_water {
         let s = (game_world.size as f32) * 1.5; // 比世界稍大，看着舒服
-        let water_y = crate::constant::SEA_LEVEL as f32 + 0.45; // 海平面 + 一点点浮空
+        let water_y = lk2_core::constant::SEA_LEVEL as f32 + 0.45; // 海平面 + 一点点浮空
         commands.spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(s, s))),
             MeshMaterial3d(materials.add(StandardMaterial {

@@ -9,11 +9,11 @@
 //!   6. apply_local_knockback  — 对本地 predicted entity 应用击退
 //!   7. trigger_visual_effects — 播放挥剑 / 命中 / 屏幕震动
 
-use crate::network::protocols::components::{CombatReady, Health};
-use crate::network::protocols::msg::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
-use crate::network::PlayerAction;
-use crate::pvp::components::{CombatState, VisualEffectEvent};
-use crate::pvp::FixedTick;
+use lk2_core::protocol::components::{CombatReady, Health};
+use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::protocol::PlayerAction;
+use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
+use lk2_core::pvp::FixedTick;
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use lightyear::prelude::Predicted;

@@ -5522,10 +5522,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
+name = "lk2-client"
+version = "0.1.0"
+dependencies = [
+ "avian3d 0.6.1",
+ "bevy",
+ "bevy-inspector-egui",
+ "bevy_egui",
+ "bevy_panorbit_camera",
+ "fastnoise-lite",
+ "leafwing-input-manager",
+ "lightyear",
+ "lightyear_inputs_leafwing",
+ "lk2-core",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lk2-core"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "leafwing-input-manager",
+ "lightyear",
+ "lightyear_inputs_leafwing",
  "rand 0.10.1",
  "serde",
  "serde_json",

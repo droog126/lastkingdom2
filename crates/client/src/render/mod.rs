@@ -10,12 +10,12 @@ use std::collections::{HashMap, HashSet};
 
 use avian3d::prelude::{Collider, RigidBody};
 
-use crate::constant;
-use crate::creature::Creature;
-use crate::monster::MonsterEcosystem;
-use crate::nation::NationRegistry;
-use crate::resource::ResourceKind;
-use crate::world::{BlockType, World as GameWorld};
+use lk2_core::constant;
+use lk2_core::creature::Creature;
+use lk2_core::monster::MonsterEcosystem;
+use lk2_core::nation::NationRegistry;
+use lk2_core::resource::ResourceKind;
+use lk2_core::world::{BlockType, World as GameWorld};
 
 mod greedy_mesh;
 use greedy_mesh::build_all_terrain_meshes_aabb;
@@ -148,6 +148,10 @@ pub struct PlayerCube;
 ///
 /// 每个 renderable block type → 1 个 Mesh3d 实体（视觉）+ 1 个 Trimesh 实体（碰撞）。
 /// 之前 naive 做法每方块一个 entity（3000+）→ 现在 ~12 个。
+///
+/// `cfg.smooth_terrain` = true 时走 scalar_field + Marching Cubes 路径：
+///  - 一个 mesh + vertex color（grass/dirt/stone 分层）
+///  - 解决 cube 边角卡脚问题
 pub fn spawn_terrain_around_player(
     mut commands: Commands,
     game_world: Res<GameWorld>,
@@ -183,6 +187,78 @@ pub fn spawn_terrain_around_player(
         commands.entity(e).despawn();
     }
 
+    // AABB 范围（统一：玩家周围 ±R，Y clamp 到 world 范围）
+    let r = cfg.radius as i32;
+    let py = player.block_pos[1];
+    let y_min = (py - 20).max(0);
+    let y_max = (py + 20).min(game_world.size as i32 - 1);
+    let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
+    let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
+
+    // ─────────── 走 smooth path（默认）───────────
+    if cfg.smooth_terrain {
+        let started = time.elapsed_secs();
+        let sm = smooth_mesh::build_smooth_mesh(
+            &game_world, min, max, 0.5, cfg.smooth_passes,
+        );
+        if let Some(sm) = sm {
+            let total_tris = sm.collider_indices.len() / 3;
+            // 单一 material：vertex color 模式 + 平滑 terrain
+            let mat = materials.add(StandardMaterial {
+                base_color: Color::WHITE,  // vertex color 覆盖
+                perceptual_roughness: 0.85,
+                metallic: 0.0,
+                ..default()
+            });
+            let mesh_handle = meshes.add(sm.mesh.clone());
+            let visual = commands
+                .spawn((
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(mat),
+                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                    TerrainChunk,
+                ))
+                .id();
+            spawned.visual_entities.push(visual);
+            // 碰撞：Trimesh（avian3d 0.6 要 Vec<Vec3> + Vec<[u32; 3]>）
+            let collider_verts: Vec<Vec3> = sm
+                .collider_trimesh
+                .iter()
+                .map(|p| Vec3::new(p[0], p[1], p[2]))
+                .collect();
+            let collider_indices: Vec<[u32; 3]> = sm
+                .collider_indices
+                .chunks(3)
+                .filter(|c| c.len() == 3)
+                .map(|c| [c[0], c[1], c[2]])
+                .collect();
+            let collider = Collider::trimesh(collider_verts, collider_indices);
+            let collider_ent = commands
+                .spawn((
+                    RigidBody::Static,
+                    collider,
+                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                    TerrainChunk,
+                ))
+                .id();
+            spawned.collider_entities.push(collider_ent);
+
+            spawned.last_player_block = player.block_pos;
+            let mesh_secs = time.elapsed_secs() - started;
+            debug!(
+                "🌊 smooth mesh: {} tris, passes={}, 耗时 {:.0}ms（玩家 {:?}）",
+                total_tris, cfg.smooth_passes, mesh_secs * 1000.0, player.block_pos
+            );
+        } else {
+            // 标量场全空（cave 都没有）→ 不 spawn 任何东西
+            debug!("🌊 smooth mesh: 标量场全空（无 solid 在 AABB 内）");
+            spawned.last_player_block = player.block_pos;
+        }
+        *last_mesh_wall = time.elapsed_secs();
+        return;
+    }
+
+    // ─────────── 走 legacy greedy path（--legacy-voxel 启用）───────────
     // 1. 准备 12 种 BlockType 对应的材质（共享，减少 GPU 状态切换）
     let mut mats: HashMap<BlockType, Handle<StandardMaterial>> = HashMap::new();
     for bt in [
@@ -230,13 +306,6 @@ pub fn spawn_terrain_around_player(
 
     // 2. Greedy Mesh：每个 block type 一个 mesh（玩家周围 AABB，41³ = ~70KB）
     let started = time.elapsed_secs();
-    let r = cfg.radius as i32;
-    let py = player.block_pos[1];
-    // Y 范围：以玩家为中心 ±20，但 clamp 到 [0, world.size-1]
-    let y_min = (py - 20).max(0);
-    let y_max = (py + 20).min(game_world.size as i32 - 1);
-    let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
-    let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
     let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
     let mesh_count = block_meshes.len();
     let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
@@ -282,7 +351,6 @@ pub fn spawn_terrain_around_player(
     }
 
     spawned.last_player_block = player.block_pos;
-    // 改 debug! — 每次跳/走都打太吵，按需用 RUST_LOG=minecraft_bevy::render=debug 看
     debug!(
         "🧱 greedy mesh: {} type(s), {} tris, 耗时 {:.0}ms（玩家 {:?}）",
         mesh_count,
@@ -448,9 +516,9 @@ pub fn emergency_teleport(
 ) {
     if !keys.just_pressed(KeyCode::F5) { return; }
     let safe = [
-        crate::constant::WORLD_SIZE / 2,
+        lk2_core::constant::WORLD_SIZE / 2,
         30,  // 出生点正上方 30m，半空，自由落体
-        crate::constant::WORLD_SIZE / 2,
+        lk2_core::constant::WORLD_SIZE / 2,
     ];
     warn!("🚨 F5 紧急传送： {:?} -> {:?}", player.block_pos, safe);
     player.block_pos = safe;
@@ -463,13 +531,13 @@ pub fn cycle_terrain_preset(
     mut game_world: ResMut<GameWorld>,
 ) {
     if !keys.just_pressed(KeyCode::F8) { return; }
-    let names = crate::world::terrain::presets::preset_names();
+    let names = lk2_core::world::terrain::presets::preset_names();
     let current = game_world.pipeline.name.clone();
     let next_idx = names.iter().position(|n| *n == current)
         .map(|i| (i + 1) % names.len())
         .unwrap_or(0);
     let next_name = names[next_idx];
-    let new_pipeline = crate::world::terrain::presets::by_name(next_name);
+    let new_pipeline = lk2_core::world::terrain::presets::by_name(next_name);
     let new_name = new_pipeline.name.clone();
     game_world.pipeline = std::sync::Arc::new(new_pipeline);
     info!("🌍 F8 切 preset: {} -> {}", current, new_name);
@@ -534,9 +602,14 @@ pub fn setup_cursor_grab(
     }
 }
 
+/// 动物方向指示器 marker（被 `update_animal_indicator` 系统刷新）
+/// 原来在 `src/main.rs` 里定义，迁到 render 模块更近
+#[derive(Component)]
+pub struct AnimalIndicatorText;
+
 /// 动物方向指示器系统：每帧找最近的动物 + 算相对相机的屏幕方向 → 更新顶部 HUD 文字
 pub fn update_animal_indicator(
-    mut q_text: Query<&mut Text, With<crate::AnimalIndicatorText>>,
+    mut q_text: Query<&mut Text, With<AnimalIndicatorText>>,
     player: Res<PlayerState>,
     camera: Query<&Transform, With<Camera3d>>,
     creatures: Query<&Creature>,
@@ -597,10 +670,10 @@ pub fn update_animal_indicator(
 
     // 用英文标签（默认字体没 CJK，全显示成 ↑ 难看）
     let label = match c.kind {
-        crate::creature::CreatureKind::Pig => "Pig",
-        crate::creature::CreatureKind::Sheep => "Sheep",
-        crate::creature::CreatureKind::Cow => "Cow",
-        crate::creature::CreatureKind::Chicken => "Chicken",
+        lk2_core::creature::CreatureKind::Pig => "Pig",
+        lk2_core::creature::CreatureKind::Sheep => "Sheep",
+        lk2_core::creature::CreatureKind::Cow => "Cow",
+        lk2_core::creature::CreatureKind::Chicken => "Chicken",
     };
     text.0 = format!("{}  {}  {:.1}m", arrow, label, dist);
 }
@@ -614,13 +687,14 @@ pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
-    mut pool: ResMut<crate::resource::GlobalResourcePool>,
+    mut pool: ResMut<lk2_core::resource::GlobalResourcePool>,
     mut angles: ResMut<CameraAngles>,
     mut nations: ResMut<NationRegistry>,
     mut monsters: ResMut<MonsterEcosystem>,
     camera: Query<&Transform, With<Camera3d>>,
     time: Res<Time>,
     freefly: Res<FreeFlyState>,
+    cfg: Res<RenderConfig>,
 ) {
     // FreeFly 模式下，WASD/Space/Shift/QE 全部交给 freefly_movement
     // 这里只保留鼠标视角外的「功能键」（G/F/J/K）
@@ -674,7 +748,7 @@ pub fn player_input(
         } else {
             di[1] = d.y.signum() as i32;
         }
-        try_player_move(&mut player, &mut game_world, di);
+        try_player_move(&mut player, &mut game_world, di, cfg.ground_step_threshold);
         // 玩家输入不再改 LastMoveDirection（让相机自动转动物 / Q E 改朝向）
     }
 
@@ -758,7 +832,14 @@ pub fn player_input(
 }
 
 /// 玩家移动：3D cardinal 方向。如果目标块是实心，向上找空位（最多 6 格）。
-fn try_player_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3]) {
+///
+/// v2（smooth terrain 配套）：
+///   - 用 `effective_ground_height` (f32) 比较当前 vs 目标 XZ 列的软地表
+///   - 差 > `ground_step_threshold` (默认 0.5) 才视为"被卡" → 向上找空位
+///   - 否则可以直接挪到目标 XZ 位置（玩家 y 仍按格子走）
+///
+/// 物理仍然按格子（玩家不"贴地滑行"），但"卡脚"判定从 boolean is_solid 改成 f32 高度差。
+fn try_player_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3], threshold: f32) {
     let mut new_pos = [
         player.block_pos[0] + d[0],
         player.block_pos[1] + d[1],
@@ -770,8 +851,15 @@ fn try_player_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32
     if new_pos[1] < 0 || new_pos[1] >= game_world.size as i32 {
         return;
     }
+    // 软"卡脚"判定：f32 高度差 vs threshold
+    let cur_ground = scalar_field::effective_ground_height(game_world, player.block_pos[0], player.block_pos[2]);
+    let next_ground = scalar_field::effective_ground_height(game_world, new_pos[0], new_pos[2]);
+    let step_diff = (next_ground - cur_ground).abs();
+    let blocked_by_height = step_diff > threshold;
+    // 目标格本身是实心（罕见：脚被踩在 block 中心）
     let b = game_world.get(new_pos[0], new_pos[1], new_pos[2]);
-    if b.is_solid() {
+    let blocked_by_solid = b.is_solid();
+    if blocked_by_height || blocked_by_solid {
         // 向上找空位（最多 6 格）
         let mut landed = false;
         for up in 1..=6 {
@@ -810,7 +898,7 @@ pub struct PlayerState {
     pub pos: Vec3,
     pub block_pos: [i32; 3],
     pub inventory: std::collections::HashMap<ResourceKind, i64>,
-    pub nation_id: Option<crate::nation::NationId>,
+    pub nation_id: Option<lk2_core::nation::NationId>,
     pub monsters_killed: u32,
     pub blocks_gathered: u32,
     pub nations_founded: u32,

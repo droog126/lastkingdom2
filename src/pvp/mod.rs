@@ -128,8 +128,8 @@ impl WeaponId {
 // ---------------------------------------------------------------------------
 use bevy::prelude::*;
 
-use crate::network::protocols::components::CombatReady;
-use crate::network::protocols::msg::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::protocol::components::CombatReady;
+use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
 
 /// 当前 fixed-update tick 计数器（每个 FixedUpdate 递增）。
 /// 用于跨系统对齐 tick 值（位置历史 / 攻击输入 / 伤害事件 / 预测）

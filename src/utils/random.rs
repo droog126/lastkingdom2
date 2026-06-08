@@ -3,7 +3,8 @@ use std::ops::Add;
 use bevy::math::Vec2;
 use rand::{rng, Rng};
 
-use crate::constant::FPS;
+// FPS 不在 lk2_core::constant — 留本地 stub
+const FPS: f32 = 60.0;
 
 pub fn random_arr2(x: u32, y: u32) -> impl Iterator<Item = [f32; 2]> + Clone {
     std::iter::repeat_with(move || {

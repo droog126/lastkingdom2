@@ -24,8 +24,8 @@
 //! 41³ cell = 42³ 角点 = 74088 元素 = 296KB（Vec 放堆上），stack 安全。
 //! 一次 re-mesh 50-100ms（AABB 41³，1.5s 节流够用）。
 
-use crate::world::BlockType;
-use crate::world::World as GameWorld;
+use lk2_core::world::BlockType;
+use lk2_core::world::World as GameWorld;
 
 /// 标量场：3D f32 数组，shape = (sx, sy, sz) 角点数，origin = 角点 (0,0,0) 对应的世界坐标
 #[derive(Debug, Clone)]

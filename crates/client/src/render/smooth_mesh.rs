@@ -13,7 +13,7 @@ use bevy::prelude::*;
 
 use super::marching_cubes::{build_mesh as mc_build_mesh, McVertex};
 use super::scalar_field::{build_density_field, ScalarField};
-use crate::world::World as GameWorld;
+    use lk2_core::world::World as GameWorld;
 
 /// 一个 smooth chunk 的输出（玩家周围 AABB 一个 mesh）
 pub struct SmoothMesh {
@@ -49,8 +49,9 @@ pub fn build_smooth_mesh(
     }
 
     // 3) 可选 Laplacian smoothing
+    // 3) 可选 Laplacian smoothing（注意：传入 indices.clone() 因为后续 smooth_normals 还要用）
     let vertices = if smooth_passes > 0 {
-        laplacian_smooth(vertices, indices, smooth_passes)
+        laplacian_smooth(vertices, &indices, smooth_passes)
     } else {
         vertices
     };
@@ -98,7 +99,7 @@ fn layer_color(y: f32) -> [f32; 4] {
 /// 简化版：按 (vertex position) hash 找邻居（同位置 = 共享顶点）
 fn laplacian_smooth(
     vertices: Vec<McVertex>,
-    indices: Vec<u32>,
+    indices: &[u32],
     passes: u32,
 ) -> Vec<McVertex> {
     let mut verts = vertices;
@@ -153,7 +154,7 @@ fn smooth_normals(vertices: &[McVertex], indices: &[u32]) -> (Vec<[f32; 3]>, Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::World as GameWorld;
+use lk2_core::world::World as GameWorld;
 
     #[test]
     fn empty_world_no_mesh() {

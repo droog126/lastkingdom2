@@ -9,14 +9,14 @@
 //!   4. apply_damage_and_knockback — 应用伤害与击退
 //!   5. expire_knockback_immunity — 清除击退免疫
 
-use crate::network::protocols::components::{CombatReady, Health, KnockbackImmunity};
-use crate::network::protocols::msg::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
+use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
 use crate::pvp::components::{
     CombatState, DamageEvent, Hitbox, Ping, PositionHistory, PositionSnapshot, WeaponStats,
 };
 use crate::pvp::los::line_of_sight;
 use crate::pvp::FixedTick;
-use crate::world::World as GameWorld;
+use lk2_core::world::World as GameWorld;
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use lightyear::prelude::PeerId;

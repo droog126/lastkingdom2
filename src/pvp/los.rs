@@ -5,8 +5,8 @@
 //!
 //! 用于 PvP 命中判定中的"隔着墙不能打"逻辑。
 
-use crate::world::World as GameWorld;
-use crate::world::BlockType;
+use lk2_core::world::World as GameWorld;
+use lk2_core::world::BlockType;
 use bevy::prelude::*;
 
 /// 视线检测结果
@@ -119,7 +119,7 @@ pub fn sector_voxels(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::World as GameWorld;
+    use lk2_core::world::World as GameWorld;
 
     fn dummy_world() -> GameWorld {
         // 16x4x16 的空地，底下一层草

@@ -19,6 +19,13 @@
 loop_run.out.txt
 build_all.txt
 build_core.txt
+test_core.txt
+test_log.txt
+test_ws.txt
+tmp_test.txt
+
+# Temporary / duplicate files
+README copy.md
 
 # IDE configurations
 .idea/

@@ -7,7 +7,7 @@
 //! - `Ping`               — 客户端延迟
 //! - `PositionHistory`    — 服务端位置快照缓冲（用于延迟补偿）
 //!
-//! 网络化组件见 `crate::network::protocols::components`
+//! 网络化组件见 `lk2_core::protocol::components`
 
 use bevy::prelude::*;
 use std::collections::VecDeque;

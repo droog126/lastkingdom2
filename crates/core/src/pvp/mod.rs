@@ -190,6 +190,28 @@ pub enum VisualEffectEvent {
 }
 
 // ---------------------------------------------------------------------------
+// 固定 tick 计数器（跨 server / client 共享 — 同一 App 里所有 PvP 系统对齐 tick）
+// ---------------------------------------------------------------------------
+//
+// 原位置: `src/pvp/mod.rs::FixedTick`（umbrella binary 持有）
+// 迁出原因: server / client 各自要跑 PvP 系统，必须有同一个 tick 计数。
+//
+// 用法:
+//   app.init_resource::<FixedTick>()
+//   app.add_systems(FixedUpdate, (increment_fixed_tick, ...))
+//
+// bevy 0.18 没有内置 `FixedTick` 资源（lightyear 0.26 也不暴露它），自己维护一份。
+
+/// 当前 fixed-update tick 计数器（每个 FixedUpdate 递增 1）。
+#[derive(Resource, Default)]
+pub struct FixedTick(pub u32);
+
+/// 递增 tick（在 PvP plugin 的 FixedUpdate 链最前面调用）
+pub fn increment_fixed_tick(mut tick: ResMut<FixedTick>) {
+    tick.0 = tick.0.wrapping_add(1);
+}
+
+// ---------------------------------------------------------------------------
 // re-export: 让外部既可以用 `lk2_core::pvp::CombatState` 也可以用
 // `lk2_core::pvp::components::CombatState`（兼容后续 server/client crate
 // 拆分时可能保留的子模块名）
@@ -199,7 +221,7 @@ pub mod components {
     //! 兼容层：保留 `crate::pvp::components::*` 的导入路径
     //! （原 src/pvp/systems_server.rs 和 systems_client.rs 用了这个路径）
     pub use super::{
-        CombatState, DamageEvent, Hitbox, Ping, PositionHistory, PositionSnapshot, VisualEffectEvent,
-        WeaponStats,
+        CombatState, DamageEvent, FixedTick, Hitbox, Ping, PositionHistory, PositionSnapshot,
+        VisualEffectEvent, WeaponStats,
     };
 }

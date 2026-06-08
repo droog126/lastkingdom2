@@ -24,7 +24,7 @@ use block_mesh::{
 };
 use ndshape::{ConstShape, ConstShape3u32};
 
-use crate::world::{BlockType, World as GameWorld};
+use lk2_core::world::{BlockType, World as GameWorld};
 
 /// 玩家周围的 AABB chunk：41 × 41 × 41（半径 20 + 1 padding）。
 /// 渲染只算这 41³ 范围（68921 cells = ~70KB，stack 安全）。

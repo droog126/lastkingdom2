@@ -6,8 +6,8 @@
 //! - `auto_step_up`        — 自动爬 1 格
 //! - `knockback_decay`     — 击退衰减
 
-use crate::controller::components::{GroundHit, PvPController, PlayerCollider};
-use crate::world::World as GameWorld;
+use lk2_core::controller::components::{GroundHit, PvPController, PlayerCollider};
+use lk2_core::world::World as GameWorld;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;

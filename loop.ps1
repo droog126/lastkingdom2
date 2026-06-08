@@ -15,12 +15,13 @@ $env:RUST_LOG = "info"
 
 # 0. Kill any old process
 Get-Process -Name "minecraft_bevy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "lk2-client" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-# 1. Build
+# 1. Build (lk2-client binary, no dev-dynamic-linking — DLL 路径有 bug 暂时用 static)
 if (-not $SkipBuild) {
-    Write-Host ">>> cargo build --features dev-dynamic-linking ..." -ForegroundColor Cyan
-    cargo build --features dev-dynamic-linking 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+    Write-Host ">>> cargo build -p lk2-client ..." -ForegroundColor Cyan
+    cargo build -p lk2-client 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
     if ($LASTEXITCODE -ne 0) {
         Write-Host ">>> BUILD FAILED" -ForegroundColor Red
         exit 1
@@ -28,15 +29,15 @@ if (-not $SkipBuild) {
 }
 
 # 2. Run + screenshot + record
-$exePath = Join-Path $ProjectRoot "target\debug\minecraft_bevy.exe"
+$exePath = Join-Path $ProjectRoot "target\debug\lk2-client.exe"
 if (-not (Test-Path $exePath)) {
     Write-Host ">>> Binary not found: $exePath" -ForegroundColor Red
     exit 1
 }
 
-Write-Host ">>> Start demo (${Seconds}s, --auto-demo) ..." -ForegroundColor Green
+Write-Host ">>> Start demo (${Seconds}s, --offline --auto-demo) ..." -ForegroundColor Green
 $logPath = Join-Path $ProjectRoot "screenshots\loop_run.log"
-$proc = Start-Process -FilePath $exePath -ArgumentList "--auto-demo" -PassThru -NoNewWindow -RedirectStandardOutput $logPath -RedirectStandardError "$logPath.err"
+$proc = Start-Process -FilePath $exePath -ArgumentList "--offline","--auto-demo" -PassThru -NoNewWindow -RedirectStandardOutput $logPath -RedirectStandardError "$logPath.err"
 Start-Sleep -Seconds $Seconds
 $proc | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1

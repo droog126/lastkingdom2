@@ -1,0 +1,61 @@
+[package]
+name = "lk2-client"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "lk2-client"
+path = "src/main.rs"
+
+# ============================================================================
+# 客户端 binary：DefaultPlugins + lightyear ClientPlugins + 渲染 + 输入 + UI
+#
+# 对应 docs/plans/client-server-split.md §5 / §9 步骤 5
+#
+# 设计：
+#   - 启 Bevy 的 DefaultPlugins (含 winit / wgpu / WindowPlugin)
+#   - 加 lightyear 0.26 ClientPlugins（默认是 NetcodeClient，--offline 模式里
+#     不会真去连 server，但 Plugin 仍然要 add 以便 NetworkMessages / Replication
+#     资源存在）
+#   - 渲染 / pretty / 客户端 PvP 预测 / 本地输入预测 / HUD 全部在本 crate
+#   - **不**包含 server-only 代码（`pvp::systems_server` / `SelfCheck` /
+#     `SimulationTick` 这些）
+#   - **不**直连 UDP/TCP transport（那是后续 `wire-network-and-loop` task 拆）
+#   - 共享数据 / sim 逻辑走 lk2-core（不带渲染类型 / 物理 plugin）
+# ============================================================================
+
+[dependencies]
+# 共享依赖版本（与 umbrella / core 对齐）
+bevy = { workspace = true }
+
+# 物理 — 仅可视化插值，server 跑确定性 step（详见 client-server-split.md §5）
+avian3d = { workspace = true }
+
+# UI / 编辑器
+bevy_egui = { workspace = true }
+bevy-inspector-egui = { workspace = true }
+bevy_panorbit_camera = { workspace = true }
+
+# 序列化（state.json dump）
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 噪声（地形生成）
+fastnoise-lite = { workspace = true }
+
+# tracing / log
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# sim 共享库
+lk2-core = { workspace = true }
+
+# lightyear 0.26 — client 注册消息 / 组件 + leafwing 输入
+# 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
+# 也直接拉是为了在 main.rs 里用 `lightyear_inputs_leafwing::InputPlugin`
+# 引用
+lightyear = { workspace = true, features = ["leafwing"] }
+lightyear_inputs_leafwing = { workspace = true }
+leafwing-input-manager = { workspace = true }
+
+[dev-dependencies]
