@@ -4,7 +4,10 @@
 
 param(
     [int]$Seconds = 12,
-    [switch]$SkipBuild = $false
+    # 默认 SkipBuild=true: 冷编译 lightyear 0.26 + leafwing 需要 22+ 分钟,
+    # 超过 30 min cap 装不下, 也撞 lightyear + bevy 0.18 API drift 编译错。
+    # 只在 binary 已经编过、增量 build 时才用 -Build
+    [switch]$SkipBuild = $true
 )
 
 $ProjectRoot = $PSScriptRoot
@@ -13,12 +16,11 @@ Set-Location $ProjectRoot
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
 $env:RUST_LOG = "info"
 
-# 0. Kill any old process
-Get-Process -Name "minecraft_bevy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# 0. Kill any old lk2-client process
 Get-Process -Name "lk2-client" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-# 1. Build (lk2-client binary, no dev-dynamic-linking — DLL 路径有 bug 暂时用 static)
+# 1. Build (default 跳过, 改用 -Build flag 显式打开)
 if (-not $SkipBuild) {
     Write-Host ">>> cargo build -p lk2-client ..." -ForegroundColor Cyan
     cargo build -p lk2-client 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5

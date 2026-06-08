@@ -1,0 +1,50 @@
+[package]
+name = "lk2-server"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "lk2-server"
+path = "src/main.rs"
+
+# ============================================================================
+# 服务端 binary：MinimalPlugins (headless) + lightyear ServerPlugins + 物理 + sim
+#
+# 对应 docs/plans/client-server-split.md §4 / §9 步骤 4
+#
+# 设计：
+#   - 启 Bevy MinimalPlugins (无 winit / wgpu / asset / audio / ui)
+#     → 这就是真正的 headless server, 没有窗口
+#   - 加 lightyear 0.26 ServerPlugins (默认 NetcodeServer 接收 UDP)
+#   - 加 PhysicsPlugins (server 跑确定性物理 step, 不要插值)
+#   - 跑核心 sim: simulation_tick / scenario / monster / resource / self_check
+#   - 接收 client 输入 (AttackInput) + 权威 PvP 判定
+#   - 复制状态给 client (PlayerPos / MonsterKind / MonsterHealth)
+#   - **不**包含任何渲染 / pretty / 输入采集 / 客户端预测
+#   - listen UDP 0.0.0.0:5000 (端口从 env LK2_PORT 读, 默认 5000)
+# ============================================================================
+
+[dependencies]
+# bevy: 用 default-features=false + 必要 features, 不拉 winit/wgpu/asset/audio/ui
+bevy = { workspace = true, default-features = false, features = ["bevy_ecs", "bevy_time"] }
+
+# 物理 — server 跑确定性 step (区别于 client 端的可视化插值)
+avian3d = { workspace = true }
+
+# 序列化（state.json dump）
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# tracing / log
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# sim 共享库
+lk2-core = { workspace = true }
+
+# lightyear 0.26 — 服务端权威 + 消息分发
+# 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
+# 也直接拉是为了在 main.rs 里引用
+lightyear = { workspace = true, features = ["leafwing"] }
+lightyear_inputs_leafwing = { workspace = true }
+leafwing-input-manager = { workspace = true }
