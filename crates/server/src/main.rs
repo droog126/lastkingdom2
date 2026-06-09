@@ -40,6 +40,7 @@ mod pvp_systems;
 // ---- lk2-core 共享 sim 逻辑 ----
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
+use lk2_core::constant;
 use lk2_core::creature::{update_creatures, CreatureSpawnerDone};
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
@@ -116,7 +117,7 @@ fn main() {
         //   3) 之后才 spawn Server entity (后续 wire-network-and-loop task 做)
         // 缺步骤 1 时, 编译能过 (register_message lazy init MessageRegistry),
         // 但运行时 server 缺 link/sync/netcode, netcode 起不来。
-        .add_plugins(lightyear::prelude::ServerPlugins::default())
+        .add_plugins(lightyear::prelude::server::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
         .add_plugins(ServerPvPPlugin)
         // ====== Resources ======

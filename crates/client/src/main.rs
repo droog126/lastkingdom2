@@ -181,7 +181,7 @@ fn main() {
     //
     // 这里只 `add_plugins(ClientPlugins::default())`，并把协议 plugin 一起加，
     // 保证 register_message / register_component / InputPlugin 全部 init。
-    app.add_plugins(lightyear::prelude::ClientPlugins::default());
+    app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
 
     // ===== 4. 资源初始化 =====
@@ -236,14 +236,19 @@ fn main() {
     );
 
     // ===== 7. 每帧 Update 系统（核心循环）=====
+    //
+    // 注意: bevy 0.18 的 `IntoScheduleConfigs` tuple impl 只到 20 元 (见
+    // bevy_ecs-0.18.1/src/schedule/config.rs:613 `all_tuples!(..., 1, 20, ...)`),
+    // 且 `.chain()` 不能在 tuple 里混 `.before(X)` (产生 boxed ScheduleConfigs,
+    // 不是 tuple 形式)。所以分多块 add_systems, 每块 tuple ≤ 20。
     app.add_systems(
         Update,
         (
-            // scenario / sim
+            // scenario / sim (3)
             lk2_core::scenario::scenario_runner,
             lk2_core::scenario::simulate_player_actions,
             lk2_core::scenario::scenario_tick_recorder,
-            // 客户端独有
+            // 客户端独有 (8)
             auto_demo,
             mouse_look_system,
             first_person_camera,
@@ -252,20 +257,25 @@ fn main() {
             player_attack_creatures,
             animate_avatar,
             spawn_terrain_around_player,
-            // F3 自由视角 / C 切 3rd person / F5 传送 / F8 切 preset
+            // F3 自由视角 / C 切 3rd person / F5 传送 / F8 切 preset (4)
             freefly_toggle,
             camera_mode_toggle,
             emergency_teleport,
             cycle_terrain_preset,
-            freefly_movement.before(first_person_camera),
-            // PvP 客户端
+        )
+            .chain(),
+    );
+    app.add_systems(
+        Update,
+        (
+            // PvP 客户端 (6)
             collect_local_input,
             client_attack_predict,
             on_hit_confirm,
             on_knockback_event,
             on_damage_result,
             trigger_visual_effects,
-            // 控制器（地面 / WASD / 爬台阶 / 击退衰减）
+            // 控制器（地面 / WASD / 爬台阶 / 击退衰减） (5)
             ground_detection,
             character_movement,
             auto_step_up,
@@ -274,6 +284,8 @@ fn main() {
         )
             .chain(),
     );
+    // freefly_movement 必须先于 first_person_camera (否则镜头不动)
+    app.add_systems(Update, freefly_movement.before(first_person_camera));
 
     // ===== 8. 辅助系统（截图 / HUD / 退出 / tick 录制）=====
     app.add_systems(

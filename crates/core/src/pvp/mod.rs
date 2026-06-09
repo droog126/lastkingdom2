@@ -53,12 +53,12 @@ impl Default for CombatState {
 /// 武器属性（剑 / 斧 / 锄）
 #[derive(Component, Clone, Copy, Debug)]
 pub struct WeaponStats {
-    pub reach: f32,             // 攻击距离（格）
-    pub damage: f32,            // 基础伤害
-    pub knockback: f32,         // 水平击退力度
-    pub attack_speed: f32,      // 每秒攻击次数（冷却 = 1/speed）
-    pub sweep_angle_deg: f32,   // 扇形角度（度）
-    pub sweep_range: f32,      // 横扫半径（与 reach 共同决定命中体积）
+    pub reach: f32,           // 攻击距离（格）
+    pub damage: f32,          // 基础伤害
+    pub knockback: f32,       // 水平击退力度
+    pub attack_speed: f32,    // 每秒攻击次数（冷却 = 1/speed）
+    pub sweep_angle_deg: f32, // 扇形角度（度）
+    pub sweep_range: f32,     // 横扫半径（与 reach 共同决定命中体积）
 }
 
 impl WeaponStats {
@@ -116,10 +116,7 @@ impl Default for PositionHistory {
 
 impl PositionHistory {
     pub fn new(max_size: usize) -> Self {
-        Self {
-            snapshots: VecDeque::with_capacity(max_size),
-            max_size,
-        }
+        Self { snapshots: VecDeque::with_capacity(max_size), max_size }
     }
 
     pub fn push(&mut self, snap: PositionSnapshot) {
@@ -212,6 +209,114 @@ pub fn increment_fixed_tick(mut tick: ResMut<FixedTick>) {
 }
 
 // ---------------------------------------------------------------------------
+// 武器注册表（server + client 共用）
+// ---------------------------------------------------------------------------
+//
+// 之前 plan 标了"留给 server/client task 拆"，但 client crate 的 setup_player_pvp
+// 已经 `use lk2_core::pvp::WeaponId; WeaponId::IronSword.stats()`, 不迁出来
+// client 就编不过。WeaponId / WeaponEntry / WEAPON_TABLE 都是纯数据, 没有 bevy
+// 或 lightyear 依赖, 放在这里最干净。
+
+/// 武器 ID
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WeaponId {
+    Fists = 0,
+    WoodenSword = 1,
+    StoneSword = 2,
+    IronSword = 3,
+    DiamondSword = 4,
+    GoldSword = 5,
+}
+
+impl WeaponId {
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(Self::Fists),
+            1 => Some(Self::WoodenSword),
+            2 => Some(Self::StoneSword),
+            3 => Some(Self::IronSword),
+            4 => Some(Self::DiamondSword),
+            5 => Some(Self::GoldSword),
+            _ => None,
+        }
+    }
+}
+
+/// 武器属性（不可变静态表里查）
+#[derive(Clone, Copy, Debug)]
+pub struct WeaponEntry {
+    pub name: &'static str,
+    pub damage: f32,
+    pub reach: f32,        // 攻击距离（米）
+    pub knockback: f32,    // m/s 水平速度
+    pub attack_speed: f32, // 攻速（次/秒）
+    pub sweep_deg: f32,    // 扇形角度
+}
+
+const WEAPON_TABLE: &[WeaponEntry] = &[
+    // id=0: 空手
+    WeaponEntry {
+        name: "Fists",
+        damage: 1.0,
+        reach: 2.5,
+        knockback: 0.1,
+        attack_speed: 1.4,
+        sweep_deg: 60.0,
+    },
+    // id=1: 木剑
+    WeaponEntry {
+        name: "Wooden Sword",
+        damage: 4.0,
+        reach: 3.0,
+        knockback: 0.2,
+        attack_speed: 1.6,
+        sweep_deg: 60.0,
+    },
+    // id=2: 石剑
+    WeaponEntry {
+        name: "Stone Sword",
+        damage: 5.0,
+        reach: 3.0,
+        knockback: 0.25,
+        attack_speed: 1.6,
+        sweep_deg: 60.0,
+    },
+    // id=3: 铁剑（竞技标准）
+    WeaponEntry {
+        name: "Iron Sword",
+        damage: 6.0,
+        reach: 3.2,
+        knockback: 0.4,
+        attack_speed: 1.6,
+        sweep_deg: 60.0,
+    },
+    // id=4: 钻石剑
+    WeaponEntry {
+        name: "Diamond Sword",
+        damage: 7.0,
+        reach: 3.2,
+        knockback: 0.4,
+        attack_speed: 1.6,
+        sweep_deg: 60.0,
+    },
+    // id=5: 金剑
+    WeaponEntry {
+        name: "Gold Sword",
+        damage: 4.0,
+        reach: 3.2,
+        knockback: 0.4,
+        attack_speed: 2.0, // 攻速最快
+        sweep_deg: 60.0,
+    },
+];
+
+impl WeaponId {
+    pub fn stats(&self) -> WeaponEntry {
+        WEAPON_TABLE[*self as usize].clone()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // re-export: 让外部既可以用 `lk2_core::pvp::CombatState` 也可以用
 // `lk2_core::pvp::components::CombatState`（兼容后续 server/client crate
 // 拆分时可能保留的子模块名）
@@ -222,6 +327,6 @@ pub mod components {
     //! （原 src/pvp/systems_server.rs 和 systems_client.rs 用了这个路径）
     pub use super::{
         CombatState, DamageEvent, FixedTick, Hitbox, Ping, PositionHistory, PositionSnapshot,
-        VisualEffectEvent, WeaponStats,
+        VisualEffectEvent, WeaponEntry, WeaponId, WeaponStats,
     };
 }

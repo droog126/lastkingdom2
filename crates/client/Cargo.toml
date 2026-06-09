@@ -7,6 +7,12 @@ edition = "2024"
 name = "lk2-client"
 path = "src/main.rs"
 
+[features]
+# 启用 Bevy 动态链接，大幅缩短开发期增量编译时间。
+# 用法: cargo run -p lk2-client --features dev-dynamic-linking
+# 注意: 仅供开发使用，切勿在发布构建中启用。
+dev-dynamic-linking = ["bevy/dynamic_linking"]
+
 # ============================================================================
 # 客户端 binary：DefaultPlugins + lightyear ClientPlugins + 渲染 + 输入 + UI
 #
@@ -42,6 +48,10 @@ serde_json = { workspace = true }
 
 # 噪声（地形生成）
 fastnoise-lite = { workspace = true }
+
+# 渲染 — greedy_mesh.rs 用 block-mesh + ndshape 生成合并 mesh
+block-mesh = { workspace = true }
+ndshape = { workspace = true }
 
 # tracing / log
 tracing = { workspace = true }

@@ -329,3 +329,27 @@ pub fn spawn_voxel_colliders(
     // 体素碰撞检测应该直接用 World::get() + 自定义 shapecast
     // 这里留一个接口，方便后续扩展
 }
+
+// ---------------------------------------------------------------------------
+// ControllerPlugin — 把 4 个角色控制系统打包到一个 plugin
+// ---------------------------------------------------------------------------
+//
+// 原 umbrella 的 `src/controller/mod.rs::ControllerPlugin` 把这 4 个系统 add
+// 到 FixedUpdate。本 crate 是 client, 把 plugin 复制过来, 行为等价。
+
+pub struct ControllerPlugin;
+
+impl Plugin for ControllerPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            FixedUpdate,
+            (
+                ground_detection,
+                character_movement,
+                auto_step_up,
+                knockback_decay,
+            )
+                .chain(),
+        );
+    }
+}

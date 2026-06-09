@@ -5530,11 +5530,13 @@ dependencies = [
  "bevy-inspector-egui",
  "bevy_egui",
  "bevy_panorbit_camera",
+ "block-mesh",
  "fastnoise-lite",
  "leafwing-input-manager",
  "lightyear",
  "lightyear_inputs_leafwing",
  "lk2-core",
+ "ndshape",
  "serde",
  "serde_json",
  "tracing",
@@ -5552,6 +5554,22 @@ dependencies = [
  "rand 0.10.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lk2-server"
+version = "0.1.0"
+dependencies = [
+ "avian3d 0.6.1",
+ "bevy",
+ "leafwing-input-manager",
+ "lightyear",
+ "lightyear_inputs_leafwing",
+ "lk2-core",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
