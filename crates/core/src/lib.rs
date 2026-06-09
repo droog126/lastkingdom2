@@ -16,6 +16,7 @@
 //! - `pvp`         — 跨 server/client 共享的 PvP 组件 (CombatState / Hitbox / Ping / PositionHistory / DamageEvent / VisualEffectEvent)
 //! - `controller`  — 跨 server/client 共享的角色控制器组件 (PvPController / PlayerCollider / GroundHit)
 //! - `protocol`    — lightyear 0.26 网络协议 (Messages / Components / PlayerAction / ProtocolPlugin)
+//! - `transport`    — 跨 server/client 共享的 transport 共识 (DEFAULT_PORT / PROTOCOL_ID / server_listen_addr / parse_connect_arg / CliArgs)
 //!
 //! **不含**（保留在 umbrella binary / 之后的 server / client crate）:
 //! - `pvp::los` / `pvp::systems_*` / `pvp::WeaponId` / `pvp::PvPPlugin` — 留到 server/client task 拆
@@ -36,6 +37,7 @@ pub mod protocol;
 pub mod pvp;
 pub mod resource;
 pub mod scenario;
+pub mod transport;
 pub mod world;
 
 // ai 依赖 scenario 类型，scenario 依赖 player — player 必须先
