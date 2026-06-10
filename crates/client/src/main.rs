@@ -194,6 +194,24 @@ fn main() {
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
 
+    // 绕开 lightyear 0.26.4 + workspace feature unification 副作用:
+    // workspace 启 server feature 后, lightyear_inputs_leafwing 的 server
+    // feature 也被启上 → client binary 编译时 InputPlugin::<PlayerAction>::
+    // build 走 cfg(server) 分支加了 ServerInputPlugin → receive_input_message
+    // system 在 client 端跑 → 找 Res<PeerMetadata> → panic "Resource does not
+    // exist"。
+    // 修法: client 端也 init_resource::<PeerMetadata>()(空 instance 就够,
+    // client 不接收 server 上行的 input, system 空跑 round-trip 无害)。
+    // 跟 server 端 87b304f 那个 init_resource 同源问题, 跟 lightyear 0.26
+    // 自身的 lightyear_connection::ConnectionPlugin bug 配套。
+    // 同样: lk2_core::scenario::simulate_player_actions 要 lk2_core::PlayerState
+    // (不是 client 本地 crate::render::PlayerState)。两个 type 名字相同但 crate
+    // 不同, 都要 init, 否则 client 一进网络模式就 panic。
+    app.init_resource::<lightyear::prelude::PeerMetadata>()
+        .init_resource::<lk2_core::pvp::FixedTick>()
+        .init_resource::<lk2_core::player::PlayerState>()
+        .init_resource::<TimeOfDay>();
+
     if network_mode {
         let server_addr = connect_addr
             .expect("network_mode=true implies connect_addr is Some");
