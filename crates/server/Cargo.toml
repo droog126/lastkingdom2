@@ -32,7 +32,10 @@ dev-dynamic-linking = ["bevy/dynamic_linking"]
 
 [dependencies]
 # bevy: 用 default-features=false + 必要 features, 不拉 winit/wgpu/asset/audio/ui
-bevy = { version = "0.18.1", default-features = false, features = ["default_app"] }
+# wire-network-and-loop 任务（2026-06-10）: 加 bevy_scene feature 以 init
+# SceneSpawner resource, 绕开 avian3d 0.6.1 init_collider_constructor_hierarchies
+# panic "Resource does not exist: SceneSpawner"
+bevy = { version = "0.18.1", default-features = false, features = ["default_app", "bevy_scene"] }
 
 # 物理 — server 跑确定性 step (区别于 client 端的可视化插值)
 avian3d = { workspace = true }
@@ -51,10 +54,19 @@ lk2-core = { workspace = true }
 # lightyear 0.26 — 服务端权威 + 消息分发
 # 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
 # 也直接拉是为了在 main.rs 里引用
-# wire-network-and-loop 任务（2026-06-10）: 加 server + udp feature
+# wire-network-and-loop 任务（2026-06-10）: 加 server + udp + client feature
 # - server: 拉 lightyear_udp 的 server 模块（ServerUdpIo）
 # - udp: 把 lightyear_udp 这个 sub-crate 引入（缺了 udp feature，
 #   `lightyear::prelude::server::ServerUdpIo` 是 unresolved import）
-lightyear = { workspace = true, features = ["leafwing", "server", "udp"] }
+# - client: 关键！lightyear 0.26 server 端的 `ServerMultiMessageSender`
+#   依赖 `lightyear_connection::client::PeerMetadata` resource（这个 type 在
+#   client.rs 里 cfg(feature="client") 门控），所以**必须**启 client feature
+#   才会编译出 PeerMetadata 资源。Server 才能 register 成功。
+#   这看起来是 lightyear 0.26 的设计 bug / host-server 假设, 但截止 0.26.4
+#   仍然如此。详见 lightyear_connection-0.26.4/src/client.rs:148。
+lightyear = { workspace = true, features = ["leafwing", "server", "udp", "client"] }
 lightyear_inputs_leafwing = { workspace = true }
 leafwing-input-manager = { workspace = true }
+# lightyear_connection 直接拉,只是为了在 main.rs 里 import PeerMetadata
+# (lightyear 0.26.4 bug 绕开, 详见 server main.rs 注释)
+lightyear_connection = { version = "0.26", features = ["server", "client"] }

@@ -32,6 +32,25 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use avian3d::prelude::PhysicsPlugins;
 use lightyear::prelude::server::ServerUdpIo;
 use lightyear::prelude::LocalAddr;
+// lightyear 0.26.4 bug 绕开: `ServerMultiMessageSender` (lightyear_messages
+// server.rs:33 `metadata: Res<'w, PeerMetadata>`) 依赖 `Res<PeerMetadata>`,而
+// `PeerMetadata` 只在 `lightyear_connection::client::ConnectionPlugin::build`
+// (lightyear_connection-0.26.4/src/client.rs:184) 里 init_resource。
+// 但 server binary 只 enable 'server' feature, **不**加 `client::ConnectionPlugin`,
+// 所以 `PeerMetadata` 永远不存在 → 启 server 后 system `receive_input_message`
+// 第一次跑立刻 panic "Parameter ServerMultiMessageSender::metadata failed
+// validation: Resource does not exist"。
+//
+// 修法: server main.rs 手动 init `PeerMetadata` 资源,跟 client::ConnectionPlugin
+// 行为对齐。`PeerMetadata` 通过 `lightyear-0.26.4/src/lib.rs:326
+// 'pub use lightyear_connection::*;'` 在 `lightyear::prelude::` 顶层 re-export,
+// 路径是 `lightyear::prelude::PeerMetadata`(不是 `prelude::client::PeerMetadata`)。
+use lightyear::prelude::PeerMetadata;
+// 绕开 avian3d 0.6.1 + MinimalPlugins: avian3d::init_collider_constructor_hierarchies
+// 读 `Res<SceneSpawner>`, MinimalPlugins 没 ScenePlugin 不会 init 它。
+// 手动 init 一个空 SceneSpawner — server 不加载任何 .scn / .gltf 资产, 这个
+// resource 永远空着不影响行为。
+use bevy::scene::SceneSpawner;
 
 use std::time::Duration;
 
@@ -46,6 +65,7 @@ use lk2_core::constant;
 use lk2_core::creature::{update_creatures, CreatureSpawnerDone};
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
+use lk2_core::player::PlayerState;
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
@@ -80,6 +100,15 @@ impl Default for TimeOfDay {
 // ============================================================================
 
 fn main() {
+    // init tracing subscriber (info 级别). server main.rs 之前没初始化,
+    // info!() 调用全被吞掉, 看 server_run.out.txt 是空文件。
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     // 监听端口 (env LK2_PORT 覆盖, 默认 5000)
     let port: u16 = std::env::var("LK2_PORT")
         .ok()
@@ -121,6 +150,14 @@ fn main() {
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<bevy::prelude::Mesh>()
         .add_message::<bevy::asset::AssetEvent<bevy::prelude::Mesh>>()
+        // 兼容补丁: avian3d 0.6.1 `init_collider_constructor_hierarchies` 系统
+        // (avian3d-0.6.1/src/collision/collider/backend.rs:324-329) 需要
+        // `Res<SceneSpawner>` (在 bevy_scene feature 编译进来后)。MinimalPlugins
+        // 不含 ScenePlugin, SceneSpawner resource 没被 init →
+        // panic "Resource does not exist: SceneSpawner"。修复: 显式
+        // `init_resource::<SceneSpawner>()` 注一个空的(用 bevy_scene::SceneSpawner::default())。
+        // server 完全不实际 spawn scene, 仅为让 system 找到 resource 不 panic。
+        .init_resource::<bevy::scene::SceneSpawner>()
         // lightyear 0.26 服务端权威
         // ⚠️ 顺序 (lightyear-0.26.4/src/lib.rs:96 强制约束):
         //   1) ServerPlugins 先 (装 netcode / link / sync / replication 系统)
@@ -131,7 +168,21 @@ fn main() {
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
         .add_plugins(ServerPvPPlugin)
+        // wire-network-and-loop 任务（2026-06-10）补: bevy 0.18 的 Message
+        // 总线（本地 event，区别于 lightyear register 的网络 message）需要
+        // 显式 add_message，read_attack_inputs 读 MessageReader<AttackInput>。
+        .add_message::<lk2_core::protocol::messages::AttackInput>()
+        .add_message::<lk2_core::protocol::messages::HitConfirm>()
+        .add_message::<lk2_core::protocol::messages::KnockbackEvent>()
+        .add_message::<lk2_core::protocol::messages::DamageResult>()
+        .add_message::<lk2_core::pvp::DamageEvent>()
+        .add_message::<lk2_core::pvp::VisualEffectEvent>()
         // ====== Resources ======
+        // 绕开 lightyear 0.26.4 bug: PeerMetadata 必须 init,否则 receive_input_message panic
+        .init_resource::<PeerMetadata>()
+        // 绕开 avian3d 0.6.1 + MinimalPlugins: SceneSpawner 必须存在,
+        // 否则 init_collider_constructor_hierarchies panic
+        .init_resource::<SceneSpawner>()
         .init_resource::<SimClock>()
         .init_resource::<TimeOfDay>()
         .init_resource::<GameWorld>()
@@ -141,6 +192,8 @@ fn main() {
         .init_resource::<TickObserver>()
         .init_resource::<TickRecorder>()
         .init_resource::<CreatureSpawnerDone>()
+        .init_resource::<PlayerState>()
+        .init_resource::<FixedTick>()
         .insert_resource(scenario_state)
         // ====== Startup ======
         .add_systems(Startup, (

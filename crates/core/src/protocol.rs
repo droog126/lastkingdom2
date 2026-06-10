@@ -256,6 +256,20 @@ impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         use lightyear::prelude::*;
 
+        // ----- lightyear 0.26 init order workaround -----
+        // 1. `MessagePlugin::finish` 会在 finish 阶段 `remove_resource::<MessageRegistry>().unwrap()`
+        //    (lightyear_messages-0.26.4/src/plugin.rs:65-68), 然后 line 162 写回一个内部构造的 registry.
+        // 2. 但 `ServerMultiMessageSender<With<Connected>>::metadata` (即 `Res<MessageRegistry>`)
+        //    在 `receive_input_message` (lightyear_inputs-0.26.4/src/server.rs:128-131, 147) 第一次
+        //    跑时验证. 如果资源不在 → panic "Resource does not exist".
+        // 3. fix: 我们手动 init 一个空 MessageRegistry BEFORE register 任何 message, 这样
+        //    (a) `MessagePlugin::finish` 的 `remove_resource().unwrap()` 成功（我们提供了 resource）,
+        //    (b) `insert_resource(registry)` 写回时用 lightyear 内部构造的完整 registry,
+        //    (c) system 第一次跑时 resource 已经存在, validation 通过.
+        // Reference: lightyear_messages-0.26.4/src/registry.rs:378-384 (`register_message_custom_serde`
+        // 内部 `if !has_resource { init_resource }`), 所以 init 0 个 message 也会让 resource 存在.
+        app.init_resource::<MessageRegistry>();
+
         // ----- Inputs (leafwing) -----
         // 客户端采集 PlayerAction, lightyear 自动把它序列化传到服务端。
         app.add_plugins(lightyear_inputs_leafwing::prelude::InputPlugin::<
