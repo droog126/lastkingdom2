@@ -30,7 +30,8 @@
 use bevy::prelude::*;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use avian3d::prelude::PhysicsPlugins;
-use lightyear::prelude::{LocalAddr, ServerUdpIo};
+use lightyear::prelude::server::ServerUdpIo;
+use lightyear::prelude::LocalAddr;
 
 use std::time::Duration;
 
@@ -155,6 +156,32 @@ fn main() {
             tick_combat_cooldowns,
         ).chain())
         .run();
+}
+
+// ============================================================================
+// spawn_server — wire lightyear UDP transport (subtask 1 of wire-network-and-loop)
+// ============================================================================
+//
+// lightyear 0.26 用 reactive 模式启 transport: 不是 add_plugins 启,而是 spawn
+// 一个 entity 挂 `ServerUdpIo` + `LocalAddr(server_addr)`,然后
+// `LinkStart` observer 触发,系统自动 `UdpSocket::bind(local_addr)`。
+//
+// 参考:
+// - lightyear_udp-0.26.4/src/server.rs:30-50 (`ServerUdpIo` 定义 + `#[require(Server)]`)
+// - lightyear_udp-0.26.4/src/server.rs:71-95 (LinkStart observer 真正 bind socket 的 system)
+//
+// ServerUdpIo 的 `#[require(Server)]` 会自动加 Server marker, 所以不用手写。
+fn spawn_server(mut commands: Commands) {
+    let server_addr = lk2_core::transport::server_listen_addr();
+    info!(
+        "[net] spawning server entity with ServerUdpIo + LocalAddr({})",
+        server_addr
+    );
+    commands.spawn((
+        Name::new("Server"),
+        ServerUdpIo::default(),
+        LocalAddr(server_addr),
+    ));
 }
 
 // ============================================================================
