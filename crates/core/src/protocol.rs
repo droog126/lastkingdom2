@@ -74,9 +74,7 @@ use serde::{Deserialize, Serialize};
 // `lightyear_inputs_leafwing::InputPlugin` (在 ProtocolPlugin 里手动 add)。
 
 /// 玩家输入动作 — 客户端采集、本地预测、传送到服务端
-#[derive(
-    Reflect, Actionlike, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash,
-)]
+#[derive(Reflect, Actionlike, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlayerAction {
     MoveForward,
     MoveBackward,
@@ -210,7 +208,7 @@ pub mod components {
         pub reach: f32,
         pub damage: f32,
         pub knockback: f32,
-        pub attack_speed: f32,    // 次/秒
+        pub attack_speed: f32, // 次/秒
         pub sweep_angle_deg: f32,
         pub attack_cooldown: f32, // 剩余冷却秒
     }
@@ -260,9 +258,9 @@ impl Plugin for ProtocolPlugin {
 
         // ----- Inputs (leafwing) -----
         // 客户端采集 PlayerAction, lightyear 自动把它序列化传到服务端。
-        app.add_plugins(
-            lightyear_inputs_leafwing::prelude::InputPlugin::<PlayerAction>::default(),
-        );
+        app.add_plugins(lightyear_inputs_leafwing::prelude::InputPlugin::<
+            PlayerAction,
+        >::default());
 
         // ----- Messages (瞬时事件) -----
         // 客户端 → 服务端

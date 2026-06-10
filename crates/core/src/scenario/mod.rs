@@ -23,7 +23,7 @@
 //! 启动方式：binary 第一个参数 = 剧本路径
 
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -127,11 +127,7 @@ pub struct RecordedTick {
 
 impl Default for Scenario {
     fn default() -> Self {
-        Self {
-            name: "default".into(),
-            record_window: Some((0, 30)),
-            steps: vec![],
-        }
+        Self { name: "default".into(), record_window: Some((0, 30)), steps: vec![] }
     }
 }
 
@@ -159,11 +155,7 @@ impl ScenarioState {
 
 pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
     // 第一个非 cargo 参数是剧本路径
-    let path = args
-        .iter()
-        .skip(1)
-        .find(|a| !a.starts_with("--") && a.ends_with(".json"))
-        .cloned();
+    let path = args.iter().skip(1).find(|a| !a.starts_with("--") && a.ends_with(".json")).cloned();
 
     if let Some(p) = path {
         match std::fs::read_to_string(&p) {
@@ -214,7 +206,9 @@ pub fn scenario_runner(
     clock: Res<SimClock>,
     mut commands: Commands,
 ) {
-    let Some(scenario) = state.scenario.clone() else { return };
+    let Some(scenario) = state.scenario.clone() else {
+        return;
+    };
 
     if state.end_requested {
         // 等几 tick 让 screenshot 完成
@@ -258,7 +252,10 @@ pub fn scenario_runner(
             if scenario.name == "default" || scenario.name == "idle" {
                 state.recording = false;
                 state.record_buffer.clear();
-                info!("⏭ 跳过录制 (scenario={}, 默认不录以避免 29MB 泄漏)", scenario.name);
+                info!(
+                    "⏭ 跳过录制 (scenario={}, 默认不录以避免 29MB 泄漏)",
+                    scenario.name
+                );
                 advance_step(&mut state);
                 return;
             }
@@ -304,9 +301,7 @@ pub fn scenario_runner(
         ScenarioStep::Screenshot { name } => {
             let path = format!("screenshots/{}_{}.png", scenario.name, name);
             info!("📸 截图 → {}", path);
-            commands
-                .spawn(Screenshot::primary_window())
-                .observe(save_to_disk(path));
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
             // 等 1 tick 让 screenshot 完成
             if clock.tick > state.last_step_done_tick {
                 advance_step(&mut state);
@@ -400,7 +395,11 @@ pub fn simulate_player_actions(
     }
     // 2. 采掘
     else if state.pending_gather_left > 0 {
-        let (x, y, z) = (player.block_pos[0], player.block_pos[1], player.block_pos[2]);
+        let (x, y, z) = (
+            player.block_pos[0],
+            player.block_pos[1],
+            player.block_pos[2],
+        );
         let b = game_world.get(x, y, z);
         if let Some((res, _)) = b.yields() {
             if b.is_solid() {
@@ -414,9 +413,18 @@ pub fn simulate_player_actions(
                 info!("方块不可采掘，找下一个");
                 // 走一格再试（先过滤掉 OOB，避免再触发 OUT OF BOUNDS 日志）
                 let dirs: [[i32; 3]; 6] = [
-                    [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0],
+                    [1, 0, 0],
+                    [-1, 0, 0],
+                    [0, 0, 1],
+                    [0, 0, -1],
+                    [0, 1, 0],
+                    [0, -1, 0],
                 ];
-                let (cx, cy, cz) = (player.block_pos[0], player.block_pos[1], player.block_pos[2]);
+                let (cx, cy, cz) = (
+                    player.block_pos[0],
+                    player.block_pos[1],
+                    player.block_pos[2],
+                );
                 for d in dirs {
                     let np = [cx + d[0], cy + d[1], cz + d[2]];
                     if !game_world.in_bounds(np[0], np[1], np[2]) {
@@ -431,9 +439,18 @@ pub fn simulate_player_actions(
             info!("当前位置无可采掘物，找下一个");
             // 走一格再试（先过滤掉 OOB，避免再触发 OUT OF BOUNDS 日志）
             let dirs: [[i32; 3]; 6] = [
-                [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0],
+                [1, 0, 0],
+                [-1, 0, 0],
+                [0, 0, 1],
+                [0, 0, -1],
+                [0, 1, 0],
+                [0, -1, 0],
             ];
-            let (cx, cy, cz) = (player.block_pos[0], player.block_pos[1], player.block_pos[2]);
+            let (cx, cy, cz) = (
+                player.block_pos[0],
+                player.block_pos[1],
+                player.block_pos[2],
+            );
             for d in dirs {
                 let np = [cx + d[0], cy + d[1], cz + d[2]];
                 if !game_world.in_bounds(np[0], np[1], np[2]) {
@@ -486,12 +503,12 @@ pub fn simulate_player_actions(
             let cost = nations.next_flag_cost() as u64;
             let flag_count = nations.flag_count;
             if let Ok(used_id) = nations.found(
-                    &mut pool,
-                    0,
-                    format!("PlayerNation#{}", flag_count + 1),
-                    player.block_pos,
-                    0,
-                ) {
+                &mut pool,
+                0,
+                format!("PlayerNation#{}", flag_count + 1),
+                player.block_pos,
+                0,
+            ) {
                 player.nation_id = Some(used_id);
                 player.nations_founded += 1;
                 info!("🏴 创国成功 id={} cost={}", used_id.0, cost);
@@ -593,7 +610,12 @@ fn try_move_with_fallback(
         return true;
     }
     const CANDIDATES: [[i32; 3]; 6] = [
-        [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0],
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+        [0, 1, 0],
+        [0, -1, 0],
     ];
     let cur = player.block_pos;
     let best = CANDIDATES
@@ -605,9 +627,7 @@ fn try_move_with_fallback(
         })
         .min_by_key(|d| {
             let np = [cur[0] + d[0], cur[1] + d[1], cur[2] + d[2]];
-            (np[0] - target[0]).abs()
-                + (np[1] - target[1]).abs()
-                + (np[2] - target[2]).abs()
+            (np[0] - target[0]).abs() + (np[1] - target[1]).abs() + (np[2] - target[2]).abs()
         });
     if let Some(d) = best {
         attempt_move(player, game_world, *d)
@@ -616,18 +636,17 @@ fn try_move_with_fallback(
     }
 }
 
-fn attempt_move(
-    player: &mut PlayerState,
-    game_world: &mut GameWorld,
-    d: [i32; 3],
-) -> bool {
+fn attempt_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3]) -> bool {
     let new_pos = [
         player.block_pos[0] + d[0],
         player.block_pos[1] + d[1],
         player.block_pos[2] + d[2],
     ];
     if !game_world.in_bounds(new_pos[0], new_pos[1], new_pos[2]) {
-        info!("❌ move {:?} -> {:?} OUT OF BOUNDS", player.block_pos, new_pos);
+        info!(
+            "❌ move {:?} -> {:?} OUT OF BOUNDS",
+            player.block_pos, new_pos
+        );
         return false;
     }
     let b = game_world.get(new_pos[0], new_pos[1], new_pos[2]);
@@ -648,7 +667,10 @@ fn attempt_move(
                 return true;
             }
         }
-        info!("❌ move {:?} -> {:?} BLOCKED + no fly room", player.block_pos, new_pos);
+        info!(
+            "❌ move {:?} -> {:?} BLOCKED + no fly room",
+            player.block_pos, new_pos
+        );
         return false;
     }
     player.block_pos = new_pos;
@@ -701,10 +723,8 @@ pub fn scenario_tick_recorder(
     // 写到独立行（追加）
     if let Ok(line) = serde_json::to_string(&rec) {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&state.record_path)
+        if let Ok(mut f) =
+            std::fs::OpenOptions::new().create(true).append(true).open(&state.record_path)
         {
             let _ = writeln!(f, "{}", line);
         }

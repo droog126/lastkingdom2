@@ -12,8 +12,8 @@
 #![allow(dead_code)]
 
 use bevy::prelude::*;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -78,13 +78,13 @@ impl MonsterKind {
 pub struct MonsterIndividual {
     pub id: u32,
     pub kind: MonsterKind,
-    pub nest_id: u32,         // 0 = 顶级（不在任何 nest），>0 = 隶属小巢
-    pub kingdom_id: u32,      // 所属王国
+    pub nest_id: u32,    // 0 = 顶级（不在任何 nest），>0 = 隶属小巢
+    pub kingdom_id: u32, // 所属王国
     pub hp: i32,
     pub max_hp: i32,
-    pub food: i64,            // 体内食物（死亡时 25% 转化为灵魂）
+    pub food: i64,             // 体内食物（死亡时 25% 转化为灵魂）
     pub last_active_tick: u64, // 巢穴用
-    pub position: [i32; 3],   // 简单位置
+    pub position: [i32; 3],    // 简单位置
 }
 
 impl MonsterIndividual {
@@ -117,7 +117,7 @@ impl MonsterIndividual {
             let t = Transfer {
                 kind: ResourceKind::Soul,
                 amount: soul,
-                src: TransferSrc::Regen, // 守恒审计上算"再生"而非"加"
+                src: TransferSrc::Regen,  // 守恒审计上算"再生"而非"加"
                 dst: TransferDst::Wasted, //  无所谓
             };
             let _ = apply_transfer(pool, t);
@@ -155,15 +155,7 @@ impl MonsterNest {
                 MonsterIndividual::new(mid, kind, kingdom_id, id, center),
             );
         }
-        Self {
-            id,
-            kingdom_id,
-            biome,
-            center,
-            individuals,
-            last_activity_tick: 0,
-            dormant: false,
-        }
+        Self { id, kingdom_id, biome, center, individuals, last_activity_tick: 0, dormant: false }
     }
 
     pub fn size(&self) -> u32 {
@@ -172,7 +164,9 @@ impl MonsterNest {
 
     /// 5 分钟无活动 → 进入休眠
     pub fn check_dormancy(&mut self, current_tick: u64) {
-        if !self.dormant && current_tick.saturating_sub(self.last_activity_tick) > NEST_DORMANCY_SECS as u64 {
+        if !self.dormant
+            && current_tick.saturating_sub(self.last_activity_tick) > NEST_DORMANCY_SECS as u64
+        {
             self.dormant = true;
         }
     }
@@ -211,14 +205,7 @@ impl MonsterKingdom {
             let n = MonsterNest::new(nid, id, biome, nc, 20);
             nests.insert(nid, n);
         }
-        Self {
-            id,
-            biome,
-            center,
-            nests,
-            destroyed: false,
-            destroyed_at_tick: None,
-        }
+        Self { id, biome, center, nests, destroyed: false, destroyed_at_tick: None }
     }
 
     pub fn total_individuals(&self) -> u32 {
@@ -233,7 +220,7 @@ impl MonsterKingdom {
 #[derive(Resource, Debug)]
 pub struct MonsterEcosystem {
     pub kingdoms: HashMap<u32, MonsterKingdom>,
-    pub max_individuals: u32,        // 全局上限
+    pub max_individuals: u32, // 全局上限
     pub current_individuals: u32,
     pub rng: StdRng,
     pub current_tick: u64,
@@ -292,7 +279,11 @@ impl MonsterEcosystem {
 
     /// demo 初始化：1 个王国（jungle）+ 3 个小巢各 20 = 60 个体
     pub fn demo_init(&mut self, world_center: [i32; 3]) {
-        self.spawn_kingdom(Biome::Jungle, [world_center[0], world_center[1], world_center[2] - 8], 3);
+        self.spawn_kingdom(
+            Biome::Jungle,
+            [world_center[0], world_center[1], world_center[2] - 8],
+            3,
+        );
     }
 
     pub fn spawn_kingdom(&mut self, biome: Biome, center: [i32; 3], nest_count: u32) -> u32 {
@@ -320,9 +311,7 @@ impl MonsterEcosystem {
                 n.check_dormancy(current);
                 if n.tick_decay(&mut rng) {
                     // 衰亡 → 释放个体配额
-                    self.current_individuals = self
-                        .current_individuals
-                        .saturating_sub(n.size());
+                    self.current_individuals = self.current_individuals.saturating_sub(n.size());
                     to_remove.push(n.id);
                 }
             }
@@ -373,12 +362,8 @@ impl MonsterEcosystem {
 
     /// 守恒校验：current_individuals 应该 = 所有 nests 的个体数之和
     pub fn verify_individual_count(&self) -> bool {
-        let sum: u32 = self
-            .kingdoms
-            .values()
-            .filter(|k| !k.destroyed)
-            .map(|k| k.total_individuals())
-            .sum();
+        let sum: u32 =
+            self.kingdoms.values().filter(|k| !k.destroyed).map(|k| k.total_individuals()).sum();
         sum == self.current_individuals
     }
 }

@@ -7,7 +7,9 @@ param(
     # 默认 SkipBuild=true: 冷编译 lightyear 0.26 + leafwing 需要 22+ 分钟,
     # 超过 30 min cap 装不下, 也撞 lightyear + bevy 0.18 API drift 编译错。
     # 只在 binary 已经编过、增量 build 时才用 -Build
-    [switch]$SkipBuild = $true
+    [switch]$SkipBuild = $true,
+    # 启用 Bevy 动态链接 (开发期增量 build 快, binary 会动态加载 lib 而非静态链接)
+    [switch]$Dynamic = $false
 )
 
 $ProjectRoot = $PSScriptRoot
@@ -21,9 +23,11 @@ Get-Process -Name "lk2-client" -ErrorAction SilentlyContinue | Stop-Process -For
 Start-Sleep -Seconds 1
 
 # 1. Build (default 跳过, 改用 -Build flag 显式打开)
+$featureArgs = if ($Dynamic) { "--features dev-dynamic-linking" } else { "" }
+if ($Dynamic) { Write-Host ">>> dynamic linking ON <<<" -ForegroundColor Cyan }
 if (-not $SkipBuild) {
-    Write-Host ">>> cargo build -p lk2-client ..." -ForegroundColor Cyan
-    cargo build -p lk2-client 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+    Write-Host ">>> cargo build -p lk2-client $featureArgs ..." -ForegroundColor Cyan
+    Invoke-Expression "cargo build -p lk2-client $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
     if ($LASTEXITCODE -ne 0) {
         Write-Host ">>> BUILD FAILED" -ForegroundColor Red
         exit 1

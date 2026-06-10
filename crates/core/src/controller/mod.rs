@@ -72,13 +72,13 @@ impl Default for PvPController {
     fn default() -> Self {
         Self {
             // 移动参数
-            speed: 5.0,              // Minecraft 疾跑速度
-            jump_impulse: 8.0,       // MC 默认
-            air_control: 0.3,        // 空中控制较弱
+            speed: 5.0,        // Minecraft 疾跑速度
+            jump_impulse: 8.0, // MC 默认
+            air_control: 0.3,  // 空中控制较弱
             gravity_scale: 1.0,
 
             // 自动爬
-            step_height: 0.6,        // 自动爬 1 格
+            step_height: 0.6, // 自动爬 1 格
             step_speed: 3.0,
 
             // 地面检测
@@ -166,9 +166,9 @@ pub struct PlayerCollider {
 impl Default for PlayerCollider {
     fn default() -> Self {
         Self {
-            radius: 0.3,        // MC 玩家宽度 0.6m
-            half_height: 0.9,  // 总高度 = 0.3 + 0.9*2 + 0.3 = 2.4m（略高，方便碰撞）
-            eye_height: 1.62,  // MC 标准
+            radius: 0.3,      // MC 玩家宽度 0.6m
+            half_height: 0.9, // 总高度 = 0.3 + 0.9*2 + 0.3 = 2.4m（略高，方便碰撞）
+            eye_height: 1.62, // MC 标准
         }
     }
 }

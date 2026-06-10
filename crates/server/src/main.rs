@@ -30,6 +30,7 @@
 use bevy::prelude::*;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use avian3d::prelude::PhysicsPlugins;
+use lightyear::prelude::{LocalAddr, ServerUdpIo};
 
 use std::time::Duration;
 
@@ -135,6 +136,7 @@ fn main() {
         .add_systems(Startup, (
             setup_world,
             self_check,
+            spawn_server,
         ).chain())
         // ====== Update ======
         .add_systems(Update, (

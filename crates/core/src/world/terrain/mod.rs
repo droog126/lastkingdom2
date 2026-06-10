@@ -30,12 +30,16 @@ pub struct TerrainContext {
 pub trait TerrainModule: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
     /// 冲突优先级（高 weight 胜出）默认 1.0
-    fn weight(&self) -> f32 { 1.0 }
+    fn weight(&self) -> f32 {
+        1.0
+    }
     /// 返回 `Some(b)` = 放这个 block；`None` = 我不管，让下一个
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType>;
     /// 如果这个模块定义 (x, z) 处的"软地表 f32 高度"（多维 heightmap 用），返回 Some
     /// 默认 None — 只有 HeightmapModule / SpawnHillModule 覆写
-    fn surface_f32(&self, _x: i32, _z: i32) -> Option<f32> { None }
+    fn surface_f32(&self, _x: i32, _z: i32) -> Option<f32> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,8 +73,8 @@ pub struct SpawnHillModule {
     pub name: String,
     pub center_x: i32,
     pub center_z: i32,
-    pub radius: i32,        // 圆顶半径（XZ 距离）
-    pub max_height: i32,    // 圆顶中心最高点距海平面的高度
+    pub radius: i32,     // 圆顶半径（XZ 距离）
+    pub max_height: i32, // 圆顶中心最高点距海平面的高度
     pub enabled: bool,
     pub weight: f32,
 }
@@ -82,24 +86,32 @@ impl Default for SpawnHillModule {
             center_x: 48,
             center_z: 48,
             radius: 14,
-            max_height: 18,    // 中心 (48, 48) 顶面 Y = SEA_LEVEL + max_height = 12 + 18 = 30
+            max_height: 18, // 中心 (48, 48) 顶面 Y = SEA_LEVEL + max_height = 12 + 18 = 30
             enabled: true,
-            weight: 10.0,      // 最高，强制覆盖
+            weight: 10.0, // 最高，强制覆盖
         }
     }
 }
 
 impl TerrainModule for SpawnHillModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
-        if !self.enabled { return None; }
+        if !self.enabled {
+            return None;
+        }
         let dx = ctx.x - self.center_x;
         let dz = ctx.z - self.center_z;
         let dist2 = dx * dx + dz * dz;
         let r = self.radius;
-        if dist2 > r * r { return None; }   // 圆外不管，让 Heightmap 接管
+        if dist2 > r * r {
+            return None;
+        } // 圆外不管，让 Heightmap 接管
 
         // 圆顶高度 = 中心高，往外线性降低
         let dist = (dist2 as f32).sqrt();
@@ -110,20 +122,30 @@ impl TerrainModule for SpawnHillModule {
         ctx.surface_y = Some(surface);
         ctx.biome = Some(Biome::Jungle);
 
-        if ctx.y > surface { return Some(BlockType::Air); }
-        if ctx.y == surface { return Some(BlockType::Leaves); }  // 草绿冠
-        if ctx.y >= surface - 3 { return Some(BlockType::Dirt); }
+        if ctx.y > surface {
+            return Some(BlockType::Air);
+        }
+        if ctx.y == surface {
+            return Some(BlockType::Leaves);
+        } // 草绿冠
+        if ctx.y >= surface - 3 {
+            return Some(BlockType::Dirt);
+        }
         Some(BlockType::Stone)
     }
 
     /// 圆顶山 f32 高度（不截断） — 多维 heightmap 的 dim 2
     fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
-        if !self.enabled { return None; }
+        if !self.enabled {
+            return None;
+        }
         let dx = x - self.center_x;
         let dz = z - self.center_z;
         let dist2 = dx * dx + dz * dz;
         let r = self.radius;
-        if dist2 > r * r { return None; }
+        if dist2 > r * r {
+            return None;
+        }
         let dist = (dist2 as f32).sqrt();
         let dome_h = (1.0 - dist / r as f32) * self.max_height as f32;
         Some(SEA_LEVEL as f32 + 1.0 + dome_h)
@@ -138,10 +160,10 @@ impl TerrainModule for SpawnHillModule {
 pub struct HeightmapModule {
     pub name: String,
     pub seed: u64,
-    pub base_height: f32,        // SEA_LEVEL
-    pub amplitude_big: f32,      // 大尺度山脉振幅
-    pub frequency_big: f32,      // 1/N
-    pub amplitude_detail: f32,   // 细节振幅
+    pub base_height: f32,      // SEA_LEVEL
+    pub amplitude_big: f32,    // 大尺度山脉振幅
+    pub frequency_big: f32,    // 1/N
+    pub amplitude_detail: f32, // 细节振幅
     pub frequency_detail: f32,
     pub weight: f32,
 }
@@ -172,13 +194,10 @@ impl HeightmapModule {
         let biome = Biome::from_xz_infinite(x, z);
         let bias: f32 = match biome {
             Biome::Desert => -2.0,
-            Biome::Jungle =>  0.0,
-            Biome::Tundra =>  3.0,
+            Biome::Jungle => 0.0,
+            Biome::Tundra => 3.0,
         };
-        h_big * self.amplitude_big
-             + h_detail * self.amplitude_detail
-             + self.base_height
-             + bias
+        h_big * self.amplitude_big + h_detail * self.amplitude_detail + self.base_height + bias
     }
 
     /// 算 (x, z) 处的地表 Y 高度（i32，给 BlockType 生成用）
@@ -196,8 +215,12 @@ impl HeightmapModule {
 }
 
 impl TerrainModule for HeightmapModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
         let surface = self.compute_surface(ctx.x, ctx.z);
@@ -234,11 +257,11 @@ impl TerrainModule for HeightmapModule {
 pub struct CaveModule {
     pub name: String,
     pub seed: u64,
-    pub density: f32,         // > 此值挖空
-    pub scale_xz: f32,        // 1/N
+    pub density: f32,  // > 此值挖空
+    pub scale_xz: f32, // 1/N
     pub scale_y: f32,
-    pub min_y: i32,           // 不挖更深
-    pub preserve_top: i32,    // 保留表层 N 格不挖
+    pub min_y: i32,        // 不挖更深
+    pub preserve_top: i32, // 保留表层 N 格不挖
     pub enabled: bool,
     pub weight: f32,
 }
@@ -254,21 +277,31 @@ impl Default for CaveModule {
             min_y: 1,
             preserve_top: 1,
             enabled: true,
-            weight: 0.9,  // 比 heightmap 略低，让 heightmap 先定表层
+            weight: 0.9, // 比 heightmap 略低，让 heightmap 先定表层
         }
     }
 }
 
 impl TerrainModule for CaveModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
-        if !self.enabled { return None; }
-        if ctx.y < self.min_y { return None; }
+        if !self.enabled {
+            return None;
+        }
+        if ctx.y < self.min_y {
+            return None;
+        }
         // 保护表层
         if let Some(surface) = ctx.surface_y {
-            if ctx.y >= surface - self.preserve_top { return None; }
+            if ctx.y >= surface - self.preserve_top {
+                return None;
+            }
         }
         let fx = (ctx.x as f32 * self.scale_xz) as i32;
         let fy = (ctx.y as f32 * self.scale_y) as i32;
@@ -277,7 +310,7 @@ impl TerrainModule for CaveModule {
         if n > self.density {
             Some(BlockType::Air)
         } else {
-            None  // 不冲突，让 heightmap 的 stone 留下
+            None // 不冲突，让 heightmap 的 stone 留下
         }
     }
 }
@@ -300,14 +333,22 @@ impl Default for WaterFillModule {
 }
 
 impl TerrainModule for WaterFillModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
-        if ctx.y > self.sea_level { return None; }
+        if ctx.y > self.sea_level {
+            return None;
+        }
         // 高度以上 / 已经是水 的不处理；只在空腔里填水
         if let Some(surface) = ctx.surface_y {
-            if ctx.y >= surface { return Some(BlockType::Water); }
+            if ctx.y >= surface {
+                return Some(BlockType::Water);
+            }
         }
         None
     }
@@ -321,11 +362,11 @@ impl TerrainModule for WaterFillModule {
 pub struct TreeModule {
     pub name: String,
     pub seed: u64,
-    pub density: f32,           // 0..1, 每 (x,z) 生成树概率
+    pub density: f32, // 0..1, 每 (x,z) 生成树概率
     pub min_height: i32,
     pub max_height: i32,
     pub canopy_radius: i32,
-    pub biome: Option<Biome>,   // None = 任何 biome 都长
+    pub biome: Option<Biome>, // None = 任何 biome 都长
     pub weight: f32,
 }
 
@@ -334,7 +375,7 @@ impl Default for TreeModule {
         Self {
             name: "tree".into(),
             seed: 0xBEEF,
-            density: 0.10,        // 10% 方格有树（之前 2% 太稀，看不见）
+            density: 0.10, // 10% 方格有树（之前 2% 太稀，看不见）
             min_height: 3,
             max_height: 5,
             canopy_radius: 2,
@@ -354,30 +395,44 @@ impl TreeModule {
             ^ (cell_z as u64).wrapping_mul(0x85EBCA77)
             ^ self.seed;
         let r = hash01(cell_x, 0, cell_z, self.seed as u32);
-        if r > self.density { return false; }
+        if r > self.density {
+            return false;
+        }
         // 在 8x8 cell 内选 (2,2) 到 (5,5) 的中心
         let lx = x.rem_euclid(8);
         let lz = z.rem_euclid(8);
-        if lx == 3 && lz == 3 { return true; }
+        if lx == 3 && lz == 3 {
+            return true;
+        }
         // 让 hash 决定其它内部点也行（简单版：只允许 (3,3)）
         false
     }
 }
 
 impl TerrainModule for TreeModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
         // 只在地表生成
         let surface = ctx.surface_y?;
-        if ctx.y > surface { return None; }
+        if ctx.y > surface {
+            return None;
+        }
         // biome 过滤
         if let Some(required) = self.biome {
-            if ctx.biome? != required { return None; }
+            if ctx.biome? != required {
+                return None;
+            }
         }
         // 是不是这棵树的中心？
-        if !self.is_tree_center(ctx.x, ctx.z) { return None; }
+        if !self.is_tree_center(ctx.x, ctx.z) {
+            return None;
+        }
         // 中心 (x, z) 才有树
         // trunk: ctx.y 是地表上方 1..=tree_height
         let trunk_height = self.min_height
@@ -397,7 +452,9 @@ impl TerrainModule for TreeModule {
             let dy = ctx.y - canopy_top;
             let dist = (dy * dy) as f32;
             let p = 0.7 - dist * 0.15;
-            if n < p { return Some(BlockType::Leaves); }
+            if n < p {
+                return Some(BlockType::Leaves);
+            }
         }
         None
     }
@@ -412,8 +469,8 @@ pub struct OreModule {
     pub name: String,
     pub seed: u64,
     pub ore: BlockType,
-    pub cluster_size: i32,     // cluster 半径
-    pub clusters_per_64: f32,  // 每 64³ 体积的 cluster 数
+    pub cluster_size: i32,    // cluster 半径
+    pub clusters_per_64: f32, // 每 64³ 体积的 cluster 数
     pub min_y: i32,
     pub max_y: i32,
     pub biome: Option<Biome>,
@@ -427,7 +484,7 @@ impl Default for OreModule {
             seed: 0xCAFE,
             ore: BlockType::IronOre,
             cluster_size: 2,
-            clusters_per_64: 2.0,   // 之前 0.5 太少；提到 2.0 每 64³ 期望 2 簇
+            clusters_per_64: 2.0, // 之前 0.5 太少；提到 2.0 每 64³ 期望 2 簇
             min_y: 1,
             max_y: 60,
             biome: None,
@@ -446,33 +503,50 @@ impl OreModule {
         // cluster 中心在 cell 内随机位置
         let cell_hash = hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0x3333) as u32);
         // 决定这一格是否放 cluster
-        let threshold = self.clusters_per_64 / 64.0;  // per cell
-        if cell_hash > threshold { return false; }
+        let threshold = self.clusters_per_64 / 64.0; // per cell
+        if cell_hash > threshold {
+            return false;
+        }
         // 中心位置
         let lx = x.rem_euclid(cell_size);
         let ly = y.rem_euclid(cell_size);
         let lz = z.rem_euclid(cell_size);
-        let ox = (hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0xAAAA) as u32) as i32).rem_euclid(cell_size);
-        let oy = (hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0xBBBB) as u32) as i32).rem_euclid(cell_size);
-        let oz = (hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0xCCCC) as u32) as i32).rem_euclid(cell_size);
+        let ox = (hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0xAAAA) as u32) as i32)
+            .rem_euclid(cell_size);
+        let oy = (hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0xBBBB) as u32) as i32)
+            .rem_euclid(cell_size);
+        let oz = (hash01(cx_cell, cy_cell, cz_cell, (self.seed ^ 0xCCCC) as u32) as i32)
+            .rem_euclid(cell_size);
         let dx = (lx - ox).abs();
         let dy = (ly - oy).abs();
         let dz = (lz - oz).abs();
-        if dx + dy + dz <= self.cluster_size { return true; }
+        if dx + dy + dz <= self.cluster_size {
+            return true;
+        }
         // 噪点：邻近格子随机
-        if hash01(x, y, z, (self.seed ^ 0xDEAD) as u32) > 0.9 { return true; }
+        if hash01(x, y, z, (self.seed ^ 0xDEAD) as u32) > 0.9 {
+            return true;
+        }
         false
     }
 }
 
 impl TerrainModule for OreModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
-        if ctx.y < self.min_y || ctx.y > self.max_y { return None; }
+        if ctx.y < self.min_y || ctx.y > self.max_y {
+            return None;
+        }
         if let Some(required) = self.biome {
-            if ctx.biome? != required { return None; }
+            if ctx.biome? != required {
+                return None;
+            }
         }
         // 只替换 stone（避免覆盖 cave/水）
         // 这里我们用 weight 比 heightmap 高，先返回矿
@@ -501,13 +575,12 @@ impl TerrainPipeline {
         if y < self.vertical_min || y >= self.vertical_max {
             return BlockType::Air;
         }
-        let mut ctx = TerrainContext {
-            x, y, z, seed: self.seed,
-            surface_y: None, biome: None,
-        };
+        let mut ctx = TerrainContext { x, y, z, seed: self.seed, surface_y: None, biome: None };
         // 按 weight 降序遍历（高 weight 优先）
         let mut sorted: Vec<&Box<dyn TerrainModule>> = self.modules.iter().collect();
-        sorted.sort_by(|a, b| b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal)
+        });
         for m in sorted {
             if let Some(block) = m.decide(&mut ctx) {
                 return block;
@@ -520,7 +593,9 @@ impl TerrainPipeline {
     /// 返回 None = pipeline 没有任何模块定义 surface_f32（比如纯矿/树 pipeline）
     pub fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
         let mut sorted: Vec<&Box<dyn TerrainModule>> = self.modules.iter().collect();
-        sorted.sort_by(|a, b| b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal)
+        });
         for m in sorted {
             if let Some(h) = m.surface_f32(x, z) {
                 return Some(h);
@@ -546,7 +621,7 @@ pub mod presets {
         TerrainPipeline {
             name: "default".into(),
             modules: vec![
-                Box::new(SpawnHillModule::default()),  // 圆顶山，优先
+                Box::new(SpawnHillModule::default()), // 圆顶山，优先
                 Box::new(h),
                 Box::new(CaveModule::default()),
                 Box::new(WaterFillModule::default()),
@@ -569,7 +644,7 @@ pub mod presets {
             modules: vec![
                 Box::new(h),
                 Box::new(WaterFillModule::default()),
-                Box::new(TreeModule { density: 0.01, ..Default::default() }),  // 稀树
+                Box::new(TreeModule { density: 0.01, ..Default::default() }), // 稀树
             ],
             vertical_min: 0,
             vertical_max: crate::world::VERTICAL_SIZE,
@@ -585,7 +660,7 @@ pub mod presets {
         TerrainPipeline {
             name: "mountainous".into(),
             modules: vec![
-                Box::new(SpawnHillModule::default()),  // 出生圆顶山（mountainous 也有）
+                Box::new(SpawnHillModule::default()), // 出生圆顶山（mountainous 也有）
                 Box::new(h),
                 Box::new(CaveModule::default()),
                 Box::new(WaterFillModule::default()),
@@ -619,11 +694,8 @@ pub mod presets {
             weight: 0.5,
         };
 
-        let mut modules: Vec<Box<dyn TerrainModule>> = vec![
-            Box::new(h),
-            Box::new(cave),
-            Box::new(water),
-        ];
+        let mut modules: Vec<Box<dyn TerrainModule>> =
+            vec![Box::new(h), Box::new(cave), Box::new(water)];
         // 50% 概率加树
         if rng.random_bool(0.5) {
             modules.push(Box::new(TreeModule {
@@ -634,7 +706,12 @@ pub mod presets {
         }
         // 30% 概率加矿
         if rng.random_bool(0.3) {
-            let ores = [BlockType::IronOre, BlockType::SunstoneOre, BlockType::FrostcoreOre, BlockType::LivingRoot];
+            let ores = [
+                BlockType::IronOre,
+                BlockType::SunstoneOre,
+                BlockType::FrostcoreOre,
+                BlockType::LivingRoot,
+            ];
             modules.push(Box::new(OreModule {
                 seed: rng.random(),
                 ore: ores[rng.random_range(0..ores.len())],

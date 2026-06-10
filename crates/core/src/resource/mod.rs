@@ -26,7 +26,7 @@ use std::fmt;
 pub enum ResourceKind {
     // ---- 基础资源 ----
     Wood,
-    HardenedWood,  // 樵夫专属
+    HardenedWood, // 樵夫专属
     Apple,
     WheatSeeds,
     Carrot,
@@ -35,26 +35,26 @@ pub enum ResourceKind {
     Food,
     Soul,
     // ---- 三生态群落专属 ----
-    Sunstone,           // 焦土沙漠
-    Frostcore,          // 冰封苔原
-    LivingRoot,         // 繁盛丛林
+    Sunstone,   // 焦土沙漠
+    Frostcore,  // 冰封苔原
+    LivingRoot, // 繁盛丛林
     // ---- 炼金 ----
-    BloodthistleSeeds,  // 苔原战利品
-    FrostleafSeeds,     // 沙漠战利品
+    BloodthistleSeeds, // 苔原战利品
+    FrostleafSeeds,    // 沙漠战利品
     // ---- 以太界 ----
-    VoidEssence,        // 以太幽魂掉落
+    VoidEssence, // 以太幽魂掉落
     // ---- 传说组件 ----
-    GripOfFirelord,     // 沙漠金字塔传说宝箱
-    CoreOfIceGiant,     // 苔原冰洞传说宝箱
-    WhisperOfTreant,    // 丛林神庙传说宝箱
-    EyeOfTheDeep,       // 以太界岩浆垂钓
-    SandsOfTime,        // 沙漠传说宝箱
-    WraithFiber,        // 以太界
-    GuardianFragment,   // 丛林神庙传说宝箱
-    StormCore,          // 山地
-    EarthRune,          // 洞穴
-    VampireFang,        // 夜晚精英
-    PhoenixFeather,     // 岩浆垂钓
+    GripOfFirelord,   // 沙漠金字塔传说宝箱
+    CoreOfIceGiant,   // 苔原冰洞传说宝箱
+    WhisperOfTreant,  // 丛林神庙传说宝箱
+    EyeOfTheDeep,     // 以太界岩浆垂钓
+    SandsOfTime,      // 沙漠传说宝箱
+    WraithFiber,      // 以太界
+    GuardianFragment, // 丛林神庙传说宝箱
+    StormCore,        // 山地
+    EarthRune,        // 洞穴
+    VampireFang,      // 夜晚精英
+    PhoenixFeather,   // 岩浆垂钓
 }
 
 impl ResourceKind {
@@ -199,12 +199,7 @@ impl GlobalResourcePool {
         let cur = self.get(k);
         let max = k.max();
         if cur + amount > max {
-            return Err(PoolError::WouldExceedMax {
-                kind: k,
-                cur,
-                amount,
-                max,
-            });
+            return Err(PoolError::WouldExceedMax { kind: k, cur, amount, max });
         }
         let new = cur + amount;
         self.current.insert(k, new);
@@ -228,11 +223,7 @@ impl GlobalResourcePool {
         }
         let cur = self.get(k);
         if amount > cur {
-            return Err(PoolError::Insufficient {
-                kind: k,
-                cur,
-                amount,
-            });
+            return Err(PoolError::Insufficient { kind: k, cur, amount });
         }
         let new = cur - amount;
         self.current.insert(k, new);
@@ -409,7 +400,10 @@ pub enum TransferDst {
 pub fn apply_transfer(pool: &mut GlobalResourcePool, t: Transfer) -> Result<i64, PoolError> {
     debug_assert!(t.amount > 0, "transfer amount must be > 0");
     match t.src {
-        TransferSrc::Regen | TransferSrc::Init | TransferSrc::PlayerGather(_) | TransferSrc::MonsterDrop(_) => {
+        TransferSrc::Regen
+        | TransferSrc::Init
+        | TransferSrc::PlayerGather(_)
+        | TransferSrc::MonsterDrop(_) => {
             // 收入：直接 force_add（池子净增）
             // 注意：gathering/drop 不算 audit_added（regen 也不算），所以是 force_add
             pool.force_add(t.kind, t.amount);
@@ -422,7 +416,9 @@ pub fn apply_transfer(pool: &mut GlobalResourcePool, t: Transfer) -> Result<i64,
                 TransferDst::Wasted => {
                     // 真销毁：sub 已经扣了，dst=Wasted 表示"扔掉"
                 }
-                TransferDst::PlayerUse(_) | TransferDst::NationTreasury(_) | TransferDst::NationBuild(_) => {
+                TransferDst::PlayerUse(_)
+                | TransferDst::NationTreasury(_)
+                | TransferDst::NationBuild(_) => {
                     // 转移到目标（这里都是同 pool 内的子账户，简单起见直接 add 回去）
                     let _ = pool.try_add(t.kind, t.amount)?;
                 }
@@ -540,8 +536,8 @@ mod tests {
         let t = Transfer {
             kind: ResourceKind::Wood,
             amount: 30,
-            src: TransferSrc::Nation(0),       // 国家支出
-            dst: TransferDst::Wasted,         // 销毁
+            src: TransferSrc::Nation(0), // 国家支出
+            dst: TransferDst::Wasted,    // 销毁
         };
         // apply_transfer 处理：Nation → try_sub(30) → 池子 100-30=70
         // Wasted：不归位
@@ -559,7 +555,7 @@ mod tests {
                 kind: ResourceKind::Apple,
                 amount: 5,
                 src: TransferSrc::Regen,
-                dst: TransferDst::Wasted,  // regen 时 dst 无所谓
+                dst: TransferDst::Wasted, // regen 时 dst 无所谓
             },
         )
         .unwrap();
@@ -570,12 +566,15 @@ mod tests {
     fn cannot_force_add_past_max_during_init() {
         // force_add 也守 max（除了 regen）
         let mut p = GlobalResourcePool::new();
-        p.force_add(ResourceKind::Sunstone, 200);  // max=200，恰好
+        p.force_add(ResourceKind::Sunstone, 200); // max=200，恰好
         // 再加会越过，但 force_add 不会检查
-        p.force_add(ResourceKind::Sunstone, 1);    // 现在 201 > 200
+        p.force_add(ResourceKind::Sunstone, 1); // 现在 201 > 200
         // verify_conservation 应该报超过 max（中文标签 "阳炎石"）
         let err = p.verify_conservation().unwrap_err();
-        assert!(err.contains("阳炎石") && err.contains("> max"),
-            "expected '阳炎石' and '> max' in error, got: {}", err);
+        assert!(
+            err.contains("阳炎石") && err.contains("> max"),
+            "expected '阳炎石' and '> max' in error, got: {}",
+            err
+        );
     }
 }

@@ -68,7 +68,14 @@ pub struct Nation {
 }
 
 impl Nation {
-    pub fn new(id: NationId, name: String, king: u32, flag_pos: [i32; 3], tick: u64, order: u32) -> Self {
+    pub fn new(
+        id: NationId,
+        name: String,
+        king: u32,
+        flag_pos: [i32; 3],
+        tick: u64,
+        order: u32,
+    ) -> Self {
         let mut members = BTreeSet::new();
         members.insert(king);
         Self {
@@ -196,11 +203,8 @@ impl NationRegistry {
         // 等等——Transfer 的语义是 src 减 / dst 加。买旗应该是"玩家灵魂→销毁"。
         // 但 TransferSrc::PlayerGather 意思是"玩家从某处采集"——这不对。
         // 让我们换一个 TransferSrc：直接 try_sub 然后单独处理。
-        pool.try_sub(ResourceKind::Soul, cost)
-            .map_err(|e| FoundError::PoolError(e))?;
-        pool.audit_subtracted
-            .entry(ResourceKind::Soul)
-            .and_modify(|v| *v += cost);
+        pool.try_sub(ResourceKind::Soul, cost).map_err(|e| FoundError::PoolError(e))?;
+        pool.audit_subtracted.entry(ResourceKind::Soul).and_modify(|v| *v += cost);
         // 这里其实有个守恒问题：买了旗灵魂没了，但池子里也没"多出"什么
         // 所以 sub 后 audit_subtracted 累加，但 audit_added 没动 → verify_conservation 不会报错（sub ≤ add）
 
@@ -228,10 +232,7 @@ impl NationRegistry {
         }
         let n = self.nations.get_mut(&nation_id).ok_or(JoinError::NoSuchNation)?;
         if n.size() as u32 >= n.pop_cap {
-            return Err(JoinError::PopulationFull {
-                current: n.size() as u32,
-                cap: n.pop_cap,
-            });
+            return Err(JoinError::PopulationFull { current: n.size() as u32, cap: n.pop_cap });
         }
         n.members.insert(player_id);
         Ok(())
@@ -239,9 +240,7 @@ impl NationRegistry {
 
     /// 玩家离开国家
     pub fn leave(&mut self, player_id: u32) -> Result<NationId, LeaveError> {
-        let id = self
-            .find_nation_by_player(player_id)
-            .ok_or(LeaveError::NotInNation)?;
+        let id = self.find_nation_by_player(player_id).ok_or(LeaveError::NotInNation)?;
         let n = self.nations.get_mut(&id).unwrap();
         if player_id == n.king {
             // 国王离开 = 国家解散（传位太复杂，demo 直接解散）
@@ -256,10 +255,7 @@ impl NationRegistry {
 
     /// 找玩家所在的国家
     pub fn find_nation_by_player(&self, player_id: u32) -> Option<NationId> {
-        self.nations
-            .values()
-            .find(|n| n.is_member(player_id))
-            .map(|n| n.id)
+        self.nations.values().find(|n| n.is_member(player_id)).map(|n| n.id)
     }
 
     /// 对一个国家造成 HP 伤害（攻击旗帜）。返回剩余 HP
@@ -299,10 +295,7 @@ impl NationRegistry {
         let n = self.nations.get_mut(&nation_id).ok_or(UpgradeError::NoSuchNation)?;
         let current_cap = n.pop_cap;
         if target <= current_cap {
-            return Err(UpgradeError::AlreadyAtOrAbove {
-                current: current_cap,
-                target,
-            });
+            return Err(UpgradeError::AlreadyAtOrAbove { current: current_cap, target });
         }
         if !matches!(target, 10 | 15 | 20) {
             return Err(UpgradeError::InvalidTarget(target));
@@ -317,13 +310,16 @@ impl NationRegistry {
         }
         // 扣资源（国家开销 = 销毁）
         if wood > 0 {
-            pool.try_sub(ResourceKind::Wood, wood as i64).map_err(|e: PoolError| UpgradeError::PoolError(e))?;
+            pool.try_sub(ResourceKind::Wood, wood as i64)
+                .map_err(|e: PoolError| UpgradeError::PoolError(e))?;
         }
         if food > 0 {
-            pool.try_sub(ResourceKind::Food, food as i64).map_err(|e: PoolError| UpgradeError::PoolError(e))?;
+            pool.try_sub(ResourceKind::Food, food as i64)
+                .map_err(|e: PoolError| UpgradeError::PoolError(e))?;
         }
         if soul > 0 {
-            pool.try_sub(ResourceKind::Soul, soul as i64).map_err(|e: PoolError| UpgradeError::PoolError(e))?;
+            pool.try_sub(ResourceKind::Soul, soul as i64)
+                .map_err(|e: PoolError| UpgradeError::PoolError(e))?;
         }
         // 升级
         n.pop_cap = target;
@@ -444,9 +440,7 @@ mod tests {
     #[test]
     fn found_first_nation_costs_10_souls() {
         let (mut reg, mut pool) = reg_with_souls(10);
-        let id = reg
-            .found(&mut pool, 1, "TestNation".into(), [16, 8, 16], 0)
-            .unwrap();
+        let id = reg.found(&mut pool, 1, "TestNation".into(), [16, 8, 16], 0).unwrap();
         assert_eq!(id, NationId(0));
         assert_eq!(reg.flag_count, 1);
         assert_eq!(pool.get(ResourceKind::Soul), 0);
@@ -468,25 +462,23 @@ mod tests {
     fn cannot_exceed_8_flags() {
         let (mut reg, mut pool) = reg_with_souls(10 + 15 + 20 + 25 + 30 + 40 + 50 + 60);
         for i in 1..=8 {
-            reg.found(&mut pool, i as u32, format!("N{}", i), [i, 1, 1], 0)
-                .unwrap();
+            reg.found(&mut pool, i as u32, format!("N{}", i), [i, 1, 1], 0).unwrap();
         }
         assert_eq!(reg.flag_count, 8);
         assert!(!reg.can_found_new());
         // 第 9 面国旗应该失败
-        let err = reg
-            .found(&mut pool, 9, "N9".into(), [9, 1, 1], 0)
-            .unwrap_err();
+        let err = reg.found(&mut pool, 9, "N9".into(), [9, 1, 1], 0).unwrap_err();
         assert!(matches!(err, FoundError::MaxFlagsReached(8)));
     }
 
     #[test]
     fn insufficient_souls_fails() {
-        let (mut reg, mut pool) = reg_with_souls(5);  // 不足 10
-        let err = reg
-            .found(&mut pool, 1, "N".into(), [1, 1, 1], 0)
-            .unwrap_err();
-        assert!(matches!(err, FoundError::InsufficientSouls { have: 5, need: 10 }));
+        let (mut reg, mut pool) = reg_with_souls(5); // 不足 10
+        let err = reg.found(&mut pool, 1, "N".into(), [1, 1, 1], 0).unwrap_err();
+        assert!(matches!(
+            err,
+            FoundError::InsufficientSouls { have: 5, need: 10 }
+        ));
     }
 
     #[test]
@@ -494,9 +486,7 @@ mod tests {
         let (mut reg, mut pool) = reg_with_souls(100);
         reg.found(&mut pool, 1, "A".into(), [1, 1, 1], 0).unwrap();
         // 玩家 1 尝试再建一个国家
-        let err = reg
-            .found(&mut pool, 1, "B".into(), [2, 1, 1], 0)
-            .unwrap_err();
+        let err = reg.found(&mut pool, 1, "B".into(), [2, 1, 1], 0).unwrap_err();
         assert!(matches!(err, FoundError::AlreadyInNation));
     }
 
@@ -510,12 +500,15 @@ mod tests {
         }
         // 第 6 个应失败
         let err = reg.join(id, 6).unwrap_err();
-        assert!(matches!(err, JoinError::PopulationFull { current: 5, cap: 5 }));
+        assert!(matches!(
+            err,
+            JoinError::PopulationFull { current: 5, cap: 5 }
+        ));
     }
 
     #[test]
     fn upgrade_population_consumes_resources() {
-        let (mut reg, mut pool) = reg_with_souls(10 + 25);  // 25 是升级到 15 需要的
+        let (mut reg, mut pool) = reg_with_souls(10 + 25); // 25 是升级到 15 需要的
         pool.force_add(ResourceKind::Wood, 3_000);
         pool.force_add(ResourceKind::Food, 2_000);
         let id = reg.found(&mut pool, 1, "A".into(), [1, 1, 1], 0).unwrap();

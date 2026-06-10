@@ -85,12 +85,19 @@ pub fn spawn_creatures(
     world: Res<GameWorld>,
     mut done: ResMut<CreatureSpawnerDone>,
 ) {
-    if done.0 { return; }
+    if done.0 {
+        return;
+    }
     done.0 = true;
 
     let s = world.size;
     let mut rng = rand::rng();
-    let kinds = [CreatureKind::Pig, CreatureKind::Sheep, CreatureKind::Cow, CreatureKind::Chicken];
+    let kinds = [
+        CreatureKind::Pig,
+        CreatureKind::Sheep,
+        CreatureKind::Cow,
+        CreatureKind::Chicken,
+    ];
     let count = 30;
     let mut placed = 0;
     let mut attempts = 0;
@@ -104,7 +111,15 @@ pub fn spawn_creatures(
         starter_attempts += 1;
         let x = spawn_cx + rng.random_range(-8..9);
         let z = spawn_cz + rng.random_range(-8..9);
-        if try_spawn_creature(&mut commands, &mut meshes, &mut materials, &world, &kinds, x, z) {
+        if try_spawn_creature(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &world,
+            &kinds,
+            x,
+            z,
+        ) {
             placed += 1;
         }
     }
@@ -117,8 +132,18 @@ pub fn spawn_creatures(
         let x = rng.random_range(2..(s - 2));
         let z = rng.random_range(2..(s - 2));
         // 离出生点 8 格以外（避免覆盖起始牧场）
-        if (x - spawn_cx).abs() + (z - spawn_cz).abs() < 8 { continue; }
-        if try_spawn_creature(&mut commands, &mut meshes, &mut materials, &world, &kinds, x, z) {
+        if (x - spawn_cx).abs() + (z - spawn_cz).abs() < 8 {
+            continue;
+        }
+        if try_spawn_creature(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &world,
+            &kinds,
+            x,
+            z,
+        ) {
             placed += 1;
         }
     }
@@ -137,7 +162,9 @@ fn try_spawn_creature(
 ) -> bool {
     let mut rng = rand::rng();
     let s = world.size;
-    if x < 2 || x >= s - 2 || z < 2 || z >= s - 2 { return false; }
+    if x < 2 || x >= s - 2 || z < 2 || z >= s - 2 {
+        return false;
+    }
     // 找地表
     let mut surface_y = None;
     for y in (1..s).rev() {
@@ -146,9 +173,13 @@ fn try_spawn_creature(
             break;
         }
     }
-    let Some(y) = surface_y else { return false; };
-    if !world.get(x, y, z).is_surface() { return false; }
-    let y = y + 1;  // 站在地表上一格
+    let Some(y) = surface_y else {
+        return false;
+    };
+    if !world.get(x, y, z).is_surface() {
+        return false;
+    }
+    let y = y + 1; // 站在地表上一格
 
     let kind = kinds[rng.random_range(0..kinds.len())];
 
@@ -163,16 +194,13 @@ fn try_spawn_creature(
         Creature { kind, block_pos: [x, y, z] },
         CreatureAI {
             wander_timer: 0.0,
-            next_wander_secs: rng.random_range(0.5..1.5),  // 起始牧场动得快点
+            next_wander_secs: rng.random_range(0.5..1.5), // 起始牧场动得快点
             bob_phase: rng.random_range(0.0..std::f32::consts::TAU),
         },
         Mesh3d(mesh_h),
         MeshMaterial3d(mat_h),
-        Transform::from_translation(Vec3::new(
-            x as f32 + 0.5,
-            y as f32 + 0.5,
-            z as f32 + 0.5,
-        )).with_scale(kind.size()),
+        Transform::from_translation(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5))
+            .with_scale(kind.size()),
     ));
     true
 }
@@ -186,7 +214,9 @@ pub fn player_attack_creatures(
     mut commands: Commands,
     mut q: Query<(Entity, &mut Creature, &mut CreatureAI)>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyK) { return; }
+    if !keys.just_pressed(KeyCode::KeyK) {
+        return;
+    }
     let px = player.block_pos[0] as f32 + 0.5;
     let py = player.block_pos[1] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
@@ -234,22 +264,28 @@ pub fn update_creatures(
         let bob = (ai.bob_phase).sin() * 0.05;
         tf.translation.y = creature.block_pos[1] as f32 + 0.5 + bob;
 
-        if ai.wander_timer < ai.next_wander_secs { continue; }
+        if ai.wander_timer < ai.next_wander_secs {
+            continue;
+        }
         ai.wander_timer = 0.0;
         ai.next_wander_secs = rng.random_range(1.5..3.0);
 
         // 选个方向：4 水平 + 偶尔原地转身
-        let dirs: [[i32; 3]; 4] = [
-            [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1],
-        ];
+        let dirs: [[i32; 3]; 4] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
         let d = dirs[rng.random_range(0..dirs.len())];
         let nx = creature.block_pos[0] + d[0];
         let ny = creature.block_pos[1] + d[1];
         let nz = creature.block_pos[2] + d[2];
-        if !world.in_bounds(nx, ny, nz) { continue; }
+        if !world.in_bounds(nx, ny, nz) {
+            continue;
+        }
         // 目标格必须空（Air），下方必须是实心
-        if world.get(nx, ny, nz) != BlockType::Air { continue; }
-        if !world.get(nx, ny - 1, nz).is_solid() { continue; }
+        if world.get(nx, ny, nz) != BlockType::Air {
+            continue;
+        }
+        if !world.get(nx, ny - 1, nz).is_solid() {
+            continue;
+        }
         // 转向（用 y 旋转）
         let yaw = match (d[0], d[2]) {
             (1, 0) => std::f32::consts::FRAC_PI_2,

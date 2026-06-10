@@ -32,7 +32,9 @@ impl Default for SimClock {
                 if let Some(name) = e.file_name().to_str() {
                     if let Some(rest) = name.strip_prefix("iter_") {
                         if let Ok(n) = rest.parse::<u32>() {
-                            if n > max_iter { max_iter = n; }
+                            if n > max_iter {
+                                max_iter = n;
+                            }
                         }
                     }
                 }
