@@ -51,6 +51,10 @@ lk2-core = { workspace = true }
 # lightyear 0.26 — 服务端权威 + 消息分发
 # 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
 # 也直接拉是为了在 main.rs 里引用
-lightyear = { workspace = true, features = ["leafwing"] }
+# wire-network-and-loop 任务（2026-06-10）: 加 server + udp feature
+# - server: 拉 lightyear_udp 的 server 模块（ServerUdpIo）
+# - udp: 把 lightyear_udp 这个 sub-crate 引入（缺了 udp feature，
+#   `lightyear::prelude::server::ServerUdpIo` 是 unresolved import）
+lightyear = { workspace = true, features = ["leafwing", "server", "udp"] }
 lightyear_inputs_leafwing = { workspace = true }
 leafwing-input-manager = { workspace = true }
