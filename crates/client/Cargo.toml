@@ -64,7 +64,10 @@ lk2-core = { workspace = true }
 # 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
 # 也直接拉是为了在 main.rs 里用 `lightyear_inputs_leafwing::InputPlugin`
 # 引用
-lightyear = { workspace = true, features = ["leafwing"] }
+# wire-network-and-loop 任务（2026-06-10）: 加 client + udp feature
+# - client: 拉 lightyear_udp 的 client 模块（UdpIo 给 client 用）
+# - udp: 把 lightyear_udp 这个 sub-crate 引入
+lightyear = { workspace = true, features = ["leafwing", "client", "udp"] }
 lightyear_inputs_leafwing = { workspace = true }
 leafwing-input-manager = { workspace = true }
 

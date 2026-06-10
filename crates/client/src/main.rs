@@ -99,7 +99,15 @@ fn main() {
     let offline_mode = args.iter().any(|a| a == "--offline");
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
 
-    println!("[lk2-client] starting (offline={}, auto_demo={})", offline_mode, auto_demo_mode);
+    // 解析 --connect=<ip:port>（wire-network-and-loop 任务, 2026-06-10）
+    // --offline 时强制 offline 模式（即使用户写了 --connect）
+    let connect_addr = lk2_core::transport::parse_connect_arg(&args);
+    let network_mode = connect_addr.is_some() && !offline_mode;
+    if network_mode {
+        println!("[lk2-client] network mode: connect to {}", connect_addr.unwrap());
+    } else {
+        println!("[lk2-client] starting (offline={}, auto_demo={})", offline_mode, auto_demo_mode);
+    }
 
     // 解析 --preset
     let preset_name = args
@@ -174,15 +182,25 @@ fn main() {
         .insert_resource(Gravity::default());
 
     // ===== 3. lightyear 0.26 ClientPlugins =====
-    // 注意：当前（build-client）任务**还没接** UDP transport。`--offline` 模式
-    // 下 Client 不会真去连 server；wire-network-and-loop task 会把
-    // `ClientPlugins::net_config(...)` 加上 UDP transport。占位 default 配置
-    // 启动起来 OK（Client entity 不 spawn 就啥也不发生）。
-    //
-    // 这里只 `add_plugins(ClientPlugins::default())`，并把协议 plugin 一起加，
-    // 保证 register_message / register_component / InputPlugin 全部 init。
+    // wire-network-and-loop 任务（2026-06-10）完成 update: 之前 build-client
+    // 任务只 `add_plugins(ClientPlugins::default())` 占位。现在:
+    // - offline 模式行为完全不变（不 spawn Client entity）
+    // - network 模式(--connect=): 在 Startup chain 末尾 spawn Client entity
+    //   挂 `UdpIo` + `LocalAddr(0.0.0.0:0)` + `PeerAddr(server_addr)`,由
+    //   lightyear 内部的 LinkStart observer 自动 `UdpSocket::bind(0.0.0.0:0)`
+    //   并 connect 到 server
+    // - 加一个 `apply_networked_position` system 把 server 复制回来的
+    //   `PlayerPos` 写到玩家 entity 的 `Transform.translation` 上
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
+
+    if network_mode {
+        let server_addr = connect_addr
+            .expect("network_mode=true implies connect_addr is Some");
+        app.add_systems(Startup, move |commands: Commands| {
+            spawn_networked_client(commands, server_addr);
+        });
+    }
 
     // ===== 4. 资源初始化 =====
     app.init_resource::<RenderConfig>()
@@ -248,6 +266,10 @@ fn main() {
             lk2_core::scenario::scenario_runner,
             lk2_core::scenario::simulate_player_actions,
             lk2_core::scenario::scenario_tick_recorder,
+            // network mode (1): apply server-replicated PlayerPos
+            // (offline 模式下 apply_networked_position 是 no-op, 因为
+            // PlayerPos 没注册组件, Transform 不会被改)
+            apply_networked_position,
             // 客户端独有 (8)
             auto_demo,
             mouse_look_system,
@@ -306,6 +328,59 @@ fn main() {
 
     // ===== 9. 启动！ =====
     app.run();
+}
+
+// ---------------------------------------------------------------------------
+// spawn_networked_client — lightyear 0.26 client transport wiring
+// ---------------------------------------------------------------------------
+//
+// wire-network-and-loop 任务 (2026-06-10) — 接 UDP transport。
+// 跟 server 端对称: lightyear 0.26 走 reactive 模式,
+// spawn Client entity 挂 `UdpIo` + `LocalAddr(0.0.0.0:0)` + `PeerAddr(server_addr)`,
+// 系统自动 `UdpSocket::bind(0.0.0.0:0)` 并 connect。
+//
+// 参考:
+// - lightyear_udp-0.26.4/src/lib.rs:64-75 (`UdpIo` 定义, `#[require(Link)]`)
+// - lightyear_udp-0.26.4/src/lib.rs:107+ (LinkStart observer 触发 bind)
+//
+// **不做 client-side prediction** — 本任务只要 client 跟着 server 的
+// 权威 PlayerPos 走, 等子任务 2 再加 prediction。
+fn spawn_networked_client(mut commands: Commands, server_addr: std::net::SocketAddr) {
+    use lightyear::prelude::UdpIo;
+    use lightyear::prelude::{LocalAddr, PeerAddr};
+    info!(
+        "[net] spawning client entity with UdpIo + LocalAddr(0.0.0.0:0) + PeerAddr({})",
+        server_addr
+    );
+    commands.spawn((
+        Name::new("Client"),
+        UdpIo::default(),
+        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
+        PeerAddr(server_addr),
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// apply_networked_position — 把 server 复制的 PlayerPos 写到玩家 Transform
+// ---------------------------------------------------------------------------
+//
+// lightyear 0.26 在 server→client 复制时, 把 server 端玩家 entity 的
+// `PlayerPos(Vec3)` 组件同步过来 (ProtocolPlugin 已 register_component)。
+// 我们要做的: 找到客户端本地代表自己的玩家 entity (带 `Player` marker),
+// 把 `PlayerPos.0` 写到 `Transform.translation`。
+//
+// **offline 模式**: 不会 spawn Client entity, 不会有 PlayerPos 复制过来,
+// 但 offline 模式的 simulation_tick 已经直接改 Transform 了 (Resource::PlayerState),
+// 所以这个 system 在 offline 模式是 no-op (PlayerPos 组件不会存在于玩家 entity)。
+fn apply_networked_position(
+    mut q: Query<
+        (&mut Transform, &lk2_core::protocol::components::PlayerPos),
+        With<Player>,
+    >,
+) {
+    for (mut tf, pos) in q.iter_mut() {
+        tf.translation = pos.0;
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -112,6 +112,15 @@ fn main() {
         .add_plugins(MinimalPlugins)
         // 物理确定性 (server 跑 step, 不插值)
         .add_plugins(PhysicsPlugins::default())
+        // 兼容补丁: avian3d 0.6.1 的 ColliderCachePlugin 默认包含在
+        // PhysicsPlugins 里, 它在 PreUpdate 跑 clear_unused_colliders 读
+        // `MessageReader<AssetEvent<Mesh>>`。MinimalPlugins 没启 AssetPlugin,
+        // 这个 message buffer 没初始化 → panic "Message not initialized"。
+        // 修复: 显式 `init_asset` + `add_message::<AssetEvent<Mesh>>` 注册。
+        // server 完全不用 mesh asset, 只是为了让 system 找到 buffer 不 panic。
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<bevy::prelude::Mesh>()
+        .add_message::<bevy::asset::AssetEvent<bevy::prelude::Mesh>>()
         // lightyear 0.26 服务端权威
         // ⚠️ 顺序 (lightyear-0.26.4/src/lib.rs:96 强制约束):
         //   1) ServerPlugins 先 (装 netcode / link / sync / replication 系统)
