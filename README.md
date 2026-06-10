@@ -1,8 +1,8 @@
-# 万国起源：最后一国 钻石版 — Demo Skeleton
+# 万国起源：最后一国 钻石版
 
-bevy 0.18.1 上的 **sim + 渲染 demo 骨架**。
+Bevy 0.18.1 上的 **体素 sim + 渲染 demo workspace**。
 
-> 状态：✅ `cargo check` / `cargo build` / `cargo test` 全部通过；✅ `cargo run` 自动跑 sim + 截图 + HUD，**支持闭环 AI 迭代**。
+> 状态：仓库根现在是 **virtual workspace**。废弃的 `minecraft_bevy` 根包已经删除；请改用 `lk2-client` / `lk2-server` 入口。
 
 ---
 
@@ -29,21 +29,13 @@ bevy 0.18.1 上的 **sim + 渲染 demo 骨架**。
 
 ```
 F:\rustProject\lastkingdom2\
-├── Cargo.toml                  # bevy 0.18.1, broccoli 0.6.6, compt 1.9.x, serde
-├── src/
-│   ├── main.rs                 # 入口 + Bevy 系统接线 + HUD + 截图 + 启动自检
-│   ├── constant/mod.rs         # 25 资源上限 / 国旗上限 / 怪物上限 / tick 速率
-│   ├── resource/mod.rs         # GlobalResourcePool + Transfer + 守恒审计
-│   ├── world/mod.rs            # 32³ 世界 + 3 Biome + 8 BlockType + 生成器
-│   ├── nation/mod.rs           # 8 国旗上限 + pop 5/10/15/20
-│   ├── monster/mod.rs          # 5 王国 + 80 巢 + 1500 个体生态
-│   ├── render/mod.rs           # 体素地形渲染（玩家周围 16 格内）
-│   ├── pretty/mod.rs           # 水面 + 玩家 avatar + 怪物 cube + 树 + 云 + 旗
-│   └── ai/mod.rs               # TickObserver 闭环 debug
-├── target/debug/minecraft_bevy.exe
+├── Cargo.toml                  # workspace 根（无 package）
+├── crates/
+│   ├── core/                   # 共享 sim / 数据 / 协议
+│   ├── client/                 # Bevy 客户端（渲染 / HUD / 输入 / 截图）
+│   └── server/                 # headless 服务端（权威 sim / UDP）
 ├── screenshots/                # 闭环截图
-│   ├── iter_01.png             # tick ~4
-│   └── iter_02.png             # tick ~9
+│   └── iter_NN/iter_NN.png     # 每轮截图
 └── README.md
 ```
 
@@ -54,13 +46,14 @@ F:\rustProject\lastkingdom2\
 ```powershell
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
 $env:RUST_LOG = "info"
-cargo run
+cargo run -p lk2-client -- --offline
 ```
 
-或者直接跑 release binary：
+联机模式：
 
 ```powershell
-.\target\debug\minecraft_bevy.exe
+cargo run -p lk2-server
+cargo run -p lk2-client -- --connect=127.0.0.1:5000
 ```
 
 ### 自动 demo 行为
@@ -161,7 +154,14 @@ cargo run
 
 ---
 
-## 五、性能
+## 五、入口
+
+- 离线 demo / 截图闭环：`cargo run -p lk2-client -- --offline`
+- 服务端：`cargo run -p lk2-server`
+- 客户端联机：`cargo run -p lk2-client -- --connect=127.0.0.1:5000`
+- 闭环脚本：`.\loop.ps1`
+
+## 六、性能
 
 - ~50 单元测试全过（50 passed, 0 failed）
 - 启动自检 100 tick headless < 1ms
@@ -169,7 +169,7 @@ cargo run
 
 ---
 
-## 六、迭代历史
+## 七、迭代历史
 
 ### 修过的 bug
 | # | 描述 | 修复 |
@@ -195,7 +195,7 @@ cargo run
 
 ---
 
-## 七、依赖
+## 八、依赖
 
 ```toml
 bevy = "0.18.1"

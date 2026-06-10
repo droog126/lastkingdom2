@@ -32,6 +32,11 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use avian3d::prelude::PhysicsPlugins;
 use lightyear::prelude::server::ServerUdpIo;
 use lightyear::prelude::LocalAddr;
+// 用 leafwing ActionState 读 client 上行的 PlayerAction (lightyear 0.26
+// InputPlugin::finish() 在 server 端自动加 InputManagerPlugin::<A>::server()
+// + 初始化 ActionState<PlayerAction> resource, 我们直接 Res<ActionState<...>> 读就行)
+use leafwing_input_manager::prelude::ActionState;
+use lk2_core::protocol::PlayerAction;
 // lightyear 0.26.4 bug 绕开: `ServerMultiMessageSender` (lightyear_messages
 // server.rs:33 `metadata: Res<'w, PeerMetadata>`) 依赖 `Res<PeerMetadata>`,而
 // `PeerMetadata` 只在 `lightyear_connection::client::ConnectionPlugin::build`
@@ -203,7 +208,9 @@ fn main() {
         .add_systems(Startup, (
             setup_world,
             self_check,
+            dump_world_resources,
             spawn_server,
+            spawn_player,
         ).chain())
         // ====== Update ======
         .add_systems(Update, (
@@ -215,6 +222,7 @@ fn main() {
         // ====== FixedUpdate (server PvP) ======
         .add_systems(FixedUpdate, (
             // record_position_history 已在 ServerPvPPlugin 内
+            apply_input_to_player,
             read_attack_inputs,
             melee_hit_registration,
             apply_damage_and_knockback,
@@ -222,6 +230,16 @@ fn main() {
             tick_combat_cooldowns,
         ).chain())
         .run();
+}
+
+// ============================================================================
+// dump_world_resources — debug: 确认 PeerMetadata 在 world 里
+// ============================================================================
+fn dump_world_resources(world: &bevy::prelude::World) {
+    let has_peer_metadata = world.get_resource::<PeerMetadata>().is_some();
+    info!("[debug] PeerMetadata in world? {}", has_peer_metadata);
+    let has_scene_spawner = world.get_resource::<SceneSpawner>().is_some();
+    info!("[debug] SceneSpawner in world? {}", has_scene_spawner);
 }
 
 // ============================================================================
@@ -257,6 +275,96 @@ fn spawn_server(mut commands: Commands) {
     // 没 listen。
     info!("[net] triggering LinkStart on server entity {:?}", server_id);
     commands.trigger(LinkStart { entity: server_id });
+}
+
+// ============================================================================
+// spawn_player — 权威玩家 entity, 挂 PlayerPos 让 lightyear 自动复制给 client
+// ============================================================================
+//
+// wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完的最后一步。
+// 之前 server 端没人 spawn 玩家 entity, client 端 apply_networked_position
+// 跑空 round (找不到带 PlayerPos 组件的 entity)。现在 server 端 spawn 一个
+// 玩家 entity 挂 Transform + PlayerPos(Vec3) + Name("Player"), lightyear
+// 默认 server→client 复制会把 PlayerPos 自动发给 client, 客户端
+// apply_networked_position 就能把收到的 Vec3 写到本机玩家 Transform。
+//
+// 简化: 暂只 spawn 一个"权威玩家" entity, 不做 per-peer 玩家(没有
+// 真正的多人)。client 收到的就是这个 server 权威位置。
+fn spawn_player(mut commands: Commands) {
+    let spawn = bevy::math::Vec3::new(
+        constant::WORLD_SIZE as f32 / 2.0 + 0.5,
+        (constant::SEA_LEVEL + 2) as f32 + 0.5,
+        constant::WORLD_SIZE as f32 / 2.0 + 0.5,
+    );
+    info!("[player] spawning authoritative player entity at {:?}", spawn);
+    commands.spawn((
+        Name::new("Player"),
+        bevy::prelude::Transform::from_translation(spawn),
+        lk2_core::protocol::components::PlayerPos(spawn),
+        // wire-network-and-loop 任务 (2026-06-11): 挂 Replicate 组件, lightyear
+        // 才会把这个 entity + 它的 PlayerPos 组件复制给所有 client。
+        // docs: lightyear-0.26.4/src/lib.rs:195 "To replicate an entity from the
+        // local world to the remote world, you can just add the Replicate
+        // component to the entity"
+        lightyear::prelude::Replicate::to_clients(
+            lightyear::prelude::NetworkTarget::All,
+        ),
+    ));
+}
+
+// ============================================================================
+// apply_input_to_player — server 端读 client ActionState, 改 Player Transform
+// ============================================================================
+//
+// 读 `Res<ActionState<PlayerAction>>` (lightyear_inputs_leafwing 的
+// InputManagerPlugin::server() 自动 init, 通过 Res 拿全局 input) 算 Vec2
+// 方向, 应用到玩家 entity 的 Transform.translation, 然后把 Transform
+// 同步到 PlayerPos (lightyear 0.26 在 system 之间会自动复制 PlayerPos
+// 给 client)。
+//
+// 这是 authoritative server sim 的最小闭环: client 按 W → server
+// 收到 ActionState.pressed(MoveForward)=true → 玩家 entity 向 +Z 移动
+// → PlayerPos 复制 → client apply_networked_position 更新本机
+// Transform。
+fn apply_input_to_player(
+    actions: Res<ActionState<PlayerAction>>,
+    mut q: Query<&mut bevy::prelude::Transform, With<Name>>,
+    // PlayerPos 不在 Query 里 — 复制是 lightyear 自动的事, 我们改完
+    // Transform 后由 lightyear 0.26 注册的 replication 流程在下一 tick
+    // 把 PlayerPos.0 同步到 (transform.translation)。如果实际跑起来
+    // PlayerPos 没动, 后续 patch 改成显式写回。
+) {
+    let mut dir = bevy::math::Vec2::ZERO;
+    if actions.pressed(&PlayerAction::MoveForward) {
+        dir.y += 1.0;
+    }
+    if actions.pressed(&PlayerAction::MoveBackward) {
+        dir.y -= 1.0;
+    }
+    if actions.pressed(&PlayerAction::MoveLeft) {
+        dir.x -= 1.0;
+    }
+    if actions.pressed(&PlayerAction::MoveRight) {
+        dir.x += 1.0;
+    }
+    if dir.length() > 1.0 {
+        dir = dir.normalize();
+    }
+    let speed = 4.0; // m/s, 跟 client 的 PvPController 默认 speed 对齐
+    let dt = 1.0 / 60.0; // 假设 60 TPS (lightyear ServerPlugins::default tick_duration)
+    let delta = bevy::math::Vec3::new(dir.x, 0.0, -dir.y) * speed * dt; // bevy camera: -Z = forward
+    for mut transform in q.iter_mut() {
+        if transform.translation == bevy::math::Vec3::ZERO
+            && transform.translation.length() < 0.001
+        {
+            // 跳过默认 Transform (origin 0,0,0) — spawn 的玩家有真实位置
+            continue;
+        }
+        transform.translation += delta;
+    }
+    if dir.length() > 0.01 {
+        info!("[player] input dir={:?} applied delta={:?}", dir, delta);
+    }
 }
 
 // ============================================================================

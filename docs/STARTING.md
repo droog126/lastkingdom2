@@ -10,7 +10,7 @@
 
 ```powershell
 cd F:\rustProject\lastkingdom2
-cargo build
+cargo build --workspace
 ```
 
 > Rust edition 2024，需要 Rust 1.75+。`Cargo.toml` 已固定 `compt = ">=1.9, <1.10"`（broccoli 0.6 配套版本）— **不要 bump 它**。
@@ -19,12 +19,12 @@ cargo build
 
 ## 1. 三种运行姿势
 
-### 1a. 手动玩（FPS 第一视角）
+### 1a. 手动玩（离线客户端）
 
 ```powershell
 cd F:\rustProject\lastkingdom2
 $env:BEVY_DISABLE_ACCESSIBILITY="1"   # 跳过 Windows 辅助 API，启动快很多
-.\target\debug\minecraft_bevy.exe
+cargo run -p lk2-client -- --offline
 ```
 
 打开一个 1280×720 的窗口，出生在 `96³` 世界的中心。
@@ -51,8 +51,8 @@ $env:BEVY_DISABLE_ACCESSIBILITY="1"   # 跳过 Windows 辅助 API，启动快很
 ```powershell
 cd F:\rustProject\lastkingdom2
 $env:BEVY_DISABLE_ACCESSIBILITY="1"
-$env:RUST_LOG="info,minecraft_bevy=info,pvp=warn,controller=warn"
-.\target\debug\minecraft_bevy.exe --auto-demo
+$env:RUST_LOG="info"
+cargo run -p lk2-client -- --offline --auto-demo
 ```
 
 行为：
@@ -71,17 +71,17 @@ cd F:\rustProject\lastkingdom2
 .\loop.ps1
 ```
 
-等价于：`cargo build` + 启动 .exe 12 秒 + 杀进程 + 准备下一轮。AI agent 读最新截图 → 决定改什么 → 改代码 → 再跑。
+等价于：按需 build `lk2-client`/`lk2-server` + 跑 12 秒 + 杀进程 + 准备下一轮。AI agent 读最新截图 → 决定改什么 → 改代码 → 再跑。
 
 ---
 
 ## 2. 改完代码怎么看效果？
 
-**增量编译**（只改了 src/ 下文件）：
+**增量编译**：
 
 ```powershell
 cd F:\rustProject\lastkingdom2
-cargo build
+cargo build --workspace
 # 第一次：~22 分钟（cold）  后续：1-30 秒
 ```
 
@@ -123,8 +123,9 @@ cargo fmt                  # 自动格式化（rustfmt.toml: max_width=100）
 
 | 文件 | 说明 |
 | --- | --- |
-| `target\debug\minecraft_bevy.exe` | 主二进制 |
-| `screenshots\iter_NN.png` | 启动后每 5 秒一张的截图（含 HUD overlay） |
+| `target\debug\lk2-client.exe` | 客户端二进制 |
+| `target\debug\lk2-server.exe` | 服务端二进制 |
+| `screenshots\iter_NN\iter_NN.png` | 启动后每轮生成的截图（含 HUD overlay） |
 | `screenshots\state_tNN.json` | 每 5 tick 的 sim 状态（玩家坐标、资源、怪物、invariant 违例） |
 | `target\debug\deps\` | 增量编译缓存（删掉等于 cold rebuild） |
 | `log\*.log` | 编译/运行日志（`cargo build > log\build.log` 这种） |
@@ -151,15 +152,15 @@ cargo fmt                  # 自动格式化（rustfmt.toml: max_width=100）
 ```powershell
 # 玩
 cd F:\rustProject\lastkingdom2
-cargo build
+cargo build --workspace
 $env:BEVY_DISABLE_ACCESSIBILITY="1"
-.\target\debug\minecraft_bevy.exe
+cargo run -p lk2-client -- --offline
 
 # AI 迭代（截图 + 状态）
-.\target\debug\minecraft_bevy.exe --auto-demo
+cargo run -p lk2-client -- --offline --auto-demo
 # → 读 screenshots\iter_NN.png 和 state_tNN.json
 
 # 改完代码
-cargo build
+cargo build --workspace
 # 再跑
 ```

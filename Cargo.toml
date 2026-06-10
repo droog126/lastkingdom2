@@ -39,60 +39,9 @@ bevy_panorbit_camera = "0.34.0"
 # workspace 内部 crate
 lk2-core = { path = "crates/core" }
 
-# ============================================================================
-# Umbrella 包（保留 binary 入口 — main.rs 在 src/，暂时未迁走 module，
-# 之后会由 server/client 接管；详见 client-server-split.md §9）
-# ============================================================================
-[package]
-name = "minecraft_bevy"
-version = "0.1.0"
-edition = "2024"
-
-[features]
-# 启用 Bevy 动态链接,大幅缩短开发期增量编译时间。
-# 用法: cargo run --features dev-dynamic-linking
-# 注意: 仅供开发使用,切勿在发布构建中启用。
-dev-dynamic-linking = ["bevy/dynamic_linking"]
-
-[dependencies]
-# 共享依赖
-bevy = { workspace = true }
-avian3d = { workspace = true }
-rand = { workspace = true }
-bevy-inspector-egui = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-lightyear = { workspace = true }
-leafwing-input-manager = { workspace = true }
-fastnoise-lite = { workspace = true }
-bevy_egui = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-rkyv = { workspace = true }
-postcard = { workspace = true }
-zstd = { workspace = true }
-sled = { workspace = true }
-rhai = { workspace = true }
-dashmap = { workspace = true }
-building-blocks = { workspace = true }
-block-mesh = { workspace = true }
-ndshape = { workspace = true }
-parry3d = { workspace = true }
-bevy_panorbit_camera = { workspace = true }
-
-# 迁出的 sim 逻辑
-lk2-core = { workspace = true }
-
-[dev-dependencies]
-criterion = { version = "0.8", features = ["html_reports"] }
-
 [profile.dev]
 opt-level = 2
 incremental = true
 
 [profile.dev.package."*"]
 opt-level = 3
-
-[[bench]]
-name = "mesh_gen"
-harness = false

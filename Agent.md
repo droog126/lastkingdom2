@@ -48,12 +48,12 @@
 
 | 模块 | 文件 |作用 |
 | --- | --- | --- |
-|启动自检 | `src/main.rs::self_check` |100 tick headless + invariants |
+|启动自检 | `crates/client/src/main.rs::self_check` / `crates/server/src/main.rs::self_check` |100 tick headless + invariants |
 |启动后 sim | `simulation_tick` | 每1s跑1 个游戏 tick |
-| 自动 demo | `src/render/mod.rs::auto_demo` |玩家自动走 +飞 |
+| 自动 demo | `crates/client/src/render/mod.rs::auto_demo` |玩家自动走 +飞 |
 | 自动 orbit | `auto_orbit_camera` |相机绕玩家转 |
-| 自动截图 | `main.rs::periodic_screenshot` | 每5s截1 张 |
-| HUD overlay | `main.rs::setup_hud` + `update_hud` | 左上角文字 |
+| 自动截图 | `crates/client/src/main.rs::periodic_screenshot` | 每5s截1 张 |
+| HUD overlay | `crates/client/src/main.rs::setup_hud` + `update_hud` | 左上角文字 |
 |模拟输入 | (可加) `simulate_input` system |模拟键盘/鼠标输入用于自动测 |
 | tick录制 | (可加) `tick_recorder` | 每 N tick dump JSON |
 
@@ -79,7 +79,7 @@
 11. **不要删函数注释**，除非是错的
 
 ### Phase4：构建（必须过）
-12. `Set-Location F:\rustProject\lastkingdom2; $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo build --features dev-dynamic-linking`
+12. `Set-Location F:\rustProject\lastkingdom2; $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo build -p lk2-client --features dev-dynamic-linking`（联机改动同时补 `-p lk2-server`）
 13. 看 `build.log`末尾
 14. 如果失败，回到 Phase3修
 
@@ -159,10 +159,11 @@ powershell -File loop.ps1 #12s 默认
 powershell -File loop.ps1 -Seconds20 # 加长
 
 #单独编译(dev:必须带 dev-dynamic-linking,详见 § 十二)
-cargo build --features dev-dynamic-linking
+cargo build -p lk2-client --features dev-dynamic-linking
+cargo build -p lk2-server --features dev-dynamic-linking
 
 #单独跑
-$proc = Start-Process -FilePath ".\target\debug\minecraft_bevy.exe" -PassThru -NoNewWindow
+$proc = Start-Process -FilePath ".\target\debug\lk2-client.exe" -ArgumentList @("--offline","--auto-demo") -PassThru -NoNewWindow
 Start-Sleep -Seconds12
 $proc | Stop-Process -Force
 
@@ -237,20 +238,21 @@ plan:
 
 ## 十二、编译加速(必读,默认行为)
 
-**所有 dev 阶段的 `cargo build` / `cargo run` / `loop.ps1` 都必须带 `--features dev-dynamic-linking`**。`loop.ps1` 已内置这个 flag,`Phase 4` 步骤 12 也已更新。**不要**手动去掉它。
+**所有 dev 阶段的 `cargo build -p lk2-client` / `cargo build -p lk2-server` / `cargo run -p ...` / `loop.ps1` 都必须带 `--features dev-dynamic-linking`**。`loop.ps1` 已内置这个 flag,`Phase 4` 步骤 12 也已更新。**不要**手动去掉它。
 
 ### 为什么
 Bevy 本身很大,光静态链接一次要 10+ 分钟;动态链接后,只有第一次会完整编 Bevy(同样慢),**之后**只要业务代码没改到 Bevy 内部,增量构建从几分钟降到几秒。本项目已经迭代 96 轮,后面还会有几百轮 —— 没有这个 feature 根本跑不动。
 
 ### 规则
-- ✅ `cargo build --features dev-dynamic-linking`(dev 唯一正确写法)
-- ✅ `cargo run --features dev-dynamic-linking`
+- ✅ `cargo build -p lk2-client --features dev-dynamic-linking`
+- ✅ `cargo build -p lk2-server --features dev-dynamic-linking`
+- ✅ `cargo run -p lk2-client --features dev-dynamic-linking -- --offline`
 - ✅ `loop.ps1`(已自动带,不要绕过)
-- ❌ `cargo build` —— 禁止,会把动态库废掉、回退到全量静态链接
+- ❌ `cargo build` / `cargo run`（根 workspace 直接跑）—— 禁止,会绕开显式入口或退回全量静态链接
 - ❌ `cargo build --release` 时**任何**带 `dev-dynamic-linking` 的组合 —— release 严禁带这个 feature
 - ❌ 任何 CI / 打包脚本中带 `dev-dynamic-linking` —— 失败立即停
 
 ### 异常处理
-- **如果 `cargo build --features dev-dynamic-linking` 第一次失败**:检查 `Cargo.toml` 的 `[features]` 段是否还在,以及 `bevy` 依赖未被 pin 死版本(动态链接要求 `bevy` 不能是 `=x.y.z` 严格等号)。
+- **如果 `cargo build -p lk2-client --features dev-dynamic-linking` 第一次失败**:检查目标 crate 的 `[features]` 段是否还在,以及 `bevy` 依赖未被 pin 死版本(动态链接要求 `bevy` 不能是 `=x.y.z` 严格等号)。
 - **如果增量构建突然变慢到分钟级**:大概率有人误删了 `[features]` 段或 `loop.ps1` 的 `--features` flag —— 立即 `git diff Cargo.toml loop.ps1` 回看。
-- **如果 agent 误用了 `cargo build`**(无 feature):`target\debug` 里的 `minecraft_bevy.exe` 还是上一次带 feature 编出来的,表面看能跑,实际增量加速失效 —— 下次 `loop.ps1` 会自动改回正确 flag,但已编出来的二进制要 `cargo clean` 一下才彻底干净。
+- **如果 agent 误用了 `cargo build`**(无 feature):不会再产出根包 `minecraft_bevy.exe`;但会把 client/server 的动态链接缓存打乱,下次 `loop.ps1` 会自动改回正确 flag,必要时 `cargo clean` 一下再重建。

@@ -4,9 +4,9 @@ Bevy 0.18.1 voxel game demo ("万国起源：最后一国 钻石版") with **clo
 
 ## Setup commands
 
-- Install deps: `cargo build` (Rust 1.75+, edition 2024)
-- Start dev: `$env:BEVY_DISABLE_ACCESSIBILITY="1"; $env:RUST_LOG="info"; cargo run` (auto-demo mode, no input needed)
-- Build: `cargo build` (~22 min cold from scratch, ~1 s incremental)
+- Install deps: `cargo build --workspace` (Rust 1.75+, edition 2024)
+- Start dev: `$env:BEVY_DISABLE_ACCESSIBILITY="1"; $env:RUST_LOG="info"; cargo run -p lk2-client -- --offline` (auto-demo / offline loop)
+- Build: `cargo build --workspace` (~22 min cold from scratch, ~1 s incremental)
 - Test: `cargo test --workspace`
 - Lint: `cargo clippy --workspace`
 - Format: `cargo fmt` (style in `rustfmt.toml`)
@@ -19,19 +19,14 @@ Quickstart:
 
 ```powershell
 .\loop.ps1                           # build + 12s run + capture iter_NN.png + state_NN.json
-Get-ChildItem screenshots\iter_*.png | Sort LastWriteTime -Descending | Select -First 3
+Get-ChildItem screenshots\iter_*\iter_*.png | Sort LastWriteTime -Descending | Select -First 3
 ```
 
 ## Project layout
 
-- `src/main.rs` — entry, Bevy system wiring, HUD, screenshot, self-check
-- `src/world/` — 32³ voxel world, 3 biomes, 8 block types
-- `src/ai/` — `TickObserver` invariants + closed-loop debug
-- `src/scenario/` — scenario state machine (MoveTo / Gather / Attack / FoundNation / ...)
-- `src/render/` — voxel terrain mesh + spawner (player ±16 radius, max 3000 blocks)
-- `src/pretty/` — water + player avatar + monster cubes + trees + clouds + flags
-- `src/monster/`, `src/nation/`, `src/resource/`, `src/constant/`, `src/instance/` — sim subsystems
-- `src/utils/` — small helpers (channel, file)
+- `crates/client/src/main.rs` — Bevy client entry, HUD, screenshot, offline demo, client-side render/input
+- `crates/server/src/main.rs` — headless server entry, self-check, authority sim, UDP listen
+- `crates/core/src/` — shared sim/data/protocol modules (`world`, `ai`, `scenario`, `monster`, `nation`, `resource`, ...)
 - `scenarios/` — scenario JSON files (test scripts)
 - `screenshots/` — output of `loop.ps1` (PNG + state JSON)
 - `document/` — design notes (Blender export workflow, etc.)
@@ -62,5 +57,5 @@ Get-ChildItem screenshots\iter_*.png | Sort LastWriteTime -Descending | Select -
 
 ## Security
 
-- No secrets in the repo. Single-player demo, no auth, no network
+- No secrets in the repo. Network code exists for local multiplayer, but no auth/secrets flow
 - Do not commit `target/`, `screenshots/iter_*.png`, `*.log` — most are already in `.gitignore`; double-check with `git status` before pushing

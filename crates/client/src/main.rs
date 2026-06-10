@@ -73,6 +73,8 @@ use crate::render::{
 // ---- 重新导出 lk2-core PvP 数据（main.rs 里要直接用） ----
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
 use lk2_core::protocol::components::Health;
+use lk2_core::protocol::PlayerAction;
+use leafwing_input_manager::prelude::ActionState;
 
 // ---------------------------------------------------------------------------
 // CLI 解析
@@ -288,6 +290,10 @@ fn main() {
             // (offline 模式下 apply_networked_position 是 no-op, 因为
             // PlayerPos 没注册组件, Transform 不会被改)
             apply_networked_position,
+            // 键盘 → leafwing ActionState(lightyear 会自动 serialize 上行)
+            // client 端必须用 ActionState 标记 pressed, lightyear_inputs_leafwing
+            // 的 ClientInputPlugin 才会把它打包成 InputMessage 发到 server。
+            collect_keys_to_action_state,
             // 客户端独有 (8)
             auto_demo,
             mouse_look_system,
@@ -398,6 +404,58 @@ fn apply_networked_position(
 ) {
     for (mut tf, pos) in q.iter_mut() {
         tf.translation = pos.0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// collect_keys_to_action_state — 把键盘按键映射到 leafwing ActionState
+// ---------------------------------------------------------------------------
+//
+// wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完的最后一步。
+//
+// client 端必须把键盘按下的状态标到 ActionState<PlayerAction> 上,
+// lightyear_inputs_leafwing::ClientInputPlugin 才会把 ActionState 序列化
+// 上行到 server。否则 server 端 Res<ActionState<PlayerAction>> 永远空,
+// 玩家不会动。
+//
+// 简化: 用 Resource 级 ActionState<PlayerAction> (entity-level 需要
+// 给玩家 entity 配 InputMap<PlayerAction>, 这里用 Resource 更轻量)。
+//
+// key mapping (跟 PvPController 保持一致):
+//   W → MoveForward,  S → MoveBackward,  A → MoveLeft,  D → MoveRight
+//   Space → Jump
+fn collect_keys_to_action_state(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut q: Query<&mut ActionState<PlayerAction>, With<Player>>,
+) {
+    use leafwing_input_manager::prelude::ActionState as _;
+
+    let mut action_state = match q.single_mut() {
+        Ok(s) => s,
+        Err(_) => return, // 玩家 entity 不存在 (offline 模式 client 端 spawn 的本地玩家是另一个 entity, 没 ActionState)
+    };
+
+    // 每次 tick 全清再 set pressed,避免 stale state
+    // leafwing 0.20 没 release_all() 方法, 用 ActionState::default() 整体替换
+    *action_state = ActionState::<PlayerAction>::default();
+
+    if keys.pressed(KeyCode::KeyW) {
+        action_state.press(&PlayerAction::MoveForward);
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        action_state.press(&PlayerAction::MoveBackward);
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        action_state.press(&PlayerAction::MoveLeft);
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        action_state.press(&PlayerAction::MoveRight);
+    }
+    if keys.pressed(KeyCode::Space) {
+        action_state.press(&PlayerAction::Jump);
+    }
+    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        action_state.press(&PlayerAction::Sprint);
     }
 }
 
@@ -934,6 +992,10 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
                 .with_knockback_resistance(0.1),
             lk2_core::controller::PlayerCollider::default(),
             CombatState::default(),
+            // wire-network-and-loop (2026-06-11): 挂 ActionState 组件,让
+            // collect_keys_to_action_state 能 Query 到, lightyear_inputs_leafwing
+            // 也能从玩家 entity 读到 ActionState 自动 serialize 上行
+            ActionState::<PlayerAction>::default(),
             WeaponStats {
                 reach: iron.reach,
                 damage: iron.damage,

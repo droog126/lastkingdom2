@@ -23,10 +23,18 @@ test_core.txt
 test_log.txt
 test_ws.txt
 tmp_test.txt
-# server boot / e2e test logs (server_test.* / server_e2e.* / server_run.*)
+# server boot / e2e test logs (server_test.* / server_e2e.* / server_run.* / server_dbg.* / server_dbg2.* / server_e2e3-5.*)
 server_test.*
 server_e2e.*
+server_e2e[3-9].*
 server_run.*
+server_dbg.*
+server_dbg2.*
+# client boot / e2e test logs
+client_e2e.*
+client_e2e[3-9].*
+client_dbg.*
+client_dbg2.*
 
 # Temporary / duplicate files
 README copy.md

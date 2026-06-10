@@ -7,12 +7,6 @@ edition = "2024"
 name = "lk2-server"
 path = "src/main.rs"
 
-[features]
-# 启用 Bevy 动态链接，大幅缩短开发期增量编译时间。
-# 用法: cargo run -p lk2-server --features dev-dynamic-linking
-# 注意: 仅供开发使用，切勿在发布构建中启用。
-dev-dynamic-linking = ["bevy/dynamic_linking"]
-
 # ============================================================================
 # 服务端 binary：MinimalPlugins (headless) + lightyear ServerPlugins + 物理 + sim
 #
@@ -32,9 +26,10 @@ dev-dynamic-linking = ["bevy/dynamic_linking"]
 
 [dependencies]
 # bevy: 用 default-features=false + 必要 features, 不拉 winit/wgpu/asset/audio/ui
-# wire-network-and-loop 任务（2026-06-10）: 加 bevy_scene feature 以 init
-# SceneSpawner resource, 绕开 avian3d 0.6.1 init_collider_constructor_hierarchies
-# panic "Resource does not exist: SceneSpawner"
+# - default_app: SceneSpawner resource, 绕开 avian3d 0.6.1 init_collider_constructor_hierarchies
+#   panic "Resource does not exist: SceneSpawner"
+# - bevy_scene: 启 bevy::scene::SceneSpawner type (MinimalPlugins 没 ScenePlugin,
+#   我们手动 init_resource<SceneSpawner>())
 bevy = { version = "0.18.1", default-features = false, features = ["default_app", "bevy_scene"] }
 
 # 物理 — server 跑确定性 step (区别于 client 端的可视化插值)
@@ -51,16 +46,14 @@ tracing-subscriber = { workspace = true }
 # sim 共享库
 lk2-core = { workspace = true }
 
-# lightyear 0.26 — 服务端权威 + 消息分发
-# 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
-# 也直接拉是为了在 main.rs 里引用
-# wire-network-and-loop 任务（2026-06-10）: 加 server + udp + client feature
-# - server: 拉 lightyear_udp 的 server 模块（ServerUdpIo）
-# - udp: 把 lightyear_udp 这个 sub-crate 引入（缺了 udp feature，
-#   `lightyear::prelude::server::ServerUdpIo` 是 unresolved import）
+# wire-network-and-loop 任务（2026-06-10）lightyear 启的 features:
+# - leafwing: 拉 lightyear_inputs_leafwing (用 InputPlugin 接入 PlayerAction)
+# - server: 拉 lightyear_udp 的 server 模块 (ServerUdpIo)
+# - udp: 把 lightyear_udp 这个 sub-crate 引入 (缺了 udp feature,
+#   `lightyear::prelude::server::ServerUdpIo` 是 unresolved import)
 # - client: 关键！lightyear 0.26 server 端的 `ServerMultiMessageSender`
-#   依赖 `lightyear_connection::client::PeerMetadata` resource（这个 type 在
-#   client.rs 里 cfg(feature="client") 门控），所以**必须**启 client feature
+#   依赖 `lightyear_connection::client::PeerMetadata` resource (这个 type 在
+#   client.rs 里 cfg(feature="client") 门控), 所以**必须**启 client feature
 #   才会编译出 PeerMetadata 资源。Server 才能 register 成功。
 #   这看起来是 lightyear 0.26 的设计 bug / host-server 假设, 但截止 0.26.4
 #   仍然如此。详见 lightyear_connection-0.26.4/src/client.rs:148。
