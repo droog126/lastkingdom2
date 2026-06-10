@@ -1,6 +1,12 @@
 # loop.ps1 - WANGUO ORIGINS demo closed-loop iteration script
 # Usage: powershell -File loop.ps1
 # Each loop: build (if needed) -> run 12s -> kill -> list new screenshots
+#
+# 默认 (2026-06-11 wire-network-and-loop 任务后): 启 lk2-server + lk2-client
+# 走 `--connect=127.0.0.1:5000` 双进程联机模式, 验证 client 能连 server
+# 跑 sim tick + 截图。
+# 单机模式 (--offline) 还在: 传 `-Offline` 切回, 或 `-NoServer` 启 client
+# 但不启 server (client --connect= 但没 server 在听, 会 connect 失败)。
 
 param(
     [int]$Seconds = 12,
@@ -9,7 +15,15 @@ param(
     # 只在 binary 已经编过、增量 build 时才用 -Build
     [switch]$SkipBuild = $true,
     # 启用 Bevy 动态链接 (开发期增量 build 快, binary 会动态加载 lib 而非静态链接)
-    [switch]$Dynamic = $false
+    [switch]$Dynamic = $false,
+    # 联机模式 (默认 $true): 同时启 lk2-server + lk2-client --connect=...
+    # 离线模式: 只启 lk2-client --offline (旧行为)
+    [switch]$Offline = $false,
+    # 不启 server (默认 false). 用 -NoServer 跑 client --connect= 但没 server,
+    # 用于 debug client transport 行为。
+    [switch]$NoServer = $false,
+    # 联机模式 client 连的地址 (默认 127.0.0.1:5000, 跟 lk2-core::transport::DEFAULT_PORT)
+    [string]$ServerAddr = "127.0.0.1:5000"
 )
 
 $ProjectRoot = $PSScriptRoot
@@ -18,16 +32,94 @@ Set-Location $ProjectRoot
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
 $env:RUST_LOG = "info"
 
-# 0. Kill any old lk2-client process
-Get-Process -Name "lk2-client" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# 0. Kill any old lk2-client / lk2-server processes (loop 之前清场)
+Get-Process -Name "lk2-client","lk2-server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
 # 1. Build (default 跳过, 改用 -Build flag 显式打开)
 $featureArgs = if ($Dynamic) { "--features dev-dynamic-linking" } else { "" }
 if ($Dynamic) { Write-Host ">>> dynamic linking ON <<<" -ForegroundColor Cyan }
+
+# 1a. 决定 build 哪些 crate. 联机模式需要 client + server, 离线模式只需 client
+$buildTargets = if ($Offline -or $NoServer) { @("lk2-client") } else { @("lk2-client","lk2-server") }
+$serverExePath = Join-Path $ProjectRoot "target\debug\lk2-server.exe"
+$clientExePath = Join-Path $ProjectRoot "target\debug\lk2-client.exe"
+$needServerBuild = (-not $Offline) -and (-not $NoServer) -and (-not (Test-Path $serverExePath))
+$needClientBuild = -not (Test-Path $clientExePath)
+
 if (-not $SkipBuild) {
-    Write-Host ">>> cargo build -p lk2-client $featureArgs ..." -ForegroundColor Cyan
-    Invoke-Expression "cargo build -p lk2-client $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+    foreach ($t in $buildTargets) {
+        Write-Host ">>> cargo build -p $t $featureArgs ..." -ForegroundColor Cyan
+        Invoke-Expression "cargo build -p $t $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ">>> BUILD FAILED for $t" -ForegroundColor Red
+            exit 1
+        }
+    }
+} else {
+    # 就算 -SkipBuild, 缺 binary 时也要建 (本会话第一次跑 loop 常见)
+    if ($needClientBuild) {
+        Write-Host ">>> client binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
+        Invoke-Expression "cargo build -p lk2-client $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
+    }
+    if ($needServerBuild) {
+        Write-Host ">>> server binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
+        Invoke-Expression "cargo build -p lk2-server $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
+    }
+}
+
+# 2. Run + screenshot + record
+if (-not (Test-Path $clientExePath)) {
+    Write-Host ">>> Binary not found: $clientExePath" -ForegroundColor Red
+    exit 1
+}
+
+# 决定模式
+$serverProc = $null
+$serverLog = Join-Path $ProjectRoot "screenshots\loop_server.log"
+$clientLog = Join-Path $ProjectRoot "screenshots\loop_run.log"
+$mode = "online"
+if ($Offline) {
+    $mode = "offline"
+    $clientArgs = @("--offline","--auto-demo")
+    Write-Host ">>> Mode: OFFLINE (no server, client --offline --auto-demo) ${Seconds}s ..." -ForegroundColor Green
+} elseif ($NoServer) {
+    $mode = "noserver"
+    $clientArgs = @("--connect=$ServerAddr","--auto-demo")
+    Write-Host ">>> Mode: NOSERVER (no lk2-server, client --connect=$ServerAddr will fail) ${Seconds}s ..." -ForegroundColor Yellow
+} else {
+    if (-not (Test-Path $serverExePath)) {
+        Write-Host ">>> Server binary not found: $serverExePath (use -Offline to skip server)" -ForegroundColor Red
+        exit 1
+    }
+    $clientArgs = @("--connect=$ServerAddr","--auto-demo")
+    Write-Host ">>> Mode: ONLINE (server + client --connect=$ServerAddr) ${Seconds}s ..." -ForegroundColor Green
+
+    # 启 server 后台
+    Write-Host ">>> Starting lk2-server (background) ..." -ForegroundColor Cyan
+    $serverProc = Start-Process -FilePath $serverExePath -PassThru -NoNewWindow `
+        -RedirectStandardOutput $serverLog -RedirectStandardError "$serverLog.err"
+    # 等 server 跑完 self_check (大约 1 秒, 给 3 秒 buffer)
+    Start-Sleep -Seconds 3
+}
+
+# 启 client (前台, 让截图 + state JSON 写出来)
+Write-Host ">>> Starting lk2-client ($mode) ..." -ForegroundColor Cyan
+$clientProc = Start-Process -FilePath $clientExePath -ArgumentList $clientArgs -PassThru -NoNewWindow `
+    -RedirectStandardOutput $clientLog -RedirectStandardError "$clientLog.err"
+Start-Sleep -Seconds $Seconds
+$clientProc | Stop-Process -Force -ErrorAction SilentlyContinue
+if ($serverProc) {
+    $serverProc | Stop-Process -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Seconds 1
+
+# 1. Build (default 跳过, 改用 -Build flag 显式打开)
+if (-not $SkipBuild) {
+    Write-Host ">>> cargo build -p lk2-client ..." -ForegroundColor Cyan
+    cargo build -p lk2-client 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
     if ($LASTEXITCODE -ne 0) {
         Write-Host ">>> BUILD FAILED" -ForegroundColor Red
         exit 1
@@ -41,19 +133,13 @@ if (-not (Test-Path $exePath)) {
     exit 1
 }
 
-Write-Host ">>> Start demo (${Seconds}s, --offline --auto-demo) ..." -ForegroundColor Green
-$logPath = Join-Path $ProjectRoot "screenshots\loop_run.log"
-$proc = Start-Process -FilePath $exePath -ArgumentList "--offline","--auto-demo" -PassThru -NoNewWindow -RedirectStandardOutput $logPath -RedirectStandardError "$logPath.err"
-Start-Sleep -Seconds $Seconds
-$proc | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 1
-
 # 3. List results
 Write-Host ""
 Write-Host "=== Latest screenshots ===" -ForegroundColor Yellow
-Get-ChildItem "$ProjectRoot\screenshots\iter_*.png" -ErrorAction SilentlyContinue |
+# iter_NN.png 在 screenshots/iter_NN/iter_NN.png (子目录)
+Get-ChildItem "$ProjectRoot\screenshots\iter_*\iter_*.png" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 5 |
-    ForEach-Object { "  $($_.Name) ($($_.Length / 1KB | ForEach-Object {'{0:N1}KB' -f $_}))" }
+    ForEach-Object { "  $($_.FullName.Substring($ProjectRoot.Length + 1)) ($($_.Length / 1KB | ForEach-Object {'{0:N1}KB' -f $_}))" }
 
 Write-Host ""
 Write-Host "=== Latest tick state ===" -ForegroundColor Yellow
@@ -61,14 +147,33 @@ Get-ChildItem "$ProjectRoot\screenshots\state_*.json" -ErrorAction SilentlyConti
     Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
     ForEach-Object { "  $($_.Name)" }
 
+# 联机模式多输出 server 端关键 log, 帮 AI 验证"client 连上 server"
+if ($mode -in @("online","noserver")) {
+    Write-Host ""
+    Write-Host "=== Server log (last 8 lines) ===" -ForegroundColor Yellow
+    if (Test-Path $serverLog) {
+        Get-Content $serverLog -Tail 8
+    } else {
+        Write-Host "  (no server log file at $serverLog)" -ForegroundColor DarkGray
+    }
+    # 检查 server self_check / tick 关键标记
+    $serverCheckOk = (Test-Path $serverLog) -and (Select-String -Path $serverLog -Pattern "自检.*100 tick 全部通过|Server UDP socket bound" -Quiet)
+    if ($serverCheckOk) {
+        Write-Host "  [OK] server self-check passed + socket bound" -ForegroundColor Green
+    } else {
+        Write-Host "  [WARN] server didn't print self-check pass / socket bound (see log above)" -ForegroundColor Yellow
+    }
+}
+
 Write-Host ""
 Write-Host ">>> Done. AI: read latest screenshot + state JSON, decide next round" -ForegroundColor Magenta
 
 #4. SCORE protocol reminder -- find latest iter and drop decision.template.md
 $latestIterDir = $null
 $latestIterName = $null
+# 按 LastWriteTime 排序 (不是 Name — 'iter_99' 字符串 > 'iter_100' 字符串, 数字排序会跑偏)
 $ssDirs = Get-ChildItem "$ProjectRoot\screenshots\iter_*" -Directory -ErrorAction SilentlyContinue |
- Sort-Object Name -Descending
+ Sort-Object LastWriteTime -Descending
 if ($ssDirs.Count -gt0) {
  $latestIterDir = $ssDirs[0].FullName
  $latestIterName = $ssDirs[0].Name
