@@ -46,6 +46,10 @@ use lightyear::prelude::LocalAddr;
 // 'pub use lightyear_connection::*;'` 在 `lightyear::prelude::` 顶层 re-export,
 // 路径是 `lightyear::prelude::PeerMetadata`(不是 `prelude::client::PeerMetadata`)。
 use lightyear::prelude::PeerMetadata;
+// lightyear 0.26.4 文档 (lightyear-0.26.4/src/lib.rs:133):
+// "You can trigger LinkStart to start the link" — 必须手动 trigger,
+// 否则 ServerUdpIo 不会 bind socket
+use lightyear::prelude::LinkStart;
 // 绕开 avian3d 0.6.1 + MinimalPlugins: avian3d::init_collider_constructor_hierarchies
 // 读 `Res<SceneSpawner>`, MinimalPlugins 没 ScenePlugin 不会 init 它。
 // 手动 init 一个空 SceneSpawner — server 不加载任何 .scn / .gltf 资产, 这个
@@ -239,11 +243,20 @@ fn spawn_server(mut commands: Commands) {
         "[net] spawning server entity with ServerUdpIo + LocalAddr({})",
         server_addr
     );
-    commands.spawn((
-        Name::new("Server"),
-        ServerUdpIo::default(),
-        LocalAddr(server_addr),
-    ));
+    let server_id = commands
+        .spawn((
+            Name::new("Server"),
+            ServerUdpIo::default(),
+            LocalAddr(server_addr),
+        ))
+        .id();
+    // 手动 trigger LinkStart: lightyear 0.26.4 文档明示
+    // "You can trigger LinkStart to start the link"
+    // (lightyear-0.26.4/src/lib.rs:133)。不 trigger 的话 ServerUdpIo 的
+    // LinkStart observer 永远不跑, UDP socket 永远不 bind, server 等于
+    // 没 listen。
+    info!("[net] triggering LinkStart on server entity {:?}", server_id);
+    commands.trigger(LinkStart { entity: server_id });
 }
 
 // ============================================================================

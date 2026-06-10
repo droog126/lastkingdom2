@@ -23,6 +23,10 @@ test_core.txt
 test_log.txt
 test_ws.txt
 tmp_test.txt
+# server boot / e2e test logs (server_test.* / server_e2e.* / server_run.*)
+server_test.*
+server_e2e.*
+server_run.*
 
 # Temporary / duplicate files
 README copy.md
