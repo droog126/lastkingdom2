@@ -161,7 +161,8 @@ pub fn spawn_pretty(
         ];
         for (i, (color, _name)) in monster_kinds.iter().enumerate() {
             let angle = (i as f32) * 1.2566;
-            let r = 8.0 + (i as f32) * 1.5;
+            // 从 8-15m 缩到 3-5m，让 demo 怪物一定在玩家视野内（画面更满）
+            let r = 3.0 + (i as f32) * 0.5;
             let x = player.pos.x + angle.cos() * r;
             let z = player.pos.z + angle.sin() * r;
             let y = player.pos.y + 0.5;
