@@ -9,7 +9,11 @@
 # 但不启 server (client --connect= 但没 server 在听, 会 connect 失败)。
 
 param(
-    [int]$Seconds = 12,
+    # 默认 30s: UDP connect 握手 + lightyear replication 第一次 tick 推到 client 端
+    # 需要 12~30s。wire-network-and-loop 任务早期 12s 没看到 [net] applied PlayerPos
+    # log 主要是 handshake 还没完成。30s 给 lightyear NetcodeClientPlugin + ReplicationReceiver
+    # 留足时间 (首次 connect + 首次 heartbeat + 首次 component tick = ~3 个 RTT)。
+    [int]$Seconds = 60,
     # 默认 SkipBuild=true: 冷编译 lightyear 0.26 + leafwing 需要 22+ 分钟,
     # 超过 30 min cap 装不下, 也撞 lightyear + bevy 0.18 API drift 编译错。
     # 只在 binary 已经编过、增量 build 时才用 -Build

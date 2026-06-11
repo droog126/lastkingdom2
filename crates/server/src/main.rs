@@ -296,16 +296,46 @@ fn dump_world_resources(world: &bevy::prelude::World) {
 //
 // ServerUdpIo 的 `#[require(Server)]` 会自动加 Server marker, 所以不用手写。
 fn spawn_server(mut commands: Commands) {
+    use lightyear::prelude::server::Start;
+    use lightyear_netcode::server_plugin::{NetcodeConfig, NetcodeServer};
+
     let server_addr = lk2_core::transport::server_listen_addr();
     info!(
-        "[net] spawning server entity with ServerUdpIo + LocalAddr({})",
+        "[net] spawning server entity with ServerUdpIo + NetcodeServer + LocalAddr({})",
         server_addr
     );
+
+    // 构造 NetcodeServer: 这是 lightyear 0.26 server 端接 client UDP connect
+    // request 的核心组件, NetcodeServerPlugin 的 start observer 跑时
+    // `Query<(), With<NetcodeServer>>` 必须能 match 到, 否则 Started marker
+    // 不会 insert, client connect 永远停在 Connecting。
+    // private_key + protocol_id 必须跟 client 端的 NetcodeClient 一致:
+    // - 同一对 server/client 通信: shared private_key (从固定文件读 / 启动时
+    //   随机生成并写文件) + 同一 protocol_id
+    // - dev 模式: 启动时 generate_key() 并写 .lk2_server_key, client 端从
+    //   --server-arg 读。这里先简化为固定 32 字节全 0xAA 占位 (注意: 必须跟
+    //   client 端 用的 key 一致, 后续再调成从文件读)。
+    // - protocol_id 0x4C4B3256_4E455457 = "LK2VNETW" dev id
+    //   (lightyear netcode 要求两端的 protocol_id 完全相同, 校验失败 server
+    //    直接 reject client 的 connect token)
+    let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
+    let protocol_id: u64 = 0x4C4B3256_4E455457;
+    let netcode_server = NetcodeServer::new(
+        NetcodeConfig::default()
+            .with_protocol_id(protocol_id)
+            .with_key(private_key),
+    );
+    info!(
+        "[net] NetcodeServer initialized: protocol_id=0x{:x}, key=<fixed-dev>",
+        protocol_id
+    );
+
     let server_id = commands
         .spawn((
             Name::new("Server"),
             ServerUdpIo::default(),
             LocalAddr(server_addr),
+            netcode_server,
         ))
         .id();
     // 手动 trigger LinkStart: lightyear 0.26.4 文档明示
@@ -318,6 +348,12 @@ fn spawn_server(mut commands: Commands) {
         server_id
     );
     commands.trigger(LinkStart { entity: server_id });
+    // 手动 trigger Start: lightyear_netcode 0.26 NetcodeServerPlugin
+    // 加了 On<Start> observer (lightyear_netcode-0.26.4/src/server_plugin.rs:295),
+    // 不 trigger 的话 Started marker 不会 insert, server-side netcode 不真
+    // 接受 client connect request。Start 来自 lightyear_connection::server::Start。
+    info!("[net] triggering Start on server entity {:?}", server_id);
+    commands.trigger(Start { entity: server_id });
 }
 
 // ============================================================================

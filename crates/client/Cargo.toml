@@ -73,8 +73,9 @@ lk2-core = { workspace = true }
 #   NetworkVisibilityPlugin / ProtocolCheckPlugin)。缺这个 client 端
 #   没有 ReplicationReceivePlugin, server 复制的 Replicate entity 不会被
 #   client 接收 + 解码 (PlayerPos 复制失效)。
-lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication"] }
+lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication", "netcode"] }
 lightyear_inputs_leafwing = { workspace = true }
+lightyear_netcode = { version = "0.26" }
 leafwing-input-manager = { workspace = true }
 
 [dev-dependencies]

@@ -60,9 +60,13 @@ lk2-core = { workspace = true }
 #   才会编译出 PeerMetadata 资源。Server 才能 register 成功。
 #   这看起来是 lightyear 0.26 的设计 bug / host-server 假设, 但截止 0.26.4
 #   仍然如此。详见 lightyear_connection-0.26.4/src/client.rs:148。
-lightyear = { workspace = true, features = ["leafwing", "server", "udp", "client"] }
+lightyear = { workspace = true, features = ["leafwing", "server", "udp", "client", "netcode"] }
 lightyear_inputs_leafwing = { workspace = true }
 leafwing-input-manager = { workspace = true }
 # lightyear_connection 直接拉,只是为了在 main.rs 里 import PeerMetadata
 # (lightyear 0.26.4 bug 绕开, 详见 server main.rs 注释)
 lightyear_connection = { version = "0.26", features = ["server", "client"] }
+# wire-network-and-loop 任务 (2026-06-11): direct dep lightyear_netcode
+# server 端构造 NetcodeServer::new(NetcodeConfig), private_key 必须跟
+# client 端的 NetcodeClient 一样
+lightyear_netcode = { version = "0.26" }

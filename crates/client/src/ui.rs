@@ -162,14 +162,9 @@ pub fn update_hud(
     let apple = hud_state.map(|s| s.pool_apple).unwrap_or(pool.get(ResourceKind::Apple));
     let soul = hud_state.map(|s| s.pool_soul).unwrap_or(pool.get(ResourceKind::Soul));
     let flags = hud_state.map(|s| s.flag_count).unwrap_or(nations.flag_count);
-    let monster_count =
-        hud_state.map(|s| s.monster_count).unwrap_or(monsters.current_individuals);
-    let anomalies = hud_state
-        .map(|s| s.observer_anomalies as usize)
-        .unwrap_or(obs.anomalies.len());
-    let invariants = hud_state
-        .map(|s| s.observer_invariant_violations)
-        .unwrap_or(0);
+    let monster_count = hud_state.map(|s| s.monster_count).unwrap_or(monsters.current_individuals);
+    let anomalies = hud_state.map(|s| s.observer_anomalies as usize).unwrap_or(obs.anomalies.len());
+    let invariants = hud_state.map(|s| s.observer_invariant_violations).unwrap_or(0);
 
     if let Ok(mut text) = q_top.single_mut() {
         **text = format!(

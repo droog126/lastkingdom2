@@ -259,11 +259,20 @@ fn main() {
     app.init_resource::<lightyear::prelude::PeerMetadata>()
         .init_resource::<lk2_core::pvp::FixedTick>()
         .init_resource::<TimeOfDay>();
+    // Local Bevy message bus used by send_online_gameplay_commands before
+    // Lightyear forwards GameplayCommand to the server.
+    app.add_message::<GameplayCommand>();
 
     if network_mode {
         let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
         app.add_systems(Startup, move |commands: Commands| {
-            spawn_networked_client(commands, server_addr);
+            // client_id 用启动时 unix timestamp ms 末 16 位, dev 模式不需要
+            // 全局唯一, 1 个 client 就够。如果同机起多个 client 再用 counter。
+            let client_id_seed: u64 = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64 & 0xFFFF_FFFF_FFFF_FFFF)
+                .unwrap_or(0xC11E_71);
+            spawn_networked_client(commands, server_addr, client_id_seed);
         });
     }
 
@@ -413,35 +422,73 @@ fn main() {
 }
 
 // Spawn the lightyear UDP client link in online mode.
-fn spawn_networked_client(mut commands: Commands, server_addr: std::net::SocketAddr) {
+fn spawn_networked_client(
+    mut commands: Commands,
+    server_addr: std::net::SocketAddr,
+    client_id_seed: u64,
+) {
     use lightyear::prelude::UdpIo;
+    use lightyear::prelude::client::Connect;
     use lightyear::prelude::{LinkStart, LocalAddr, PeerAddr};
+    use lightyear_netcode::client_plugin::{NetcodeClient, NetcodeConfig};
+    use lightyear_netcode::prelude::Authentication;
+
     info!(
         "[net] spawning client entity with UdpIo + LocalAddr(0.0.0.0:0) + PeerAddr({})",
         server_addr
     );
+    // 构造 NetcodeClient: 这是 lightyear 0.26 client 端的 "连接凭证" 组件,
+    // NetcodeClientPlugin::connect observer (`On<Connect>` at
+    // lightyear_netcode-0.26.4/src/client_plugin.rs:193) 跑时
+    // `Query<&mut NetcodeClient, Without<Connected>>` 必须能 match 到这个组件,
+    // 否则 `client.inner.connect()` 永远不调用。Authentication::Manual 是
+    // 开发模式 (生产环境应该走 backend HTTPS 拿 ConnectToken, 但本地单局域网
+    // 联机不需要这层安全, dev 模式直接 Manual 配 private_key 即可)。
+    // dev 模式: 跟 server 端 spawn_server 一致用固定 0xAA key + 固定 protocol_id。
+    // (生产环境应该 server 把 key 写 .lk2_server_key, client 从 argv / env 读)
+    let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
+    let protocol_id: u64 = 0x4C4B3256_4E455457; // "LK2VNETW" → dev protocol id
+    let netcode_client = NetcodeClient::new(
+        Authentication::Manual { server_addr, client_id: client_id_seed, private_key, protocol_id },
+        NetcodeConfig::default(),
+    )
+    .expect("NetcodeClient::new(Manual) failed");
+    info!(
+        "[net] NetcodeClient initialized for server={}, client_id={}, protocol_id=0x{:x}",
+        server_addr, client_id_seed, protocol_id
+    );
+
     let client_id = commands
         .spawn((
             Name::new("Client"),
             UdpIo::default(),
             LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
             PeerAddr(server_addr),
+            netcode_client,
         ))
         .id();
     // 手动 trigger LinkStart, 跟 server 端同理 (lightyear 0.26 文档明示
     // "You can trigger LinkStart to start the link" — lightyear-0.26.4/src/lib.rs:133)。
     // 不 trigger 的话 UdpIo 的 LinkStart observer 永远不跑, UDP socket 永远不 bind。
-    info!("[net] triggering LinkStart on client entity {:?}", client_id);
+    info!(
+        "[net] triggering LinkStart on client entity {:?}",
+        client_id
+    );
     commands.trigger(LinkStart { entity: client_id });
+    // 手动 trigger Connect: lightyear_netcode 0.26 NetcodeClientPlugin
+    // 加了 On<Connect> observer (lightyear_netcode-0.26.4/src/client_plugin.rs:193),
+    // 不 trigger 的话 client.inner.connect() 永远不跑, UDP 不真发 connect
+    // request 到 server, server 永远不会收到 client。必须 LinkStart 之后
+    // 立刻 trigger Connect (同 frame / 同 command batch)。
+    info!("[net] triggering Connect on client entity {:?}", client_id);
+    commands.trigger(Connect { entity: client_id });
 }
 
 // Mirror replicated server position onto PlayerState resource.
 // All client systems (terrain, avatar, camera) already read PlayerState, so this
 // is the only bridge needed between network and rendering.
 fn apply_networked_position(
-    mut q: Query<
-        (&mut Transform, &lk2_core::protocol::components::PlayerPos),
-    >,
+    mut q: Query<(&mut Transform, &lk2_core::protocol::components::PlayerPos)>,
 ) {
     // 注: 不带 With<Player> filter — server 端 spawn 的 authoritative player
     // entity 复制到 client 时, 不会带 client 本地 crate::render::Player marker
@@ -459,7 +506,8 @@ fn apply_networked_position(
         // (offline 模式没 server 复制 → count = 0, 不 log 噪音)
         tracing::info!(
             "[net] applied PlayerPos to {} player entity, pos={:?}",
-            count, first_pos
+            count,
+            first_pos
         );
     }
 }
@@ -568,18 +616,17 @@ fn send_online_gameplay_commands(
     keys: Res<ButtonInput<KeyCode>>,
     player: Res<PlayerState>,
     clock: Res<SimClock>,
-    mut writer: MessageWriter<GameplayCommand>,
+    writer: Option<MessageWriter<GameplayCommand>>,
 ) {
     if *run_mode != ClientRunMode::Online {
         return;
     }
+    let Some(mut writer) = writer else {
+        return;
+    };
 
     let mut send = |kind: GameplayCommandKind| {
-        writer.write(GameplayCommand {
-            tick: clock.tick,
-            player_block: player.block_pos,
-            kind,
-        });
+        writer.write(GameplayCommand { tick: clock.tick, player_block: player.block_pos, kind });
     };
 
     if keys.just_pressed(KeyCode::KeyG) {

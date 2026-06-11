@@ -205,9 +205,11 @@ pub fn spawn_terrain_around_player(
         let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
-            // 单一 material：vertex color 模式 + 平滑 terrain
+            // 单一 material：vertex color 模式 + 平滑 terrain。
+            // Bevy/wgpu 路径偶发只显示 base_color；用草土色兜底，避免出生地变白色测试板。
             let mat = materials.add(StandardMaterial {
-                base_color: Color::WHITE, // vertex color 覆盖
+                base_color: Color::srgb(0.62, 0.72, 0.48),
+                emissive: Color::srgb(0.035, 0.045, 0.025).into(),
                 perceptual_roughness: 0.85,
                 metallic: 0.0,
                 ..default()
