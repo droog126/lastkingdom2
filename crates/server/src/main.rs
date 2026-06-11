@@ -358,6 +358,25 @@ fn spawn_server(mut commands: Commands) {
     // 接受 client connect request。Start 来自 lightyear_connection::server::Start。
     info!("[net] triggering Start on server entity {:?}", server_id);
     commands.trigger(Start { entity: server_id });
+
+    // 保险: 手动 insert `Started` marker 到 server entity。
+    // lightyear_netcode 0.26 `NetcodeServer` plugin 的 `On<Start>` observer
+    // (lightyear_netcode-0.26.4/src/server_plugin.rs:295-299) 理论上会
+    // `commands.entity(trigger.entity).insert(Started)`, 但我们 server log
+    // 没看到 `Started added: removing Starting/Stopped` trace
+    // (lightyear_connection-0.26.4/src/server.rs:61) —— 可能是 observer 时机
+    // 问题, 也可能是我们 trigger `Start` 太快 (<- commands buffer 还没把
+    // NetcodeServer component apply 到 server entity) 导致 query 不 match。
+    // 手动 add_observer 保险: 一旦 `NetcodeServer` add 到 server entity
+    // (那条 add 在 lightyear 0.26 server spawn 时已经同步 apply), 立即
+    // 补一个 `Started` marker, 不管 lightyear_netcode 的 observer 跑没跑。
+    // 这是 fix "Replicate::on_insert 在 SingleServer mode 下 server 找不到
+    // `&Server, With<Started>` → silent return → UpdatesMessage 永远不发"
+    // 1% 卡点的硬保险。
+    info!("[net] manually inserting Started marker to server entity {:?}", server_id);
+    commands.entity(server_id).insert(
+        lightyear_connection::server::Started,
+    );
 }
 
 // ============================================================================
@@ -431,17 +450,25 @@ fn replicate_player_for_connected(
         client_of_entity
     );
 
-    // 2) 找名为 "Player" 的第一个 entity, 给它挂 Replicate::to_clients(All)
-    //    (单 client 简化版, 只挂第一个)
+    // 2) 找名为 "Player" 的第一个 entity, 给它挂 `Replicate::manual(vec![client_of_entity])`
+    //    ——**不**用 `to_clients(NetworkTarget::All)`, 因为 lightyear 0.26 的
+    //    `SingleServer` mode 在 Replicate on_insert 钩子里用 `server.collection()`
+    //    拿所有 client peer entities, 但我们的 server 端没显式让 ClientOf entity
+    //    变成 Server 的 child (lightyear_udp server 在 spawn LinkOf entity 时
+    //    自动 add `LinkOf<Server>` relationship, server 端 collection 应该在 client
+    //    connect 后自动包含 ClientOf entity, 但 `to_clients(All)` 似乎有时序问题
+    //    或 server 端 collection() 内部拿不全),导致 `apply_targets` 不给任何 sender
+    //    注册 per_sender_state, lightyear 复制数据塞进 buffer 但没 sender 收
+    //    ⇒ UpdatesMessage 永远不发。`manual(vec![client_of_entity])` 直接指定
+    //    sender 列表, 走 `SingleServer(Sender(client))` mode 而不是
+    //    `SingleServer(All)`, 跳过 NetworkTarget resolution 整条路径。
     for entity in player_q.iter() {
         commands.entity(entity).insert(
-            lightyear::prelude::Replicate::to_clients(
-                lightyear::prelude::NetworkTarget::All,
-            ),
+            lightyear::prelude::Replicate::manual(vec![client_of_entity]),
         );
         info!(
-            "[net] Replicate component attached to Player entity {:?} — will now replicate to all clients",
-            entity
+            "[net] Replicate component attached to Player entity {:?} with manual senders [{:?}] — will now replicate to ClientOf entity",
+            entity, client_of_entity
         );
         break;
     }

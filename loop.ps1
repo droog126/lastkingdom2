@@ -14,7 +14,7 @@ param(
     # log 主要是 handshake 还没完成。30s 给 lightyear NetcodeClientPlugin + ReplicationReceiver
     # 留足时间 (首次 connect + 首次 heartbeat + 首次 component tick = ~3 个 RTT)。
     [int]$Seconds = 60,
-    [string]$RUST_LOG = "info,lightyear_replication=debug,lightyear_connection=debug,lightyear_send=debug,lightyear_receive=debug",
+    [string]$RUST_LOG = $(if ($env:RUST_LOG) { $env:RUST_LOG } else { "info,lightyear_replication=debug,lightyear_connection=debug,lightyear_send=debug,lightyear_receive=debug" }),
     # 默认 SkipBuild=true: 冷编译 lightyear 0.26 + leafwing 需要 22+ 分钟,
     # 超过 30 min cap 装不下, 也撞 lightyear + bevy 0.18 API drift 编译错。
     # 只在 binary 已经编过、增量 build 时才用 -Build
@@ -35,11 +35,9 @@ $ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
 
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
-if ($env:RUST_LOG) {
-    # RUST_LOG 已被 param 注入, 跳过默认
-} else {
-    $env:RUST_LOG = "info"
-}
+# RUST_LOG 已在 param 默认值里塞好 (默认读 $env:RUST_LOG 否则用 lightyear debug 默认)
+# 强制写一次到 env var, 给子进程继承
+$env:RUST_LOG = $RUST_LOG
 $rustSysroot = (& rustc --print sysroot).Trim()
 $runtimePaths = @(
     (Join-Path $ProjectRoot "target\debug\deps"),
