@@ -69,7 +69,7 @@ pub fn spawn_pretty(
     if cfg.show_player_avatar {
         let base = player.pos + Vec3::new(0.0, 0.0, 0.0);
         // 身体（红）
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -78,7 +78,7 @@ pub fn spawn_pretty(
             Color::srgb(0.85, 0.25, 0.25),
         );
         // 头（肤色）
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -87,7 +87,7 @@ pub fn spawn_pretty(
             Color::srgb(0.95, 0.78, 0.65),
         );
         // 头发（深棕）
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -96,7 +96,7 @@ pub fn spawn_pretty(
             Color::srgb(0.20, 0.12, 0.05),
         );
         // 眼睛
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -104,7 +104,7 @@ pub fn spawn_pretty(
             Vec3::new(0.10, 0.10, 0.05),
             Color::srgb(0.0, 0.0, 0.0),
         );
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -113,7 +113,7 @@ pub fn spawn_pretty(
             Color::srgb(0.0, 0.0, 0.0),
         );
         // 腿（深蓝）
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -121,7 +121,7 @@ pub fn spawn_pretty(
             Vec3::new(0.22, 0.45, 0.35),
             Color::srgb(0.15, 0.18, 0.55),
         );
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -130,7 +130,7 @@ pub fn spawn_pretty(
             Color::srgb(0.15, 0.18, 0.55),
         );
         // 旗杆（白色高杆）— 让玩家从远处也能看到
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -139,7 +139,7 @@ pub fn spawn_pretty(
             Color::srgb(0.95, 0.95, 0.95),
         );
         // 旗面（鲜红色）
-        spawn_cube(
+        spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -230,7 +230,7 @@ pub fn spawn_pretty(
     }
 }
 
-fn spawn_cube(
+fn spawn_avatar_cube(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -238,17 +238,30 @@ fn spawn_cube(
     size: Vec3,
     color: Color,
 ) {
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: color,
-            perceptual_roughness: 0.6,
-            metallic: 0.1,
-            ..default()
-        })),
-        Transform::from_translation(pos),
-        AvatarPart,
-    ));
+    let entity = spawn_cube(commands, meshes, materials, pos, size, color);
+    commands.entity(entity).insert(AvatarPart);
+}
+
+fn spawn_cube(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    pos: Vec3,
+    size: Vec3,
+    color: Color,
+) -> Entity {
+    commands
+        .spawn((
+            Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: color,
+                perceptual_roughness: 0.6,
+                metallic: 0.1,
+                ..default()
+            })),
+            Transform::from_translation(pos),
+        ))
+        .id()
 }
 
 /// Update 玩家 avatar 位置（跟随 PlayerState）
