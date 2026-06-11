@@ -85,10 +85,10 @@ impl Default for SpawnHillModule {
             name: "spawn_hill".into(),
             center_x: 48,
             center_z: 48,
-            radius: 14,
-            max_height: 18, // 中心 (48, 48) 顶面 Y = SEA_LEVEL + max_height = 12 + 18 = 30
+            radius: 16,
+            max_height: 15, // 中心 Y = 12+15=27; 边缘约 Y=12=sea level
             enabled: true,
-            weight: 10.0, // 最高，强制覆盖
+            weight: 10.0,
         }
     }
 }
@@ -149,6 +149,78 @@ impl TerrainModule for SpawnHillModule {
         let dist = (dist2 as f32).sqrt();
         let dome_h = (1.0 - dist / r as f32) * self.max_height as f32;
         Some(SEA_LEVEL as f32 + 1.0 + dome_h)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 模块 0.5: VillageMark — 在指定 (x, z) 放村旗+小屋方块（造"国家感"）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct VillageMarkModule {
+    pub name: String,
+    pub sites: Vec<(i32, i32)>, // (x, z) 位置
+    pub pole_height: i32,        // 旗杆高度
+    pub flag_w: i32,             // 旗面宽
+    pub flag_h: i32,             // 旗面高
+    pub enabled: bool,
+    pub weight: f32,
+}
+
+impl Default for VillageMarkModule {
+    fn default() -> Self {
+        // 默认 3 个村庄：出生圆顶山南/东南/西南各一面旗
+        Self {
+            name: "village_mark".into(),
+            sites: vec![(48, 70), (70, 48), (26, 48), (70, 70), (26, 70)],
+            pole_height: 8,
+            flag_w: 2,
+            flag_h: 2,
+            enabled: true,
+            weight: 9.0, // 比 heightmap 高（覆盖地表），比 SpawnHill 10.0 低（不挡出生点）
+        }
+    }
+}
+
+impl TerrainModule for VillageMarkModule {
+    fn name(&self) -> &str { &self.name }
+    fn weight(&self) -> f32 { self.weight }
+
+    fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
+        if !self.enabled { return None; }
+        for (sx, sz) in &self.sites {
+            let dx = (ctx.x - sx).abs();
+            let dz = (ctx.z - sz).abs();
+            // 旗杆: 1x1 立柱
+            if dx <= 0 && dz <= 0 {
+                if ctx.y <= self.pole_height {
+                    return Some(BlockType::Wood);
+                }
+                return None;
+            }
+            // 旗面: 旗杆顶 (sx+1..sx+flag_w) x 旗杆顶
+            if dx >= 1 && dx <= self.flag_w && dz <= 0
+                && ctx.y >= self.pole_height - self.flag_h
+                && ctx.y < self.pole_height
+            {
+                return Some(BlockType::Sand); // 黄色旗面
+            }
+            // 小屋: 1x1 中心 (只一格, 不连成线)
+            if dx == 0 && dz == 0 {
+                if let Some(surf) = ctx.surface_y {
+                    if ctx.y == surf + 1 {
+                        return Some(BlockType::Wood); // 地板
+                    }
+                    if ctx.y == surf + 2 {
+                        return Some(BlockType::Wood); // 墙
+                    }
+                    if ctx.y == surf + 3 {
+                        return Some(BlockType::Leaves); // 屋顶
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -375,7 +447,7 @@ impl Default for TreeModule {
         Self {
             name: "tree".into(),
             seed: 0xBEEF,
-            density: 0.10, // 10% 方格有树（之前 2% 太稀，看不见）
+            density: 0.15, // 15% 方格有树（10% 还是稀，远处看就是零星几棵）
             min_height: 3,
             max_height: 5,
             canopy_radius: 2,
@@ -614,14 +686,15 @@ pub mod presets {
     use rand::prelude::*;
 
     pub fn default_preset() -> TerrainPipeline {
-        // "温和山"配方：出生就看到有山有水有沙有动物。amp 16 + 出生圆顶山 + 树 0.10 + 矿 2.0
+        // "温和山"配方：出生就看到有山有水有沙有动物。amp 16 + 出生圆顶山 + 5 村旗 + 树 0.15 + 矿 2.0
         let mut h = HeightmapModule { seed: 0xDEADBEEF, ..Default::default() };
         h.amplitude_big = 16.0;
         h.amplitude_detail = 5.0;
         TerrainPipeline {
             name: "default".into(),
             modules: vec![
-                Box::new(SpawnHillModule::default()), // 圆顶山，优先
+                Box::new(SpawnHillModule::default()),
+                Box::new(VillageMarkModule::default()),  // 5 村旗
                 Box::new(h),
                 Box::new(CaveModule::default()),
                 Box::new(WaterFillModule::default()),
