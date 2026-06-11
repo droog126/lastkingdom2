@@ -340,6 +340,7 @@ fn main() {
     // bevy_ecs-0.18.1/src/schedule/config.rs:613 `all_tuples!(..., 1, 20, ...)`),
     // 且 `.chain()` 不能在 tuple 里混 `.before(X)` (产生 boxed ScheduleConfigs,
     // 不是 tuple 形式)。所以分多块 add_systems, 每块 tuple ≤ 20。
+    // 22 systems 拆 2 块: 第一块 scenario + network, 第二块 input/camera/HUD。
     app.add_systems(
         Update,
         (
@@ -350,6 +351,7 @@ fn main() {
             // network mode (1): apply server-replicated PlayerPos to PlayerState
             // (offline 模式下 PlayerPos 没注册组件, 这个系统是 no-op)
             apply_networked_position,
+            debug_dump_replicated_entities,
             apply_authoritative_snapshot,
             apply_voxel_delta,
             send_online_gameplay_commands,
@@ -357,7 +359,7 @@ fn main() {
             // client 端必须用 ActionState 标记 pressed, lightyear_inputs_leafwing
             // 的 ClientInputPlugin 才会把它打包成 InputMessage 发到 server。
             collect_keys_to_action_state,
-            // 客户端独有 (8)
+            // 客户端独有 (8) — split 一部分到第二个 chain 避免 tuple 超 20
             auto_demo,
             mouse_look_system,
             first_person_camera,
@@ -366,6 +368,12 @@ fn main() {
             offline_player_attack_creatures,
             animate_avatar,
             spawn_terrain_around_player,
+        )
+            .chain(),
+    );
+    app.add_systems(
+        Update,
+        (
             // F3 自由视角 / C 切 3rd person / F5 传送 / F8 切 preset (4)
             freefly_toggle,
             camera_mode_toggle,
@@ -510,6 +518,48 @@ fn apply_networked_position(
             first_pos
         );
     }
+}
+
+// Debug: 5 秒一次 dump client world 里所有 entity 的 component name + lightyear
+// 关键 marker (Replicate / Linked / ClientOf / Connect token) 是否出现。
+// 给 wire-network-and-loop 任务排查 PlayerPos 复制是否真到 client world 用。
+// (Query<EntityRef> + TypedReflect / TypeRegistry 在 bevy 0.18 的接口
+//  仍不稳定, 走简化的 Query<Option<&Name>> + 多个 marker Query 计数)
+fn debug_dump_replicated_entities(
+    run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
+    mut last_dump: Local<f32>,
+    names: Query<(Entity, Option<&Name>)>,
+    replicate_count: Query<Entity, With<lightyear::prelude::Replicate>>,
+    replicated_count: Query<Entity, With<lightyear::prelude::Replicated>>,
+    clientof_count: Query<Entity, With<lightyear_connection::client_of::ClientOf>>,
+    linked_count: Query<Entity, With<lightyear::prelude::Linked>>,
+    playerpos_count: Query<Entity, With<lk2_core::protocol::components::PlayerPos>>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now - *last_dump < 5.0 {
+        return;
+    }
+    *last_dump = now;
+    let total = names.iter().count();
+    let rep = replicate_count.iter().count();
+    let red = replicated_count.iter().count();
+    let co = clientof_count.iter().count();
+    let ln = linked_count.iter().count();
+    let pp = playerpos_count.iter().count();
+    // 列出所有带 Name 的 entity + component 概要
+    let mut sample: Vec<String> = Vec::new();
+    for (e, name) in names.iter().take(8) {
+        let n = name.map(|n| n.as_str()).unwrap_or("?");
+        sample.push(format!("{:?}={}", e, n));
+    }
+    tracing::info!(
+        "[net-debug] total_entities={}, replicate={}, replicated={}, clientof={}, linked={}, playerpos={}, sample=[{}]",
+        total, rep, red, co, ln, pp, sample.join(", ")
+    );
 }
 
 fn apply_authoritative_snapshot(

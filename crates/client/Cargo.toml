@@ -76,6 +76,9 @@ lk2-core = { workspace = true }
 lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication", "netcode"] }
 lightyear_inputs_leafwing = { workspace = true }
 lightyear_netcode = { version = "0.26" }
+# lightyear_connection 直接拉,只是为了在 main.rs 里 import ClientOf
+# (ClientOf 在 lightyear_connection::client_of, lightyear prelude 没 re-export)
+lightyear_connection = { version = "0.26", features = ["client"] }
 leafwing-input-manager = { workspace = true }
 
 [dev-dependencies]

@@ -5201,6 +5201,7 @@ dependencies = [
  "fastnoise-lite",
  "leafwing-input-manager",
  "lightyear",
+ "lightyear_connection",
  "lightyear_inputs_leafwing",
  "lightyear_netcode",
  "lk2-core",

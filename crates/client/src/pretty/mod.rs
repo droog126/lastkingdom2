@@ -179,16 +179,16 @@ pub fn spawn_pretty(
 
     // ---- 云朵（白色大方块漂在天上） ----
     for i in 0..6 {
-        let cx = player.pos.x + ((i as f32) * 7.0 - 20.0);
-        let cy = 24.0 + (i as f32) * 0.5;
-        let cz = player.pos.z + ((i as f32) * 5.0 - 15.0);
+        let cx = player.pos.x + ((i as f32) * 9.0 - 26.0);
+        let cy = player.pos.y + 11.0 + (i as f32) * 0.4;
+        let cz = player.pos.z + ((i as f32) * 6.0 - 20.0);
         spawn_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
             Vec3::new(cx, cy, cz),
-            Vec3::new(3.0 + (i as f32) * 0.4, 1.2, 2.0 + (i as f32) * 0.3),
-            Color::srgba(1.0, 1.0, 1.0, 0.85),
+            Vec3::new(2.8 + (i as f32) * 0.3, 0.35, 1.1 + (i as f32) * 0.2),
+            Color::srgb(0.82, 0.88, 0.95),
         );
     }
 

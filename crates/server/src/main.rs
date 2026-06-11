@@ -243,7 +243,11 @@ fn main() {
         // 备选: 监听 client connect (On<Add, Connected>) 时再 spawn,
         // 但启动就 spawn 也行 (server-side 复制的 entity 会在 client connect
         // 时被自动 broadcast)。当前走 Startup 启动即 spawn 路径, 简单点。
-        // .add_observer(spawn_player_for_connected)
+        // wire-network-and-loop (2026-06-11): 改用 On<Add, ClientOf> observer
+        // 在 client 真连上后才挂 Replicate, 触发 lightyear 0.26 复制。
+        // (原因: Replicate on_insert 钩子只对 connect 之后才注册的 client 生效,
+        //  在 connect 前挂 Replicate 会被漏掉, client 收不到初始复制)。
+        .add_observer(replicate_player_for_connected)
         // ====== Update ======
         .add_systems(
             Update,
@@ -357,13 +361,20 @@ fn spawn_server(mut commands: Commands) {
 }
 
 // ============================================================================
-// spawn_player — authoritative player entity, 挂 PlayerPos + Replicate
-// ============================================================================
+// spawn_player — authoritative player entity, 挂 PlayerPos (无 Replicate)
 //
 // wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完。
-// server 启动即 spawn 一个 authoritative player entity, lightyear 默认
-// server→client 复制会把 PlayerPos 自动发给 client, client 端
-// apply_networked_position 就能 apply。
+// server 启动即 spawn 一个 authoritative sim player entity, **不挂** Replicate。
+// Replicate 组件由 `replicate_player_for_connected` observer 在
+// 每个 client `ClientOf` 实体 spawn (On<Add, ClientOf>) 时**动态插入**到
+// 这个 player entity 上 —— 原因: lightyear 0.26 Replicate on_insert 钩子
+// 解析 `NetworkTarget` 的时候,只对**当前已经 connect 的** client peer
+// 注册 sender;在 client connect 之前挂 Replicate, 那个 client 就收不到
+// 这个 entity 的初始复制 (lightyear 不会"补发"已经存在的 Replicate entity)。
+// observer 方案保证 Replicate 在 client 真连上之后才挂, 复制准时发到
+// client 端 (lightyear-0.26.4/src/lib.rs:195 "To replicate an entity from
+// the local world to the remote world, you can just add the Replicate
+// component to the entity")。
 //
 // 简化: 只支持 1 个 client (单进程 demo)。后面做 per-client player 实体
 // 再细化。
@@ -378,13 +389,62 @@ fn spawn_player(mut commands: Commands) {
         Name::new("Player"),
         bevy::prelude::Transform::from_translation(spawn),
         lk2_core::protocol::components::PlayerPos(spawn),
-        // docs: lightyear-0.26.4/src/lib.rs:195 "To replicate an entity from the
-        // local world to the remote world, you can just add the Replicate
-        // component to the entity"
-        lightyear::prelude::Replicate::to_clients(
-            lightyear::prelude::NetworkTarget::All,
-        ),
     ));
+}
+
+// client 连上后, 找本地 sim 的 player entity 挂 Replicate, 触发 lightyear
+// 复制。client 端 `apply_networked_position` system 这时 query 才不为空。
+//
+// 注意: `On<Add, ClientOf>` 是 server 端观测 client 连上事件的标准入口
+// (lightyear_connection-0.26.4/src/server.rs + lightyear_replication plugin
+// 都靠 ClientOf marker 区分每个 client 的 LinkOf entity)。这里只对第一个
+// player entity 挂 Replicate (单 client 简化版);生产环境要 per-client
+// spawn 一个 mirror entity。
+//
+// 关键步骤:
+//  1. 给 ClientOf entity 挂 `ReplicationSender::default()` — lightyear 0.26
+//     不会自动挂这个 (Replicate::on_insert 在 components.rs:481 用
+//     `query_filtered::<Has<HostClient>, (With<ClientOf>, Or<(With<ReplicationSender>, With<HostClient>)>)>`
+//     找每个 ClientOf 对应的 sender),没有 ReplicationSender 的 ClientOf
+//     会被 "ClientOf not found or does not have ReplicationSender" error 跳过
+//     (lightyear_replication-0.26.4/src/send/components.rs:911)。
+//  2. 找名为 "Player" 的 sim entity 挂 `Replicate::to_clients(All)` —
+//     on_insert 钩子在 server.collection() 现在有 ClientOf 的情况下,能
+//     resolve 出具体 sender (即 client_of_entity) 注册到 ReplicationTarget。
+fn replicate_player_for_connected(
+    trigger: On<Add, lightyear_connection::client_of::ClientOf>,
+    mut commands: Commands,
+    player_q: Query<Entity, With<Name>>,
+) {
+    let client_of_entity = trigger.entity;
+    info!(
+        "[net] ClientOf entity {:?} connected, attaching ReplicationSender to it + Replicate to local Player entity",
+        client_of_entity
+    );
+
+    // 1) 给 ClientOf entity 挂 ReplicationSender (lightyear 0.26 不会自动加)
+    commands.entity(client_of_entity).insert(
+        lightyear::prelude::ReplicationSender::default(),
+    );
+    info!(
+        "[net] ReplicationSender attached to ClientOf entity {:?} — now this client can receive replicated entities",
+        client_of_entity
+    );
+
+    // 2) 找名为 "Player" 的第一个 entity, 给它挂 Replicate::to_clients(All)
+    //    (单 client 简化版, 只挂第一个)
+    for entity in player_q.iter() {
+        commands.entity(entity).insert(
+            lightyear::prelude::Replicate::to_clients(
+                lightyear::prelude::NetworkTarget::All,
+            ),
+        );
+        info!(
+            "[net] Replicate component attached to Player entity {:?} — will now replicate to all clients",
+            entity
+        );
+        break;
+    }
 }
 
 // 备选 observer 版本 (没启,见 Startup chain 注释)
