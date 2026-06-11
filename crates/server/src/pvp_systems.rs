@@ -13,12 +13,12 @@
 //!   5. expire_knockback_immunity — 清除击退免疫
 //!   6. tick_combat_cooldowns    — 冷却衰减
 
+use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
+use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::pvp::FixedTick;
 use lk2_core::pvp::{
     CombatState, DamageEvent, Hitbox, PositionHistory, PositionSnapshot, WeaponStats,
 };
-use lk2_core::pvp::FixedTick;
-use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
-use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
 use lk2_core::world::World as GameWorld;
 
 use crate::los::line_of_sight;
@@ -37,12 +37,7 @@ pub struct ServerPvPPlugin;
 
 impl Plugin for ServerPvPPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            FixedUpdate,
-            (
-                record_position_history,
-            ),
-        );
+        app.add_systems(FixedUpdate, (record_position_history,));
         // 其余 4 个 system 由 main.rs 显式 .chain() 注册
     }
 }
@@ -145,7 +140,7 @@ pub fn melee_hit_registration(
         let eye_pos = attacker_tf.translation + Vec3::Y * 1.62;
         let forward = attack_input.input_dir.normalize();
 
-        for (victim_entity, _, hitbox, health, history, kb_immune) in victims.iter() {
+        for (victim_entity, _, hitbox, health, history, _kb_immune) in victims.iter() {
             if health.0 <= 0.0 {
                 continue;
             }
@@ -188,7 +183,11 @@ pub fn melee_hit_registration(
             // 跳劈判定
             let height_diff = attacker_tf.translation.y - victim_snap.translation.y;
             let is_critical = height_diff > 0.5 && attack_input.is_falling;
-            let damage = if is_critical { weapon.damage * 1.5 } else { weapon.damage };
+            let damage = if is_critical {
+                weapon.damage * 1.5
+            } else {
+                weapon.damage
+            };
 
             // 击退方向
             let kb_dir = (victim_snap.translation - attacker_tf.translation).normalize_or_zero();
@@ -207,10 +206,8 @@ pub fn melee_hit_registration(
             });
 
             // 写 HitConfirm (Unreliable, 给 client 看击打特效)
-            let victim_client_id = client_id_map
-                .get(&victim_entity)
-                .copied()
-                .unwrap_or(PeerId::Server);
+            let victim_client_id =
+                client_id_map.get(&victim_entity).copied().unwrap_or(PeerId::Server);
             hit_confirms.write(HitConfirm {
                 victim_id: victim_client_id,
                 damage,
@@ -250,10 +247,7 @@ pub fn apply_damage_and_knockback(
             health.0 = (health.0 - event.damage).max(0.0);
         }
 
-        let is_immune = kb_immunity
-            .get(event.victim)
-            .map(|(_, k)| k.0 > 0.0)
-            .unwrap_or(false);
+        let is_immune = kb_immunity.get(event.victim).map(|(_, k)| k.0 > 0.0).unwrap_or(false);
 
         if !is_immune {
             if let Ok((_, mut vel)) = velocities.get_mut(event.victim) {
@@ -265,10 +259,8 @@ pub fn apply_damage_and_knockback(
         }
 
         if let Ok((_, health)) = healths.get(event.victim) {
-            let victim_client_id = client_id_map
-                .get(&event.victim)
-                .copied()
-                .unwrap_or(PeerId::Server);
+            let victim_client_id =
+                client_id_map.get(&event.victim).copied().unwrap_or(PeerId::Server);
             damage_results.write(DamageResult {
                 victim_id: victim_client_id,
                 new_health: health.0,
@@ -283,10 +275,7 @@ pub fn apply_damage_and_knockback(
 // 5. 击退免疫消退
 // ---------------------------------------------------------------------------
 
-pub fn expire_knockback_immunity(
-    time: Res<Time>,
-    mut kb_immunity: Query<&mut KnockbackImmunity>,
-) {
+pub fn expire_knockback_immunity(time: Res<Time>, mut kb_immunity: Query<&mut KnockbackImmunity>) {
     let dt = time.delta_secs();
     for mut kbi in kb_immunity.iter_mut() {
         kbi.0 = (kbi.0 - dt).max(0.0);

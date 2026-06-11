@@ -7,6 +7,9 @@ edition = "2024"
 name = "lk2-server"
 path = "src/main.rs"
 
+[features]
+dev-dynamic-linking = ["bevy/dynamic_linking"]
+
 # ============================================================================
 # 服务端 binary：MinimalPlugins (headless) + lightyear ServerPlugins + 物理 + sim
 #

@@ -194,7 +194,7 @@ impl NationRegistry {
             });
         }
         // 消耗灵魂
-        let t = Transfer {
+        let _t = Transfer {
             kind: ResourceKind::Soul,
             amount: cost,
             src: TransferSrc::PlayerGather(player_id), // 这里语义反着用：src = 玩家→池子，dst = 销毁

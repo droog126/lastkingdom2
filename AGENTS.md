@@ -34,6 +34,8 @@ Get-ChildItem screenshots\iter_*\iter_*.png | Sort LastWriteTime -Descending | S
 - `loop.ps1`, `run_scenario.ps1` — closed-loop drivers
 - `Agent.md` — the project's AI-agent operations manual (read this first)
 
+Legacy note: the old root `minecraft_bevy` package and `launchers/` wrappers were removed. Do not route new work through them.
+
 ## Code style
 
 - `rustfmt.toml` — `max_width = 100`, `comment_width = 100`, `tab_spaces = 4`, `use_field_init_shorthand = true`, `newline_style = "Unix"`

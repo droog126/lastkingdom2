@@ -13,9 +13,9 @@ param(
     # 默认 SkipBuild=true: 冷编译 lightyear 0.26 + leafwing 需要 22+ 分钟,
     # 超过 30 min cap 装不下, 也撞 lightyear + bevy 0.18 API drift 编译错。
     # 只在 binary 已经编过、增量 build 时才用 -Build
-    [switch]$SkipBuild = $true,
+    [switch]$SkipBuild = $false,
     # 启用 Bevy 动态链接 (开发期增量 build 快, binary 会动态加载 lib 而非静态链接)
-    [switch]$Dynamic = $false,
+    [switch]$Dynamic = $true,
     # 联机模式 (默认 $true): 同时启 lk2-server + lk2-client --connect=...
     # 离线模式: 只启 lk2-client --offline (旧行为)
     [switch]$Offline = $false,
@@ -31,6 +31,13 @@ Set-Location $ProjectRoot
 
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
 $env:RUST_LOG = "info"
+$rustSysroot = (& rustc --print sysroot).Trim()
+$runtimePaths = @(
+    (Join-Path $ProjectRoot "target\debug\deps"),
+    (Join-Path $ProjectRoot "target\debug"),
+    (Join-Path $rustSysroot "bin")
+) | Where-Object { Test-Path $_ }
+$env:PATH = (($runtimePaths + @($env:PATH)) -join ";")
 
 # 0. Kill any old lk2-client / lk2-server processes (loop 之前清场)
 Get-Process -Name "lk2-client","lk2-server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -115,23 +122,6 @@ if ($serverProc) {
     $serverProc | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 Start-Sleep -Seconds 1
-
-# 1. Build (default 跳过, 改用 -Build flag 显式打开)
-if (-not $SkipBuild) {
-    Write-Host ">>> cargo build -p lk2-client ..." -ForegroundColor Cyan
-    cargo build -p lk2-client 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ">>> BUILD FAILED" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 2. Run + screenshot + record
-$exePath = Join-Path $ProjectRoot "target\debug\lk2-client.exe"
-if (-not (Test-Path $exePath)) {
-    Write-Host ">>> Binary not found: $exePath" -ForegroundColor Red
-    exit 1
-}
 
 # 3. List results
 Write-Host ""

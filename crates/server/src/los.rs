@@ -8,9 +8,9 @@
 //! 本文件是 server crate 的副本 (从 src/pvp/los.rs 迁出)。
 //! import 已经走 lk2_core, 直接复用。
 
-use lk2_core::world::World as GameWorld;
-use lk2_core::world::BlockType;
 use bevy::prelude::*;
+use lk2_core::world::BlockType;
+use lk2_core::world::World as GameWorld;
 
 /// 视线检测结果
 #[derive(Clone, Debug)]
@@ -26,21 +26,11 @@ pub struct LosResult {
 }
 
 /// 从 from 到 to 做体素视线检测
-pub fn line_of_sight(
-    world: &GameWorld,
-    from: Vec3,
-    to: Vec3,
-    step_size: f32,
-) -> LosResult {
+pub fn line_of_sight(world: &GameWorld, from: Vec3, to: Vec3, step_size: f32) -> LosResult {
     let dir = to - from;
     let total_dist = dir.length();
     if total_dist < 0.001 {
-        return LosResult {
-            blocked: false,
-            block_pos: None,
-            total_dist: 0.0,
-            travel_dist: 0.0,
-        };
+        return LosResult { blocked: false, block_pos: None, total_dist: 0.0, travel_dist: 0.0 };
     }
     let step = dir.normalize() * step_size;
     let mut pos = from;
@@ -68,12 +58,7 @@ pub fn line_of_sight(
         }
     }
 
-    LosResult {
-        blocked: false,
-        block_pos: None,
-        total_dist,
-        travel_dist: total_dist,
-    }
+    LosResult { blocked: false, block_pos: None, total_dist, travel_dist: total_dist }
 }
 
 /// 从眼睛位置（player_eye + height）朝向 forward 做扇形命中检测
@@ -85,7 +70,7 @@ pub fn sector_voxels(
     step_size: f32,
 ) -> Vec<[i32; 3]> {
     let half_angle = sweep_angle_deg.to_radians() / 2.0;
-    let right = forward.cross(Vec3::Y).normalize();
+    let _right = forward.cross(Vec3::Y).normalize();
     let mut voxels = Vec::new();
     let mut checked = std::collections::HashSet::new();
 

@@ -11,14 +11,14 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::prelude::*;
 
-use super::marching_cubes::{build_mesh as mc_build_mesh, McVertex};
-use super::scalar_field::{build_density_field, ScalarField};
-    use lk2_core::world::World as GameWorld;
+use super::marching_cubes::{McVertex, build_mesh as mc_build_mesh};
+use super::scalar_field::{ScalarField, build_density_field};
+use lk2_core::world::World as GameWorld;
 
 /// 一个 smooth chunk 的输出（玩家周围 AABB 一个 mesh）
 pub struct SmoothMesh {
     pub mesh: Mesh,
-    pub collider_trimesh: Vec<[f32; 3]>,  // 顶点
+    pub collider_trimesh: Vec<[f32; 3]>, // 顶点
     pub collider_indices: Vec<u32>,
 }
 
@@ -60,23 +60,19 @@ pub fn build_smooth_mesh(
     let (positions, normals) = smooth_normals(&vertices, &indices);
 
     // 5) 顶点色（按 y 分层：grass/dirt/stone）
-    let colors: Vec<[f32; 4]> = positions
-        .iter()
-        .map(|p| layer_color(p[1]))
-        .collect();
+    let colors: Vec<[f32; 4]> = positions.iter().map(|p| layer_color(p[1])).collect();
 
     // 6) build bevy::Mesh
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices.clone()));
 
-    Some(SmoothMesh {
-        mesh,
-        collider_trimesh: positions,
-        collider_indices: indices,
-    })
+    Some(SmoothMesh { mesh, collider_trimesh: positions, collider_indices: indices })
 }
 
 /// 按 Y 分层上色：
@@ -87,21 +83,17 @@ fn layer_color(y: f32) -> [f32; 4] {
     const HIGH: f32 = 18.0;
     const MID: f32 = 8.0;
     if y >= HIGH {
-        [0.25, 0.55, 0.18, 1.0]  // grass 绿
+        [0.25, 0.55, 0.18, 1.0] // grass 绿
     } else if y >= MID {
-        [0.55, 0.36, 0.20, 1.0]  // dirt 棕
+        [0.55, 0.36, 0.20, 1.0] // dirt 棕
     } else {
-        [0.55, 0.55, 0.55, 1.0]  // stone 灰
+        [0.55, 0.55, 0.55, 1.0] // stone 灰
     }
 }
 
 /// Laplacian smoothing：对每个顶点位置 = 邻接顶点平均
 /// 简化版：按 (vertex position) hash 找邻居（同位置 = 共享顶点）
-fn laplacian_smooth(
-    vertices: Vec<McVertex>,
-    indices: &[u32],
-    passes: u32,
-) -> Vec<McVertex> {
+fn laplacian_smooth(vertices: Vec<McVertex>, indices: &[u32], passes: u32) -> Vec<McVertex> {
     let mut verts = vertices;
     for _ in 0..passes {
         let mut new_positions: Vec<[f32; 3]> = Vec::with_capacity(verts.len());
@@ -142,7 +134,7 @@ fn laplacian_smooth(
 }
 
 /// 法线平滑：每个唯一 position 的法线 = 共享该 position 的所有三角形法线平均
-fn smooth_normals(vertices: &[McVertex], indices: &[u32]) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
+fn smooth_normals(vertices: &[McVertex], _indices: &[u32]) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     // 简化：直接把每个顶点的当前法线保留（不做合并）
     // 因为 MC 输出每个三角形 3 个独立顶点，没有共享 — 共享发生在连续三角形用同 edge 交点时
     // v1 视觉上略 faceted，但 41³ grid + 0.5 平滑够用
@@ -154,7 +146,7 @@ fn smooth_normals(vertices: &[McVertex], indices: &[u32]) -> (Vec<[f32; 3]>, Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-use lk2_core::world::World as GameWorld;
+    use lk2_core::world::World as GameWorld;
 
     #[test]
     fn empty_world_no_mesh() {

@@ -9,15 +9,15 @@
 //!   6. apply_local_knockback  — 对本地 predicted entity 应用击退
 //!   7. trigger_visual_effects — 播放挥剑 / 命中 / 屏幕震动
 
-use lk2_core::protocol::components::{CombatReady, Health};
-use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
-use lk2_core::protocol::PlayerAction;
-use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
-use lk2_core::pvp::FixedTick;
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
-use lightyear::prelude::Predicted;
 use leafwing_input_manager::prelude::*;
+use lightyear::prelude::Predicted;
+use lk2_core::protocol::PlayerAction;
+use lk2_core::protocol::components::{CombatReady, Health};
+use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::pvp::FixedTick;
+use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
 
 // ---------------------------------------------------------------------------
 // 1. 采集本地输入 → 发送 AttackInput
@@ -26,13 +26,15 @@ use leafwing_input_manager::prelude::*;
 pub fn collect_local_input(
     tick: Res<FixedTick>,
     // 兜底：demo 里没人插 PlayerAction 的 InputMap，没资源时静默 no-op
-    mut input_manager: Option<ResMut<ActionState<PlayerAction>>>,
+    input_manager: Option<ResMut<ActionState<PlayerAction>>>,
     player_transform: Query<&Transform, With<Camera>>,
     mut writer: MessageWriter<AttackInput>,
     combat: Query<&CombatState>,
     mut last_attack_was_sent: Local<bool>,
 ) {
-    let Some(mut input_manager) = input_manager else { return; };
+    let Some(input_manager) = input_manager else {
+        return;
+    };
     // 检测 Attack 按钮（鼠标左键）
     let attack_pressed = input_manager.just_pressed(&PlayerAction::Attack);
 
@@ -50,11 +52,7 @@ pub fn collect_local_input(
 
     // 从相机朝向获取攻击方向
     // bevy 0.18: `Transform::forward()` 返回 `Dir3`（方向向量包装），不是 `Vec3`
-    let forward: Vec3 = player_transform
-        .iter()
-        .next()
-        .map(|t| *t.forward())
-        .unwrap_or(Vec3::Z);
+    let forward: Vec3 = player_transform.iter().next().map(|t| *t.forward()).unwrap_or(Vec3::Z);
 
     // is_falling = 没有在地上（简化：用 Velocity.y 判断）
     let is_falling = true; // TODO: 接入 LinearVelocity.y
@@ -62,12 +60,7 @@ pub fn collect_local_input(
     let tick_val = tick.0;
     let combo_count = combat.map(|c| c.combo_count + 1).unwrap_or(0) as u8;
 
-    writer.write(AttackInput {
-        tick: tick_val,
-        input_dir: forward,
-        is_falling,
-        combo_count,
-    });
+    writer.write(AttackInput { tick: tick_val, input_dir: forward, is_falling, combo_count });
 
     *last_attack_was_sent = true;
 }
@@ -109,8 +102,8 @@ pub fn on_hit_confirm(
 ) {
     for confirm in confirms.read() {
         // PeerId → Entity 转换（PeerId 的 bits 编码成 Entity 标识；不是真实 entity，仅作占位）
-        let target = Entity::from_raw_u32(confirm.victim_id.to_bits() as u32)
-            .unwrap_or(Entity::PLACEHOLDER);
+        let target =
+            Entity::from_raw_u32(confirm.victim_id.to_bits() as u32).unwrap_or(Entity::PLACEHOLDER);
         if confirm.is_critical {
             effect_writer.write(VisualEffectEvent::CriticalHit {
                 target,
@@ -141,16 +134,13 @@ pub fn on_knockback_event(
     mut effect_writer: MessageWriter<VisualEffectEvent>,
 ) {
     for kb in knockbacks.read() {
-        let target = Entity::from_raw_u32(kb.victim_id.to_bits() as u32)
-            .unwrap_or(Entity::PLACEHOLDER);
+        let target =
+            Entity::from_raw_u32(kb.victim_id.to_bits() as u32).unwrap_or(Entity::PLACEHOLDER);
         if let Ok((_, mut vel)) = velocities.get_mut(target) {
             // 服务端已算过，这里直接覆盖（客户端相信服务端）
             vel.0 = kb.velocity;
         }
-        effect_writer.write(VisualEffectEvent::KnockbackApplied {
-            target,
-            velocity: kb.velocity,
-        });
+        effect_writer.write(VisualEffectEvent::KnockbackApplied { target, velocity: kb.velocity });
     }
 }
 
@@ -206,14 +196,32 @@ pub fn trigger_visual_effects(
                 // TODO: spawn 命中粒子（红色方块，0.3s 后自动 despawn）
                 info!("💥 命中 at {:?}", hit_pos);
                 if let Ok(tf) = transforms.get(*target) {
-                    spawn_hit_particle(&mut commands, &mut meshes, &mut materials, tf.translation, Color::srgb(1.0, 0.1, 0.1));
+                    spawn_hit_particle(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        tf.translation,
+                        Color::srgb(1.0, 0.1, 0.1),
+                    );
                 }
             }
             VisualEffectEvent::CriticalHit { target, hit_pos, .. } => {
                 info!("💥 暴击 at {:?}", hit_pos);
                 if let Ok(tf) = transforms.get(*target) {
-                    spawn_hit_particle(&mut commands, &mut meshes, &mut materials, tf.translation, Color::srgb(1.0, 0.85, 0.2));
-                    spawn_hit_particle(&mut commands, &mut meshes, &mut materials, tf.translation + Vec3::Y * 0.5, Color::srgb(1.0, 0.55, 0.0));
+                    spawn_hit_particle(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        tf.translation,
+                        Color::srgb(1.0, 0.85, 0.2),
+                    );
+                    spawn_hit_particle(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        tf.translation + Vec3::Y * 0.5,
+                        Color::srgb(1.0, 0.55, 0.0),
+                    );
                 }
             }
             VisualEffectEvent::KnockbackApplied { target, velocity } => {
@@ -245,11 +253,8 @@ fn spawn_hit_particle(
         linear.alpha,
     );
     let mesh_handle = meshes.add(bevy::prelude::Cuboid::new(0.15, 0.15, 0.15));
-    let material_handle = materials.add(bevy::prelude::StandardMaterial {
-        base_color: color,
-        emissive,
-        ..default()
-    });
+    let material_handle =
+        materials.add(bevy::prelude::StandardMaterial { base_color: color, emissive, ..default() });
     commands.spawn((
         Mesh3d(mesh_handle),
         MeshMaterial3d(material_handle),

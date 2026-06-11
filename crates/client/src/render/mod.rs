@@ -3,8 +3,8 @@
 //! 策略：玩家周围 R 半径内的 solid 块 → spawn 一个 Mesh3d+MeshMaterial3d entity
 //! 性能：3D scene 持 ~2000 个 entity 没问题；超过会卡
 
-use bevy::prelude::*;
 use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::{HashMap, HashSet};
 
@@ -14,22 +14,23 @@ use lk2_core::constant;
 use lk2_core::creature::Creature;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
+use lk2_core::player::PlayerState;
 use lk2_core::resource::ResourceKind;
 use lk2_core::world::{BlockType, World as GameWorld};
 
 mod greedy_mesh;
 use greedy_mesh::build_all_terrain_meshes_aabb;
 
-mod scalar_field;
 mod marching_cubes;
+mod scalar_field;
 mod smooth_mesh;
 
 /// 体素渲染配置
 #[derive(Resource, Debug, Clone)]
 pub struct RenderConfig {
-    pub radius: i32,                  // 渲染半径（玩家 ±R）
-    pub max_blocks: usize,            // 一次性最多 spawn 多少个
-    pub y_offset: f32,                // 玩家脚下贴图偏移（让 y=0 在地面）
+    pub radius: i32,       // 渲染半径（玩家 ±R）
+    pub max_blocks: usize, // 一次性最多 spawn 多少个
+    pub y_offset: f32,     // 玩家脚下贴图偏移（让 y=0 在地面）
     pub sky_color: Color,
     pub fog_color: Color,
     pub fog_start: f32,
@@ -39,33 +40,33 @@ pub struct RenderConfig {
     pub auto_orbit_distance: f32,
     pub auto_walk: bool,
     pub auto_walk_interval_secs: f32,
-    pub auto_keys: bool,             // --auto-demo 时自动按 F/J 测功能（不靠人按键）
-    pub mouse_look: bool,            // 默认开：鼠标转视角；--auto-demo 关：用动物自动跟随
-    pub smooth_terrain: bool,        // 默认 true：标量场 + Marching Cubes 平滑地形（解决 cube 边角卡脚）
-    pub smooth_passes: u32,          // Laplacian 平滑次数（0..=3），默认 0
-    pub ground_step_threshold: f32,  // 玩家移动"被卡"的高度差阈值（默认 0.5 — "跨度 0.5 才不能走"）
+    pub auto_keys: bool,      // --auto-demo 时自动按 F/J 测功能（不靠人按键）
+    pub mouse_look: bool,     // 默认开：鼠标转视角；--auto-demo 关：用动物自动跟随
+    pub smooth_terrain: bool, // 默认 true：标量场 + Marching Cubes 平滑地形（解决 cube 边角卡脚）
+    pub smooth_passes: u32,   // Laplacian 平滑次数（0..=3），默认 0
+    pub ground_step_threshold: f32, // 玩家移动"被卡"的软地表高度差阈值（默认 0.85）
 }
 
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
-            radius: 20,  // 之前 16，玩家只能看到 ±16 方块。升到 20 让世界看起来更辽阔
+            radius: 20, // 之前 16，玩家只能看到 ±16 方块。升到 20 让世界看起来更辽阔
             max_blocks: 3000,
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
             fog_color: Color::srgb(0.75, 0.82, 0.95),
             fog_start: 18.0,
             fog_end: 48.0,
-            auto_orbit: false,            // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
-            auto_orbit_speed: 0.30,       // 0.22 太慢看不清全貌,0.30 12s 内能转接近半圈
-            auto_orbit_distance: 6.5,     // 15 太远,玩家在画面里就是个黑点;6.5 能看清 avatar + 周边
-            auto_walk: false,             // 默认玩家控制；--auto-demo 开启
+            auto_orbit: false,      // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
+            auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌,0.30 12s 内能转接近半圈
+            auto_orbit_distance: 6.5, // 15 太远,玩家在画面里就是个黑点;6.5 能看清 avatar + 周边
+            auto_walk: false,       // 默认玩家控制；--auto-demo 开启
             auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
-            auto_keys: false,             // --auto-demo 开启：自动按 F/J 验证
-            mouse_look: true,             // 默认开：鼠标转视角（FPS 标准）
-            smooth_terrain: true,         // 默认开：scalar field + MC
-            smooth_passes: 0,             // v1 不平滑（先看效果）
-            ground_step_threshold: 0.5,   // "跨度 0.5 才不能走"
+            auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
+            mouse_look: true,       // 默认开：鼠标转视角（FPS 标准）
+            smooth_terrain: true,   // 默认开：scalar field + MC
+            smooth_passes: 0,       // v1 不平滑（先看效果）
+            ground_step_threshold: 0.85, // 低矮起伏直接走，高墙才挡
         }
     }
 }
@@ -73,8 +74,8 @@ impl Default for RenderConfig {
 /// 相机朝向（鼠标累积的 yaw + pitch）。mouse_look 系统读，first_person_camera 用
 #[derive(Resource)]
 pub struct CameraAngles {
-    pub yaw: f32,    // 绕 +Y 轴，0 = 相机看 -Z；右转为负
-    pub pitch: f32,  // 绕相机右轴，0 = 水平；上视为正
+    pub yaw: f32,   // 绕 +Y 轴，0 = 相机看 -Z；右转为负
+    pub pitch: f32, // 绕相机右轴，0 = 水平；上视为正
 }
 
 impl Default for CameraAngles {
@@ -106,8 +107,10 @@ pub struct FreeFlyState {
     pub position: Vec3,
     /// WASD 速度向量（用于平滑加减速）
     pub velocity: Vec3,
-    /// 进入 freefly 时存的玩家位置，退出时还原。灵魂出窍不能让玩家身体被其他系统挪走。
+    /// 进入 freefly 时存的玩家格子位置，退出时还原。
     pub saved_player_pos: Option<[i32; 3]>,
+    /// 进入 freefly 时存的玩家连续位置，退出时还原。
+    pub saved_player_world_pos: Option<Vec3>,
 }
 
 impl Default for FreeFlyState {
@@ -117,6 +120,7 @@ impl Default for FreeFlyState {
             position: Vec3::new(48.5, 18.0, 48.5), // 默认从玩家出生点上方起
             velocity: Vec3::ZERO,
             saved_player_pos: None,
+            saved_player_world_pos: None,
         }
     }
 }
@@ -126,9 +130,9 @@ const FREEFLY_SPEED: f32 = 30.0;
 /// Shift 加速倍率
 const FREEFLY_BOOST: f32 = 3.0;
 
-const MOUSE_SENS: f32 = 0.0022;     // 弧度/像素（≈ 0.13°/像素）
-const PITCH_LIMIT: f32 = 1.483;     // ≈ 85°（防止翻转）
-const YAW_QE_STEP: f32 = 22.5_f32.to_radians();  // Q/E 步进 22.5°（备胎）
+const MOUSE_SENS: f32 = 0.0022; // 弧度/像素（≈ 0.13°/像素）
+const PITCH_LIMIT: f32 = 1.483; // ≈ 85°（防止翻转）
+const YAW_QE_STEP: f32 = 22.5_f32.to_radians(); // Q/E 步进 22.5°（备胎）
 
 /// 已 spawn 的 terrain entity 列表（用于 despawn 重生）
 /// 视觉 + 碰撞 分开存：视觉走 greedy mesh 出 mesh3d 实体，碰撞走 trimesh 实体
@@ -162,7 +166,7 @@ pub fn spawn_terrain_around_player(
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
     // 限流：同一次刷屏只 warn 一次（1 秒间隔，按真实时间）
-    mut last_warn_time: Local<f32>,
+    _last_warn_time: Local<f32>,
     // 节流：最近一次 re-mesh 用了多少 ms。60fps + Greedy Mesh ≈ 600-1200ms 一次，
     // 所以按帧调会被卡成 1fps。用真实时间节流，0.5s 内不重复 re-mesh。
     mut last_mesh_wall: Local<f32>,
@@ -176,7 +180,7 @@ pub fn spawn_terrain_around_player(
         return;
     }
     if moved && now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
-        return;  // 0.5s → 1.5s 留时间给更大的 40³ re-mesh (12 type * 40³)
+        return; // 0.5s → 1.5s 留时间给更大的 40³ re-mesh (12 type * 40³)
     }
 
     // 清掉上一次的（视觉 + 碰撞）
@@ -198,14 +202,12 @@ pub fn spawn_terrain_around_player(
     // ─────────── 走 smooth path（默认）───────────
     if cfg.smooth_terrain {
         let started = time.elapsed_secs();
-        let sm = smooth_mesh::build_smooth_mesh(
-            &game_world, min, max, 0.5, cfg.smooth_passes,
-        );
+        let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
             // 单一 material：vertex color 模式 + 平滑 terrain
             let mat = materials.add(StandardMaterial {
-                base_color: Color::WHITE,  // vertex color 覆盖
+                base_color: Color::WHITE, // vertex color 覆盖
                 perceptual_roughness: 0.85,
                 metallic: 0.0,
                 ..default()
@@ -221,11 +223,8 @@ pub fn spawn_terrain_around_player(
                 .id();
             spawned.visual_entities.push(visual);
             // 碰撞：Trimesh（avian3d 0.6 要 Vec<Vec3> + Vec<[u32; 3]>）
-            let collider_verts: Vec<Vec3> = sm
-                .collider_trimesh
-                .iter()
-                .map(|p| Vec3::new(p[0], p[1], p[2]))
-                .collect();
+            let collider_verts: Vec<Vec3> =
+                sm.collider_trimesh.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
             let collider_indices: Vec<[u32; 3]> = sm
                 .collider_indices
                 .chunks(3)
@@ -247,7 +246,10 @@ pub fn spawn_terrain_around_player(
             let mesh_secs = time.elapsed_secs() - started;
             debug!(
                 "🌊 smooth mesh: {} tris, passes={}, 耗时 {:.0}ms（玩家 {:?}）",
-                total_tris, cfg.smooth_passes, mesh_secs * 1000.0, player.block_pos
+                total_tris,
+                cfg.smooth_passes,
+                mesh_secs * 1000.0,
+                player.block_pos
             );
         } else {
             // 标量场全空（cave 都没有）→ 不 spawn 任何东西
@@ -402,19 +404,23 @@ pub fn setup_atmosphere(
     // 斜 15°（绕 Z 轴），让剑看起来"握着"
     let tilt = Quat::from_rotation_z(15_f32.to_radians());
     // 把手：相机本地，右下角
-    let handle = commands.spawn((
-        HeldWeaponPart,
-        Mesh3d(handle_mesh),
-        MeshMaterial3d(handle_mat),
-        Transform::from_translation(Vec3::new(0.45, -0.55, -0.75)).with_rotation(tilt),
-    )).id();
+    let handle = commands
+        .spawn((
+            HeldWeaponPart,
+            Mesh3d(handle_mesh),
+            MeshMaterial3d(handle_mat),
+            Transform::from_translation(Vec3::new(0.45, -0.55, -0.75)).with_rotation(tilt),
+        ))
+        .id();
     // 刀刃：把手正上方叠
-    let blade = commands.spawn((
-        HeldWeaponPart,
-        Mesh3d(blade_mesh),
-        MeshMaterial3d(blade_mat),
-        Transform::from_translation(Vec3::new(0.45, 0.10, -0.75)).with_rotation(tilt),
-    )).id();
+    let blade = commands
+        .spawn((
+            HeldWeaponPart,
+            Mesh3d(blade_mesh),
+            MeshMaterial3d(blade_mat),
+            Transform::from_translation(Vec3::new(0.45, 0.10, -0.75)).with_rotation(tilt),
+        ))
+        .id();
     commands.entity(cam_entity).add_child(handle);
     commands.entity(cam_entity).add_child(blade);
     info!("⚔ 剑已 spawn（缩小到右下角，斜 15°）");
@@ -439,8 +445,12 @@ pub fn mouse_look_system(
     freefly: Res<FreeFlyState>,
 ) {
     // 自由视角下强制开（脱离玩家也想用鼠标看）
-    if !cfg.mouse_look && !freefly.enabled { return; }
-    if motion.delta == Vec2::ZERO { return; }
+    if !cfg.mouse_look && !freefly.enabled {
+        return;
+    }
+    if motion.delta == Vec2::ZERO {
+        return;
+    }
     // FPS 标准：鼠标右滑 → 视角右转（yaw+）；鼠标上滑 → 抬头（pitch+）
     angles.yaw += motion.delta.x * MOUSE_SENS;
     angles.pitch -= motion.delta.y * MOUSE_SENS;
@@ -456,16 +466,15 @@ pub fn freefly_toggle(
     mut freefly: ResMut<FreeFlyState>,
     mut player: ResMut<PlayerState>,
 ) {
-    if !keys.just_pressed(KeyCode::F3) { return; }
+    if !keys.just_pressed(KeyCode::F3) {
+        return;
+    }
     freefly.enabled = !freefly.enabled;
     if freefly.enabled {
         // 进入：快照玩家位置，相机从玩家头顶 18m 起飞
         freefly.saved_player_pos = Some(player.block_pos);
-        freefly.position = Vec3::new(
-            player.block_pos[0] as f32 + 0.5,
-            player.block_pos[1] as f32 + 0.5 + 18.0,
-            player.block_pos[2] as f32 + 0.5,
-        );
+        freefly.saved_player_world_pos = Some(player.pos);
+        freefly.position = player.pos + Vec3::Y * 18.0;
         freefly.velocity = Vec3::ZERO;
         info!(
             "🕊 FreeFly ON — 玩家身体冻结在 {:?}，WASD 飞 / Space↑ / Shift↓ / 鼠标视角 / F3 回本体",
@@ -474,13 +483,16 @@ pub fn freefly_toggle(
     } else {
         // 退出：还原玩家位置（block_pos 和 pos 同步）
         if let Some(saved) = freefly.saved_player_pos.take() {
-            info!("🕊 FreeFly OFF — 还原玩家 {:?} -> {:?}", player.block_pos, saved);
-            player.block_pos = saved;
-            player.pos = Vec3::new(
+            let saved_pos = freefly.saved_player_world_pos.take().unwrap_or(Vec3::new(
                 saved[0] as f32 + 0.5,
-                saved[1] as f32 + 0.5,
+                saved[1] as f32,
                 saved[2] as f32 + 0.5,
+            ));
+            info!(
+                "🕊 FreeFly OFF — 还原玩家 {:?} -> {:?}",
+                player.block_pos, saved
             );
+            set_player_position(&mut player, saved_pos, saved);
         } else {
             info!("🕊 FreeFly OFF");
         }
@@ -495,8 +507,12 @@ pub fn camera_mode_toggle(
     freefly: Res<FreeFlyState>,
 ) {
     // FreeFly 模式下禁用 C 切换（避免模式冲突）
-    if freefly.enabled { return; }
-    if !keys.just_pressed(KeyCode::KeyC) { return; }
+    if freefly.enabled {
+        return;
+    }
+    if !keys.just_pressed(KeyCode::KeyC) {
+        return;
+    }
     *mode = match *mode {
         CameraMode::FirstPerson => {
             info!("📷 CameraMode → 3rd person");
@@ -509,33 +525,34 @@ pub fn camera_mode_toggle(
     };
 }
 
-/// F5 紧急传送：把玩家传回出生点上方 30m（卡在山里/找不到自己时救命用）
+/// F5 紧急传送：把玩家传回出生点的可站地面（卡在山里/找不到自己时救命用）
 pub fn emergency_teleport(
     keys: Res<ButtonInput<KeyCode>>,
+    game_world: Res<GameWorld>,
     mut player: ResMut<PlayerState>,
 ) {
-    if !keys.just_pressed(KeyCode::F5) { return; }
-    let safe = [
-        lk2_core::constant::WORLD_SIZE / 2,
-        30,  // 出生点正上方 30m，半空，自由落体
-        lk2_core::constant::WORLD_SIZE / 2,
-    ];
-    warn!("🚨 F5 紧急传送： {:?} -> {:?}", player.block_pos, safe);
-    player.block_pos = safe;
-    player.pos = Vec3::new(safe[0] as f32 + 0.5, safe[1] as f32 + 0.5, safe[2] as f32 + 0.5);
+    if !keys.just_pressed(KeyCode::F5) {
+        return;
+    }
+    let x = lk2_core::constant::WORLD_SIZE / 2;
+    let z = lk2_core::constant::WORLD_SIZE / 2;
+    let Some((pos, block_pos)) = player_spawn_position_at(&game_world, x, z) else {
+        warn!("🚨 F5 紧急传送失败：出生列没有可站位置");
+        return;
+    };
+    warn!("🚨 F5 紧急传送： {:?} -> {:?}", player.block_pos, block_pos);
+    set_player_position(&mut player, pos, block_pos);
 }
 
 /// F8 循环切换地形 preset
-pub fn cycle_terrain_preset(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut game_world: ResMut<GameWorld>,
-) {
-    if !keys.just_pressed(KeyCode::F8) { return; }
+pub fn cycle_terrain_preset(keys: Res<ButtonInput<KeyCode>>, mut game_world: ResMut<GameWorld>) {
+    if !keys.just_pressed(KeyCode::F8) {
+        return;
+    }
     let names = lk2_core::world::terrain::presets::preset_names();
     let current = game_world.pipeline.name.clone();
-    let next_idx = names.iter().position(|n| *n == current)
-        .map(|i| (i + 1) % names.len())
-        .unwrap_or(0);
+    let next_idx =
+        names.iter().position(|n| *n == current).map(|i| (i + 1) % names.len()).unwrap_or(0);
     let next_name = names[next_idx];
     let new_pipeline = lk2_core::world::terrain::presets::by_name(next_name);
     let new_name = new_pipeline.name.clone();
@@ -550,7 +567,9 @@ pub fn freefly_movement(
     angles: Res<CameraAngles>,
     time: Res<Time>,
 ) {
-    if !freefly.enabled { return; }
+    if !freefly.enabled {
+        return;
+    }
 
     // 视野方向（完整 3D，包括 pitch — freefly 应该能飞高飞低）
     let (sy, cy) = angles.yaw.sin_cos();
@@ -563,12 +582,24 @@ pub fn freefly_movement(
 
     // 累加意图（按住 = 持续）
     let mut wish = Vec3::ZERO;
-    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp)    { wish += forward; }
-    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)  { wish -= forward; }
-    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) { wish += right; }
-    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)  { wish -= right; }
-    if keys.pressed(KeyCode::Space) { wish += up; }
-    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) { wish -= up; }
+    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
+        wish += forward;
+    }
+    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
+        wish -= forward;
+    }
+    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+        wish += right;
+    }
+    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+        wish -= right;
+    }
+    if keys.pressed(KeyCode::Space) {
+        wish += up;
+    }
+    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        wish -= up;
+    }
     // Q/E = 加速
     let speed = if keys.pressed(KeyCode::KeyQ) || keys.pressed(KeyCode::KeyE) {
         FREEFLY_SPEED * FREEFLY_BOOST
@@ -595,7 +626,9 @@ pub fn setup_cursor_grab(
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     cfg: Res<RenderConfig>,
 ) {
-    if !cfg.mouse_look { return; }
+    if !cfg.mouse_look {
+        return;
+    }
     if let Ok(mut cursor) = cursors.single_mut() {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
@@ -614,7 +647,9 @@ pub fn update_animal_indicator(
     camera: Query<&Transform, With<Camera3d>>,
     creatures: Query<&Creature>,
 ) {
-    let Ok(mut text) = q_text.single_mut() else { return; };
+    let Ok(mut text) = q_text.single_mut() else {
+        return;
+    };
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
 
@@ -647,7 +682,11 @@ pub fn update_animal_indicator(
     let arrow = if let Ok(tf) = camera.single() {
         let f = tf.forward();
         let cam = Vec2::new(f.x, f.z);
-        let cam_n = if cam.length() > 0.01 { cam.normalize() } else { Vec2::new(1.0, 0.0) };
+        let cam_n = if cam.length() > 0.01 {
+            cam.normalize()
+        } else {
+            Vec2::new(1.0, 0.0)
+        };
         let dot = animal_v.dot(cam_n);
         let cross = animal_v.x * cam_n.y - animal_v.y * cam_n.x;
         // cross < 0 = 动物在右；angle 量化到 8 方向
@@ -707,7 +746,11 @@ pub fn player_input(
         // bevy 0.18: Transform::forward() 返回 local -Z 在 world 中的方向（相机看哪里）
         let f = tf.forward();
         let f_h = Vec3::new(f.x, 0.0, f.z);
-        let f_n = if f_h.length() > 0.01 { f_h.normalize() } else { Vec3::new(1.0, 0.0, 0.0) };
+        let f_n = if f_h.length() > 0.01 {
+            f_h.normalize()
+        } else {
+            Vec3::new(1.0, 0.0, 0.0)
+        };
         // right = fwd × Y：看着 -Z 时 right = +X（D 往右移，符合 FPS 习惯）
         let r = f_n.cross(Vec3::Y);
         (f_n, r)
@@ -719,12 +762,24 @@ pub fn player_input(
     // FreeFly 模式下 WASD/Space/Shift/QE 全部跳过（由 freefly_movement 处理）
     let mut d = Vec3::ZERO;
     if !freefly_active {
-        if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp)    { d += forward; }
-        if keys.just_pressed(KeyCode::KeyS) || keys.just_pressed(KeyCode::ArrowDown)  { d -= forward; }
-        if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft)  { d -= right; }
-        if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) { d += right; }
-        if keys.just_pressed(KeyCode::Space)    { d += Vec3::Y; }
-        if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) { d -= Vec3::Y; }
+        if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp) {
+            d += forward;
+        }
+        if keys.just_pressed(KeyCode::KeyS) || keys.just_pressed(KeyCode::ArrowDown) {
+            d -= forward;
+        }
+        if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft) {
+            d -= right;
+        }
+        if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) {
+            d += right;
+        }
+        if keys.just_pressed(KeyCode::Space) {
+            d += Vec3::Y;
+        }
+        if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) {
+            d -= Vec3::Y;
+        }
     }
 
     // 转向：Q 左转 22.5°，E 右转 22.5°（改 CameraAngles.yaw，相机跟）
@@ -754,7 +809,11 @@ pub fn player_input(
 
     // 采集：G 键 = 挖当前脚下方块
     if keys.just_pressed(KeyCode::KeyG) {
-        let (x, y, z) = (player.block_pos[0], player.block_pos[1], player.block_pos[2]);
+        let (x, y, z) = (
+            player.block_pos[0],
+            player.block_pos[1] - 1,
+            player.block_pos[2],
+        );
         let b = game_world.get(x, y, z);
         if b.is_solid() {
             if let Some((res, _)) = b.yields() {
@@ -762,7 +821,11 @@ pub fn player_input(
                 let _ = pool.try_add(res, 1);
                 *player.inventory.entry(res).or_insert(0) += 1;
                 player.blocks_gathered += 1;
-                info!("⛏ 你挖了 {:?} (库存 {:?})", res, player.inventory.get(&res).copied().unwrap_or(0));
+                info!(
+                    "⛏ 你挖了 {:?} (库存 {:?})",
+                    res,
+                    player.inventory.get(&res).copied().unwrap_or(0)
+                );
             } else {
                 info!("这个方块挖不出东西");
             }
@@ -823,7 +886,10 @@ pub fn player_input(
         if let Some((dist, kid, nid, iid)) = best {
             if monsters.kill_individual(kid, nid, iid, &mut pool) {
                 player.monsters_killed += 1;
-                info!("⚔ 你击杀了怪物 (距离 {:.1} 格) kid={} nid={} iid={}", dist, kid, nid, iid);
+                info!(
+                    "⚔ 你击杀了怪物 (距离 {:.1} 格) kid={} nid={} iid={}",
+                    dist, kid, nid, iid
+                );
             }
         } else {
             info!("⚔ 2 格内没有怪物");
@@ -831,57 +897,115 @@ pub fn player_input(
     }
 }
 
-/// 玩家移动：3D cardinal 方向。如果目标块是实心，向上找空位（最多 6 格）。
-///
-/// v2（smooth terrain 配套）：
-///   - 用 `effective_ground_height` (f32) 比较当前 vs 目标 XZ 列的软地表
-///   - 差 > `ground_step_threshold` (默认 0.5) 才视为"被卡" → 向上找空位
-///   - 否则可以直接挪到目标 XZ 位置（玩家 y 仍按格子走）
-///
-/// 物理仍然按格子（玩家不"贴地滑行"），但"卡脚"判定从 boolean is_solid 改成 f32 高度差。
-fn try_player_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3], threshold: f32) {
-    let mut new_pos = [
-        player.block_pos[0] + d[0],
-        player.block_pos[1] + d[1],
-        player.block_pos[2] + d[2],
-    ];
-    if !game_world.in_bounds(new_pos[0], new_pos[1], new_pos[2]) {
-        return;
+const PLAYER_BODY_CLEARANCE_BLOCKS: i32 = 2;
+const MAX_SMOOTH_DROP: f32 = 6.0;
+
+fn player_body_clear(world: &GameWorld, x: i32, foot_y: i32, z: i32) -> bool {
+    if foot_y < 0 || foot_y + PLAYER_BODY_CLEARANCE_BLOCKS > world.size {
+        return false;
     }
-    if new_pos[1] < 0 || new_pos[1] >= game_world.size as i32 {
-        return;
-    }
-    // 软"卡脚"判定：f32 高度差 vs threshold
-    let cur_ground = scalar_field::effective_ground_height(game_world, player.block_pos[0], player.block_pos[2]);
-    let next_ground = scalar_field::effective_ground_height(game_world, new_pos[0], new_pos[2]);
-    let step_diff = (next_ground - cur_ground).abs();
-    let blocked_by_height = step_diff > threshold;
-    // 目标格本身是实心（罕见：脚被踩在 block 中心）
-    let b = game_world.get(new_pos[0], new_pos[1], new_pos[2]);
-    let blocked_by_solid = b.is_solid();
-    if blocked_by_height || blocked_by_solid {
-        // 向上找空位（最多 6 格）
-        let mut landed = false;
-        for up in 1..=6 {
-            let try_pos = [new_pos[0], new_pos[1] + up, new_pos[2]];
-            if game_world.in_bounds(try_pos[0], try_pos[1], try_pos[2])
-                && !game_world.get(try_pos[0], try_pos[1], try_pos[2]).is_solid()
-            {
-                new_pos = try_pos;
-                landed = true;
-                break;
-            }
-        }
-        if !landed {
-            return; // 被挡死
+    for y in foot_y..(foot_y + PLAYER_BODY_CLEARANCE_BLOCKS) {
+        if world.get(x, y, z).is_solid() {
+            return false;
         }
     }
-    player.block_pos = new_pos;
-    player.pos = Vec3::new(
-        new_pos[0] as f32 + 0.5,
-        new_pos[1] as f32 + 0.5,
-        new_pos[2] as f32 + 0.5,
-    );
+    true
+}
+
+fn standable_foot_y(
+    world: &GameWorld,
+    x: i32,
+    z: i32,
+    near_y: f32,
+    max_step_up: f32,
+) -> Option<i32> {
+    let min_y = ((near_y - MAX_SMOOTH_DROP).floor() as i32).max(1);
+    let max_y = ((near_y + max_step_up).ceil() as i32).min(world.size - 2);
+    (min_y..=max_y)
+        .filter(|foot_y| {
+            world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
+        })
+        .min_by(|a, b| {
+            let da = (*a as f32 - near_y).abs();
+            let db = (*b as f32 - near_y).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+fn standable_foot_y_any_height(world: &GameWorld, x: i32, z: i32) -> Option<i32> {
+    (1..(world.size - 2)).rev().find(|foot_y| {
+        world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
+    })
+}
+
+pub fn player_stand_position_at(
+    world: &GameWorld,
+    x: i32,
+    z: i32,
+    near_y: f32,
+    max_step_up: f32,
+) -> Option<(Vec3, [i32; 3])> {
+    let foot_y = standable_foot_y(world, x, z, near_y, max_step_up)?;
+    Some((
+        Vec3::new(x as f32 + 0.5, foot_y as f32, z as f32 + 0.5),
+        [x, foot_y, z],
+    ))
+}
+
+pub fn player_spawn_position_at(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
+    let foot_y = standable_foot_y_any_height(world, x, z)?;
+    Some((
+        Vec3::new(x as f32 + 0.5, foot_y as f32, z as f32 + 0.5),
+        [x, foot_y, z],
+    ))
+}
+
+fn set_player_position(player: &mut PlayerState, pos: Vec3, block_pos: [i32; 3]) {
+    player.pos = pos;
+    player.block_pos = block_pos;
+}
+
+/// 玩家移动：水平移动按软地表找落脚点，竖直移动只检查身体空间。
+///
+/// 这不是完整刚体物理；`PlayerState` 仍是 demo 的权威位置。关键是移动判定不再把
+/// “目标脚下格是 solid” 当成卡住，而是找目标 XZ 附近可站的地面，所以方块边缘不会卡脚。
+fn try_player_move(
+    player: &mut PlayerState,
+    game_world: &mut GameWorld,
+    d: [i32; 3],
+    threshold: f32,
+) -> bool {
+    if d[1] != 0 && d[0] == 0 && d[2] == 0 {
+        let next_y = player.block_pos[1] + d[1];
+        if !game_world.in_bounds(player.block_pos[0], next_y, player.block_pos[2]) {
+            return false;
+        }
+        if !player_body_clear(game_world, player.block_pos[0], next_y, player.block_pos[2]) {
+            return false;
+        }
+        let pos = Vec3::new(player.pos.x, next_y as f32, player.pos.z);
+        set_player_position(
+            player,
+            pos,
+            [player.block_pos[0], next_y, player.block_pos[2]],
+        );
+        return true;
+    }
+
+    let next_x = player.block_pos[0] + d[0];
+    let next_z = player.block_pos[2] + d[2];
+    let Some((pos, block_pos)) =
+        player_stand_position_at(game_world, next_x, next_z, player.pos.y, threshold)
+    else {
+        return false;
+    };
+
+    if pos.y - player.pos.y > threshold {
+        return false;
+    }
+
+    set_player_position(player, pos, block_pos);
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -892,20 +1016,8 @@ fn try_player_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32
 #[derive(Component)]
 pub struct Player;
 
-/// 玩家状态（Resource，不是 Component）
-#[derive(Resource, Default)]
-pub struct PlayerState {
-    pub pos: Vec3,
-    pub block_pos: [i32; 3],
-    pub inventory: std::collections::HashMap<ResourceKind, i64>,
-    pub nation_id: Option<lk2_core::nation::NationId>,
-    pub monsters_killed: u32,
-    pub blocks_gathered: u32,
-    pub nations_founded: u32,
-}
-
-/// 自动 demo 模式：每 N 秒随机移动玩家，让相机跟着转
-/// Demo 模式：玩家可以"飞" — 如果被固体挡住，自动向上找空位
+/// 自动 demo 模式：每 N 秒随机移动玩家，让相机跟着转。
+/// 移动沿用手动输入的软地表落脚逻辑，避免演示路径贴墙或卡边。
 pub fn auto_demo(
     time: Res<Time>,
     mut player: ResMut<PlayerState>,
@@ -923,14 +1035,26 @@ pub fn auto_demo(
     if cfg.auto_keys {
         *auto_frame += 1;
         // t=1.0s: 按 F（第一次造国，应成功 +20 souls）
-        if *auto_frame == 60 { keys.press(KeyCode::KeyF); }
-        if *auto_frame == 62 { keys.release(KeyCode::KeyF); }
+        if *auto_frame == 60 {
+            keys.press(KeyCode::KeyF);
+        }
+        if *auto_frame == 62 {
+            keys.release(KeyCode::KeyF);
+        }
         // t=4.0s: 按 J（杀怪 — 玩家身边可能没怪，info 一下即可）
-        if *auto_frame == 240 { keys.press(KeyCode::KeyJ); }
-        if *auto_frame == 242 { keys.release(KeyCode::KeyJ); }
+        if *auto_frame == 240 {
+            keys.press(KeyCode::KeyJ);
+        }
+        if *auto_frame == 242 {
+            keys.release(KeyCode::KeyJ);
+        }
         // t=8.0s: 再按 F（应失败：已有国家）
-        if *auto_frame == 480 { keys.press(KeyCode::KeyF); }
-        if *auto_frame == 482 { keys.release(KeyCode::KeyF); }
+        if *auto_frame == 480 {
+            keys.press(KeyCode::KeyF);
+        }
+        if *auto_frame == 482 {
+            keys.release(KeyCode::KeyF);
+        }
     }
 
     if !cfg.auto_walk {
@@ -938,9 +1062,12 @@ pub fn auto_demo(
     }
 
     // 玩家按了任何移动键 → 让位给真实输入
-    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::KeyA)
-        || keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::KeyD)
-        || keys.pressed(KeyCode::Space) || keys.pressed(KeyCode::ShiftLeft)
+    if keys.pressed(KeyCode::KeyW)
+        || keys.pressed(KeyCode::KeyA)
+        || keys.pressed(KeyCode::KeyS)
+        || keys.pressed(KeyCode::KeyD)
+        || keys.pressed(KeyCode::Space)
+        || keys.pressed(KeyCode::ShiftLeft)
     {
         return;
     }
@@ -951,55 +1078,47 @@ pub fn auto_demo(
     *walk_timer = 0.0;
     *walk_step += 1;
 
-    // 8 水平方向 + 偶尔 Y 方向，但只挑前方 2 格都空的方向（避免第一视角撞墙）
+    // 8 水平方向 + 偶尔 Y 方向；移动函数负责找可站地面和身体空间。
     let all_dirs: [[i32; 3]; 9] = [
-        [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1],
-        [1, 0, 1], [1, 0, -1], [-1, 0, 1], [-1, 0, -1],
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+        [1, 0, 1],
+        [1, 0, -1],
+        [-1, 0, 1],
+        [-1, 0, -1],
         [0, 1, 0],
     ];
-    // 过滤：前方 2 格都空（避免被挡住后第一视角贴着墙看）
-    let good_dirs: Vec<[i32; 3]> = all_dirs.iter().filter(|d| {
-        let np1 = [player.block_pos[0] + d[0], player.block_pos[1] + d[1], player.block_pos[2] + d[2]];
-        let np2 = [np1[0] + d[0], np1[1] + d[1], np1[2] + d[2]];
-        if !game_world.in_bounds(np1[0], np1[1], np1[2]) { return false; }
-        if !game_world.in_bounds(np2[0], np2[1], np2[2]) { return false; }
-        if game_world.get(np1[0], np1[1], np1[2]).is_solid() { return false; }
-        if game_world.get(np2[0], np2[1], np2[2]).is_solid() { return false; }
-        true
-    }).copied().collect();
-    if good_dirs.is_empty() { return; }
-    let d = good_dirs[(*walk_step as usize) % good_dirs.len()];
-
-    // demo 模式：被挡住时向上飞过（最高 +6 格）。新地形很高，不强行压回平地
-    let mut new_pos = [
-        player.block_pos[0] + d[0],
-        player.block_pos[1] + d[1],
-        player.block_pos[2] + d[2],
-    ];
-    if !game_world.in_bounds(new_pos[0], new_pos[1], new_pos[2]) {
+    // 过滤：前方 2 格都能按软地表落脚（避免被挡住后第一视角贴着墙看）
+    let good_dirs: Vec<[i32; 3]> = all_dirs
+        .iter()
+        .filter(|d| {
+            let nx1 = player.block_pos[0] + d[0];
+            let nz1 = player.block_pos[2] + d[2];
+            let nx2 = nx1 + d[0];
+            let nz2 = nz1 + d[2];
+            player_stand_position_at(
+                &game_world,
+                nx1,
+                nz1,
+                player.pos.y,
+                cfg.ground_step_threshold,
+            )
+            .and_then(|(pos, _)| {
+                player_stand_position_at(&game_world, nx2, nz2, pos.y, cfg.ground_step_threshold)
+            })
+            .is_some()
+        })
+        .copied()
+        .collect();
+    if good_dirs.is_empty() {
         return;
     }
-    let b = game_world.get(new_pos[0], new_pos[1], new_pos[2]);
-    if b.is_solid() {
-        // 向上找空位（最多 6 格）
-        for up in 1..=6 {
-            let try_pos = [new_pos[0], new_pos[1] + up, new_pos[2]];
-            if game_world.in_bounds(try_pos[0], try_pos[1], try_pos[2])
-                && !game_world.get(try_pos[0], try_pos[1], try_pos[2]).is_solid()
-            {
-                new_pos = try_pos;
-                break;
-            }
-        }
-    }
-    if !game_world.get(new_pos[0], new_pos[1], new_pos[2]).is_solid() {
-        let before = player.block_pos;
-        player.block_pos = new_pos;
-        player.pos = Vec3::new(
-            new_pos[0] as f32 + 0.5,
-            new_pos[1] as f32 + 0.5,
-            new_pos[2] as f32 + 0.5,
-        );
+    let d = good_dirs[(*walk_step as usize) % good_dirs.len()];
+
+    let before = player.block_pos;
+    if try_player_move(&mut player, &mut game_world, d, cfg.ground_step_threshold) {
         // 记下最后水平移动方向
         let dx = (player.block_pos[0] - before[0]) as f32;
         let dz = (player.block_pos[2] - before[2]) as f32;
@@ -1008,11 +1127,20 @@ pub fn auto_demo(
             last.0 = v.normalize();
         }
     }
-    // 周期性地采集当前块（如果可采集）
-    let cur = game_world.get(player.block_pos[0], player.block_pos[1], player.block_pos[2]);
+    // 周期性地采集脚下块（如果可采集）
+    let cur = game_world.get(
+        player.block_pos[0],
+        player.block_pos[1] - 1,
+        player.block_pos[2],
+    );
     if let Some((res, _)) = cur.yields() {
         if cur.is_solid() {
-            game_world.set(player.block_pos[0], player.block_pos[1], player.block_pos[2], BlockType::Air);
+            game_world.set(
+                player.block_pos[0],
+                player.block_pos[1] - 1,
+                player.block_pos[2],
+                BlockType::Air,
+            );
             *player.inventory.entry(res).or_insert(0) += 1;
             player.blocks_gathered += 1;
         }
@@ -1035,7 +1163,9 @@ pub fn first_person_camera(
     mode: Res<CameraMode>,
     mut orbit_angle: Local<f32>,
 ) {
-    let Ok(mut tf) = q.single_mut() else { return; };
+    let Ok(mut tf) = q.single_mut() else {
+        return;
+    };
 
     // F3 自由視点：相机从 freefly.position 起飞，完全脱离玩家
     if freefly.enabled {
@@ -1054,13 +1184,13 @@ pub fn first_person_camera(
     if cfg.auto_orbit && !cfg.mouse_look {
         *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
         let a = *orbit_angle;
-        let target = Vec3::new(
-            player.block_pos[0] as f32 + 0.5,
-            player.block_pos[1] as f32 + 0.5 + 0.5, // 看向玩家胸口/头部高度
-            player.block_pos[2] as f32 + 0.5,
-        );
+        let target = player.pos + Vec3::Y * 1.0; // 看向玩家胸口/头部高度
         let cam_pos = target
-            + Vec3::new(a.cos() * cfg.auto_orbit_distance, 3.0, a.sin() * cfg.auto_orbit_distance);
+            + Vec3::new(
+                a.cos() * cfg.auto_orbit_distance,
+                3.0,
+                a.sin() * cfg.auto_orbit_distance,
+            );
         tf.translation = cam_pos;
         tf.look_at(target, Vec3::Y);
         return;
@@ -1071,22 +1201,14 @@ pub fn first_person_camera(
         let (sy, cy) = angles.yaw.sin_cos();
         // yaw 对应水平 forward = (sy, 0, -cy)；相机在玩家身后 = -forward
         let back = Vec3::new(-sy, 0.0, cy);
-        let target = Vec3::new(
-            player.block_pos[0] as f32 + 0.5,
-            player.block_pos[1] as f32 + 0.5 + 1.0,
-            player.block_pos[2] as f32 + 0.5,
-        );
+        let target = player.pos + Vec3::Y * 1.4;
         let cam_pos = target + back * TP_DISTANCE + Vec3::new(0.0, TP_HEIGHT, 0.0);
         tf.translation = cam_pos;
         tf.look_at(target, Vec3::Y);
         return;
     }
 
-    let eye = Vec3::new(
-        player.block_pos[0] as f32 + 0.5,
-        player.block_pos[1] as f32 + 0.5 + 1.3,
-        player.block_pos[2] as f32 + 0.5,
-    );
+    let eye = player.pos + Vec3::Y * 1.7;
 
     let dir = if cfg.mouse_look {
         // 鼠标视角：forward = (sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch))
@@ -1100,7 +1222,9 @@ pub fn first_person_camera(
             let dx = (c.block_pos[0] as f32 + 0.5) - eye.x;
             let dz = (c.block_pos[2] as f32 + 0.5) - eye.z;
             let d2 = dx * dx + dz * dz;
-            if d2 < 900.0 { candidates.push((d2, c.block_pos)); }
+            if d2 < 900.0 {
+                candidates.push((d2, c.block_pos));
+            }
         }
         candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         let mut best: Option<[i32; 3]> = None;
@@ -1114,15 +1238,28 @@ pub fn first_person_camera(
                 let z = eye.z + (tz - eye.z) * t;
                 let bx = x.floor() as i32;
                 let bz = z.floor() as i32;
-                if world.in_bounds(bx, player.block_pos[1], bz)
-                    && world.get(bx, player.block_pos[1], bz).is_solid()
-                { clear = false; break; }
+                let by = eye.y.floor() as i32;
+                if world.in_bounds(bx, by, bz) && world.get(bx, by, bz).is_solid() {
+                    clear = false;
+                    break;
+                }
             }
-            if clear { best = Some(*c); break; }
+            if clear {
+                best = Some(*c);
+                break;
+            }
         }
         if let Some(c) = best {
-            let v = Vec3::new((c[0] as f32 + 0.5) - eye.x, 0.0, (c[2] as f32 + 0.5) - eye.z);
-            if v.length() > 0.01 { v.normalize() } else { Vec3::new(1.0, 0.0, 0.0) }
+            let v = Vec3::new(
+                (c[0] as f32 + 0.5) - eye.x,
+                0.0,
+                (c[2] as f32 + 0.5) - eye.z,
+            );
+            if v.length() > 0.01 {
+                v.normalize()
+            } else {
+                Vec3::new(1.0, 0.0, 0.0)
+            }
         } else if last.0.length() < 0.01 {
             Vec3::new(1.0, 0.0, 0.0)
         } else {

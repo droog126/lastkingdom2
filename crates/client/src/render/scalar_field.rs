@@ -53,11 +53,7 @@ impl ScalarField {
 /// - cell 数 = (max[0]-min[0]) × (max[1]-min[1]) × (max[2]-min[2])
 /// - 角点数 = cell 数 + 1 每维
 /// - 每个角点的 density = 周围 8 个 cell 中 solid（排除 Air + Water）的占比 ∈ [0, 1]
-pub fn build_density_field(
-    world: &GameWorld,
-    min: [i32; 3],
-    max: [i32; 3],
-) -> ScalarField {
+pub fn build_density_field(world: &GameWorld, min: [i32; 3], max: [i32; 3]) -> ScalarField {
     let cell_size = [
         (max[0] - min[0]).max(1) as usize,
         (max[1] - min[1]).max(1) as usize,
@@ -103,11 +99,7 @@ pub fn build_density_field(
         }
     }
 
-    ScalarField {
-        data,
-        shape: corner_shape,
-        origin: min,
-    }
+    ScalarField { data, shape: corner_shape, origin: min }
 }
 
 /// 玩家脚下"软"地表高度（f32）— 用于 try_player_move 的"跨度 0.5"判定

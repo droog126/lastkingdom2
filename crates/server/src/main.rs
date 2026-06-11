@@ -27,16 +27,18 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use bevy::prelude::*;
-use bevy::ecs::schedule::IntoScheduleConfigs;
 use avian3d::prelude::PhysicsPlugins;
-use lightyear::prelude::server::ServerUdpIo;
+use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::prelude::*;
 use lightyear::prelude::LocalAddr;
+use lightyear::prelude::server::ServerUdpIo;
 // 用 leafwing ActionState 读 client 上行的 PlayerAction (lightyear 0.26
 // InputPlugin::finish() 在 server 端自动加 InputManagerPlugin::<A>::server()
 // + 初始化 ActionState<PlayerAction> resource, 我们直接 Res<ActionState<...>> 读就行)
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::PlayerAction;
+use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
+use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback};
 // lightyear 0.26.4 bug 绕开: `ServerMultiMessageSender` (lightyear_messages
 // server.rs:33 `metadata: Res<'w, PeerMetadata>`) 依赖 `Res<PeerMetadata>`,而
 // `PeerMetadata` 只在 `lightyear_connection::client::ConnectionPlugin::build`
@@ -71,20 +73,41 @@ mod pvp_systems;
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
-use lk2_core::creature::{update_creatures, CreatureSpawnerDone};
+use lk2_core::creature::{CreatureSpawnerDone, update_creatures};
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
+use lk2_core::sim::{SimRole, advance_demo_tick};
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
 // ---- 服务端 crate 内部模块的导出 ----
 use crate::pvp_systems::{
-    apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
-    read_attack_inputs, record_position_history, tick_combat_cooldowns, ServerPvPPlugin,
+    ServerPvPPlugin, apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
+    read_attack_inputs, record_position_history, tick_combat_cooldowns,
 };
+
+const PLACE_WOOD_COST: i64 = 1;
+
+#[derive(Resource, Default)]
+struct WorldRevision(u64);
+
+#[derive(Resource, Clone)]
+struct LastVoxelDeltaState {
+    revision: u64,
+    x: i32,
+    y: i32,
+    z: i32,
+    block: lk2_core::world::BlockType,
+}
+
+impl Default for LastVoxelDeltaState {
+    fn default() -> Self {
+        Self { revision: 0, x: 0, y: 0, z: 0, block: lk2_core::world::BlockType::Air }
+    }
+}
 
 // ============================================================================
 // SimClock (备用，self_check / tick_recorder 用)
@@ -101,7 +124,9 @@ use crate::pvp_systems::{
 pub struct TimeOfDay(pub f32);
 
 impl Default for TimeOfDay {
-    fn default() -> Self { Self(0.5) }  // 正午
+    fn default() -> Self {
+        Self(0.5)
+    } // 正午
 }
 
 // ============================================================================
@@ -119,10 +144,7 @@ fn main() {
         .init();
 
     // 监听端口 (env LK2_PORT 覆盖, 默认 5000)
-    let port: u16 = std::env::var("LK2_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(5000);
+    let port: u16 = std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000);
     info!("[server] listening on UDP 0.0.0.0:{}", port);
 
     // 读取 scenario
@@ -133,7 +155,9 @@ fn main() {
             name: "idle".into(),
             record_window: None,
             steps: vec![
-                lk2_core::scenario::ScenarioStep::Log { msg: "=== idle: server stand-by ===".into() },
+                lk2_core::scenario::ScenarioStep::Log {
+                    msg: "=== idle: server stand-by ===".into(),
+                },
                 lk2_core::scenario::ScenarioStep::WaitTicks { ticks: 1000 },
             ],
         }
@@ -205,30 +229,46 @@ fn main() {
         .init_resource::<FixedTick>()
         .insert_resource(scenario_state)
         // ====== Startup ======
-        .add_systems(Startup, (
-            setup_world,
-            self_check,
-            dump_world_resources,
-            spawn_server,
-            spawn_player,
-        ).chain())
+        .add_systems(
+            Startup,
+            (
+                setup_world,
+                self_check,
+                dump_world_resources,
+                spawn_server,
+                spawn_player,
+            )
+                .chain(),
+        )
+        // 备选: 监听 client connect (On<Add, Connected>) 时再 spawn,
+        // 但启动就 spawn 也行 (server-side 复制的 entity 会在 client connect
+        // 时被自动 broadcast)。当前走 Startup 启动即 spawn 路径, 简单点。
+        // .add_observer(spawn_player_for_connected)
         // ====== Update ======
-        .add_systems(Update, (
-            simulation_tick,
-            end_tick_system,
-            tick_recorder,
-            update_creatures,
-        ).chain())
+        .add_systems(
+            Update,
+            (
+                simulation_tick,
+                end_tick_system,
+                tick_recorder,
+                update_creatures,
+            )
+                .chain(),
+        )
         // ====== FixedUpdate (server PvP) ======
-        .add_systems(FixedUpdate, (
-            // record_position_history 已在 ServerPvPPlugin 内
-            apply_input_to_player,
-            read_attack_inputs,
-            melee_hit_registration,
-            apply_damage_and_knockback,
-            expire_knockback_immunity,
-            tick_combat_cooldowns,
-        ).chain())
+        .add_systems(
+            FixedUpdate,
+            (
+                // record_position_history 已在 ServerPvPPlugin 内
+                apply_input_to_player,
+                read_attack_inputs,
+                melee_hit_registration,
+                apply_damage_and_knockback,
+                expire_knockback_immunity,
+                tick_combat_cooldowns,
+            )
+                .chain(),
+        )
         .run();
 }
 
@@ -273,23 +313,24 @@ fn spawn_server(mut commands: Commands) {
     // (lightyear-0.26.4/src/lib.rs:133)。不 trigger 的话 ServerUdpIo 的
     // LinkStart observer 永远不跑, UDP socket 永远不 bind, server 等于
     // 没 listen。
-    info!("[net] triggering LinkStart on server entity {:?}", server_id);
+    info!(
+        "[net] triggering LinkStart on server entity {:?}",
+        server_id
+    );
     commands.trigger(LinkStart { entity: server_id });
 }
 
 // ============================================================================
-// spawn_player — 权威玩家 entity, 挂 PlayerPos 让 lightyear 自动复制给 client
+// spawn_player — authoritative player entity, 挂 PlayerPos + Replicate
 // ============================================================================
 //
-// wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完的最后一步。
-// 之前 server 端没人 spawn 玩家 entity, client 端 apply_networked_position
-// 跑空 round (找不到带 PlayerPos 组件的 entity)。现在 server 端 spawn 一个
-// 玩家 entity 挂 Transform + PlayerPos(Vec3) + Name("Player"), lightyear
-// 默认 server→client 复制会把 PlayerPos 自动发给 client, 客户端
-// apply_networked_position 就能把收到的 Vec3 写到本机玩家 Transform。
+// wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完。
+// server 启动即 spawn 一个 authoritative player entity, lightyear 默认
+// server→client 复制会把 PlayerPos 自动发给 client, client 端
+// apply_networked_position 就能 apply。
 //
-// 简化: 暂只 spawn 一个"权威玩家" entity, 不做 per-peer 玩家(没有
-// 真正的多人)。client 收到的就是这个 server 权威位置。
+// 简化: 只支持 1 个 client (单进程 demo)。后面做 per-client player 实体
+// 再细化。
 fn spawn_player(mut commands: Commands) {
     let spawn = bevy::math::Vec3::new(
         constant::WORLD_SIZE as f32 / 2.0 + 0.5,
@@ -301,8 +342,6 @@ fn spawn_player(mut commands: Commands) {
         Name::new("Player"),
         bevy::prelude::Transform::from_translation(spawn),
         lk2_core::protocol::components::PlayerPos(spawn),
-        // wire-network-and-loop 任务 (2026-06-11): 挂 Replicate 组件, lightyear
-        // 才会把这个 entity + 它的 PlayerPos 组件复制给所有 client。
         // docs: lightyear-0.26.4/src/lib.rs:195 "To replicate an entity from the
         // local world to the remote world, you can just add the Replicate
         // component to the entity"
@@ -312,28 +351,35 @@ fn spawn_player(mut commands: Commands) {
     ));
 }
 
+// 备选 observer 版本 (没启,见 Startup chain 注释)
+// fn spawn_player_for_connected(...)
+
 // ============================================================================
 // apply_input_to_player — server 端读 client ActionState, 改 Player Transform
 // ============================================================================
 //
 // 读 `Res<ActionState<PlayerAction>>` (lightyear_inputs_leafwing 的
 // InputManagerPlugin::server() 自动 init, 通过 Res 拿全局 input) 算 Vec2
-// 方向, 应用到玩家 entity 的 Transform.translation, 然后把 Transform
-// 同步到 PlayerPos (lightyear 0.26 在 system 之间会自动复制 PlayerPos
-// 给 client)。
+// 方向, 应用到玩家 entity 的 Transform.translation, 同时写回 PlayerPos
+// (lightyear 复制的是 PlayerPos), 然后 lightyear 自动把 PlayerPos 同步给 client。
 //
 // 这是 authoritative server sim 的最小闭环: client 按 W → server
 // 收到 ActionState.pressed(MoveForward)=true → 玩家 entity 向 +Z 移动
 // → PlayerPos 复制 → client apply_networked_position 更新本机
 // Transform。
 fn apply_input_to_player(
-    actions: Res<ActionState<PlayerAction>>,
-    mut q: Query<&mut bevy::prelude::Transform, With<Name>>,
-    // PlayerPos 不在 Query 里 — 复制是 lightyear 自动的事, 我们改完
-    // Transform 后由 lightyear 0.26 注册的 replication 流程在下一 tick
-    // 把 PlayerPos.0 同步到 (transform.translation)。如果实际跑起来
-    // PlayerPos 没动, 后续 patch 改成显式写回。
+    actions: Option<Res<ActionState<PlayerAction>>>,
+    mut q: Query<
+        (
+            &mut bevy::prelude::Transform,
+            &mut lk2_core::protocol::components::PlayerPos,
+        ),
+        With<Name>,
+    >,
 ) {
+    let Some(actions) = actions else {
+        return;
+    };
     let mut dir = bevy::math::Vec2::ZERO;
     if actions.pressed(&PlayerAction::MoveForward) {
         dir.y += 1.0;
@@ -351,16 +397,17 @@ fn apply_input_to_player(
         dir = dir.normalize();
     }
     let speed = 4.0; // m/s, 跟 client 的 PvPController 默认 speed 对齐
-    let dt = 1.0 / 60.0; // 假设 60 TPS (lightyear ServerPlugins::default tick_duration)
+    let dt = 1.0 / 30.0; // 30 TPS fixed update
     let delta = bevy::math::Vec3::new(dir.x, 0.0, -dir.y) * speed * dt; // bevy camera: -Z = forward
-    for mut transform in q.iter_mut() {
-        if transform.translation == bevy::math::Vec3::ZERO
-            && transform.translation.length() < 0.001
+    for (mut transform, mut player_pos) in q.iter_mut() {
+        if transform.translation == bevy::math::Vec3::ZERO && transform.translation.length() < 0.001
         {
             // 跳过默认 Transform (origin 0,0,0) — spawn 的玩家有真实位置
             continue;
         }
         transform.translation += delta;
+        // 同步 PlayerPos: lightyear 复制的是 PlayerPos, 不是 Transform
+        player_pos.0 = transform.translation;
     }
     if dir.length() > 0.01 {
         info!("[player] input dir={:?} applied delta={:?}", dir, delta);
@@ -372,7 +419,7 @@ fn apply_input_to_player(
 // ============================================================================
 
 fn setup_world(
-    mut commands: Commands,
+    _commands: Commands,
     mut game_world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
@@ -405,27 +452,26 @@ fn self_check(
     mut obs: ResMut<TickObserver>,
 ) {
     info!(">>> 服务端启动自检 100 tick ...");
-    let mut pool = pool.clone();
-    let mut monsters = MonsterEcosystem::clone(&*monsters);
-    let mut violations: Vec<String> = Vec::new();
-    for tick in 0..100 {
-        obs.begin_tick();
-        monsters.tick(&mut pool);
-        let _ = pool.try_add(ResourceKind::Food, 2);
-        if let Err(e) = obs.end_tick(
-            tick,
-            &game_world,
-            &pool,
-            &nations,
-            &monsters,
-            Some([constant::WORLD_SIZE / 2, constant::SEA_LEVEL + 2, constant::WORLD_SIZE / 2]),
-        ) {
-            violations.push(format!("tick {}: {}", tick, e.join("; ")));
-        }
-    }
+    let report = lk2_core::diagnostics::run_self_check(
+        &game_world,
+        &pool,
+        &nations,
+        &monsters,
+        &mut obs,
+        [
+            constant::WORLD_SIZE / 2,
+            constant::SEA_LEVEL + 2,
+            constant::WORLD_SIZE / 2,
+        ],
+        100,
+    );
+    let violations = report.violations;
     if violations.is_empty() {
         info!(">>> 自检 ✅ 100 tick 全部通过 (server)");
-        info!(">>> Listening on UDP 0.0.0.0:{} - ready for client connections", port_from_env());
+        info!(
+            ">>> Listening on UDP 0.0.0.0:{} - ready for client connections",
+            port_from_env()
+        );
     } else {
         error!(">>> 自检 ❌ {} 处违例", violations.len());
     }
@@ -433,10 +479,7 @@ fn self_check(
 }
 
 fn port_from_env() -> u16 {
-    std::env::var("LK2_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(5000)
+    std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000)
 }
 
 // ============================================================================
@@ -450,24 +493,14 @@ fn simulation_tick(
     mut monsters: ResMut<MonsterEcosystem>,
     mut obs: ResMut<TickObserver>,
 ) {
-    let now = time.elapsed_secs();
-    if now - clock.last_tick_wall < constant::SLOW_TICK_SECS {
-        return;
-    }
-    clock.last_tick_wall = now;
-    clock.tick += 1;
-    let _ = pool.try_add(ResourceKind::Apple, 1);
-    let _ = pool.try_add(ResourceKind::Food, 2);
-    obs.begin_tick();
-    monsters.tick(&mut pool);
-    if clock.tick % 10 == 0 {
-        info!(
-            "⏱ server tick {}: monsters={}, food={}",
-            clock.tick,
-            monsters.current_individuals,
-            pool.get(ResourceKind::Food)
-        );
-    }
+    let _ = advance_demo_tick(
+        &time,
+        &mut clock,
+        &mut pool,
+        &mut monsters,
+        &mut obs,
+        SimRole::ServerAuthority,
+    );
 }
 
 fn end_tick_system(
@@ -506,7 +539,7 @@ pub struct TickRecorder {
 fn tick_recorder(
     time: Res<Time>,
     mut rec: ResMut<TickRecorder>,
-    mut clock: ResMut<SimClock>,
+    clock: Res<SimClock>,
     player: Res<lk2_core::player::PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
@@ -520,35 +553,17 @@ fn tick_recorder(
     rec.last_dump_tick = clock.tick;
     rec.current_iter = clock.tick as u32;
     let path = format!("screenshots/server_state_t{}.json", clock.tick);
-    let state = serde_json::json!({
-        "tick": clock.tick,
-        "wall_secs": time.elapsed_secs(),
-        "player": {
-            "block_pos": player.block_pos,
-            "pos": [player.pos.x, player.pos.y, player.pos.z],
-        },
-        "pool": {
-            "wood": pool.get(ResourceKind::Wood),
-            "food": pool.get(ResourceKind::Food),
-            "apple": pool.get(ResourceKind::Apple),
-            "soul": pool.get(ResourceKind::Soul),
-        },
-        "nations": {
-            "flag_count": nations.flag_count,
-            "total_nations": nations.nations.len(),
-        },
-        "monsters": {
-            "current": monsters.current_individuals,
-            "kingdoms": monsters.kingdoms.len(),
-        },
-        "observer": {
-            "snapshots": obs.snapshots.len(),
-            "decisions": obs.decisions.len(),
-            "anomalies": obs.anomalies.len(),
-        },
-        "world": { "size": game_world.size },
-        "role": "server",
-    });
+    let state = lk2_core::diagnostics::build_state_json(
+        &time,
+        &clock,
+        &player,
+        &pool,
+        &nations,
+        &monsters,
+        &obs,
+        &game_world,
+        SimRole::ServerAuthority.into(),
+    );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
     }

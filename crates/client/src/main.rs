@@ -27,8 +27,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use bevy::prelude::*;
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
 use std::path::PathBuf;
 
@@ -39,42 +39,99 @@ mod controller_systems;
 mod pretty;
 mod pvp_systems;
 mod render;
+mod ui;
 
 // ---- lk2-core 共享 sim 逻辑 ----
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
-use lk2_core::creature::{player_attack_creatures, spawn_creatures, update_creatures, CreatureSpawnerDone};
+use lk2_core::creature::{
+    CreatureSpawnerDone, player_attack_creatures as offline_player_attack_creatures,
+    spawn_creatures, update_creatures,
+};
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
+use lk2_core::player::PlayerState;
 use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
+use lk2_core::sim::{SimRole, advance_demo_tick};
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
 // ---- 客户端 crate 内部模块的导出 ----
 use crate::controller_systems::{
-    auto_step_up, character_movement, collect_input, ground_detection, knockback_decay,
-    ControllerPlugin,
+    ControllerPlugin, auto_step_up, character_movement, collect_input, ground_detection,
+    knockback_decay,
 };
-use crate::pretty::{animate_avatar, spawn_pretty, PrettyConfig};
+use crate::pretty::{PrettyConfig, animate_avatar, spawn_pretty};
 use crate::pvp_systems::{
-    client_attack_predict, collect_local_input, on_damage_result, on_hit_confirm,
-    on_knockback_event, trigger_visual_effects, HealthHudMarker,
+    HealthHudMarker, client_attack_predict, collect_local_input, on_damage_result, on_hit_confirm,
+    on_knockback_event, trigger_visual_effects,
 };
 use crate::render::{
-    auto_demo, camera_mode_toggle, cycle_terrain_preset, emergency_teleport, first_person_camera,
-    freefly_movement, freefly_toggle, held_weapon_follow, mouse_look_system, player_input,
-    setup_atmosphere, setup_cursor_grab, spawn_terrain_around_player, update_animal_indicator,
     AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, Player,
-    PlayerState, RenderConfig, SpawnedBlocks,
+    RenderConfig, SpawnedBlocks, auto_demo, camera_mode_toggle, cycle_terrain_preset,
+    emergency_teleport, first_person_camera, freefly_movement, freefly_toggle, held_weapon_follow,
+    mouse_look_system, player_input, player_spawn_position_at, setup_atmosphere, setup_cursor_grab,
+    spawn_terrain_around_player, update_animal_indicator,
 };
+use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud};
 
 // ---- 重新导出 lk2-core PvP 数据（main.rs 里要直接用） ----
-use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
-use lk2_core::protocol::components::Health;
-use lk2_core::protocol::PlayerAction;
 use leafwing_input_manager::prelude::ActionState;
+use lk2_core::protocol::PlayerAction;
+use lk2_core::protocol::components::{GameplayHudState, Health, VoxelDelta};
+use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
+use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
+
+#[derive(Resource, Default, Debug, Clone)]
+struct ReplicatedSnapshot {
+    has_data: bool,
+    tick: u64,
+    player_block_pos: [i32; 3],
+    player_pos: [f32; 3],
+    nation_id: Option<u32>,
+    monsters_killed: u32,
+    blocks_gathered: u32,
+    nations_founded: u32,
+    inventory_wood: i64,
+    inventory_food: i64,
+    inventory_apple: i64,
+    inventory_soul: i64,
+    pool_wood: i64,
+    pool_food: i64,
+    pool_apple: i64,
+    pool_soul: i64,
+    flag_count: u32,
+    total_nations: u32,
+    monster_count: u32,
+    observer_anomalies: u64,
+    observer_invariant_violations: u64,
+    status_line: String,
+    last_voxel_revision: u64,
+}
+
+#[derive(Resource, Debug, Clone)]
+struct NetworkSmoothingState {
+    initialized: bool,
+    target_pos: Vec3,
+    visual_pos: Vec3,
+    target_block_pos: [i32; 3],
+}
+
+impl Default for NetworkSmoothingState {
+    fn default() -> Self {
+        Self {
+            initialized: false,
+            target_pos: Vec3::ZERO,
+            visual_pos: Vec3::ZERO,
+            target_block_pos: [0, 0, 0],
+        }
+    }
+}
+
+const ONLINE_INTERP_SPEED: f32 = 14.0;
+const ONLINE_SNAP_DISTANCE: f32 = 8.0;
 
 // ---------------------------------------------------------------------------
 // CLI 解析
@@ -97,6 +154,14 @@ fn walk_override_static() -> Option<(i32, i32)> {
 // ---------------------------------------------------------------------------
 
 fn main() {
+    // init tracing subscriber, 跟 server 一样让 info/warn 能看到
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let args: Vec<String> = std::env::args().collect();
     let offline_mode = args.iter().any(|a| a == "--offline");
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
@@ -106,9 +171,15 @@ fn main() {
     let connect_addr = lk2_core::transport::parse_connect_arg(&args);
     let network_mode = connect_addr.is_some() && !offline_mode;
     if network_mode {
-        println!("[lk2-client] network mode: connect to {}", connect_addr.unwrap());
+        println!(
+            "[lk2-client] network mode: connect to {}",
+            connect_addr.unwrap()
+        );
     } else {
-        println!("[lk2-client] starting (offline={}, auto_demo={})", offline_mode, auto_demo_mode);
+        println!(
+            "[lk2-client] starting (offline={}, auto_demo={})",
+            offline_mode, auto_demo_mode
+        );
     }
 
     // 解析 --preset
@@ -158,12 +229,12 @@ fn main() {
 
     let _ = std::fs::create_dir_all("screenshots");
 
-    // ----- App 装配 -----
     let mut app = App::new();
 
     // ===== 1. DefaultPlugins（含 winit / wgpu / WindowPlugin）=====
     app.add_plugins(
         DefaultPlugins
+            .set(AssetPlugin { file_path: "../../assets".into(), ..default() })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: format!("万国起源：最后一国 钻石版 — {}", scenario.name).into(),
@@ -173,50 +244,24 @@ fn main() {
                 }),
                 ..default()
             })
-            .set(bevy::log::LogPlugin {
-                level: bevy::log::Level::INFO,
-                ..default()
-            }),
+            .set(bevy::log::LogPlugin { level: bevy::log::Level::INFO, ..default() }),
     );
 
     // ===== 2. 物理（avian3d）=====
-    app.add_plugins(PhysicsPlugins::default())
-        .insert_resource(Gravity::default());
+    app.add_plugins(PhysicsPlugins::default()).insert_resource(Gravity::default());
 
-    // ===== 3. lightyear 0.26 ClientPlugins =====
-    // wire-network-and-loop 任务（2026-06-10）完成 update: 之前 build-client
-    // 任务只 `add_plugins(ClientPlugins::default())` 占位。现在:
-    // - offline 模式行为完全不变（不 spawn Client entity）
-    // - network 模式(--connect=): 在 Startup chain 末尾 spawn Client entity
-    //   挂 `UdpIo` + `LocalAddr(0.0.0.0:0)` + `PeerAddr(server_addr)`,由
-    //   lightyear 内部的 LinkStart observer 自动 `UdpSocket::bind(0.0.0.0:0)`
-    //   并 connect 到 server
-    // - 加一个 `apply_networked_position` system 把 server 复制回来的
-    //   `PlayerPos` 写到玩家 entity 的 `Transform.translation` 上
+    // Always add ClientPlugins; offline mode simply skips spawning the network client entity.
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
 
-    // 绕开 lightyear 0.26.4 + workspace feature unification 副作用:
-    // workspace 启 server feature 后, lightyear_inputs_leafwing 的 server
-    // feature 也被启上 → client binary 编译时 InputPlugin::<PlayerAction>::
-    // build 走 cfg(server) 分支加了 ServerInputPlugin → receive_input_message
-    // system 在 client 端跑 → 找 Res<PeerMetadata> → panic "Resource does not
-    // exist"。
-    // 修法: client 端也 init_resource::<PeerMetadata>()(空 instance 就够,
-    // client 不接收 server 上行的 input, system 空跑 round-trip 无害)。
-    // 跟 server 端 87b304f 那个 init_resource 同源问题, 跟 lightyear 0.26
-    // 自身的 lightyear_connection::ConnectionPlugin bug 配套。
-    // 同样: lk2_core::scenario::simulate_player_actions 要 lk2_core::PlayerState
-    // (不是 client 本地 crate::render::PlayerState)。两个 type 名字相同但 crate
-    // 不同, 都要 init, 否则 client 一进网络模式就 panic。
+    // Required by lightyear 0.26 + workspace feature unification; without these,
+    // client startup can panic in network mode.
     app.init_resource::<lightyear::prelude::PeerMetadata>()
         .init_resource::<lk2_core::pvp::FixedTick>()
-        .init_resource::<lk2_core::player::PlayerState>()
         .init_resource::<TimeOfDay>();
 
     if network_mode {
-        let server_addr = connect_addr
-            .expect("network_mode=true implies connect_addr is Some");
+        let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
         app.add_systems(Startup, move |commands: Commands| {
             spawn_networked_client(commands, server_addr);
         });
@@ -249,6 +294,13 @@ fn main() {
         .init_resource::<CameraMode>()
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
+        .init_resource::<ReplicatedSnapshot>()
+        .init_resource::<NetworkSmoothingState>()
+        .insert_resource(if network_mode {
+            ClientRunMode::Online
+        } else {
+            ClientRunMode::Offline
+        })
         .insert_resource(scenario_state);
 
     // ===== 5. PvP / 控制器 plugins（合并 lk2-core 的协议 + 客户端实现）=====
@@ -286,10 +338,12 @@ fn main() {
             lk2_core::scenario::scenario_runner,
             lk2_core::scenario::simulate_player_actions,
             lk2_core::scenario::scenario_tick_recorder,
-            // network mode (1): apply server-replicated PlayerPos
-            // (offline 模式下 apply_networked_position 是 no-op, 因为
-            // PlayerPos 没注册组件, Transform 不会被改)
+            // network mode (1): apply server-replicated PlayerPos to PlayerState
+            // (offline 模式下 PlayerPos 没注册组件, 这个系统是 no-op)
             apply_networked_position,
+            apply_authoritative_snapshot,
+            apply_voxel_delta,
+            send_online_gameplay_commands,
             // 键盘 → leafwing ActionState(lightyear 会自动 serialize 上行)
             // client 端必须用 ActionState 标记 pressed, lightyear_inputs_leafwing
             // 的 ClientInputPlugin 才会把它打包成 InputMessage 发到 server。
@@ -300,7 +354,7 @@ fn main() {
             first_person_camera,
             held_weapon_follow,
             player_input,
-            player_attack_creatures,
+            offline_player_attack_creatures,
             animate_avatar,
             spawn_terrain_around_player,
             // F3 自由视角 / C 切 3rd person / F5 传送 / F8 切 preset (4)
@@ -332,6 +386,10 @@ fn main() {
     );
     // freefly_movement 必须先于 first_person_camera (否则镜头不动)
     app.add_systems(Update, freefly_movement.before(first_person_camera));
+    // interpolate_online_player / apply_authoritative_snapshot 之前被加
+    // 但函数没定义(都是 baseline 不稳定)。apply_networked_position
+    // 已经够用 (server 复制 PlayerPos → 写本机玩家 Transform)。
+    // 留着 hook 注释以备后续 per-client prediction / interpolation 加进来。
 
     // ===== 8. 辅助系统（截图 / HUD / 退出 / tick 录制）=====
     app.add_systems(
@@ -354,76 +412,194 @@ fn main() {
     app.run();
 }
 
-// ---------------------------------------------------------------------------
-// spawn_networked_client — lightyear 0.26 client transport wiring
-// ---------------------------------------------------------------------------
-//
-// wire-network-and-loop 任务 (2026-06-10) — 接 UDP transport。
-// 跟 server 端对称: lightyear 0.26 走 reactive 模式,
-// spawn Client entity 挂 `UdpIo` + `LocalAddr(0.0.0.0:0)` + `PeerAddr(server_addr)`,
-// 系统自动 `UdpSocket::bind(0.0.0.0:0)` 并 connect。
-//
-// 参考:
-// - lightyear_udp-0.26.4/src/lib.rs:64-75 (`UdpIo` 定义, `#[require(Link)]`)
-// - lightyear_udp-0.26.4/src/lib.rs:107+ (LinkStart observer 触发 bind)
-//
-// **不做 client-side prediction** — 本任务只要 client 跟着 server 的
-// 权威 PlayerPos 走, 等子任务 2 再加 prediction。
+// Spawn the lightyear UDP client link in online mode.
 fn spawn_networked_client(mut commands: Commands, server_addr: std::net::SocketAddr) {
     use lightyear::prelude::UdpIo;
-    use lightyear::prelude::{LocalAddr, PeerAddr};
+    use lightyear::prelude::{LinkStart, LocalAddr, PeerAddr};
     info!(
         "[net] spawning client entity with UdpIo + LocalAddr(0.0.0.0:0) + PeerAddr({})",
         server_addr
     );
-    commands.spawn((
-        Name::new("Client"),
-        UdpIo::default(),
-        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
-        PeerAddr(server_addr),
-    ));
+    let client_id = commands
+        .spawn((
+            Name::new("Client"),
+            UdpIo::default(),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
+            PeerAddr(server_addr),
+        ))
+        .id();
+    // 手动 trigger LinkStart, 跟 server 端同理 (lightyear 0.26 文档明示
+    // "You can trigger LinkStart to start the link" — lightyear-0.26.4/src/lib.rs:133)。
+    // 不 trigger 的话 UdpIo 的 LinkStart observer 永远不跑, UDP socket 永远不 bind。
+    info!("[net] triggering LinkStart on client entity {:?}", client_id);
+    commands.trigger(LinkStart { entity: client_id });
 }
 
-// ---------------------------------------------------------------------------
-// apply_networked_position — 把 server 复制的 PlayerPos 写到玩家 Transform
-// ---------------------------------------------------------------------------
-//
-// lightyear 0.26 在 server→client 复制时, 把 server 端玩家 entity 的
-// `PlayerPos(Vec3)` 组件同步过来 (ProtocolPlugin 已 register_component)。
-// 我们要做的: 找到客户端本地代表自己的玩家 entity (带 `Player` marker),
-// 把 `PlayerPos.0` 写到 `Transform.translation`。
-//
-// **offline 模式**: 不会 spawn Client entity, 不会有 PlayerPos 复制过来,
-// 但 offline 模式的 simulation_tick 已经直接改 Transform 了 (Resource::PlayerState),
-// 所以这个 system 在 offline 模式是 no-op (PlayerPos 组件不会存在于玩家 entity)。
+// Mirror replicated server position onto PlayerState resource.
+// All client systems (terrain, avatar, camera) already read PlayerState, so this
+// is the only bridge needed between network and rendering.
 fn apply_networked_position(
     mut q: Query<
         (&mut Transform, &lk2_core::protocol::components::PlayerPos),
-        With<Player>,
     >,
 ) {
+    // 注: 不带 With<Player> filter — server 端 spawn 的 authoritative player
+    // entity 复制到 client 时, 不会带 client 本地 crate::render::Player marker
+    // (server 端没有这个 type), 只有一个 Name("Player") 跟 Replicate 组件。
+    // 所以 query 不加 With<Player> filter, 不管哪个 entity 复制了 PlayerPos 都 apply。
+    let mut count = 0;
+    let mut first_pos = bevy::math::Vec3::ZERO;
     for (mut tf, pos) in q.iter_mut() {
         tf.translation = pos.0;
+        first_pos = pos.0;
+        count += 1;
+    }
+    if count > 0 {
+        // 复制确实到了:本地玩家 entity 上有 PlayerPos 组件
+        // (offline 模式没 server 复制 → count = 0, 不 log 噪音)
+        tracing::info!(
+            "[net] applied PlayerPos to {} player entity, pos={:?}",
+            count, first_pos
+        );
     }
 }
 
-// ---------------------------------------------------------------------------
-// collect_keys_to_action_state — 把键盘按键映射到 leafwing ActionState
-// ---------------------------------------------------------------------------
-//
-// wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完的最后一步。
-//
-// client 端必须把键盘按下的状态标到 ActionState<PlayerAction> 上,
-// lightyear_inputs_leafwing::ClientInputPlugin 才会把 ActionState 序列化
-// 上行到 server。否则 server 端 Res<ActionState<PlayerAction>> 永远空,
-// 玩家不会动。
-//
-// 简化: 用 Resource 级 ActionState<PlayerAction> (entity-level 需要
-// 给玩家 entity 配 InputMap<PlayerAction>, 这里用 Resource 更轻量)。
-//
-// key mapping (跟 PvPController 保持一致):
-//   W → MoveForward,  S → MoveBackward,  A → MoveLeft,  D → MoveRight
-//   Space → Jump
+fn apply_authoritative_snapshot(
+    run_mode: Res<ClientRunMode>,
+    hud_q: Query<&GameplayHudState>,
+    mut snapshot: ResMut<ReplicatedSnapshot>,
+    mut clock: ResMut<SimClock>,
+    mut player: ResMut<PlayerState>,
+    mut pool: ResMut<GlobalResourcePool>,
+    mut nations: ResMut<NationRegistry>,
+    mut monsters: ResMut<MonsterEcosystem>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    let Some(hud) = hud_q.iter().next() else {
+        return;
+    };
+
+    snapshot.has_data = true;
+    snapshot.tick = hud.tick;
+    snapshot.player_block_pos = hud.player_block_pos;
+    snapshot.player_pos = hud.player_pos;
+    snapshot.nation_id = hud.nation_id;
+    snapshot.monsters_killed = hud.monsters_killed;
+    snapshot.blocks_gathered = hud.blocks_gathered;
+    snapshot.nations_founded = hud.nations_founded;
+    snapshot.inventory_wood = hud.inventory_wood;
+    snapshot.inventory_food = hud.inventory_food;
+    snapshot.inventory_apple = hud.inventory_apple;
+    snapshot.inventory_soul = hud.inventory_soul;
+    snapshot.pool_wood = hud.pool_wood;
+    snapshot.pool_food = hud.pool_food;
+    snapshot.pool_apple = hud.pool_apple;
+    snapshot.pool_soul = hud.pool_soul;
+    snapshot.flag_count = hud.flag_count;
+    snapshot.total_nations = hud.total_nations;
+    snapshot.monster_count = hud.monster_count;
+    snapshot.observer_anomalies = hud.observer_anomalies;
+    snapshot.observer_invariant_violations = hud.observer_invariant_violations;
+    snapshot.status_line = hud.status_line.clone();
+
+    clock.tick = hud.tick;
+    player.block_pos = hud.player_block_pos;
+    player.pos = Vec3::new(hud.player_pos[0], hud.player_pos[1], hud.player_pos[2]);
+    player.monsters_killed = hud.monsters_killed;
+    player.blocks_gathered = hud.blocks_gathered;
+    player.nations_founded = hud.nations_founded;
+    player.nation_id = hud.nation_id.map(lk2_core::nation::NationId);
+    player.inventory.insert(ResourceKind::Wood, hud.inventory_wood);
+    player.inventory.insert(ResourceKind::Food, hud.inventory_food);
+    player.inventory.insert(ResourceKind::Apple, hud.inventory_apple);
+    player.inventory.insert(ResourceKind::Soul, hud.inventory_soul);
+
+    pool.current.insert(ResourceKind::Wood, hud.pool_wood);
+    pool.current.insert(ResourceKind::Food, hud.pool_food);
+    pool.current.insert(ResourceKind::Apple, hud.pool_apple);
+    pool.current.insert(ResourceKind::Soul, hud.pool_soul);
+    nations.flag_count = hud.flag_count;
+    monsters.current_individuals = hud.monster_count;
+}
+
+fn block_type_from_u8(value: u8) -> lk2_core::world::BlockType {
+    use lk2_core::world::BlockType;
+    match value {
+        1 => BlockType::Dirt,
+        2 => BlockType::Stone,
+        3 => BlockType::Sand,
+        4 => BlockType::Snow,
+        5 => BlockType::Leaves,
+        6 => BlockType::Water,
+        7 => BlockType::Wood,
+        8 => BlockType::IronOre,
+        9 => BlockType::SunstoneOre,
+        10 => BlockType::FrostcoreOre,
+        11 => BlockType::LivingRoot,
+        12 => BlockType::BerryThicket,
+        _ => BlockType::Air,
+    }
+}
+
+fn apply_voxel_delta(
+    run_mode: Res<ClientRunMode>,
+    voxel_q: Query<&VoxelDelta>,
+    mut snapshot: ResMut<ReplicatedSnapshot>,
+    mut game_world: ResMut<GameWorld>,
+    mut spawned: ResMut<SpawnedBlocks>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    for delta in voxel_q.iter() {
+        if delta.revision <= snapshot.last_voxel_revision {
+            continue;
+        }
+        game_world.set(delta.x, delta.y, delta.z, block_type_from_u8(delta.block));
+        snapshot.last_voxel_revision = delta.revision;
+        spawned.last_player_block = [i32::MIN; 3];
+    }
+}
+
+fn send_online_gameplay_commands(
+    run_mode: Res<ClientRunMode>,
+    keys: Res<ButtonInput<KeyCode>>,
+    player: Res<PlayerState>,
+    clock: Res<SimClock>,
+    mut writer: MessageWriter<GameplayCommand>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+
+    let mut send = |kind: GameplayCommandKind| {
+        writer.write(GameplayCommand {
+            tick: clock.tick,
+            player_block: player.block_pos,
+            kind,
+        });
+    };
+
+    if keys.just_pressed(KeyCode::KeyG) {
+        send(GameplayCommandKind::GatherFootBlock);
+    }
+    if keys.just_pressed(KeyCode::KeyP) {
+        send(GameplayCommandKind::PlaceWoodFootBlock);
+    }
+    if keys.just_pressed(KeyCode::KeyH) {
+        send(GameplayCommandKind::Craft(BuildRecipe::PlankPack));
+    }
+    if keys.just_pressed(KeyCode::KeyF) {
+        send(GameplayCommandKind::FoundNation);
+    }
+    if keys.just_pressed(KeyCode::KeyJ) || keys.just_pressed(KeyCode::KeyK) {
+        send(GameplayCommandKind::KillNearestCreature);
+    }
+}
+
+// Map local keyboard state into the replicated ActionState used by lightyear.
 fn collect_keys_to_action_state(
     keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<&mut ActionState<PlayerAction>, With<Player>>,
@@ -435,8 +611,7 @@ fn collect_keys_to_action_state(
         Err(_) => return, // 玩家 entity 不存在 (offline 模式 client 端 spawn 的本地玩家是另一个 entity, 没 ActionState)
     };
 
-    // 每次 tick 全清再 set pressed,避免 stale state
-    // leafwing 0.20 没 release_all() 方法, 用 ActionState::default() 整体替换
+    // Rebuild the action state each tick to avoid stale presses.
     *action_state = ActionState::<PlayerAction>::default();
 
     if keys.pressed(KeyCode::KeyW) {
@@ -474,8 +649,8 @@ pub struct ClientPvPPlugin;
 
 impl Plugin for ClientPvPPlugin {
     fn build(&self, app: &mut App) {
-        use lk2_core::pvp::DamageEvent;
         use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+        use lk2_core::pvp::DamageEvent;
 
         app.add_message::<AttackInput>()
             .add_message::<HitConfirm>()
@@ -514,11 +689,7 @@ fn setup_camera(mut commands: Commands) {
 
 fn setup_light(mut commands: Commands) {
     commands.spawn((
-        DirectionalLight {
-            illuminance: 20000.0,
-            shadows_enabled: false,
-            ..default()
-        },
+        DirectionalLight { illuminance: 20000.0, shadows_enabled: false, ..default() },
         Transform::from_xyz(30.0, 60.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
         Sun,
     ));
@@ -552,11 +723,7 @@ pub fn day_night_cycle(
     let sunset_glow = (1.0 - (2.0 * t - 1.0).abs()).powi(3);
 
     let dist = 80.0;
-    let sun_pos = Vec3::new(
-        (t - 0.5) * 2.0 * dist,
-        dayness * dist + 5.0,
-        0.0,
-    );
+    let sun_pos = Vec3::new((t - 0.5) * 2.0 * dist, dayness * dist + 5.0, 0.0);
     if let Ok((mut tf, mut l)) = sun.single_mut() {
         *tf = Transform::from_translation(sun_pos).looking_at(Vec3::ZERO, Vec3::Y);
         l.illuminance = 1500.0 + 30000.0 * dayness;
@@ -576,216 +743,13 @@ pub fn day_night_cycle(
     );
 }
 
-// ---- HUD ----
-#[derive(Component)]
-struct HudText;
-#[derive(Component)]
-struct HudFooter;
-
-#[derive(Resource)]
-struct UiFonts {
-    cn: Handle<Font>,
-}
-
-fn setup_fonts(mut commands: Commands) {
-    let cn: Handle<Font> = Handle::default();
-    commands.insert_resource(UiFonts { cn });
-}
-
-fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
-    commands.spawn((
-        Text::new("WANGUO ORIGINS v0.4  loading..."),
-        TextFont {
-            font: fonts.cn.clone(),
-            font_size: 22.0,
-            ..default()
-        },
-        TextColor(Color::srgb(1.0, 1.0, 1.0)),
-        TextShadow {
-            offset: Vec2::new(2.0, 2.0),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.85),
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            left: px(12),
-            ..default()
-        },
-        HudText,
-    ));
-
-    // 屏幕中心：十字准星
-    let cross_size = 16.0_f32;
-    let cross_thickness = 2.0_f32;
-    let cross_offset = -cross_size / 2.0;
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(50.0),
-            top: Val::Percent(50.0),
-            width: px(cross_size),
-            height: px(cross_thickness),
-            margin: UiRect {
-                left: Val::Px(cross_offset),
-                top: Val::Px(cross_offset + (cross_size - cross_thickness) / 2.0),
-                right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-            },
-            ..default()
-        },
-        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.95)),
-    ));
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(50.0),
-            top: Val::Percent(50.0),
-            width: px(cross_thickness),
-            height: px(cross_size),
-            margin: UiRect {
-                left: Val::Px(cross_offset + (cross_size - cross_thickness) / 2.0),
-                top: Val::Px(cross_offset),
-                right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-            },
-            ..default()
-        },
-        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.95)),
-    ));
-
-    // 底部：操作 + 目标
-    commands.spawn((
-        Text::new(""),
-        TextFont {
-            font: fonts.cn.clone(),
-            font_size: 18.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.95, 0.95, 0.7)),
-        TextShadow {
-            offset: Vec2::new(1.5, 1.5),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.85),
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(12),
-            left: px(12),
-            ..default()
-        },
-        HudFooter,
-    ));
-
-    // 顶部居中：动物方向指示器
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(56),
-            left: px(0),
-            right: px(0),
-            height: px(36),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        children![(
-            Text::new("[scanning...]"),
-            TextFont {
-                font: fonts.cn.clone(),
-                font_size: 24.0,
-                ..default()
-            },
-            TextColor(Color::srgb(1.0, 0.9, 0.4)),
-            TextShadow {
-                offset: Vec2::new(1.5, 1.5),
-                color: Color::srgba(0.0, 0.0, 0.0, 0.9),
-            },
-            AnimalIndicatorText,
-        )],
-    ));
-
-    // 顶部右上：HP HUD（被 on_damage_result 刷新）
-    commands.spawn((
-        Text::new("❤ 20 / 20"),
-        TextFont {
-            font: fonts.cn.clone(),
-            font_size: 20.0,
-            ..default()
-        },
-        TextColor(Color::srgb(1.0, 0.4, 0.4)),
-        TextShadow {
-            offset: Vec2::new(1.5, 1.5),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.9),
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(12),
-            right: px(12),
-            ..default()
-        },
-        HealthHudMarker,
-    ));
-}
-
-fn update_hud(
-    mut q_top: Query<&mut Text, With<HudText>>,
-    mut q_bot: Query<&mut Text, (With<HudFooter>, Without<HudText>)>,
-    clock: Res<SimClock>,
-    player: Res<PlayerState>,
-    pool: Res<GlobalResourcePool>,
-    nations: Res<NationRegistry>,
-    monsters: Res<MonsterEcosystem>,
-    obs: Res<TickObserver>,
-    time: Res<Time>,
-) {
-    let fps = (1.0 / time.delta_secs().max(0.001)).round() as i32;
-    if let Ok(mut text) = q_top.single_mut() {
-        **text = format!(
-            "WANGUO ORIGINS v0.4  [{fps} fps]\n\
-             tick {} ({:.1}s)\n\
-             player @ {:?}\n\
-             Wood={}  Food={}  Apple={}  Soul={}\n\
-             flags={}/8  monsters={}\n\
-             anomalies={}  invariants=ok",
-            clock.tick,
-            time.elapsed_secs(),
-            player.block_pos,
-            pool.get(ResourceKind::Wood),
-            pool.get(ResourceKind::Food),
-            pool.get(ResourceKind::Apple),
-            pool.get(ResourceKind::Soul),
-            nations.flag_count,
-            monsters.current_individuals,
-            obs.anomalies.len(),
-        );
-    }
-    let wood = pool.get(ResourceKind::Wood);
-    let goal = 10;
-    let progress_bar = {
-        let pct = (wood as f32 / goal as f32).clamp(0.0, 1.0);
-        let filled = (pct * 16.0) as usize;
-        format!("{}{}", "█".repeat(filled), "░".repeat(16 - filled))
-    };
-    let status = if wood >= goal {
-        "*** WIN! 10 wood collected. Try Found Nation (F) ***"
-    } else {
-        ""
-    };
-    if let Ok(mut text) = q_bot.single_mut() {
-        **text = format!(
-            "[WASD] move  [Space] jump  [Shift] sneak  [G] gather  [K] sword  [Esc] quit\n\
-             Goal: gather 10 wood    {wood}/{goal}  {progress_bar}\n\
-             {status}",
-        );
-    }
-}
-
 // ---------------------------------------------------------------------------
 // 客户端世界初始化：地形 + 玩家 + 资源 + 怪物
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
 fn setup_world(
-    mut commands: Commands,
+    _commands: Commands,
     mut game_world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
@@ -793,10 +757,7 @@ fn setup_world(
 ) {
     let pipeline = lk2_core::world::terrain::presets::by_name(preset_name_static());
     *game_world = lk2_core::world::World::with_pipeline(constant::WORLD_SIZE, pipeline);
-    info!(
-        "[terrain] using preset '{}'",
-        game_world.pipeline.name
-    );
+    info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     for k in ResourceKind::ALL {
         let init = 50.min(k.max() / 2).max(10);
@@ -809,20 +770,21 @@ fn setup_world(
         constant::WORLD_SIZE / 2,
     ]);
 
-    let (sx, sz) = walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
-    let spawn = [sx, 30, sz];
+    let (sx, sz) =
+        walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
+    let (spawn_pos, spawn) = player_spawn_position_at(&game_world, sx, sz).unwrap_or((
+        Vec3::new(sx as f32 + 0.5, 30.0, sz as f32 + 0.5),
+        [sx, 30, sz],
+    ));
     player.block_pos = spawn;
-    player.pos = Vec3::new(
-        spawn[0] as f32 + 0.5,
-        spawn[1] as f32 + 0.5,
-        spawn[2] as f32 + 0.5,
-    );
+    player.pos = spawn_pos;
     player.inventory.insert(ResourceKind::Wood, 0);
     player.inventory.insert(ResourceKind::Food, 5);
 
     info!(
         "🌍 世界已生成: {}³, 玩家在 {:?}",
-        constant::WORLD_SIZE, spawn
+        constant::WORLD_SIZE,
+        spawn
     );
 }
 
@@ -835,28 +797,20 @@ fn self_check(
     mut obs: ResMut<TickObserver>,
 ) {
     info!(">>> 启动自检 100 tick ...");
-    let mut pool = pool.clone();
-    let mut monsters = MonsterEcosystem::clone(&*monsters);
-    let mut violations: Vec<String> = Vec::new();
-    for tick in 0..100 {
-        obs.begin_tick();
-        monsters.tick(&mut pool);
-        let _ = pool.try_add(ResourceKind::Food, 2);
-        if let Err(e) = obs.end_tick(
-            tick,
-            &game_world,
-            &pool,
-            &nations,
-            &monsters,
-            Some([
-                constant::WORLD_SIZE / 2,
-                constant::SEA_LEVEL + 2,
-                constant::WORLD_SIZE / 2,
-            ]),
-        ) {
-            violations.push(format!("tick {}: {}", tick, e.join("; ")));
-        }
-    }
+    let report = lk2_core::diagnostics::run_self_check(
+        &game_world,
+        &pool,
+        &nations,
+        &monsters,
+        &mut obs,
+        [
+            constant::WORLD_SIZE / 2,
+            constant::SEA_LEVEL + 2,
+            constant::WORLD_SIZE / 2,
+        ],
+        100,
+    );
+    let violations = report.violations;
     if violations.is_empty() {
         info!(">>> 自检 ✅ 100 tick 全部通过");
     } else {
@@ -865,13 +819,7 @@ fn self_check(
     info!("{}", obs.report());
 }
 
-// ---------------------------------------------------------------------------
-// 客户端 simulation tick + tick 结束 invariants + 截图
-// ---------------------------------------------------------------------------
-//
-// 在 `--offline` 模式下客户端**自己跑 sim**（loopback 给 demo 用）。联网模式
-// 下 sim 应在 server 跑、client 只预测 — 那条路径在 wire-network-and-loop
-// task 实现。
+// In offline mode the client advances the shared sim locally for demo/self-loop use.
 
 fn simulation_tick(
     time: Res<Time>,
@@ -880,24 +828,14 @@ fn simulation_tick(
     mut monsters: ResMut<MonsterEcosystem>,
     mut obs: ResMut<TickObserver>,
 ) {
-    let now = time.elapsed_secs();
-    if now - clock.last_tick_wall < constant::SLOW_TICK_SECS {
-        return;
-    }
-    clock.last_tick_wall = now;
-    clock.tick += 1;
-    let _ = pool.try_add(ResourceKind::Apple, 1);
-    let _ = pool.try_add(ResourceKind::Food, 2);
-    obs.begin_tick();
-    monsters.tick(&mut pool);
-    if clock.tick % 10 == 0 {
-        info!(
-            "⏱ tick {}: monsters={}, food={}",
-            clock.tick,
-            monsters.current_individuals,
-            pool.get(ResourceKind::Food)
-        );
-    }
+    let _ = advance_demo_tick(
+        &time,
+        &mut clock,
+        &mut pool,
+        &mut monsters,
+        &mut obs,
+        SimRole::ClientOffline,
+    );
 }
 
 fn end_tick_system(
@@ -937,6 +875,7 @@ fn periodic_screenshot(
     monsters: Res<MonsterEcosystem>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
+    run_mode: Res<ClientRunMode>,
 ) {
     let now = time.elapsed_secs();
     if now - clock.last_screenshot_wall < 5.0 {
@@ -957,7 +896,15 @@ fn periodic_screenshot(
         .observe(bevy::render::view::screenshot::save_to_disk(png_path));
 
     let state = build_state_json(
-        &time, &clock, &player, &pool, &nations, &monsters, &obs, &game_world,
+        &time,
+        &clock,
+        &player,
+        &pool,
+        &nations,
+        &monsters,
+        &obs,
+        &game_world,
+        *run_mode,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
@@ -992,9 +939,7 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
                 .with_knockback_resistance(0.1),
             lk2_core::controller::PlayerCollider::default(),
             CombatState::default(),
-            // wire-network-and-loop (2026-06-11): 挂 ActionState 组件,让
-            // collect_keys_to_action_state 能 Query 到, lightyear_inputs_leafwing
-            // 也能从玩家 entity 读到 ActionState 自动 serialize 上行
+            // Online mode reads and replicates input from this component.
             ActionState::<PlayerAction>::default(),
             WeaponStats {
                 reach: iron.reach,
@@ -1029,13 +974,14 @@ pub struct TickRecorder {
 fn tick_recorder(
     time: Res<Time>,
     mut rec: ResMut<TickRecorder>,
-    mut clock: ResMut<SimClock>,
+    clock: Res<SimClock>,
     player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
+    run_mode: Res<ClientRunMode>,
 ) {
     if clock.tick == 0 || clock.tick % 5 != 0 || clock.tick == rec.last_dump_tick {
         return;
@@ -1044,7 +990,15 @@ fn tick_recorder(
     rec.current_iter = clock.tick as u32;
     let path = format!("screenshots/state_t{}.json", clock.tick);
     let state = build_state_json(
-        &time, &clock, &player, &pool, &nations, &monsters, &obs, &game_world,
+        &time,
+        &clock,
+        &player,
+        &pool,
+        &nations,
+        &monsters,
+        &obs,
+        &game_world,
+        *run_mode,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
@@ -1062,41 +1016,17 @@ fn build_state_json(
     monsters: &MonsterEcosystem,
     obs: &TickObserver,
     game_world: &GameWorld,
+    run_mode: ClientRunMode,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "tick": clock.tick,
-        "wall_secs": time.elapsed_secs(),
-        "player": {
-            "block_pos": player.block_pos,
-            "pos": [player.pos.x, player.pos.y, player.pos.z],
-            "nation_id": player.nation_id.map(|n| n.0),
-            "monsters_killed": player.monsters_killed,
-            "blocks_gathered": player.blocks_gathered,
-            "nations_founded": player.nations_founded,
-        },
-        "pool": {
-            "wood": pool.get(ResourceKind::Wood),
-            "food": pool.get(ResourceKind::Food),
-            "apple": pool.get(ResourceKind::Apple),
-            "soul": pool.get(ResourceKind::Soul),
-        },
-        "nations": {
-            "flag_count": nations.flag_count,
-            "total_nations": nations.nations.len(),
-        },
-        "monsters": {
-            "current": monsters.current_individuals,
-            "kingdoms": monsters.kingdoms.len(),
-            "nests": monsters.kingdoms.values().map(|k| k.nests.len() as u32).sum::<u32>(),
-        },
-        "observer": {
-            "snapshots": obs.snapshots.len(),
-            "decisions": obs.decisions.len(),
-            "anomalies": obs.anomalies.len(),
-            "invariant_violations": obs.invariants.values().map(|i| i.total_violations).sum::<u64>(),
-        },
-        "world": {
-            "size": game_world.size,
-        },
-    })
+    lk2_core::diagnostics::build_state_json(
+        time,
+        clock,
+        player,
+        pool,
+        nations,
+        monsters,
+        obs,
+        game_world,
+        run_mode.snapshot_role(),
+    )
 }

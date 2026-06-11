@@ -160,6 +160,7 @@ cargo run -p lk2-client -- --connect=127.0.0.1:5000
 - 服务端：`cargo run -p lk2-server`
 - 客户端联机：`cargo run -p lk2-client -- --connect=127.0.0.1:5000`
 - 闭环脚本：`.\loop.ps1`
+- 旧根包 `minecraft_bevy`、`launchers/native`、`launchers/wasm` 已删除
 
 ## 六、性能
 

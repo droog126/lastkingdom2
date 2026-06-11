@@ -30,6 +30,7 @@ pub mod clock;
 pub mod constant;
 pub mod controller;
 pub mod creature;
+pub mod diagnostics;
 pub mod monster;
 pub mod nation;
 pub mod player;
@@ -37,6 +38,7 @@ pub mod protocol;
 pub mod pvp;
 pub mod resource;
 pub mod scenario;
+pub mod sim;
 pub mod transport;
 pub mod world;
 

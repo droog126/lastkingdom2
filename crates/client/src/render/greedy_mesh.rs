@@ -15,12 +15,11 @@
 //! - 局部更新（玩家挖一个方块只重算所在 chunk）
 //! - 列合并 Cuboid 替代 Trimesh（碰撞性能更好）
 
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
 use block_mesh::{
-    greedy_quads, GreedyQuadsBuffer, MergeVoxel, RIGHT_HANDED_Y_UP_CONFIG, Voxel,
-    VoxelVisibility,
+    GreedyQuadsBuffer, MergeVoxel, RIGHT_HANDED_Y_UP_CONFIG, Voxel, VoxelVisibility, greedy_quads,
 };
 use ndshape::{ConstShape, ConstShape3u32};
 
@@ -71,7 +70,10 @@ impl BlockTypeMesh {
 
     /// 转 bevy Mesh（视觉）
     pub fn to_bevy_mesh(&self) -> Mesh {
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs.clone());
@@ -152,13 +154,7 @@ pub fn greedy_mesh_for_type_aabb(
 
     let (positions, normals, uvs, indices) = quads_to_mesh_data(&buffer);
 
-    BlockTypeMesh {
-        block_type: target,
-        positions,
-        normals,
-        uvs,
-        indices,
-    }
+    BlockTypeMesh { block_type: target, positions, normals, uvs, indices }
 }
 
 /// 所有 renderable block types（不含 Air）

@@ -56,7 +56,7 @@ pub struct TickSnapshot {
 impl TickSnapshot {
     pub fn from_world(
         tick: u64,
-        world: &World,
+        _world: &World,
         pool: &GlobalResourcePool,
         nations: &NationRegistry,
         monsters: &MonsterEcosystem,

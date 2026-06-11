@@ -253,16 +253,16 @@ pub fn lold_arena_preset(rng: &mut impl Rng) -> Preset {
 
 ```powershell
 # 默认地形（和现在一样）
-.\minecraft_bevy.exe
+cargo run -p lk2-client -- --offline
 
 # 全平地图（适合造建筑）
-.\minecraft_bevy.exe --preset=flat_arena
+cargo run -p lk2-client -- --offline --preset=flat_arena
 
 # 高山地图
-.\minecraft_bevy.exe --preset=mountainous
+cargo run -p lk2-client -- --offline --preset=mountainous
 
 # 斗魂大乱斗（每局不同地形）
-.\minecraft_bevy.exe --preset=random
+cargo run -p lk2-client -- --offline --preset=random
 ```
 
 未来扩展（不在这次范围）：

@@ -244,7 +244,7 @@ impl Plugin for MyProtocol {
   - server 权威位置 / 血量, 复制到 client
   - client 收集输入, 发送到 server
   - client 拿到的远端实体用 `Interpolated` 自动插值
-- 备选: **全套 prediction/rollback** (minecraft-bevy 完整版) — 工作量 3x, 收益对 demo 阶段不大
+- 备选: **全套 prediction/rollback**（完整动作预测与回滚）— 工作量 3x, 收益对 demo 阶段不大
 
 ### Q3. transport 选型
 - **推荐**: **UDP + lightyear 默认的 Netcode** (简单, 跨平台, 适合 demo)
@@ -254,7 +254,7 @@ impl Plugin for MyProtocol {
 - **推荐**: **server 全权威** (位置 / 血量 / 资源 / 怪物状态 / scenario 进度)
   - client 几乎所有东西都从 server 复制
   - client 只预测自己玩家的输入响应 (走 lightyear Predicted)
-- 备选: 部分 client 权威 (自己挖方块先 client 跑, server 校验) — Minecraft 风格, 工作量 2x
+- 备选: 部分 client 权威 (自己挖方块先 client 跑, server 校验) — 体素编辑响应更快, 但工作量 2x
 
 ### Q5. 单机模式
 - **推荐**: **保留** (`--offline` flag, client 进程内嵌一个 MinimalPlugins server)
@@ -331,7 +331,7 @@ impl Plugin for MyProtocol {
 
 ## 11. 不在本次范围 (out of scope)
 
-- 完整的 PvP prediction / rollback (Minecraft 那种)
+- 完整的 PvP prediction / rollback
 - WebTransport / Steam Sockets transport
 - Save / load (之前 P3)
 - 大厅匹配 / 房间系统

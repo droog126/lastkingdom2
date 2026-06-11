@@ -67,7 +67,13 @@ lk2-core = { workspace = true }
 # wire-network-and-loop 任务（2026-06-10）: 加 client + udp feature
 # - client: 拉 lightyear_udp 的 client 模块（UdpIo 给 client 用）
 # - udp: 把 lightyear_udp 这个 sub-crate 引入
-lightyear = { workspace = true, features = ["leafwing", "client", "udp"] }
+# wire-network-and-loop 任务（2026-06-11）: 加 replication feature
+# - replication: 启 lightyear_replication prelude (ReplicationSendPlugin /
+#   ReplicationReceivePlugin / HierarchySendPlugin / AuthorityPlugin /
+#   NetworkVisibilityPlugin / ProtocolCheckPlugin)。缺这个 client 端
+#   没有 ReplicationReceivePlugin, server 复制的 Replicate entity 不会被
+#   client 接收 + 解码 (PlayerPos 复制失效)。
+lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication"] }
 lightyear_inputs_leafwing = { workspace = true }
 leafwing-input-manager = { workspace = true }
 

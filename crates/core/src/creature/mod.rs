@@ -212,7 +212,7 @@ pub fn player_attack_creatures(
     player: Res<PlayerState>,
     mut pool: ResMut<crate::resource::GlobalResourcePool>,
     mut commands: Commands,
-    mut q: Query<(Entity, &mut Creature, &mut CreatureAI)>,
+    mut q: Query<(Entity, &mut Creature, &CreatureAI)>,
 ) {
     if !keys.just_pressed(KeyCode::KeyK) {
         return;

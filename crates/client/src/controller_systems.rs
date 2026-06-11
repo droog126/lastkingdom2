@@ -6,11 +6,11 @@
 //! - `auto_step_up`        — 自动爬 1 格
 //! - `knockback_decay`     — 击退衰减
 
-use lk2_core::controller::components::{GroundHit, PvPController, PlayerCollider};
-use lk2_core::world::World as GameWorld;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
+use lk2_core::controller::components::{GroundHit, PlayerCollider, PvPController};
+use lk2_core::world::World as GameWorld;
 
 // ---------------------------------------------------------------------------
 // 1. 地面检测（射线投射）
@@ -28,7 +28,7 @@ pub fn ground_detection(
     spatial_query: SpatialQuery,
     mut controllers: Query<(&Transform, &PlayerCollider, &mut PvPController)>,
     // 体素世界碰撞体（如果有）
-    voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
+    _voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
 ) {
     let now = time.elapsed_secs();
 
@@ -89,7 +89,7 @@ pub fn character_movement(
     mut controllers: Query<(&mut LinearVelocity, &mut PvPController, &Transform)>,
     camera: Query<&Transform, With<Camera3d>>,
     input: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
+    _time: Res<Time>,
 ) {
     // 获取相机朝向
     let cam_tf = camera.single().ok();
@@ -133,7 +133,7 @@ pub fn character_movement(
     // 跳跃请求
     let jump_requested = input.just_pressed(KeyCode::Space);
 
-    for (mut velocity, mut controller, transform) in controllers.iter_mut() {
+    for (mut velocity, mut controller, _transform) in controllers.iter_mut() {
         // 更新输入状态
         controller.move_input = Vec2::new(move_dir.x, move_dir.z);
         controller.jump_requested = jump_requested;
@@ -182,7 +182,7 @@ pub fn character_movement(
 
 /// 自动爬台阶系统
 ///
-/// Minecraft 风格：前方有 1 格高的方块时，自动跳上去（不需要按空格）
+/// 体素地形友好：前方有可跨越台阶时自动抬升（不需要按空格）
 ///
 /// 检测逻辑：
 /// 1. 检测前方是否有碰撞（shapecast）
@@ -190,10 +190,15 @@ pub fn character_movement(
 /// 3. 爬上去后恢复水平速度
 pub fn auto_step_up(
     spatial_query: SpatialQuery,
-    mut controllers: Query<(&mut LinearVelocity, &mut PvPController, &Transform, &PlayerCollider)>,
-    voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
+    mut controllers: Query<(
+        &mut LinearVelocity,
+        &mut PvPController,
+        &Transform,
+        &PlayerCollider,
+    )>,
+    _voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
 ) {
-    for (mut velocity, mut controller, transform, collider) in controllers.iter_mut() {
+    for (mut velocity, controller, transform, collider) in controllers.iter_mut() {
         // 只有在移动且 grounded 时才尝试爬台阶
         if !controller.is_grounded || controller.move_input.length() < 0.01 {
             continue;
@@ -220,20 +225,20 @@ pub fn auto_step_up(
         );
 
         if let Some(hit) = forward_hit {
-                // 前方有障碍
-                // 检测障碍顶部高度
-                let hit_point = foot_pos + move_dir * hit.distance;
+            // 前方有障碍
+            // 检测障碍顶部高度
+            let hit_point = foot_pos + move_dir * hit.distance;
 
-                // 检测上方是否有空间（可以爬上去）
-                // 从 hit_point + Vec3::Y * step_height 向上射射线
-                let step_check_pos = hit_point + Vec3::Y * controller.step_height;
-                let above_hit = spatial_query.cast_ray(
-                    step_check_pos,
-                    Dir3::NEG_Y,
-                    controller.step_height + 0.1,
-                    true,
-                    &SpatialQueryFilter::default(),
-                );
+            // 检测上方是否有空间（可以爬上去）
+            // 从 hit_point + Vec3::Y * step_height 向上射射线
+            let step_check_pos = hit_point + Vec3::Y * controller.step_height;
+            let above_hit = spatial_query.cast_ray(
+                step_check_pos,
+                Dir3::NEG_Y,
+                controller.step_height + 0.1,
+                true,
+                &SpatialQueryFilter::default(),
+            );
 
             if let Some(above) = above_hit {
                 // 上方有空间，可以爬
@@ -259,10 +264,7 @@ pub fn auto_step_up(
 /// 击退衰减系统
 ///
 /// 击退速度和硬直时间逐渐衰减
-pub fn knockback_decay(
-    time: Res<Time>,
-    mut controllers: Query<&mut PvPController>,
-) {
+pub fn knockback_decay(time: Res<Time>, mut controllers: Query<&mut PvPController>) {
     let dt = time.delta_secs();
 
     for mut controller in controllers.iter_mut() {
@@ -287,17 +289,22 @@ pub fn knockback_decay(
 ///
 /// 如果使用 leafwing-input-manager，这个系统可以替代为 ActionState
 /// 这里用 Bevy 原生 ButtonInput 作为示例
-pub fn collect_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut controllers: Query<&mut PvPController>,
-) {
+pub fn collect_input(keys: Res<ButtonInput<KeyCode>>, mut controllers: Query<&mut PvPController>) {
     for mut controller in controllers.iter_mut() {
         // WASD
         let mut input = Vec2::ZERO;
-        if keys.pressed(KeyCode::KeyW) { input.y += 1.0; }
-        if keys.pressed(KeyCode::KeyS) { input.y -= 1.0; }
-        if keys.pressed(KeyCode::KeyA) { input.x -= 1.0; }
-        if keys.pressed(KeyCode::KeyD) { input.x += 1.0; }
+        if keys.pressed(KeyCode::KeyW) {
+            input.y += 1.0;
+        }
+        if keys.pressed(KeyCode::KeyS) {
+            input.y -= 1.0;
+        }
+        if keys.pressed(KeyCode::KeyA) {
+            input.x -= 1.0;
+        }
+        if keys.pressed(KeyCode::KeyD) {
+            input.x += 1.0;
+        }
 
         // 归一化
         if input.length() > 1.0 {
@@ -306,7 +313,8 @@ pub fn collect_input(
 
         controller.move_input = input;
         controller.jump_requested = keys.just_pressed(KeyCode::Space);
-        controller.is_sprinting = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        controller.is_sprinting =
+            keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     }
 }
 
@@ -320,10 +328,10 @@ pub fn collect_input(
 /// 注意：体素世界通常有大量方块，不建议为每个方块生成碰撞体
 /// 更好的做法：只生成玩家附近的方块碰撞体，或使用自定义碰撞检测
 pub fn spawn_voxel_colliders(
-    mut commands: Commands,
-    game_world: Res<GameWorld>,
-    player: Query<&Transform, With<PvPController>>,
-    existing_colliders: Query<&Transform, (With<Collider>, Without<PvPController>)>,
+    _commands: Commands,
+    _game_world: Res<GameWorld>,
+    _player: Query<&Transform, With<PvPController>>,
+    _existing_colliders: Query<&Transform, (With<Collider>, Without<PvPController>)>,
 ) {
     // 简化：不自动生成碰撞体
     // 体素碰撞检测应该直接用 World::get() + 自定义 shapecast

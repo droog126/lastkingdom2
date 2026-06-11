@@ -8,7 +8,7 @@
 //!   * 怪物 cube（不同颜色代表不同类型）
 
 use bevy::prelude::*;
-use crate::render::PlayerState;
+use lk2_core::player::PlayerState;
 use lk2_core::world::{Biome, World as GameWorld};
 
 /// 视觉增强配置
@@ -21,11 +21,7 @@ pub struct PrettyConfig {
 
 impl Default for PrettyConfig {
     fn default() -> Self {
-        Self {
-            show_water: true,
-            show_player_avatar: true,
-            show_monster_cubes: true,
-        }
+        Self { show_water: true, show_player_avatar: true, show_monster_cubes: true }
     }
 }
 
@@ -163,7 +159,7 @@ pub fn spawn_pretty(
             (Color::srgb(0.4, 0.25, 0.1), "Treant"),
             (Color::srgb(0.7, 0.3, 0.85), "AetherWraith"),
         ];
-        for (i, (color, name)) in monster_kinds.iter().enumerate() {
+        for (i, (color, _name)) in monster_kinds.iter().enumerate() {
             let angle = (i as f32) * 1.2566;
             let r = 8.0 + (i as f32) * 1.5;
             let x = player.pos.x + angle.cos() * r;
@@ -198,7 +194,7 @@ pub fn spawn_pretty(
 
     // ---- 树（深棕树干 + 绿色树冠） ----
     let tree_positions: [(i32, i32); 5] = [(5, 5), (-5, 3), (3, -7), (-4, -6), (8, -3)];
-    for (i, (tx, tz)) in tree_positions.iter().enumerate() {
+    for (_i, (tx, tz)) in tree_positions.iter().enumerate() {
         let t_x = (player.pos.x as i32 + tx).max(0) as f32;
         let t_z = (player.pos.z as i32 + tz).max(0) as f32;
         // 树干：3 格高
@@ -287,7 +283,7 @@ pub fn animate_avatar(
             5 => Vec3::new(-0.13, 0.20, 0.0),        // L leg
             6 => Vec3::new(0.13, 0.20, 0.0),         // R leg
             7 => Vec3::new(0.0, 3.0 + bob, 0.0),     // flag pole
-            8 => Vec3::new(0.4, 3.6 + bob, 0.0),      // flag
+            8 => Vec3::new(0.4, 3.6 + bob, 0.0),     // flag
             _ => Vec3::ZERO,
         };
         transform.translation = base + offset;

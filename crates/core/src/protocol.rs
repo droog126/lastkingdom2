@@ -84,6 +84,11 @@ pub enum PlayerAction {
     Sprint,
     Attack,
     Block,
+    Gather,
+    Place,
+    Craft,
+    FoundNation,
+    KillCreature,
 }
 
 // ============================================================================
@@ -152,6 +157,34 @@ pub mod messages {
         pub killer_name: String,
         pub victim_name: String,
         pub weapon_id: u8,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+    pub enum BuildRecipe {
+        PlankPack,
+        Campfire,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+    pub enum GameplayCommandKind {
+        GatherFootBlock,
+        PlaceWoodFootBlock,
+        Craft(BuildRecipe),
+        FoundNation,
+        KillNearestCreature,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct GameplayCommand {
+        pub tick: u64,
+        pub player_block: [i32; 3],
+        pub kind: GameplayCommandKind,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct GameplayFeedback {
+        pub ok: bool,
+        pub summary: String,
     }
 }
 
@@ -234,6 +267,40 @@ pub mod components {
     /// 怪物血量（server → client 复制）
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct MonsterHealth(pub f32);
+
+    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+    pub struct GameplayHudState {
+        pub tick: u64,
+        pub player_block_pos: [i32; 3],
+        pub player_pos: [f32; 3],
+        pub nation_id: Option<u32>,
+        pub monsters_killed: u32,
+        pub blocks_gathered: u32,
+        pub nations_founded: u32,
+        pub inventory_wood: i64,
+        pub inventory_food: i64,
+        pub inventory_apple: i64,
+        pub inventory_soul: i64,
+        pub pool_wood: i64,
+        pub pool_food: i64,
+        pub pool_apple: i64,
+        pub pool_soul: i64,
+        pub flag_count: u32,
+        pub total_nations: u32,
+        pub monster_count: u32,
+        pub observer_anomalies: u64,
+        pub observer_invariant_violations: u64,
+        pub status_line: String,
+    }
+
+    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+    pub struct VoxelDelta {
+        pub revision: u64,
+        pub x: i32,
+        pub y: i32,
+        pub z: i32,
+        pub block: u8,
+    }
 }
 
 // ============================================================================
@@ -280,6 +347,8 @@ impl Plugin for ProtocolPlugin {
         // 客户端 → 服务端
         app.register_message::<messages::AttackInput>()
             .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<messages::GameplayCommand>()
+            .add_direction(NetworkDirection::ClientToServer);
 
         // 服务端 → 客户端
         app.register_message::<messages::HitConfirm>()
@@ -289,6 +358,8 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<messages::DamageResult>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<messages::KillFeedEntry>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<messages::GameplayFeedback>()
             .add_direction(NetworkDirection::ServerToClient);
 
         // ----- Components (server → client 复制) -----
@@ -301,5 +372,7 @@ impl Plugin for ProtocolPlugin {
         app.register_component::<components::PlayerRot>();
         app.register_component::<components::MonsterKind>();
         app.register_component::<components::MonsterHealth>();
+        app.register_component::<components::GameplayHudState>();
+        app.register_component::<components::VoxelDelta>();
     }
 }

@@ -18,7 +18,7 @@ use bevy::prelude::*;
 /// PvP 角色控制器
 ///
 /// 设计目标：
-/// - Minecraft 风格移动（5 m/s 基础速度）
+/// - 体素地形上的轻量角色移动（5 m/s 基础速度）
 /// - 自动爬 0.6m 高度差（1 格 = 1m，半砖 = 0.5m）
 /// - 击退抗性（被击中后短暂减速）
 /// - 地面检测（射线投射）
@@ -26,9 +26,9 @@ use bevy::prelude::*;
 #[require(Transform)]
 pub struct PvPController {
     // === 移动参数 ===
-    /// 水平移动速度（m/s），Minecraft 默认 4.3，疾跑 5.6
+    /// 水平移动速度（m/s），常见沙盒手感约 4.3，疾跑 5.6
     pub speed: f32,
-    /// 跳跃冲量（m/s 向上），Minecraft 默认约 8.0
+    /// 跳跃冲量（m/s 向上），常见沙盒手感约 8.0
     pub jump_impulse: f32,
     /// 空中控制力度（0.0 = 无控制，1.0 = 完全控制）
     pub air_control: f32,
@@ -72,7 +72,7 @@ impl Default for PvPController {
     fn default() -> Self {
         Self {
             // 移动参数
-            speed: 5.0,        // Minecraft 疾跑速度
+            speed: 5.0,        // 沙盒疾跑速度
             jump_impulse: 8.0, // MC 默认
             air_control: 0.3,  // 空中控制较弱
             gravity_scale: 1.0,
@@ -152,7 +152,7 @@ impl PvPController {
 
 /// 玩家碰撞体配置
 ///
-/// 胶囊体：半径 0.4m，高度 1.8m（Minecraft 玩家碰撞箱 0.6×1.8）
+/// 胶囊体：半径 0.4m，高度 1.8m（常见体素角色碰撞箱 0.6×1.8）
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct PlayerCollider {
     /// 胶囊体半径

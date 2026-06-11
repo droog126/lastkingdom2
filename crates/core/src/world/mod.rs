@@ -15,6 +15,7 @@
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::constant::*;
 use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
@@ -32,7 +33,7 @@ pub enum Biome {
 
 impl Biome {
     /// 从 (x, z) 决定 biome（demo 用确定性分区，依赖 WORLD_SIZE）
-    pub fn from_xz(x: i32, z: i32) -> Self {
+    pub fn from_xz(_x: i32, z: i32) -> Self {
         let n = WORLD_SIZE as i32;
         if z < n / 3 {
             Biome::Tundra
@@ -171,6 +172,10 @@ pub struct World {
     /// 稠密 3D 数组，index = (y * SIZE + z) * SIZE + x。XZ 超出此范围时由 generate_voxel 按需生成
     pub blocks: Vec<BlockType>,
     pub size: i32,
+    /// true = 未被显式 set 的块由 pipeline 按需生成；false = 纯空测试世界。
+    pub procedural: bool,
+    /// 稠密缓存内被玩家或系统明确写过的位置。用于区分“未生成的 Air”和“被挖空的 Air”。
+    pub edited: HashSet<(i32, i32, i32)>,
     /// 噪声种子（用于 generate_voxel 按需生成）
     pub seed: u64,
     /// 地形生成 pipeline（可配置地形系统的核心）
@@ -185,6 +190,8 @@ impl World {
         Self {
             blocks: vec![BlockType::Air; n],
             size,
+            procedural: false,
+            edited: HashSet::new(),
             seed: 0xDEADBEEF,
             pipeline: std::sync::Arc::new(terrain::presets::default_preset()),
         }
@@ -192,6 +199,7 @@ impl World {
 
     pub fn with_pipeline(size: i32, pipeline: terrain::TerrainPipeline) -> Self {
         let mut w = Self::new(size);
+        w.procedural = true;
         w.pipeline = std::sync::Arc::new(pipeline);
         w
     }
@@ -203,13 +211,20 @@ impl World {
     }
 
     pub fn get(&self, x: i32, y: i32, z: i32) -> BlockType {
-        // OOB 全部 = Air（向"无限 XZ"留口子：未来可走 pipeline 替稠密数组）
+        // OOB Y 永远是 Air；XZ 超出稠密缓存时，procedural 世界仍可按需生成。
         let s = self.size;
-        if x < 0 || x >= s || y < 0 || y >= s || z < 0 || z >= s {
+        if y < 0 || y >= s {
             return BlockType::Air;
         }
-        // 优先读稠密数组（这样 set 之后 get 能看见 — sim 跑挖/放）
-        self.blocks[self.idx(x, y, z)]
+        if x >= 0 && x < s && z >= 0 && z < s {
+            let cached = self.blocks[self.idx(x, y, z)];
+            if cached != BlockType::Air || self.edited.contains(&(x, y, z)) || !self.procedural {
+                return cached;
+            }
+        } else if !self.procedural {
+            return BlockType::Air;
+        }
+        self.generate_voxel(x, y, z)
     }
 
     /// 按需生成 voxel — 用配置化 pipeline（XZ 无限，Y 有限）
@@ -225,9 +240,10 @@ impl World {
         }
         let i = self.idx(x, y, z);
         self.blocks[i] = b;
+        self.edited.insert((x, y, z));
     }
 
-    pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
+    pub fn in_bounds(&self, _x: i32, y: i32, _z: i32) -> bool {
         // XZ 无限，只检查 Y
         y >= 0 && y < self.size
     }
@@ -649,7 +665,7 @@ pub fn gather_block(
 // World 视野：给定玩家位置，返回可见块集合
 // ---------------------------------------------------------------------------
 
-/// 给定玩家位置 + 半径，返回 (x, y, z) 列表（demo：方块范围，Minecraft 风格 chunk load）
+/// 给定玩家位置 + 半径，返回 (x, y, z) 列表（demo：体素视距范围）
 ///
 /// demo 简化：直接返回 (px±r) × (py±r) × (pz±r) 的所有方块，含两端。
 /// 后续可加球形过滤、视线追踪、距离衰减。

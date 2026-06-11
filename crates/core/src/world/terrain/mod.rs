@@ -391,7 +391,7 @@ impl TreeModule {
         // 把 x, z 投到 8x8 网格上
         let cell_x = x.div_euclid(8);
         let cell_z = z.div_euclid(8);
-        let cell_seed = (cell_x as u64).wrapping_mul(0x9E3779B1)
+        let _cell_seed = (cell_x as u64).wrapping_mul(0x9E3779B1)
             ^ (cell_z as u64).wrapping_mul(0x85EBCA77)
             ^ self.seed;
         let r = hash01(cell_x, 0, cell_z, self.seed as u32);

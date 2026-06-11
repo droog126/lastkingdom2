@@ -297,7 +297,7 @@ impl MonsterEcosystem {
     }
 
     /// tick：每个小巢检查 dormancy + decay；dead kingdom 不再处理
-    pub fn tick(&mut self, pool: &mut GlobalResourcePool) {
+    pub fn tick(&mut self, _pool: &mut GlobalResourcePool) {
         self.current_tick += 1;
         let current = self.current_tick;
         // rand 0.10: StdRng::from_rng 是 infallible，返回 Self（直接拿）
