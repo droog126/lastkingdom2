@@ -105,6 +105,8 @@ pub struct ScenarioState {
     pub pending_target: Option<[i32; 3]>,
     pub pending_gather_left: u32,
     pub end_requested: bool,
+    /// MoveTo step 开始时的 tick；用于超时强制 advance（避免 fallback 死循环）
+    pub move_to_started_at_tick: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -145,6 +147,7 @@ impl ScenarioState {
             pending_target: None,
             pending_gather_left: 0,
             end_requested: false,
+            move_to_started_at_tick: None,
         }
     }
 }
@@ -310,10 +313,12 @@ pub fn scenario_runner(
             }
         }
         ScenarioStep::MoveTo { pos } => {
+            // 之前这里写 step_in_progress = false，导致 scenario_runner 下一帧又跑
+            // 同一行 MoveTo handler → log "🚶 走向" 几百次（见 baseline_check.log 之前的 spam）
+            // 改成：保持 step_in_progress=true，由 simulate_player_actions 到达时 advance
             state.pending_target = Some(*pos);
-            info!("🚶 走向 {:?}", pos);
-            // 不推进 — 等导航 system 完成
-            state.step_in_progress = false;
+            state.move_to_started_at_tick = Some(clock.tick);
+            info!("🚶 走向 {:?}（tick {}）", pos, clock.tick);
         }
         ScenarioStep::Step { dir } => {
             // 立即生效，advance
@@ -363,10 +368,26 @@ pub fn simulate_player_actions(
     mut nations: ResMut<NationRegistry>,
     mut monsters: ResMut<MonsterEcosystem>,
     mut state: ResMut<ScenarioState>,
+    clock: Res<SimClock>,
 ) {
     // 1. 走 target
     if let Some(target) = state.pending_target {
         let cur = player.block_pos;
+        // 超时：MoveTo 跑了 >200 tick 还没到 → 强制 advance（避免 fallback 卡死）
+        // 1 tick ≈ 1s（sim 60s 现实 1 tick），200 tick = 200 sim 秒 = 真实 12 秒
+        if let Some(start) = state.move_to_started_at_tick {
+            if clock.tick.saturating_sub(start) > 200 {
+                warn!(
+                    "⏱ MoveTo 到 {:?} 超时（已走 {} tick），强制 advance",
+                    target,
+                    clock.tick.saturating_sub(start)
+                );
+                state.pending_target = None;
+                state.move_to_started_at_tick = None;
+                advance_step(&mut state);
+                return;
+            }
+        }
         let d = [
             (target[0] - cur[0]).signum(),
             (target[1] - cur[1]).signum(),
@@ -386,8 +407,9 @@ pub fn simulate_player_actions(
         if dir == [0, 0, 0] {
             // 到达
             state.pending_target = None;
+            state.move_to_started_at_tick = None;
             info!("✓ 到达 {:?}", target);
-            state.current_step += 1; // advance the MoveTo step
+            advance_step(&mut state); // 同时清 step_in_progress=false + current_step+=1
         } else {
             // 走 preferred 方向；OOB/被挡时回退 6 cardinal（修死循环）
             try_move_with_fallback(&mut player, &mut game_world, dir, target);
