@@ -85,8 +85,8 @@ impl Default for SpawnHillModule {
             name: "spawn_hill".into(),
             center_x: 48,
             center_z: 48,
-            radius: 16,
-            max_height: 15, // 中心 Y = 12+15=27; 边缘约 Y=12=sea level
+            radius: 22,
+            max_height: 22, // 中心 Y = 12+22=34; 边缘约 Y=12=sea level
             enabled: true,
             weight: 10.0,
         }
@@ -113,9 +113,12 @@ impl TerrainModule for SpawnHillModule {
             return None;
         } // 圆外不管，让 Heightmap 接管
 
-        // 圆顶高度 = 中心高，往外线性降低
+        // 圆顶高度 = 中心高，往外按 1-cos 半圆降低（自然山丘曲线）
         let dist = (dist2 as f32).sqrt();
-        let dome_h = (1.0 - dist / r as f32) * self.max_height as f32;
+        let t = 1.0 - dist / r as f32;
+        let t = t.clamp(0.0, 1.0);
+        let dome_h = (1.0 - ((1.0 - t) * std::f32::consts::FRAC_PI_2).cos())
+            * self.max_height as f32;
         let surface = SEA_LEVEL + 1 + dome_h as i32;
 
         // 同时把 surface_y 写进 ctx（这样 Cave/Tree/Ore 能看到）
@@ -147,7 +150,10 @@ impl TerrainModule for SpawnHillModule {
             return None;
         }
         let dist = (dist2 as f32).sqrt();
-        let dome_h = (1.0 - dist / r as f32) * self.max_height as f32;
+        let t = 1.0 - dist / r as f32;
+        let t = t.clamp(0.0, 1.0);
+        let dome_h = (1.0 - ((1.0 - t) * std::f32::consts::FRAC_PI_2).cos())
+            * self.max_height as f32;
         Some(SEA_LEVEL as f32 + 1.0 + dome_h)
     }
 }

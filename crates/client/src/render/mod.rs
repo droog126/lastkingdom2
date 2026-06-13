@@ -1262,8 +1262,8 @@ pub fn player_stand_position_at(
 
 pub fn player_spawn_position_at(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
     let foot_y = standable_foot_y_any_height(world, x, z)?;
-    // 高空俯瞰：玩家在 surface 上方 20 格
-    let sky_y = foot_y + 20;
+    // 玩家站在山顶 surface + 2m（眼睛 1.7m 视角能平视 + 微俯瞰整个山）
+    let sky_y = foot_y + 2;
     Some((
         Vec3::new(x as f32 + 0.5, sky_y as f32, z as f32 + 0.5),
         [x, sky_y, z],

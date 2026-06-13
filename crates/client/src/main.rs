@@ -286,7 +286,7 @@ fn main() {
         .init_resource::<SwordSwing>()
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
-                cfg.auto_walk = true;
+                cfg.auto_walk = false; // 玩家站定在山顶, 不会乱跑
                 cfg.auto_orbit = true;
                 cfg.auto_keys = true;
                 cfg.mouse_look = false;
@@ -949,8 +949,8 @@ fn setup_world(
     let (sx, sz) =
         walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
     let (spawn_pos, spawn) = player_spawn_position_at(&game_world, sx, sz).unwrap_or((
-        Vec3::new(sx as f32 + 0.5, 50.0, sz as f32 + 0.5),
-        [sx, 50, sz],
+        Vec3::new(sx as f32 + 0.5, 28.0, sz as f32 + 0.5),
+        [sx, 28, sz],
     ));
     player.block_pos = spawn;
     player.pos = spawn_pos;

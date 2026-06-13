@@ -64,7 +64,8 @@ $needClientBuild = -not (Test-Path $clientExePath)
 if (-not $SkipBuild) {
     foreach ($t in $buildTargets) {
         Write-Host ">>> cargo build -p $t $featureArgs ..." -ForegroundColor Cyan
-        Invoke-Expression "cargo build -p $t $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        $buildOutput = cargo build -p $t $featureArgs 2>&1
+        $buildOutput | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) {
             Write-Host ">>> BUILD FAILED for $t" -ForegroundColor Red
             exit 1
