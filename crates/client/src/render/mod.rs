@@ -16,7 +16,7 @@ use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
 use lk2_core::resource::ResourceKind;
-use lk2_core::world::{BlockType, World as GameWorld};
+use lk2_core::world::{Biome, BlockType, World as GameWorld};
 
 mod greedy_mesh;
 use greedy_mesh::build_all_terrain_meshes_aabb;
@@ -452,7 +452,7 @@ pub fn setup_terrain_underlay(
     commands.spawn((
         Mesh3d(plane_mesh),
         MeshMaterial3d(mat),
-        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        Transform::from_translation(Vec3::new(0.0, -100.0, 0.0)), // 放地底，看不见
         TerrainUnderlay,
     ));
     info!("🟫 兜底盖板 100x100 plane 已 spawn（player 脚下 -5m 跟随）");
@@ -460,16 +460,10 @@ pub fn setup_terrain_underlay(
 
 pub fn underlay_follow_player(
     mut q: Query<&mut Transform, With<TerrainUnderlay>>,
-    player: Res<PlayerState>,
 ) {
+    // plane 永远放地底 (y=-100)，完全不可见 — 让 heightmap 自己显示
     let Ok(mut tf) = q.single_mut() else { return; };
-    // 玩家脚下 5m，永远在玩家下面；planar 跟随 XZ
-    let px = player.pos.x;
-    let pz = player.pos.z;
-    let py = player.pos.y - 5.0;
-    // 兜底：Y 不低于地形最低可能高度（防穿透到地底太多）
-    let y_clamped = py.max(-32.0);
-    tf.translation = Vec3::new(px, y_clamped, pz);
+    tf.translation = Vec3::new(0.0, -100.0, 0.0);
 }
 
 /// 武器 marker：被 held_weapon_follow 系统认领
@@ -734,8 +728,6 @@ pub fn toggle_cursor_grab_on_esc(
     keys: Res<ButtonInput<KeyCode>>,
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     cfg: Res<RenderConfig>,
-    mut angles: ResMut<CameraAngles>,
-    mut mouse_look: ResMut<RenderConfig>,
 ) {
     if !cfg.mouse_look { return; }
     if !keys.just_pressed(KeyCode::Escape) { return; }
@@ -753,8 +745,6 @@ pub fn toggle_cursor_grab_on_esc(
         // AccumulatedMouseMotion 不可 ResMut（bevy 0.18），下一帧自然衰减
         info!("🖱 ESC：抓回光标");
     }
-    let _ = angles; // 预留
-    let _ = mouse_look; // 静默 unused
 }
 
 /// 动物方向指示器 marker（被 `update_animal_indicator` 系统刷新）
@@ -837,6 +827,201 @@ pub fn update_animal_indicator(
         lk2_core::creature::CreatureKind::Chicken => "Chicken",
     };
     text.0 = format!("{}  {}  {:.1}m", arrow, label, dist);
+}
+
+// ---------------------------------------------------------------------------
+// MonsterNest 3D 标记 + 屏幕方向指示器
+// ---------------------------------------------------------------------------
+//
+// 任务 nest-marker (2026-06-13): 把 sim 里的 MonsterNest 变成可发现的视觉信号。
+//   - 启动时 spawn 一根"旗杆"在每个 nest 中心上方 5m（细长方块 0.4×4.0×0.4）
+//   - 按 biome 配色：Desert 黄沙 / Jungle 丛林绿 / Tundra 冰蓝
+//   - emissive RedStrong 让人眼远距离能看见
+//   - mesh 永远跟随玩家 XZ 偏移：player's block_pos.x/z + (offset_x, 5, offset_z)
+//     这样玩家在 ±100 范围内一定有标志（不随玩家远离而消失）
+//   - 屏幕方向指示器（NestIndicatorText）：每帧算最近 nest（30 格内）→
+//     输出 "↗ Nest 12m / 8 怪" 这种格式到顶部 HUD
+//   - offline / online 通用（不依赖 mode）
+//
+// 实现参考 update_animal_indicator 模式（顶部居中 HUD + 8 方向箭头 + 30 格范围）。
+
+/// 3D 旗杆 mesh（细长方块 0.4×4.0×0.4）
+const NEST_MARKER_SIZE: (f32, f32, f32) = (0.4, 4.0, 0.4);
+
+/// nest 旗杆 marker（持 nest.id + kingdom.id 让 update 系统能映射）
+#[derive(Component)]
+pub struct NestMarker {
+    pub nest_id: u32,
+    pub kingdom_id: u32,
+    /// nest 中心相对玩家的 XZ 偏移（生成时记下，每帧 player.pos.xz + offset）
+    pub offset_x: f32,
+    pub offset_z: f32,
+}
+
+/// nest 旗杆总数（debug 读）
+#[derive(Resource, Default)]
+pub struct NestMarkerCount(pub u32);
+
+/// 启动时 spawn 全部 nest 旗杆（每 nest 一根，center 5m 上方）
+///
+/// 注意：不在这里硬编码 nest 个数；遍历 sim 里的 MonsterEcosystem.kingdoms[*].nests
+/// 拿到 (id, kingdom_id, center, biome, individuals) 然后 spawn。
+pub fn spawn_nest_markers(
+    mut commands: Commands,
+    monsters: Res<MonsterEcosystem>,
+    player: Res<PlayerState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut count: ResMut<NestMarkerCount>,
+) {
+    let px = player.block_pos[0] as f32 + 0.5;
+    let pz = player.block_pos[2] as f32 + 0.5;
+    let mut spawned = 0_u32;
+
+    for (kid, kingdom) in monsters.kingdoms.iter() {
+        if kingdom.destroyed {
+            continue;
+        }
+        for (nid, nest) in kingdom.nests.iter() {
+            // biome 配色 + RedStrong emissive 远距离可见
+            let (base_r, base_g, base_b) = match nest.biome {
+                Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32),    // 黄沙
+                Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),     // 丛林绿
+                Biome::Tundra => (0.7_f32, 0.85_f32, 1.0_f32),    // 冰蓝
+            };
+            let mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(base_r, base_g, base_b),
+                emissive: Color::srgb(1.0, 0.25, 0.15).into(), // RedStrong
+                perceptual_roughness: 0.7,
+                metallic: 0.0,
+                ..default()
+            });
+            // 共享 mesh（所有 nest 旗杆同尺寸）
+            let mesh = meshes.add(Cuboid::new(NEST_MARKER_SIZE.0, NEST_MARKER_SIZE.1, NEST_MARKER_SIZE.2));
+
+            // 旗杆放在 (player + offset), Y 抬高 5m。offset 是 nest 相对玩家的 XZ 偏移。
+            let nx = nest.center[0] as f32 + 0.5;
+            let nz = nest.center[2] as f32 + 0.5;
+            let ny = nest.center[1] as f32 + 5.0;
+            let offset_x = nx - px;
+            let offset_z = nz - pz;
+
+            commands.spawn((
+                NestMarker {
+                    nest_id: *nid,
+                    kingdom_id: *kid,
+                    offset_x,
+                    offset_z,
+                },
+                Mesh3d(mesh),
+                MeshMaterial3d(mat),
+                Transform::from_translation(Vec3::new(px + offset_x, ny, pz + offset_z)),
+            ));
+            spawned += 1;
+        }
+    }
+
+    count.0 = spawned;
+    info!("🏳 MonsterNest 3D 旗杆已 spawn {} 个（biome 配色 + RedStrong emissive）", spawned);
+}
+
+/// 每帧更新 nest 旗杆位置：player.pos.xz + (offset_x, 5, offset_z)
+pub fn update_nest_marker_positions(
+    mut q: Query<(&NestMarker, &mut Transform)>,
+    player: Res<PlayerState>,
+) {
+    // 用 player.pos（更平滑）而不是 block_pos（每格才动一次）
+    let px = player.pos.x;
+    let pz = player.pos.z;
+    for (m, mut tf) in q.iter_mut() {
+        // Y 用 nest 原始 center.y + 5m，XZ 永远跟玩家
+        // 注：这里没存原始 Y，所以用 tf.translation.y 保持不变（启动时已设到 5m + nest.y）
+        tf.translation.x = px + m.offset_x;
+        tf.translation.z = pz + m.offset_z;
+        // Y 不动（启动时已 spawn 在 nest.center.y + 5，nest 是固定不动的）
+    }
+}
+
+/// nest 屏幕方向指示器 marker（被 `update_nest_indicator` 系统刷新）
+#[derive(Component)]
+pub struct NestIndicatorText;
+
+/// nest 屏幕方向指示器系统：每帧找最近 nest（30 格内）→ 更新顶部 HUD
+///
+/// 格式：`↗ Nest 12m / 8 怪` （8 怪 = nest.individuals.len()）
+/// 没有 nest 时显示 "🔍 附近无巢穴（>30 格）"
+pub fn update_nest_indicator(
+    mut q_text: Query<&mut Text, With<NestIndicatorText>>,
+    player: Res<PlayerState>,
+    camera: Query<&Transform, With<Camera3d>>,
+    monsters: Res<MonsterEcosystem>,
+) {
+    let Ok(mut text) = q_text.single_mut() else {
+        return;
+    };
+    let px = player.block_pos[0] as f32 + 0.5;
+    let pz = player.block_pos[2] as f32 + 0.5;
+
+    // 收集所有 active nest（kingdom 没摧毁的）
+    let mut best: Option<([i32; 3], u32, f32)> = None; // (center, individuals, dist2)
+    for (_kid, k) in monsters.kingdoms.iter() {
+        if k.destroyed {
+            continue;
+        }
+        for (_nid, n) in k.nests.iter() {
+            let dx = n.center[0] as f32 + 0.5 - px;
+            let dz = n.center[2] as f32 + 0.5 - pz;
+            let d2 = dx * dx + dz * dz;
+            if d2 < 900.0 && (best.is_none() || d2 < best.unwrap().2) {
+                best = Some((n.center, n.individuals.len() as u32, d2));
+            }
+        }
+    }
+
+    let Some((center, count, d2)) = best else {
+        text.0 = "🔍 附近无巢穴（>30 格）".to_string();
+        return;
+    };
+    let dist = d2.sqrt();
+    let nest_v = Vec2::new(
+        center[0] as f32 + 0.5 - px,
+        center[2] as f32 + 0.5 - pz,
+    );
+    if nest_v.length() < 0.01 {
+        text.0 = format!("· Nest 就在脚下 / {} 怪", count);
+        return;
+    }
+
+    // 算相对相机的方向（→ 屏幕箭头，复用 animal_indicator 公式）
+    let arrow = if let Ok(tf) = camera.single() {
+        let f = tf.forward();
+        let cam = Vec2::new(f.x, f.z);
+        let cam_n = if cam.length() > 0.01 {
+            cam.normalize()
+        } else {
+            Vec2::new(1.0, 0.0)
+        };
+        let dot = nest_v.dot(cam_n);
+        let cross = nest_v.x * cam_n.y - nest_v.y * cam_n.x;
+        // cross < 0 = nest 在右；angle 量化到 8 方向
+        let angle = cross.atan2(dot);
+        let oct = ((-angle).to_degrees() / 45.0).round() as i32;
+        match oct.rem_euclid(8) {
+            0 => "↑",
+            1 => "↗",
+            2 => "→",
+            3 => "↘",
+            4 => "↓",
+            5 => "↙",
+            6 => "←",
+            7 => "↖",
+            _ => "·",
+        }
+    } else {
+        "·"
+    };
+
+    text.0 = format!("{} Nest {:.0}m / {} 怪", arrow, dist, count);
 }
 
 /// 玩家最后移动的方向（用于第一人称相机看向方向）
@@ -1076,9 +1261,11 @@ pub fn player_stand_position_at(
 
 pub fn player_spawn_position_at(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
     let foot_y = standable_foot_y_any_height(world, x, z)?;
+    // 高空俯瞰：玩家在 surface 上方 20 格
+    let sky_y = foot_y + 20;
     Some((
-        Vec3::new(x as f32 + 0.5, foot_y as f32, z as f32 + 0.5),
-        [x, foot_y, z],
+        Vec3::new(x as f32 + 0.5, sky_y as f32, z as f32 + 0.5),
+        [x, sky_y, z],
     ))
 }
 
@@ -1302,15 +1489,15 @@ pub fn first_person_camera(
 
     // auto-demo + auto-orbit：俯瞰 orbit 模式（之前这个分支不存在，玩家被第一人称贴脸，
     // 根本看不到自己的 avatar，所以 iter_85/90/96 的 player 维度都只拿 2-3 分）
-    // 相机绕玩家在水平面上慢转，抬高 3m 俯视，dist 默认 6.5m
+    // 相机绕玩家在水平面上慢转，抬高 25m 俯视，dist 默认 6.5m
     if cfg.auto_orbit && !cfg.mouse_look {
         *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
         let a = *orbit_angle;
-        let target = player.pos + Vec3::Y * 1.0; // 看向玩家胸口/头部高度
+        let target = player.pos + Vec3::Y * 0.0; // 看向玩家脚下（俯瞰）
         let cam_pos = target
             + Vec3::new(
                 a.cos() * cfg.auto_orbit_distance,
-                3.0,
+                25.0,
                 a.sin() * cfg.auto_orbit_distance,
             );
         tf.translation = cam_pos;

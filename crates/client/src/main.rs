@@ -69,13 +69,14 @@ use crate::pvp_systems::{
     on_knockback_event, trigger_visual_effects,
 };
 use crate::render::{
-    AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, Player,
-    RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle,
+    AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, NestIndicatorText,
+    NestMarkerCount, Player, RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle,
     cycle_terrain_preset, emergency_teleport, first_person_camera, freefly_movement,
     freefly_toggle, held_weapon_follow, mouse_look_system, player_input,
     player_spawn_position_at, setup_atmosphere, setup_cursor_grab, setup_terrain_underlay,
-    spawn_terrain_around_player, toggle_cursor_grab_on_esc, underlay_follow_player,
-    update_animal_indicator,
+    spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
+    underlay_follow_player, update_animal_indicator, update_nest_indicator,
+    update_nest_marker_positions,
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud};
 
@@ -308,6 +309,7 @@ fn main() {
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
         .init_resource::<NetworkSmoothingState>()
+        .init_resource::<NestMarkerCount>()
         .insert_resource(if network_mode {
             ClientRunMode::Online
         } else {
@@ -329,6 +331,7 @@ fn main() {
             setup_cursor_grab,
             setup_terrain_underlay,    // ← 兜底盖板（修缝 B：marching_cubes 漏底面）
             setup_world,
+            spawn_nest_markers,        // ← nest-marker 任务: 在 setup_world 之后跑，monsters.demo_init 才有 nests
             spawn_pretty,
             spawn_creatures,
             setup_hud,
@@ -412,6 +415,8 @@ fn main() {
     );
     // freefly_movement 必须先于 first_person_camera (否则镜头不动)
     app.add_systems(Update, freefly_movement.before(first_person_camera));
+    // nest-marker 任务: 旗杆位置每帧跟玩家 XZ 偏移 (从 chain 拆出来避免 tuple > 20)
+    app.add_systems(Update, update_nest_marker_positions);
     // interpolate_online_player / apply_authoritative_snapshot 之前被加
     // 但函数没定义(都是 baseline 不稳定)。apply_networked_position
     // 已经够用 (server 复制 PlayerPos → 写本机玩家 Transform)。
@@ -425,6 +430,7 @@ fn main() {
             end_tick_system,
             update_hud,
             update_animal_indicator,
+            update_nest_indicator,    // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
             tick_recorder,
             periodic_screenshot,
             update_creatures,

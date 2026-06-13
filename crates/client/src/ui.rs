@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::pvp_systems::HealthHudMarker;
-use crate::render::AnimalIndicatorText;
+use crate::render::{AnimalIndicatorText, NestIndicatorText};
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::diagnostics::SnapshotRole;
@@ -127,6 +127,27 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             TextColor(Color::srgb(1.0, 0.9, 0.4)),
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
             AnimalIndicatorText,
+        )],
+    ));
+
+    // nest 方向指示器（紧贴动物指示器下方，y+36 → top=92，y 偏移 36 不重叠）
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(96),
+            left: px(0),
+            right: px(0),
+            height: px(28),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        children![(
+            Text::new("[nest scanning...]"),
+            TextFont { font: fonts.cn.clone(), font_size: 20.0, ..default() },
+            TextColor(Color::srgb(1.0, 0.6, 0.4)), // 偏橙红，跟动物指示器（黄）区分
+            TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
+            NestIndicatorText,
         )],
     ));
 
