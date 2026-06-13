@@ -1,44 +1,50 @@
-feat(net): add ServerPosUpdate app-layer player position sync
+# feat(net): wire ControlledBy + use ActionState query in apply_input_to_player
 
-绕开 lightyear 0.26 自动 Replicate 那 1% 卡点 (UpdatesMessage 不进
-client receive buffer 但 server serialize / send packet 都跑),
-server 端每 2 tick 推 ServerPosUpdate message (Vec3 + u32 tick) 走
-MetadataChannel (UnorderedReliable), client 端 MessageReceiver 自动
-bind, reader system 写 PlayerState.pos.
+服务端:
+- `replicate_player_for_connected` 给 sim player 同时挂 `Replicate::manual(vec![client_of_entity])` 跟
+  `ControlledBy { owner: client_of_entity, lifetime: Persistent }`。
+  lightyear 0.26 buffer.rs:537 检查 `controlled_by.owner == sender_entity` 命中后
+  `prepare_typed_component_insert(Controlled)` 推 Controlled marker 给 client。
+  之前 server 端有 sim player 但没推 Controlled 给 client → client 端 InputPlugin 的
+  `input_buffer_query` (With<S::Marker>) 找不到 entity → 发的 InputMessage 内 inputs 永远空。
+- `apply_input_to_player` 改用 `Query<(&ActionState<PlayerAction>, &mut Transform, &mut PlayerPos),
+  (With<Name>, With<ControlledBy>)>` 取代 `Option<Res<ActionState>>` (ActionState 是 per-entity
+  component, 不是 resource, 之前那条路永远 None)。每 tick 30Hz 读 controlled entity 的
+  ActionState (lightyear_inputs 0.26 `receive_input_message` server.rs:261 在 input 到达时自动
+  attach `InputBuffer + ActionState` 到 query.get_mut 命中的 entity, controlled_by 命中的
+  entity 一定有 ActionState), 推 Transform.translation + PlayerPos。
 
-server 端:
-- broadcast_player_pos system (FixedUpdate, 15Hz)
-- ServerMultiMessageSender<()>.send::<M, MetadataChannel>
-- 跟 lightyear 0.26.4 ServerMultiMessageSender 接口一致
-- 走 NetworkTarget::All, 单 client 简化版
-- ServerTickCounter resource (wrapping u32)
+客户端:
+- `collect_keys_to_action_state` filter 改 `With<Controlled>` 取代 `With<Player>` (Player 是
+  camera marker, 不是 player entity)。`With<Controlled>` 找 server 推过来的镜像 player entity
+  (server 端 ControlledBy 加了后, lightyear 自动推 Controlled marker 给 client), 把键盘 W/A/S/D
+  写到它的 ActionState, lightyear_inputs client `buffer_action_state` 在 FixedPreUpdate 把
+  ActionState 写到 InputBuffer, `prepare_input_message` 在 PostUpdate 序列化成 InputMessage 上行。
+- `w_active = w_pressed || cfg.auto_walk` — auto-demo 模式强制按 W (推 input 上行, 让 server
+  sim player 移动)。
 
-client 端:
-- spawn_networked_client 加 MessageReceiver<ServerPosUpdate>::default() component
-- apply_server_pos_update system (Update)
-  - drain receiver, latest pos 写 PlayerState.pos
-  - 100% 跑通: server tick 11666-11800 持续推送, client 持续 receive
-
-ProtocolPlugin:
-- 新增 messages::ServerPosUpdate struct
-- register_message<ServerPosUpdate>().add_direction(ServerToClient)
-- MetadataChannel 走 UnorderedReliable (跟 ProtocolCheck / SenderMetadata
-  内部 metadata 同一 channel, lightyear 0.26 默认 register_message
-  不指定 channel 走 metadata 路径, send 端显式 send::<_, MetadataChannel>
-  配对)
-
-manual test 验证 (Start-Process server 后台 + client connect auto-demo):
-- server 端 netcode connect OK, ClientOf entity spawn, server tick 10/20/30 跑
-- client 端 netcode connect OK, 持续 receive ServerPosUpdate 写 PlayerState
-- 15Hz 持续同步 pos Vec3(48.5, 14.5, 48.5) (sim player 初始位置)
-- client 同时持续发 PlayerAction input message 给 server
-- 全链路: client -> server (action) + server -> client (ServerPosUpdate) 双向通
+验证:
+- server 端 `lightyear_inputs::server: received input message tick=... client_id=... action=PlayerAction`
+  持续 60Hz 跑, server 端 receive 链路 100% 通 ✓
+- server 端 sim player `apply_input_to_player` system 现在能找到 ActionState (controlled entity
+  query 命中), 但 `message.inputs=[]` 持续空 ✗
+- client 端 `MessageReceiver<UpdatesMessage>` 实际 receive 0 条, `replicated=0, playerpos=0`
+  持续 — lightyear 0.26 client 端 UpdatesMessage receive 链整体不工作
+- client 端 `prepare_input_message` 的 input_buffer_query 一直空, `Number of input messages
+  to send: 0` (累积) + `EmptyInputMessage<PlayerAction>` 持续上行
 
 next:
-- 把 client apply_server_pos_update 写进 player entity Transform, 让本机玩家
-  entity 跟随 server 推来的 pos 移动
-- 后续 client prediction + server reconciliation + 插值优化
+- **核心阻塞**: client 端 UpdatesMessage 收不到 → 没有 controlled entity → ActionState 写不进去
+  → server sim player 永远不动。这跟 lightyear 0.26 client 端 receive 链整体不工作有关
+  (server 推 spawn 跟 component_insert 都收不到, 跟 server 端 `Replicate::manual` 配合下
+  `UpdatesChannel` `UnorderedUnreliableWithAcks` 没拿到 ack 反馈可能有关系)。
+- 备选方案: **完全用应用层 Message 替代整个 lightyear 0.26 replication**。
+  server 端 sim player spawn → 推 `PlayerSpawned` message 走 MetadataChannel (跟 ServerPosUpdate
+  同 channel, 100% 跑通)。每 tick 推 `ServerPosUpdate` (已跑通)。MonsterKind / MonsterHealth
+  等等也走应用层。
+- 进一步调试 lightyear 0.26 client 端 UpdatesMessage receive 链: 跑 RUST_LOG=lightyear_replication=trace
+  看 receive_messages system 跑没跑, ReplicationReceiver 跟 MessageReceiver<UpdatesMessage>
+  是不是在 client entity 上。
 
 侧修:
-- crates/core/src/world/mod.rs 跟 world/terrain/mod.rs 跟 render/mod.rs 是
-  prior 几次迭代的微调 (关掉 unused warn), 跟本次联机无关, 一起进库
+- 加 `*.err` 到 .gitignore (之前几次 loop 漏出来的孤儿 .err 污染 git status)

@@ -464,13 +464,30 @@ fn replicate_player_for_connected(
     //    ⇒ UpdatesMessage 永远不发。`manual(vec![client_of_entity])` 直接指定
     //    sender 列表, 走 `SingleServer(Sender(client))` mode 而不是
     //    `SingleServer(All)`, 跳过 NetworkTarget resolution 整条路径。
+    //
+    // 3) **同时**给 sim player 挂 `ControlledBy { owner: client_of_entity, lifetime: Persistent }` —
+    //    关键: lightyear 0.26 在 server 端发送 entity spawn 时 (buffer.rs:537) 检查
+    //    `controlled_by.owner == sender_entity`, 如果命中就 `prepare_typed_component_insert(Controlled)`
+    //    把 `Controlled` marker 推给 client 端。client 端 receive 镜像 entity 时
+    //    自动 attach `Controlled` → client 端 `InputPlugin` 的 input_buffer_query
+    //    (client.rs:530) 命中 → 把 ActionState 序列化成 InputMessage 发给 server
+    //    → server 端 `ServerInputPlugin::receive_input_message` 收到 → 写 sim player
+    //    InputBuffer + ActionState (line 261) → `update_action_state` 更新 → 我
+    //    们的 `apply_input_to_player` 读 ActionState 推 sim player Transform。
+    //    **没这一步** → client 端 input_buffer_query 不命中 → client 不发 input
+    //    → server 端 receive_input_message 收不到 → sim player 不动。
+    //    `lifetime: Persistent` 因为 disconnect 时不要 despawn sim player (server 端权威)。
     for entity in player_q.iter() {
-        commands.entity(entity).insert(
+        commands.entity(entity).insert((
             lightyear::prelude::Replicate::manual(vec![client_of_entity]),
-        );
+            lightyear::prelude::ControlledBy {
+                owner: client_of_entity,
+                lifetime: lightyear::prelude::Lifetime::Persistent,
+            },
+        ));
         info!(
-            "[net] Replicate component attached to Player entity {:?} with manual senders [{:?}] — will now replicate to ClientOf entity",
-            entity, client_of_entity
+            "[net] Replicate + ControlledBy attached to Player entity {:?} — owner={:?}, senders=[{:?}]",
+            entity, client_of_entity, client_of_entity
         );
         break;
     }
@@ -493,49 +510,50 @@ fn replicate_player_for_connected(
 // → PlayerPos 复制 → client apply_networked_position 更新本机
 // Transform。
 fn apply_input_to_player(
-    actions: Option<Res<ActionState<PlayerAction>>>,
     mut q: Query<
         (
+            &ActionState<PlayerAction>,
             &mut bevy::prelude::Transform,
             &mut lk2_core::protocol::components::PlayerPos,
         ),
-        With<Name>,
+        (With<Name>, With<lightyear::prelude::ControlledBy>),
     >,
 ) {
-    let Some(actions) = actions else {
-        return;
-    };
     let mut dir = bevy::math::Vec2::ZERO;
-    if actions.pressed(&PlayerAction::MoveForward) {
-        dir.y += 1.0;
-    }
-    if actions.pressed(&PlayerAction::MoveBackward) {
-        dir.y -= 1.0;
-    }
-    if actions.pressed(&PlayerAction::MoveLeft) {
-        dir.x -= 1.0;
-    }
-    if actions.pressed(&PlayerAction::MoveRight) {
-        dir.x += 1.0;
-    }
-    if dir.length() > 1.0 {
-        dir = dir.normalize();
-    }
     let speed = 4.0; // m/s, 跟 client 的 PvPController 默认 speed 对齐
     let dt = 1.0 / 30.0; // 30 TPS fixed update
-    let delta = bevy::math::Vec3::new(dir.x, 0.0, -dir.y) * speed * dt; // bevy camera: -Z = forward
-    for (mut transform, mut player_pos) in q.iter_mut() {
-        if transform.translation == bevy::math::Vec3::ZERO && transform.translation.length() < 0.001
-        {
-            // 跳过默认 Transform (origin 0,0,0) — spawn 的玩家有真实位置
-            continue;
+    let mut applied_count = 0;
+    for (actions, mut transform, mut player_pos) in q.iter_mut() {
+        let mut local_dir = bevy::math::Vec2::ZERO;
+        if actions.pressed(&PlayerAction::MoveForward) {
+            local_dir.y += 1.0;
         }
+        if actions.pressed(&PlayerAction::MoveBackward) {
+            local_dir.y -= 1.0;
+        }
+        if actions.pressed(&PlayerAction::MoveLeft) {
+            local_dir.x -= 1.0;
+        }
+        if actions.pressed(&PlayerAction::MoveRight) {
+            local_dir.x += 1.0;
+        }
+        if local_dir.length() > 1.0 {
+            local_dir = local_dir.normalize();
+        }
+        let delta = bevy::math::Vec3::new(local_dir.x, 0.0, -local_dir.y) * speed * dt;
         transform.translation += delta;
-        // 同步 PlayerPos: lightyear 复制的是 PlayerPos, 不是 Transform
+        // 同步 PlayerPos: 应用层 ServerPosUpdate 推的就是 PlayerPos
         player_pos.0 = transform.translation;
+        if local_dir.length() > 0.01 {
+            dir = local_dir;
+            applied_count += 1;
+        }
     }
-    if dir.length() > 0.01 {
-        info!("[player] input dir={:?} applied delta={:?}", dir, delta);
+    if applied_count > 0 {
+        info!(
+            "[player] apply_input_to_player: applied_count={}, dir={:?}, speed={}",
+            applied_count, dir, speed
+        );
     }
 }
 

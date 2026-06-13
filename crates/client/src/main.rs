@@ -86,6 +86,7 @@ use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, Health, VoxelDelta};
 use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
+use lightyear::prelude::Controlled;
 
 #[derive(Resource, Default, Debug, Clone)]
 struct ReplicatedSnapshot {
@@ -329,7 +330,6 @@ fn main() {
             setup_light,
             setup_atmosphere,
             setup_cursor_grab,
-            setup_terrain_underlay,    // ← 兜底盖板（修缝 B：marching_cubes 漏底面）
             setup_world,
             spawn_nest_markers,        // ← nest-marker 任务: 在 setup_world 之后跑，monsters.demo_init 才有 nests
             spawn_pretty,
@@ -377,7 +377,6 @@ fn main() {
             player_input,
             offline_player_attack_creatures,
             animate_avatar,
-            underlay_follow_player,    // ← 兜底盖板跟玩家（marching_cubes 漏底面 → 兜底 plane 跟到脚下 -5m）
             spawn_terrain_around_player,
             toggle_cursor_grab_on_esc,  // ← ESC 抓/放光标
         )
@@ -768,20 +767,30 @@ fn send_online_gameplay_commands(
 
 // Map local keyboard state into the replicated ActionState used by lightyear.
 fn collect_keys_to_action_state(
+    cfg: Res<RenderConfig>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut q: Query<&mut ActionState<PlayerAction>, With<Player>>,
+    mut q: Query<&mut ActionState<PlayerAction>, With<Controlled>>,
 ) {
     use leafwing_input_manager::prelude::ActionState as _;
 
     let mut action_state = match q.single_mut() {
         Ok(s) => s,
-        Err(_) => return, // 玩家 entity 不存在 (offline 模式 client 端 spawn 的本地玩家是另一个 entity, 没 ActionState)
+        Err(_) => {
+            // 玩家 entity 不存在 (offline 模式 client 端没 replicated player, 没 Controlled)
+            // 或还没连上 server
+            return;
+        }
     };
+
+    let w_pressed = keys.pressed(KeyCode::KeyW);
+    // auto-demo 模式强制按 W (推 input 上行, 让 server 端 sim player 移动, 验证
+    // closed-loop: input → server sim → server 推 pos → client visual)
+    let w_active = w_pressed || cfg.auto_walk;
 
     // Rebuild the action state each tick to avoid stale presses.
     *action_state = ActionState::<PlayerAction>::default();
 
-    if keys.pressed(KeyCode::KeyW) {
+    if w_active {
         action_state.press(&PlayerAction::MoveForward);
     }
     if keys.pressed(KeyCode::KeyS) {
