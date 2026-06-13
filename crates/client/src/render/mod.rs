@@ -460,10 +460,11 @@ pub fn setup_terrain_underlay(
 
 pub fn underlay_follow_player(
     mut q: Query<&mut Transform, With<TerrainUnderlay>>,
+    player: Res<PlayerState>,
 ) {
-    // plane 永远放地底 (y=-100)，完全不可见 — 让 heightmap 自己显示
+    // plane 跟玩家，但放玩家脚下 100m — 远超视野，绝不会看见
     let Ok(mut tf) = q.single_mut() else { return; };
-    tf.translation = Vec3::new(0.0, -100.0, 0.0);
+    tf.translation = Vec3::new(player.pos.x, -100.0, player.pos.z);
 }
 
 /// 武器 marker：被 held_weapon_follow 系统认领
@@ -777,7 +778,7 @@ pub fn update_animal_indicator(
     }
 
     let Some((c, d2)) = best else {
-        text.0 = "🔍 附近无动物（>30 格）".to_string();
+        text.0 = "[no animal within 30m]".to_string();
         return;
     };
     let dist = d2.sqrt();
@@ -786,7 +787,7 @@ pub fn update_animal_indicator(
         c.block_pos[2] as f32 + 0.5 - pz,
     );
     if animal_v.length() < 0.01 {
-        text.0 = format!("· {} 就在脚下", c.kind.label_zh());
+        text.0 = format!("* {} underfoot", c.kind.label_zh());
         return;
     }
 
@@ -979,7 +980,7 @@ pub fn update_nest_indicator(
     }
 
     let Some((center, count, d2)) = best else {
-        text.0 = "🔍 附近无巢穴（>30 格）".to_string();
+        text.0 = "[no nest within 30m]".to_string();
         return;
     };
     let dist = d2.sqrt();
@@ -988,7 +989,7 @@ pub fn update_nest_indicator(
         center[2] as f32 + 0.5 - pz,
     );
     if nest_v.length() < 0.01 {
-        text.0 = format!("· Nest 就在脚下 / {} 怪", count);
+        text.0 = format!("* Nest underfoot / {} mobs", count);
         return;
     }
 
@@ -1021,7 +1022,7 @@ pub fn update_nest_indicator(
         "·"
     };
 
-    text.0 = format!("{} Nest {:.0}m / {} 怪", arrow, dist, count);
+    text.0 = format!("{} Nest {:.0}m / {} mobs", arrow, dist, count);
 }
 
 /// 玩家最后移动的方向（用于第一人称相机看向方向）
