@@ -32,27 +32,52 @@ pub enum Biome {
 }
 
 impl Biome {
+    /// 平滑噪声场（用 hash01 模拟 value noise，2 octaves）— 大陆尺度
+    /// 返回 [0, 1) 连续值，永远不会周期重复
+    pub fn noise_field(x: i32, z: i32) -> f32 {
+        // 大尺度（每 64 一格）
+        let cell = 64_i32;
+        let cx = (x as f32 / cell as f32).floor() as i32;
+        let cz = (z as f32 / cell as f32).floor() as i32;
+        let fx = (x as f32 / cell as f32) - cx as f32;
+        let fz = (z as f32 / cell as f32) - cz as f32;
+        // 4 角 value
+        let v00 = crate::world::terrain::hash01(cx,     0,     cz,     0xB10E);
+        let v10 = crate::world::terrain::hash01(cx + 1, 0,     cz,     0xB10E);
+        let v01 = crate::world::terrain::hash01(cx,     0,     cz + 1, 0xB10E);
+        let v11 = crate::world::terrain::hash01(cx + 1, 0,     cz + 1, 0xB10E);
+        // smoothstep
+        let sx = fx * fx * (3.0 - 2.0 * fx);
+        let sz = fz * fz * (3.0 - 2.0 * fz);
+        let a = v00 * (1.0 - sx) + v10 * sx;
+        let b = v01 * (1.0 - sx) + v11 * sx;
+        let big = a * (1.0 - sz) + b * sz;
+        // 细节 (1/8 尺度)
+        let cell2 = 8_i32;
+        let cx2 = (x as f32 / cell2 as f32).floor() as i32;
+        let cz2 = (z as f32 / cell2 as f32).floor() as i32;
+        let detail = crate::world::terrain::hash01(cx2, 0, cz2, 0xD37A1);
+        big * 0.7 + detail * 0.3
+    }
+
+    /// 从连续 noise 场分 3 段（沙漠 / 丛林 / 苔原）— 真无限
+    pub fn from_xz_infinite(x: i32, z: i32) -> Self {
+        let n = Self::noise_field(x, z);
+        if n < 0.33 {
+            Biome::Desert
+        } else if n < 0.66 {
+            Biome::Jungle
+        } else {
+            Biome::Tundra
+        }
+    }
+
     /// 从 (x, z) 决定 biome（demo 用确定性分区，依赖 WORLD_SIZE）
     pub fn from_xz(_x: i32, z: i32) -> Self {
         let n = WORLD_SIZE as i32;
         if z < n / 3 {
             Biome::Tundra
         } else if z < (2 * n) / 3 {
-            Biome::Jungle
-        } else {
-            Biome::Desert
-        }
-    }
-
-    /// 无限版 biome — 用 z 模 96 切三段，让任何 (x, z) 都有 biome
-    pub fn from_xz_infinite(x: i32, z: i32) -> Self {
-        let period = 96_i32; // 每 96 格循环一次
-        let z_mod = z.rem_euclid(period);
-        let x_mod = x.rem_euclid(period);
-        let h = (z_mod * 7 + x_mod * 3) % period;
-        if h < period / 3 {
-            Biome::Tundra
-        } else if h < (2 * period) / 3 {
             Biome::Jungle
         } else {
             Biome::Desert

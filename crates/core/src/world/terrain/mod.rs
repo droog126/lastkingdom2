@@ -169,7 +169,8 @@ pub struct VillageMarkModule {
 
 impl Default for VillageMarkModule {
     fn default() -> Self {
-        // 默认 3 个村庄：出生圆顶山南/东南/西南各一面旗
+        // 无限村庄：每 80 块（沿 +X）放一个，z 偏移由噪声决定
+        // 周围 5 块（东西南北 + 中心）固定 + SpawnHill 周边的老 5 个 = 出生区也有村子
         Self {
             name: "village_mark".into(),
             sites: vec![(48, 70), (70, 48), (26, 48), (70, 70), (26, 70)],
@@ -182,13 +183,44 @@ impl Default for VillageMarkModule {
     }
 }
 
+impl VillageMarkModule {
+    /// 给定 (x, z) 算出该位置是不是某个"无限村庄"位置 + 村庄的中心坐标
+    /// 规则：每 80 块一组（沿着 x 方向），z 位置用 noise 决定
+    pub fn nearest_village(&self, x: i32, z: i32) -> Option<(i32, i32)> {
+        const SPACING: i32 = 80;
+        // 检查当前位置 (x, z) 是不是某个村庄中心
+        let cell_x = (x as f32 / SPACING as f32).floor() as i32;
+        // 候选 3 个 cell（当前 + 左右）以处理边界
+        for dx in -1..=1 {
+            let cx = cell_x + dx;
+            // 村庄中心 x = cx * SPACING + SPACING/2
+            let sx = cx * SPACING + SPACING / 2;
+            // z 偏移：每个 cx 对应一个固定 z（用 hash 决定）
+            let sz_offset = (hash01(cx, 0, 0, 0xBEEF) * 60.0 - 30.0) as i32; // -30..30
+            let sz = 48 + sz_offset;
+            // 中心点 (sx, sz)
+            if (x - sx).abs() < 2 && (z - sz).abs() < 2 {
+                return Some((sx, sz));
+            }
+        }
+        None
+    }
+}
+
 impl TerrainModule for VillageMarkModule {
     fn name(&self) -> &str { &self.name }
     fn weight(&self) -> f32 { self.weight }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
         if !self.enabled { return None; }
-        for (sx, sz) in &self.sites {
+        // 候选村庄列表 = 5 固定出生区村庄 + 无限村庄
+        let mut all_sites: Vec<(i32, i32)> = self.sites.clone();
+        if let Some((sx, sz)) = self.nearest_village(ctx.x, ctx.z) {
+            if !all_sites.contains(&(sx, sz)) {
+                all_sites.push((sx, sz));
+            }
+        }
+        for (sx, sz) in &all_sites {
             let dx = (ctx.x - sx).abs();
             let dz = (ctx.z - sz).abs();
             // 旗杆: 1x1 立柱
@@ -448,9 +480,9 @@ impl Default for TreeModule {
             name: "tree".into(),
             seed: 0xBEEF,
             density: 0.15, // 15% 方格有树（10% 还是稀，远处看就是零星几棵）
-            min_height: 3,
-            max_height: 5,
-            canopy_radius: 2,
+            min_height: 5,
+            max_height: 8,
+            canopy_radius: 3,
             biome: None,
             weight: 0.8,
         }

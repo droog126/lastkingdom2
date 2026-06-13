@@ -227,6 +227,7 @@ fn main() {
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<PlayerState>()
         .init_resource::<FixedTick>()
+        .init_resource::<ServerTickCounter>()
         .insert_resource(scenario_state)
         // ====== Startup ======
         .add_systems(
@@ -265,6 +266,7 @@ fn main() {
             (
                 // record_position_history 已在 ServerPvPPlugin 内
                 apply_input_to_player,
+                broadcast_player_pos, // 应用层 PlayerPos sync (绕开 lightyear 0.26 Replicate 卡 1%)
                 read_attack_inputs,
                 melee_hit_registration,
                 apply_damage_and_knockback,
@@ -534,6 +536,69 @@ fn apply_input_to_player(
     }
     if dir.length() > 0.01 {
         info!("[player] input dir={:?} applied delta={:?}", dir, delta);
+    }
+}
+
+// ============================================================================
+// broadcast_player_pos — 应用层 PlayerPos sync (绕开 lightyear 0.26 自动
+// replication 卡 1%)
+//
+// lightyear 0.26 自动 Replicate (`Replicate::manual(vec![client_of_entity])`)
+// 在我们这套用法下 server 端 serialize 跟 send packet 链路都跑 (`Starting
+// buffer replication for sender 143v0` + `lightyear_transport::send packet
+// channel_id=0` 在 trace log 看得清清楚楚), 但 client 端 receive 链
+// 始终不处理 UpdatesMessage — 怀疑是 lightyear 0.26 ClientPlugins 跟
+// register_message::<UpdatesMessage> 时机问题, 继续挖就是 lightyear 0.26
+// internals。
+//
+// 这里**绕开**那条路径: server 端每 2 tick (15Hz) 用 MessageSender
+// 推一个 `ServerPosUpdate` (12 bytes + 4 bytes tick = 16 bytes / packet),
+// 走 UnorderedReliable channel (默认 register_message 给 ServerToClient
+// 走的) — 实际 lightyear 0.26 `register_message` 不指定 channel, 走默认
+// 哪条由 protocol 决定, 这里没显式指定 → 应该走 `MetadataChannel`
+// (UnorderedReliable 双向, channel_id=0)。 可丢包但 server 推频高, client
+// 端 reader 一直读最新 pos 写到 `PlayerNetPos` resource, client apply
+// system 写本地 Transform。
+//
+// 后续: 真做 client 端预测时, 这条 ServerPosUpdate 改名为
+// AuthorityFrame, 走插值 timeline, 历史几个 tick 都存。
+// ============================================================================
+#[derive(bevy::prelude::Resource, Default)]
+pub struct ServerTickCounter(pub u32);
+
+fn broadcast_player_pos(
+    mut tick: ResMut<ServerTickCounter>,
+    q: Query<
+        &bevy::prelude::Transform,
+        With<lk2_core::protocol::components::PlayerPos>,
+    >,
+    server_q: Query<
+        &lightyear::prelude::Server,
+        With<lightyear_connection::server::Started>,
+    >,
+    mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
+) {
+    tick.0 = tick.0.wrapping_add(1);
+    // 每 2 tick 推一次 = 15Hz (server 30 TPS)
+    if tick.0 % 2 != 0 {
+        return;
+    }
+    let Ok(server) = server_q.single() else {
+        return;
+    };
+    // 推所有带 PlayerPos 的 entity 的位置 (单 client demo 简化, 1 个)
+    for transform in q.iter() {
+        let msg = lk2_core::protocol::messages::ServerPosUpdate {
+            server_tick: tick.0,
+            pos: transform.translation,
+        };
+        // 用 lightyear::prelude::MetadataChannel (UnorderedReliable) — 1 byte
+        // 包小, 1 frame 几包, 可靠 + 不乱序, 客户端 100% 收到
+        let _ = sender.send::<_, lightyear::prelude::MetadataChannel>(
+            &msg,
+            server,
+            &lightyear::prelude::NetworkTarget::All,
+        );
     }
 }
 

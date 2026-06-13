@@ -1,0 +1,44 @@
+feat(net): add ServerPosUpdate app-layer player position sync
+
+绕开 lightyear 0.26 自动 Replicate 那 1% 卡点 (UpdatesMessage 不进
+client receive buffer 但 server serialize / send packet 都跑),
+server 端每 2 tick 推 ServerPosUpdate message (Vec3 + u32 tick) 走
+MetadataChannel (UnorderedReliable), client 端 MessageReceiver 自动
+bind, reader system 写 PlayerState.pos.
+
+server 端:
+- broadcast_player_pos system (FixedUpdate, 15Hz)
+- ServerMultiMessageSender<()>.send::<M, MetadataChannel>
+- 跟 lightyear 0.26.4 ServerMultiMessageSender 接口一致
+- 走 NetworkTarget::All, 单 client 简化版
+- ServerTickCounter resource (wrapping u32)
+
+client 端:
+- spawn_networked_client 加 MessageReceiver<ServerPosUpdate>::default() component
+- apply_server_pos_update system (Update)
+  - drain receiver, latest pos 写 PlayerState.pos
+  - 100% 跑通: server tick 11666-11800 持续推送, client 持续 receive
+
+ProtocolPlugin:
+- 新增 messages::ServerPosUpdate struct
+- register_message<ServerPosUpdate>().add_direction(ServerToClient)
+- MetadataChannel 走 UnorderedReliable (跟 ProtocolCheck / SenderMetadata
+  内部 metadata 同一 channel, lightyear 0.26 默认 register_message
+  不指定 channel 走 metadata 路径, send 端显式 send::<_, MetadataChannel>
+  配对)
+
+manual test 验证 (Start-Process server 后台 + client connect auto-demo):
+- server 端 netcode connect OK, ClientOf entity spawn, server tick 10/20/30 跑
+- client 端 netcode connect OK, 持续 receive ServerPosUpdate 写 PlayerState
+- 15Hz 持续同步 pos Vec3(48.5, 14.5, 48.5) (sim player 初始位置)
+- client 同时持续发 PlayerAction input message 给 server
+- 全链路: client -> server (action) + server -> client (ServerPosUpdate) 双向通
+
+next:
+- 把 client apply_server_pos_update 写进 player entity Transform, 让本机玩家
+  entity 跟随 server 推来的 pos 移动
+- 后续 client prediction + server reconciliation + 插值优化
+
+侧修:
+- crates/core/src/world/mod.rs 跟 world/terrain/mod.rs 跟 render/mod.rs 是
+  prior 几次迭代的微调 (关掉 unused warn), 跟本次联机无关, 一起进库

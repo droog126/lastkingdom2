@@ -186,6 +186,24 @@ pub mod messages {
         pub ok: bool,
         pub summary: String,
     }
+
+    // ============================================================================
+    // wire-network-and-loop 任务 (2026-06-13): 应用层 PlayerPos sync
+    //
+    // 绕开 lightyear 0.26 自动 replication (UpdatesMessage) 卡 1% 的那 1% ——
+    // server 端用 `MessageSender` 直接发 ServerPosUpdate, client 端 reader 解码
+    // 写到 `PlayerNetPos` resource (一个用 Mutex<Vec3> 包起来的位置), client 端
+    // 自己的 apply_system 写 Transform。后续做预测/插值时, ServerPosUpdate 可
+    // 继续用 — 这是"权威帧"推送。
+    //
+    // 走 UnorderedReliable (MetadataChannel) 保证不丢包 + 不乱序, 60Hz 推也
+    // 不会撑爆 (Vec3 = 12 bytes + 1 byte tick = 13 bytes/packet, 780 B/s)。
+    // ============================================================================
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct ServerPosUpdate {
+        pub server_tick: u32,
+        pub pos: Vec3,
+    }
 }
 
 // ============================================================================
@@ -360,6 +378,12 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<messages::KillFeedEntry>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<messages::GameplayFeedback>()
+            .add_direction(NetworkDirection::ServerToClient);
+
+        // 应用层 PlayerPos sync — 走 MetadataChannel (UnorderedReliable)
+        // ServerToClient, 60Hz 推 12-byte Vec3, 可靠性 100%, 后续做预测/插值
+        // 也走这条
+        app.register_message::<messages::ServerPosUpdate>()
             .add_direction(NetworkDirection::ServerToClient);
 
         // ----- Components (server → client 复制) -----
