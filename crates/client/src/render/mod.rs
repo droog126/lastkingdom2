@@ -476,11 +476,58 @@ pub fn underlay_follow_player(
 #[derive(Component)]
 pub struct HeldWeaponPart;
 
+/// 挥剑动画状态：K 按下时 trigger=true，180ms 内绕 X 轴从 0 转到 90° 再回 0
+#[derive(Resource, Default)]
+pub struct SwordSwing {
+    pub start_t: f32,
+    pub swinging: bool,
+}
+
+const SWING_DURATION: f32 = 0.18; // 一次挥砍 180ms（足够快，~5 frames @ 30fps）
+
 /// 把剑贴在相机右前方，跟随相机 transform
-/// 现在剑是相机的子节点，bevy 自动处理 transform 跟随；这个系统留作占位 / 以后做挥剑动画
-pub fn held_weapon_follow() {
-    // 剑现在是 Camera3d 的子节点，bevy 自动按相机本地坐标渲染
-    // 后续如果要加挥剑动画：query 剑的 Transform + 计时器 + 修改 local Y rotation
+/// 现在剑是相机的子节点，bevy 自动处理 transform 跟随。
+/// K 键触发挥剑：剑绕 X 轴 0 → 90° → 0（180ms）
+pub fn held_weapon_follow(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut swing: ResMut<SwordSwing>,
+    mut q: Query<&mut Transform, With<HeldWeaponPart>>,
+) {
+    // 1) K 按下 → 启动挥砍（如果没在挥）
+    if keys.just_pressed(KeyCode::KeyK) && !swing.swinging {
+        swing.swinging = true;
+        swing.start_t = time.elapsed_secs();
+    }
+    // 2) 没在挥 → 保持原位（tilt 15°）
+    if !swing.swinging {
+        return;
+    }
+    // 3) 在挥：算 progress 0..1，超时结束
+    let elapsed = time.elapsed_secs() - swing.start_t;
+    if elapsed >= SWING_DURATION {
+        swing.swinging = false;
+        // 复位
+        for mut tf in &mut q {
+            tf.rotation = Quat::from_rotation_z(15_f32.to_radians());
+        }
+        return;
+    }
+    let t = elapsed / SWING_DURATION; // 0..1
+    // 半正弦曲线：0 → 1 → 0
+    let swing_phase = (t * std::f32::consts::PI).sin(); // 0..1..0
+    // 把 swing_phase 映射到 0..90° 加在基础 15° tilt 上
+    let total_pitch = 15_f32.to_radians() + swing_phase * 90_f32.to_radians();
+    for mut tf in &mut q {
+        // 用 euler (X, Y, Z) 重置回原姿态 + 叠加 pitch
+        // 基础：绕 Z 倾斜 15°（Z 旋转不动），叠加 X pitch
+        tf.rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            total_pitch,            // X 轴 pitch（向前挥）
+            0.0,                    // Y 轴 yaw（不动）
+            15_f32.to_radians(),    // Z 轴 tilt 15°（基础斜角保持）
+        );
+    }
 }
 
 /// 鼠标视角系统：读 AccumulatedMouseMotion 资源（bevy 0.18 每帧自动累加并清零）→ 累积到 CameraAngles
@@ -679,6 +726,35 @@ pub fn setup_cursor_grab(
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
     }
+}
+
+/// ESC 切换：抓住光标 ↔ 释放。玩家在释放后可以用鼠标点 UI；按 ESC 再抓回。
+/// 同时暂停 mouse_look（避免窗口外移动导致 yaw/pitch 暴冲）。
+pub fn toggle_cursor_grab_on_esc(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    cfg: Res<RenderConfig>,
+    mut angles: ResMut<CameraAngles>,
+    mut mouse_look: ResMut<RenderConfig>,
+) {
+    if !cfg.mouse_look { return; }
+    if !keys.just_pressed(KeyCode::Escape) { return; }
+    let Ok(mut cursor) = cursors.single_mut() else { return; };
+    // 当前是 Locked → 释放；当前是 None → 抓回
+    let is_locked = matches!(cursor.grab_mode, CursorGrabMode::Locked);
+    if is_locked {
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
+        info!("🖱 ESC：释放光标（按 ESC 再抓回）");
+    } else {
+        cursor.grab_mode = CursorGrabMode::Locked;
+        cursor.visible = false;
+        // 重抓时把鼠标累加清零（防下一帧 yaw/pitch 暴冲）
+        // AccumulatedMouseMotion 不可 ResMut（bevy 0.18），下一帧自然衰减
+        info!("🖱 ESC：抓回光标");
+    }
+    let _ = angles; // 预留
+    let _ = mouse_look; // 静默 unused
 }
 
 /// 动物方向指示器 marker（被 `update_animal_indicator` 系统刷新）

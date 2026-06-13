@@ -70,10 +70,11 @@ use crate::pvp_systems::{
 };
 use crate::render::{
     AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, Player,
-    RenderConfig, SpawnedBlocks, auto_demo, camera_mode_toggle, cycle_terrain_preset,
-    emergency_teleport, first_person_camera, freefly_movement, freefly_toggle, held_weapon_follow,
-    mouse_look_system, player_input, player_spawn_position_at, setup_atmosphere,
-    setup_cursor_grab, setup_terrain_underlay, spawn_terrain_around_player, underlay_follow_player,
+    RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle,
+    cycle_terrain_preset, emergency_teleport, first_person_camera, freefly_movement,
+    freefly_toggle, held_weapon_follow, mouse_look_system, player_input,
+    player_spawn_position_at, setup_atmosphere, setup_cursor_grab, setup_terrain_underlay,
+    spawn_terrain_around_player, toggle_cursor_grab_on_esc, underlay_follow_player,
     update_animal_indicator,
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud};
@@ -280,6 +281,7 @@ fn main() {
     // ===== 4. 资源初始化 =====
     app.init_resource::<RenderConfig>()
         .init_resource::<CameraAngles>()
+        .init_resource::<SwordSwing>()
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
                 cfg.auto_walk = true;
@@ -374,6 +376,7 @@ fn main() {
             animate_avatar,
             underlay_follow_player,    // ← 兜底盖板跟玩家（marching_cubes 漏底面 → 兜底 plane 跟到脚下 -5m）
             spawn_terrain_around_player,
+            toggle_cursor_grab_on_esc,  // ← ESC 抓/放光标
         )
             .chain(),
     );
