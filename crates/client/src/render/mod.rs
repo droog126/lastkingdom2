@@ -81,7 +81,7 @@ pub struct CameraAngles {
 impl Default for CameraAngles {
     fn default() -> Self {
         // 出生时明显俯视（约 -35°），让玩家第一眼看到脚下 + 远处地形
-        Self { yaw: 0.0, pitch: -0.6 }
+        Self { yaw: 0.0, pitch: -1.2 }
     }
 }
 
@@ -426,6 +426,50 @@ pub fn setup_atmosphere(
     commands.entity(cam_entity).add_child(handle);
     commands.entity(cam_entity).add_child(blade);
     info!("⚔ 剑已 spawn（缩小到右下角，斜 15°）");
+}
+
+/// 兜底盖板：玩家脚下 5m 一个 100×100 plane，从不漏（marching_cubes 缝 B 修复）
+/// 玩家每帧移动，盖板跟到 (player.x, player.y - 5, player.z)
+#[derive(Component)]
+pub struct TerrainUnderlay;
+
+pub fn setup_terrain_underlay(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // 100×100 plane，水平 y=0
+    let plane_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
+    // 深棕灰，emissive 微亮防纯黑；从下方看时也可见（双面）
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.32, 0.30, 0.26),
+        emissive: Color::srgb(0.08, 0.07, 0.05).into(),
+        perceptual_roughness: 0.95,
+        metallic: 0.0,
+        cull_mode: None, // 双面都画 — 玩家从下面/上面看都盖住
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(plane_mesh),
+        MeshMaterial3d(mat),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        TerrainUnderlay,
+    ));
+    info!("🟫 兜底盖板 100x100 plane 已 spawn（player 脚下 -5m 跟随）");
+}
+
+pub fn underlay_follow_player(
+    mut q: Query<&mut Transform, With<TerrainUnderlay>>,
+    player: Res<PlayerState>,
+) {
+    let Ok(mut tf) = q.single_mut() else { return; };
+    // 玩家脚下 5m，永远在玩家下面；planar 跟随 XZ
+    let px = player.pos.x;
+    let pz = player.pos.z;
+    let py = player.pos.y - 5.0;
+    // 兜底：Y 不低于地形最低可能高度（防穿透到地底太多）
+    let y_clamped = py.max(-32.0);
+    tf.translation = Vec3::new(px, y_clamped, pz);
 }
 
 /// 武器 marker：被 held_weapon_follow 系统认领

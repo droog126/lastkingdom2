@@ -72,8 +72,9 @@ use crate::render::{
     AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, Player,
     RenderConfig, SpawnedBlocks, auto_demo, camera_mode_toggle, cycle_terrain_preset,
     emergency_teleport, first_person_camera, freefly_movement, freefly_toggle, held_weapon_follow,
-    mouse_look_system, player_input, player_spawn_position_at, setup_atmosphere, setup_cursor_grab,
-    spawn_terrain_around_player, update_animal_indicator,
+    mouse_look_system, player_input, player_spawn_position_at, setup_atmosphere,
+    setup_cursor_grab, setup_terrain_underlay, spawn_terrain_around_player, underlay_follow_player,
+    update_animal_indicator,
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud};
 
@@ -324,6 +325,7 @@ fn main() {
             setup_light,
             setup_atmosphere,
             setup_cursor_grab,
+            setup_terrain_underlay,    // ← 兜底盖板（修缝 B：marching_cubes 漏底面）
             setup_world,
             spawn_pretty,
             spawn_creatures,
@@ -351,6 +353,9 @@ fn main() {
             // network mode (1): apply server-replicated PlayerPos to PlayerState
             // (offline 模式下 PlayerPos 没注册组件, 这个系统是 no-op)
             apply_networked_position,
+            // 应用层 PlayerPos sync 接收 (走 ServerPosUpdate message, 绕开 lightyear
+            // 0.26 自动 UpdatesMessage 那 1%)
+            apply_server_pos_update,
             debug_dump_replicated_entities,
             apply_authoritative_snapshot,
             apply_voxel_delta,
@@ -367,6 +372,7 @@ fn main() {
             player_input,
             offline_player_attack_creatures,
             animate_avatar,
+            underlay_follow_player,    // ← 兜底盖板跟玩家（marching_cubes 漏底面 → 兜底 plane 跟到脚下 -5m）
             spawn_terrain_around_player,
         )
             .chain(),
@@ -438,6 +444,8 @@ fn spawn_networked_client(
     use lightyear::prelude::UdpIo;
     use lightyear::prelude::client::Connect;
     use lightyear::prelude::{LinkStart, LocalAddr, PeerAddr};
+    use lightyear::prelude::MessageReceiver;
+    use lk2_core::protocol::messages::ServerPosUpdate;
     use lightyear_netcode::client_plugin::{NetcodeClient, NetcodeConfig};
     use lightyear_netcode::prelude::Authentication;
 
@@ -473,6 +481,10 @@ fn spawn_networked_client(
             LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
             PeerAddr(server_addr),
             netcode_client,
+            // 应用层 PlayerPos sync — client 端 receiver buffer (绕开 lightyear 0.26
+            // 自动 UpdatesMessage 那条 1% 卡死的路径, server 用 ServerMultiMessageSender
+            // 推 ServerPosUpdate, 走 MetadataChannel, 100% 可靠 + 不乱序)
+            MessageReceiver::<ServerPosUpdate>::default(),
         ))
         .id();
     // 手动 trigger LinkStart, 跟 server 端同理 (lightyear 0.26 文档明示
@@ -560,6 +572,55 @@ fn debug_dump_replicated_entities(
         "[net-debug] total_entities={}, replicate={}, replicated={}, clientof={}, linked={}, playerpos={}, sample=[{}]",
         total, rep, red, co, ln, pp, sample.join(", ")
     );
+}
+
+// ============================================================================
+// apply_server_pos_update — 应用层 PlayerPos sync 接收 (绕开 lightyear 0.26
+// 自动 UpdatesMessage 那 1%)
+//
+// server 端用 ServerMultiMessageSender 每 2 tick 推一个 ServerPosUpdate
+// (走 MetadataChannel, UnorderedReliable), client 端的 MessageReceiver buffer
+// 自动接收 (on_add hook 注册到 MessageManager.receive_messages, 跟新 protocol
+// `ServerPosUpdate` type bind 起来)。这里 drain 出来写 PlayerState.pos, 本机
+// render 系统的所有 reader 都会用新 pos。
+//
+// 注意: server 端推的是 server 端 sim player entity 的位置, client 端没有
+// "replicated server player entity" (因为 lightyear 0.26 UpdatesMessage 不来),
+// 所以这里**直接拿最新 ServerPosUpdate.pos 写 PlayerState.pos**, 反正
+// 单 client demo 我们就是要把 server 推过来的权威位置渲染到本机玩家身上。
+//
+// offline 模式不跑 (run_mode != Online, 走 early return)。
+// ============================================================================
+fn apply_server_pos_update(
+    run_mode: Res<ClientRunMode>,
+    mut receiver_q: Query<
+        &mut lightyear::prelude::MessageReceiver<
+            lk2_core::protocol::messages::ServerPosUpdate,
+        >,
+    >,
+    mut player: ResMut<PlayerState>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    let mut any = false;
+    let mut last_pos = bevy::math::Vec3::ZERO;
+    let mut last_tick: u32 = 0;
+    for mut receiver in receiver_q.iter_mut() {
+        for msg in receiver.receive() {
+            last_pos = msg.pos;
+            last_tick = msg.server_tick;
+            any = true;
+        }
+    }
+    if any {
+        player.pos = last_pos;
+        tracing::info!(
+            "[net] applied ServerPosUpdate tick={} pos={:?} → PlayerState.pos",
+            last_tick,
+            last_pos
+        );
+    }
 }
 
 fn apply_authoritative_snapshot(
@@ -870,8 +931,8 @@ fn setup_world(
     let (sx, sz) =
         walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
     let (spawn_pos, spawn) = player_spawn_position_at(&game_world, sx, sz).unwrap_or((
-        Vec3::new(sx as f32 + 0.5, 30.0, sz as f32 + 0.5),
-        [sx, 30, sz],
+        Vec3::new(sx as f32 + 0.5, 50.0, sz as f32 + 0.5),
+        [sx, 50, sz],
     ));
     player.block_pos = spawn;
     player.pos = spawn_pos;
