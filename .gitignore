@@ -11,6 +11,7 @@
 
 # Build / check / run logs — 全部丢 log/ 下，别再污染根目录
 *.log
+*.err
 /log/
 loop_run.out.txt
 build_all.txt
