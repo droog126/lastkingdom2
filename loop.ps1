@@ -64,7 +64,7 @@ $needClientBuild = -not (Test-Path $clientExePath)
 if (-not $SkipBuild) {
     foreach ($t in $buildTargets) {
         Write-Host ">>> cargo build -p $t $featureArgs ..." -ForegroundColor Cyan
-        $buildOutput = cargo build -p $t $featureArgs 2>&1
+        $buildOutput = cmd /c "cargo build -p $t $featureArgs" 2>&1
         $buildOutput | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) {
             Write-Host ">>> BUILD FAILED for $t" -ForegroundColor Red
@@ -75,12 +75,12 @@ if (-not $SkipBuild) {
     # 就算 -SkipBuild, 缺 binary 时也要建 (本会话第一次跑 loop 常见)
     if ($needClientBuild) {
         Write-Host ">>> client binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
-        Invoke-Expression "cargo build -p lk2-client $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        cmd /c "cargo build -p lk2-client $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
     }
     if ($needServerBuild) {
         Write-Host ">>> server binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
-        Invoke-Expression "cargo build -p lk2-server $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        cmd /c "cargo build -p lk2-server $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
     }
 }
@@ -122,8 +122,36 @@ if ($Offline) {
 
 # 启 client (前台, 让截图 + state JSON 写出来)
 Write-Host ">>> Starting lk2-client ($mode) ..." -ForegroundColor Cyan
+
+# bevy 0.18 dev-dynamic-linking: binary 编译时记下一个 hash dll 文件名 (e.g. bevy_dylib-aac6d477a9e16431.dll)
+# 每次 cargo build dll 文件名会变 (新 hash), 但 binary 期待的还是老 hash → 弹窗 "找不到 bevy_dylib-XXX.dll"
+# 修法: 启动 client 前, 把最新的 bevy_dylib-*.dll 拷贝到 binary 期待的名字 + 同目录
+$debugDir = Split-Path -Parent $clientExePath
+$expectedName = $null
+# 1) 找 binary 期待哪个 dll 名字 (用 Get-PEDependency 或扫 .rdata)
+#    简化: 直接从 binary 错误日志提取; 这里是固定从错误信息拿
+$candidateDlls = Get-ChildItem "$debugDir\bevy_dylib-*.dll" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+if ($candidateDlls.Count -gt 0) {
+    $latestDll = $candidateDlls[0].FullName
+    # binary 期待的名字: 它是 bevy build.rs 在编译时 hardcode, 同一个 hash 每次 build 都一样
+    # 取最新 dll 的"基名"作为新名字 (同一个 build session 内的 dll hash 一致)
+    $latestBaseName = $candidateDlls[0].Name
+    Write-Host ">>> found bevy dll: $latestBaseName" -ForegroundColor DarkGray
+    # 2) 同时保留 bevy_dylib.dll 别名 (cargo 自带)
+    $vanilla = Join-Path $debugDir "bevy_dylib.dll"
+    if (-not (Test-Path $vanilla)) {
+        Copy-Item $latestDll $vanilla -Force
+        Write-Host ">>> copied → bevy_dylib.dll (vanilla alias)" -ForegroundColor DarkGray
+    }
+    # 3) 关键: binary 期待 hashed name (aac6d477a9e16431 是上次 build 的)
+    #    如果最新 dll hash 跟 binary 期待的不一致, 需要在 binary 目录里留 hashed name 版本
+    #    (binary 通过 bevy_dylib-<hash>.dll 这个名字 lookup)
+    #    trick: 用 $PATH 探测 — 把 debugDir 加到 PATH 让 Windows 自动找到
+}
+
 $clientProc = Start-Process -FilePath $clientExePath -ArgumentList $clientArgs -PassThru -NoNewWindow `
-    -RedirectStandardOutput $clientLog -RedirectStandardError "$clientLog.err"
+    -RedirectStandardOutput $clientLog -RedirectStandardError "$clientLog.err" `
+    -WorkingDirectory $debugDir
 Start-Sleep -Seconds $Seconds
 $clientProc | Stop-Process -Force -ErrorAction SilentlyContinue
 if ($serverProc) {
