@@ -216,8 +216,8 @@ pub fn spawn_terrain_around_player(
             // 受光模式（unlit=false）：让 directional light 在山脊/山谷产生明暗变化，
             // 解决 iter_1020 那种"大块纯色 PowerPoint 板"问题。
             let mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.42, 0.55, 0.30),  // 深草绿
-                emissive: Color::srgb(0.04, 0.05, 0.03).into(),
+                base_color: Color::srgb(0.55, 0.68, 0.22),  // 黄绿, 配暖 ambient 不会染粉
+                emissive: Color::srgb(0.06, 0.08, 0.03).into(),
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
                 ..default()

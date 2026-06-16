@@ -896,14 +896,14 @@ fn setup_light(mut commands: Commands) {
         DirectionalLight {
             illuminance: 6000.0,
             shadows_enabled: false,
-            color: Color::srgb(0.65, 0.75, 1.0),
+            color: Color::srgb(0.85, 0.88, 0.95),  // 中性蓝白, 不偏冷
             ..default()
         },
         Transform::from_xyz(-40.0, 50.0, -25.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     // 环境光适度降低，让阴影区域更明显
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.85, 0.88, 0.95),
+        color: Color::srgb(0.92, 0.90, 0.85),  // 暖白, 不偏冷紫
         brightness: 0.6,
         affects_lightmapped_meshes: true,
     });
