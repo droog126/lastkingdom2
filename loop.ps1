@@ -151,7 +151,7 @@ if ($candidateDlls.Count -gt 0) {
 
 $clientProc = Start-Process -FilePath $clientExePath -ArgumentList $clientArgs -PassThru -NoNewWindow `
     -RedirectStandardOutput $clientLog -RedirectStandardError "$clientLog.err" `
-    -WorkingDirectory $debugDir
+    -WorkingDirectory $ProjectRoot
 Start-Sleep -Seconds $Seconds
 $clientProc | Stop-Process -Force -ErrorAction SilentlyContinue
 if ($serverProc) {

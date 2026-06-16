@@ -50,16 +50,16 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
-            radius: 20, // 之前 16，玩家只能看到 ±16 方块。升到 20 让世界看起来更辽阔
+            radius: 36, // 16→20→36: 视野越拉越远才能看见"世界"而不是脚下 20 方块
             max_blocks: 3000,
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
-            fog_color: Color::srgb(0.75, 0.82, 0.95),
-            fog_start: 18.0,
-            fog_end: 48.0,
+            fog_color: Color::srgb(0.85, 0.90, 0.95), // 更亮，让远处物体保留颜色不糊成紫
+            fog_start: 38.0, // 32 太近 → 整片雾；38 略推后
+            fog_end: 120.0,  // 105 仍吃掉远景；120 拉远看到更多地形
             auto_orbit: false,      // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
-            auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌,0.30 12s 内能转接近半圈
-            auto_orbit_distance: 6.5, // 15 太远,玩家在画面里就是个黑点;6.5 能看清 avatar + 周边
+            auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
+            auto_orbit_distance: 14.0, // 8 太近被山挡，14 视野开阔
             auto_walk: false,       // 默认玩家控制；--auto-demo 开启
             auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
             auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
@@ -86,18 +86,24 @@ impl Default for CameraAngles {
 }
 
 /// 相机视角模式：C 键切换
-#[derive(Resource, Default, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(Resource, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum CameraMode {
     /// 第一人称：相机在玩家眼睛位置
-    #[default]
     FirstPerson,
     /// 第三人称：相机在玩家身后 3m，俯视玩家
     ThirdPerson,
 }
 
+impl Default for CameraMode {
+    fn default() -> Self {
+        Self::ThirdPerson
+    }
+}
+
 /// 第三人称：相机到玩家的水平距离（m）+ 垂直抬高
-const TP_DISTANCE: f32 = 4.0;
-const TP_HEIGHT: f32 = 2.0;
+const TP_DISTANCE: f32 = 6.0;
+const TP_HEIGHT: f32 = 4.0;
+const MANUAL_MOVE_SPEED: f32 = 4.5;
 
 /// 自由视角模式（F3 切换）：灵魂出窍，无视玩家位置和物理，自由飞
 #[derive(Resource)]
@@ -192,10 +198,11 @@ pub fn spawn_terrain_around_player(
     }
 
     // AABB 范围（统一：玩家周围 ±R，Y clamp 到 world 范围）
+    // Y 范围给到 ±40，确保山顶 / 山谷 / cave 都能进 scalar field，Marching Cubes 出来才有地形起伏
     let r = cfg.radius as i32;
     let py = player.block_pos[1];
-    let y_min = (py - 20).max(0);
-    let y_max = (py + 20).min(game_world.size as i32 - 1);
+    let y_min = (py - 40).max(0);
+    let y_max = (py + 40).min(game_world.size as i32 - 1);
     let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
     let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
 
@@ -206,11 +213,12 @@ pub fn spawn_terrain_around_player(
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
             // 单一 material：vertex color 模式 + 平滑 terrain。
-            // Bevy/wgpu 路径偶发只显示 base_color；用草土色兜底，避免出生地变白色测试板。
+            // 受光模式（unlit=false）：让 directional light 在山脊/山谷产生明暗变化，
+            // 解决 iter_1020 那种"大块纯色 PowerPoint 板"问题。
             let mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.62, 0.72, 0.48),
-                emissive: Color::srgb(0.035, 0.045, 0.025).into(),
-                perceptual_roughness: 0.85,
+                base_color: Color::srgb(0.55, 0.68, 0.42),
+                emissive: Color::srgb(0.04, 0.05, 0.03).into(),
+                perceptual_roughness: 0.92,
                 metallic: 0.0,
                 ..default()
             });
@@ -246,7 +254,7 @@ pub fn spawn_terrain_around_player(
 
             spawned.last_player_block = player.block_pos;
             let mesh_secs = time.elapsed_secs() - started;
-            debug!(
+            info!(
                 "🌊 smooth mesh: {} tris, passes={}, 耗时 {:.0}ms（玩家 {:?}）",
                 total_tris,
                 cfg.smooth_passes,
@@ -378,10 +386,27 @@ pub fn setup_atmosphere(
     camera: Query<Entity, With<Camera3d>>,
 ) {
     // 雾
-    // bevy 0.18: Fog 组件挂在 camera 上
-    // 0.18 的 fog: use bevy::pbr::FogSettings 或者 scene::Fog
-    // 这里用简化版 ClearColor
+    // bevy 0.18: DistanceFog 组件挂在 camera 上
+    use bevy::pbr::DistanceFog;
     commands.insert_resource(ClearColor(cfg.sky_color));
+
+    // 雾挂到主相机 (auto_orbit 也需要 fog)
+    if let Ok(cam_entity) = camera.single() {
+        // visibility 120 = fog 在 120m 外才开始起作用 (10m 玩家周围完全清晰, 20m 山开始淡, 200m 看不见)
+        // 之前 from_visibility(50) 太近, 玩家周围 50m 内的 mesh 都在衰减, 整个画面被 mix
+        commands.entity(cam_entity).insert(DistanceFog {
+            color: cfg.fog_color,
+            directional_light_color: cfg.fog_color,
+            directional_light_exponent: 2.0,
+            falloff: bevy::pbr::FogFalloff::from_visibility(120.0),
+        });
+    }
+
+    if cfg.auto_orbit {
+        return;
+    }
+
+    return;
 
     // ── 武器：剑（handle 棕 + blade 银）— 小尺寸贴屏幕右下角，斜 15° ──
     let handle_mesh = meshes.add(Cuboid::new(0.18, 0.55, 0.18));
@@ -463,7 +488,9 @@ pub fn underlay_follow_player(
     player: Res<PlayerState>,
 ) {
     // plane 跟玩家，但放玩家脚下 100m — 远超视野，绝不会看见
-    let Ok(mut tf) = q.single_mut() else { return; };
+    let Ok(mut tf) = q.single_mut() else {
+        return;
+    };
     tf.translation = Vec3::new(player.pos.x, -100.0, player.pos.z);
 }
 
@@ -518,9 +545,9 @@ pub fn held_weapon_follow(
         // 基础：绕 Z 倾斜 15°（Z 旋转不动），叠加 X pitch
         tf.rotation = Quat::from_euler(
             EulerRot::XYZ,
-            total_pitch,            // X 轴 pitch（向前挥）
-            0.0,                    // Y 轴 yaw（不动）
-            15_f32.to_radians(),    // Z 轴 tilt 15°（基础斜角保持）
+            total_pitch,         // X 轴 pitch（向前挥）
+            0.0,                 // Y 轴 yaw（不动）
+            15_f32.to_radians(), // Z 轴 tilt 15°（基础斜角保持）
         );
     }
 }
@@ -730,9 +757,15 @@ pub fn toggle_cursor_grab_on_esc(
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     cfg: Res<RenderConfig>,
 ) {
-    if !cfg.mouse_look { return; }
-    if !keys.just_pressed(KeyCode::Escape) { return; }
-    let Ok(mut cursor) = cursors.single_mut() else { return; };
+    if !cfg.mouse_look {
+        return;
+    }
+    if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    let Ok(mut cursor) = cursors.single_mut() else {
+        return;
+    };
     // 当前是 Locked → 释放；当前是 None → 抓回
     let is_locked = matches!(cursor.grab_mode, CursorGrabMode::Locked);
     if is_locked {
@@ -886,9 +919,9 @@ pub fn spawn_nest_markers(
         for (nid, nest) in kingdom.nests.iter() {
             // biome 配色 + RedStrong emissive 远距离可见
             let (base_r, base_g, base_b) = match nest.biome {
-                Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32),    // 黄沙
-                Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),     // 丛林绿
-                Biome::Tundra => (0.7_f32, 0.85_f32, 1.0_f32),    // 冰蓝
+                Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32), // 黄沙
+                Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),  // 丛林绿
+                Biome::Tundra => (0.7_f32, 0.85_f32, 1.0_f32), // 冰蓝
             };
             let mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(base_r, base_g, base_b),
@@ -898,7 +931,11 @@ pub fn spawn_nest_markers(
                 ..default()
             });
             // 共享 mesh（所有 nest 旗杆同尺寸）
-            let mesh = meshes.add(Cuboid::new(NEST_MARKER_SIZE.0, NEST_MARKER_SIZE.1, NEST_MARKER_SIZE.2));
+            let mesh = meshes.add(Cuboid::new(
+                NEST_MARKER_SIZE.0,
+                NEST_MARKER_SIZE.1,
+                NEST_MARKER_SIZE.2,
+            ));
 
             // 旗杆放在 (player + offset), Y 抬高 5m。offset 是 nest 相对玩家的 XZ 偏移。
             let nx = nest.center[0] as f32 + 0.5;
@@ -908,12 +945,7 @@ pub fn spawn_nest_markers(
             let offset_z = nz - pz;
 
             commands.spawn((
-                NestMarker {
-                    nest_id: *nid,
-                    kingdom_id: *kid,
-                    offset_x,
-                    offset_z,
-                },
+                NestMarker { nest_id: *nid, kingdom_id: *kid, offset_x, offset_z },
                 Mesh3d(mesh),
                 MeshMaterial3d(mat),
                 Transform::from_translation(Vec3::new(px + offset_x, ny, pz + offset_z)),
@@ -923,7 +955,10 @@ pub fn spawn_nest_markers(
     }
 
     count.0 = spawned;
-    info!("🏳 MonsterNest 3D 旗杆已 spawn {} 个（biome 配色 + RedStrong emissive）", spawned);
+    info!(
+        "🏳 MonsterNest 3D 旗杆已 spawn {} 个（biome 配色 + RedStrong emissive）",
+        spawned
+    );
 }
 
 /// 每帧更新 nest 旗杆位置：player.pos.xz + (offset_x, 5, offset_z)
@@ -984,10 +1019,7 @@ pub fn update_nest_indicator(
         return;
     };
     let dist = d2.sqrt();
-    let nest_v = Vec2::new(
-        center[0] as f32 + 0.5 - px,
-        center[2] as f32 + 0.5 - pz,
-    );
+    let nest_v = Vec2::new(center[0] as f32 + 0.5 - px, center[2] as f32 + 0.5 - pz);
     if nest_v.length() < 0.01 {
         text.0 = format!("* Nest underfoot / {} mobs", count);
         return;
@@ -1070,16 +1102,16 @@ pub fn player_input(
     // FreeFly 模式下 WASD/Space/Shift/QE 全部跳过（由 freefly_movement 处理）
     let mut d = Vec3::ZERO;
     if !freefly_active {
-        if keys.just_pressed(KeyCode::KeyW) || keys.just_pressed(KeyCode::ArrowUp) {
+        if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
             d += forward;
         }
-        if keys.just_pressed(KeyCode::KeyS) || keys.just_pressed(KeyCode::ArrowDown) {
+        if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
             d -= forward;
         }
-        if keys.just_pressed(KeyCode::KeyA) || keys.just_pressed(KeyCode::ArrowLeft) {
+        if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
             d -= right;
         }
-        if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::ArrowRight) {
+        if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
             d += right;
         }
         if keys.just_pressed(KeyCode::Space) {
@@ -1102,16 +1134,28 @@ pub fn player_input(
 
     // 把 d 量化成 [i32; 3] 1-格移动（选主轴）
     if d.length() > 0.01 {
-        let mut di: [i32; 3] = [0, 0, 0];
-        let ad = d.abs();
-        if ad.x >= ad.y && ad.x >= ad.z {
-            di[0] = d.x.signum() as i32;
-        } else if ad.z >= ad.y {
-            di[2] = d.z.signum() as i32;
+        if d.y.abs() > 0.01 && d.x.abs() < 0.01 && d.z.abs() < 0.01 {
+            try_player_move(
+                &mut player,
+                &mut game_world,
+                [0, d.y.signum() as i32, 0],
+                cfg.ground_step_threshold,
+            );
         } else {
-            di[1] = d.y.signum() as i32;
+            let sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+            let speed = if sprint {
+                MANUAL_MOVE_SPEED * 1.5
+            } else {
+                MANUAL_MOVE_SPEED
+            };
+            try_player_move_continuous(
+                &mut player,
+                &game_world,
+                Vec3::new(d.x, 0.0, d.z),
+                speed * time.delta_secs(),
+                cfg.ground_step_threshold,
+            );
         }
-        try_player_move(&mut player, &mut game_world, di, cfg.ground_step_threshold);
         // 玩家输入不再改 LastMoveDirection（让相机自动转动物 / Q E 改朝向）
     }
 
@@ -1262,7 +1306,7 @@ pub fn player_stand_position_at(
 
 pub fn player_spawn_position_at(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
     let foot_y = standable_foot_y_any_height(world, x, z)?;
-    // 玩家站在山顶 surface + 2m（眼睛 1.7m 视角能平视 + 微俯瞰整个山）
+    // Keep the avatar just above ground; the orbit camera supplies the overview.
     let sky_y = foot_y + 2;
     Some((
         Vec3::new(x as f32 + 0.5, sky_y as f32, z as f32 + 0.5),
@@ -1323,6 +1367,35 @@ fn try_player_move(
 // ---------------------------------------------------------------------------
 
 /// 玩家 entity 的标记 component（和 PlayerState Resource 配合用）
+fn try_player_move_continuous(
+    player: &mut PlayerState,
+    game_world: &GameWorld,
+    dir: Vec3,
+    distance: f32,
+    threshold: f32,
+) -> bool {
+    let horizontal = Vec3::new(dir.x, 0.0, dir.z);
+    if horizontal.length_squared() < 0.0001 || distance <= 0.0 {
+        return false;
+    }
+
+    let next = player.pos + horizontal.normalize() * distance;
+    let next_x = next.x.floor() as i32;
+    let next_z = next.z.floor() as i32;
+    let Some((stand_pos, block_pos)) =
+        player_stand_position_at(game_world, next_x, next_z, player.pos.y, threshold)
+    else {
+        return false;
+    };
+
+    if stand_pos.y - player.pos.y > threshold {
+        return false;
+    }
+
+    set_player_position(player, Vec3::new(next.x, stand_pos.y, next.z), block_pos);
+    true
+}
+
 #[derive(Component)]
 pub struct Player;
 
@@ -1494,11 +1567,11 @@ pub fn first_person_camera(
     if cfg.auto_orbit && !cfg.mouse_look {
         *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
         let a = *orbit_angle;
-        let target = player.pos + Vec3::Y * 0.0; // 看向玩家脚下（俯瞰）
+        let target = player.pos + Vec3::Y * 1.4;
         let cam_pos = target
             + Vec3::new(
                 a.cos() * cfg.auto_orbit_distance,
-                25.0,
+                14.0,
                 a.sin() * cfg.auto_orbit_distance,
             );
         tf.translation = cam_pos;

@@ -21,7 +21,7 @@ pub struct PrettyConfig {
 
 impl Default for PrettyConfig {
     fn default() -> Self {
-        Self { show_water: true, show_player_avatar: true, show_monster_cubes: true }
+        Self { show_water: false, show_player_avatar: true, show_monster_cubes: true }
     }
 }
 
@@ -48,51 +48,70 @@ pub fn spawn_pretty(
 ) {
     // ---- 水面 ----
     if cfg.show_water {
-        let s = (game_world.size as f32) * 1.5; // 比世界稍大，看着舒服
-        let water_y = lk2_core::constant::SEA_LEVEL as f32 + 0.45; // 海平面 + 一点点浮空
+        let s = (game_world.size as f32) * 0.55;
+        let center = game_world.size as f32 * 0.5;
+        let water_y = lk2_core::constant::SEA_LEVEL as f32 + 0.08;
         commands.spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(s, s))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.2, 0.45, 0.75, 0.7),
+                base_color: Color::srgba(0.12, 0.32, 0.55, 0.38),
                 alpha_mode: AlphaMode::Blend,
                 perceptual_roughness: 0.2,
                 metallic: 0.0,
                 ..default()
             })),
-            Transform::from_translation(Vec3::new(s * 0.5, water_y, s * 0.5)),
+            Transform::from_translation(Vec3::new(center, water_y, center)),
             WaterMarker,
         ));
         info!("🌊 水面已 spawn（y={}）", water_y);
     }
 
+    // ---- 玩家脚下"基地盘"（给画面一个明确的"地面"感，避免漂浮） ----
+    // 大圆盘 + 低 emissive 像草地，camera 在 20m 外俯视也能立刻定位玩家脚下
+    {
+        let ground_y = player.pos.y - 0.5; // 玩家脚下 0.5m
+        commands.spawn((
+            Mesh3d(meshes.add(Cylinder::new(4.0, 0.15))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.55, 0.65, 0.40), // 草土色
+                emissive: Color::srgb(0.10, 0.12, 0.06).into(), // 弱，不抢眼
+                perceptual_roughness: 0.95,
+                metallic: 0.0,
+                ..default()
+            })),
+            Transform::from_translation(Vec3::new(player.pos.x, ground_y, player.pos.z)),
+            AvatarPart,
+        ));
+    }
+
     // ---- 玩家 avatar ----
     if cfg.show_player_avatar {
         let base = player.pos + Vec3::new(0.0, 0.0, 0.0);
-        // 身体（红）
+        // 身体（红）— 1.5x 大, 1.2x 亮, 让 20m 外看得清
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.0, 0.7, 0.0),
-            Vec3::new(0.6, 0.9, 0.4),
-            Color::srgb(0.85, 0.25, 0.25),
+            base + Vec3::new(0.0, 0.9, 0.0),
+            Vec3::new(0.9, 1.35, 0.6),
+            Color::srgb(0.95, 0.30, 0.30),
         );
         // 头（肤色）
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.0, 1.45, 0.0),
-            Vec3::new(0.55, 0.55, 0.55),
-            Color::srgb(0.95, 0.78, 0.65),
+            base + Vec3::new(0.0, 2.1, 0.0),
+            Vec3::new(0.82, 0.82, 0.82),
+            Color::srgb(0.98, 0.82, 0.68),
         );
         // 头发（深棕）
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.0, 1.78, 0.0),
-            Vec3::new(0.6, 0.18, 0.6),
+            base + Vec3::new(0.0, 2.6, 0.0),
+            Vec3::new(0.9, 0.27, 0.9),
             Color::srgb(0.20, 0.12, 0.05),
         );
         // 眼睛
@@ -100,52 +119,52 @@ pub fn spawn_pretty(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(-0.13, 1.5, -0.28),
-            Vec3::new(0.10, 0.10, 0.05),
+            base + Vec3::new(-0.20, 2.18, -0.42),
+            Vec3::new(0.14, 0.14, 0.07),
             Color::srgb(0.0, 0.0, 0.0),
         );
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.13, 1.5, -0.28),
-            Vec3::new(0.10, 0.10, 0.05),
+            base + Vec3::new(0.20, 2.18, -0.42),
+            Vec3::new(0.14, 0.14, 0.07),
             Color::srgb(0.0, 0.0, 0.0),
         );
-        // 腿（深蓝）
+        // 腿（深蓝）— 也放大
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(-0.13, 0.20, 0.0),
-            Vec3::new(0.22, 0.45, 0.35),
-            Color::srgb(0.15, 0.18, 0.55),
+            base + Vec3::new(-0.20, 0.30, 0.0),
+            Vec3::new(0.33, 0.65, 0.50),
+            Color::srgb(0.18, 0.22, 0.65),
         );
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.13, 0.20, 0.0),
-            Vec3::new(0.22, 0.45, 0.35),
-            Color::srgb(0.15, 0.18, 0.55),
+            base + Vec3::new(0.20, 0.30, 0.0),
+            Vec3::new(0.33, 0.65, 0.50),
+            Color::srgb(0.18, 0.22, 0.65),
         );
         // 旗杆（白色高杆）— 让玩家从远处也能看到
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.0, 3.0, 0.0),
-            Vec3::new(0.08, 2.5, 0.08),
-            Color::srgb(0.95, 0.95, 0.95),
+            base + Vec3::new(0.0, 4.5, 0.0),
+            Vec3::new(0.12, 3.8, 0.12),
+            Color::srgb(0.98, 0.98, 0.98),
         );
-        // 旗面（鲜红色）
+        // 旗面（鲜红色）— 加大 + 偏上, 远距离定位玩家
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            base + Vec3::new(0.4, 3.6, 0.0),
-            Vec3::new(0.6, 0.4, 0.04),
-            Color::srgb(0.95, 0.10, 0.10),
+            base + Vec3::new(0.6, 5.4, 0.0),
+            Vec3::new(0.95, 0.62, 0.06),
+            Color::srgb(1.0, 0.12, 0.12),
         );
         info!("🧍 玩家 avatar + 旗 已 spawn at {:?}", player.pos);
     }
@@ -178,22 +197,8 @@ pub fn spawn_pretty(
         info!("👹 5 个怪物 cube 已 spawn");
     }
 
-    // ---- 云朵（白色大方块漂在天上） ----
-    for i in 0..6 {
-        let cx = player.pos.x + ((i as f32) * 9.0 - 26.0);
-        let cy = player.pos.y + 11.0 + (i as f32) * 0.4;
-        let cz = player.pos.z + ((i as f32) * 6.0 - 20.0);
-        spawn_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            Vec3::new(cx, cy, cz),
-            Vec3::new(2.8 + (i as f32) * 0.3, 0.35, 1.1 + (i as f32) * 0.2),
-            Color::srgb(0.82, 0.88, 0.95),
-        );
-    }
-
     // ---- 树（深棕树干 + 绿色树冠） ----
+    let ground_y = player.pos.y - 2.0;
     let tree_positions: [(i32, i32); 5] = [(5, 5), (-5, 3), (3, -7), (-4, -6), (8, -3)];
     for (_i, (tx, tz)) in tree_positions.iter().enumerate() {
         let t_x = (player.pos.x as i32 + tx).max(0) as f32;
@@ -204,7 +209,7 @@ pub fn spawn_pretty(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                Vec3::new(t_x + 0.5, player.pos.y + 1.0 + h as f32, t_z + 0.5),
+                Vec3::new(t_x + 0.5, ground_y + 1.0 + h as f32, t_z + 0.5),
                 Vec3::new(0.4, 1.0, 0.4),
                 Color::srgb(0.45, 0.27, 0.10),
             );
@@ -219,7 +224,7 @@ pub fn spawn_pretty(
                         &mut materials,
                         Vec3::new(
                             t_x - 0.5 + dx as f32,
-                            player.pos.y + 4.0 + dy as f32,
+                            ground_y + 4.0 + dy as f32,
                             t_z - 0.5 + dz as f32,
                         ),
                         Vec3::new(0.7, 0.7, 0.7),
@@ -256,6 +261,8 @@ fn spawn_cube(
             Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: color,
+                // 弱 emissive 防止 fog 把它吃掉；旗面在 spawn 处再强盖
+                emissive: (color.to_linear() * 0.25).into(),
                 perceptual_roughness: 0.6,
                 metallic: 0.1,
                 ..default()

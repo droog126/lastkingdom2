@@ -69,10 +69,10 @@ use crate::pvp_systems::{
     on_knockback_event, trigger_visual_effects,
 };
 use crate::render::{
-    AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, NestIndicatorText,
-    NestMarkerCount, Player, RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle,
-    cycle_terrain_preset, emergency_teleport, first_person_camera, freefly_movement,
-    freefly_toggle, held_weapon_follow, mouse_look_system, player_input,
+    AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection,
+    NestIndicatorText, NestMarkerCount, Player, RenderConfig, SpawnedBlocks, SwordSwing, auto_demo,
+    camera_mode_toggle, cycle_terrain_preset, emergency_teleport, first_person_camera,
+    freefly_movement, freefly_toggle, held_weapon_follow, mouse_look_system, player_input,
     player_spawn_position_at, setup_atmosphere, setup_cursor_grab, setup_terrain_underlay,
     spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
     underlay_follow_player, update_animal_indicator, update_nest_indicator,
@@ -82,11 +82,11 @@ use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud};
 
 // ---- 重新导出 lk2-core PvP 数据（main.rs 里要直接用） ----
 use leafwing_input_manager::prelude::ActionState;
+use lightyear::prelude::Controlled;
 use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, Health, VoxelDelta};
 use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
-use lightyear::prelude::Controlled;
 
 #[derive(Resource, Default, Debug, Clone)]
 struct ReplicatedSnapshot {
@@ -331,7 +331,7 @@ fn main() {
             setup_atmosphere,
             setup_cursor_grab,
             setup_world,
-            spawn_nest_markers,        // ← nest-marker 任务: 在 setup_world 之后跑，monsters.demo_init 才有 nests
+            spawn_nest_markers, // ← nest-marker 任务: 在 setup_world 之后跑，monsters.demo_init 才有 nests
             spawn_pretty,
             spawn_creatures,
             setup_hud,
@@ -378,7 +378,7 @@ fn main() {
             offline_player_attack_creatures,
             animate_avatar,
             spawn_terrain_around_player,
-            toggle_cursor_grab_on_esc,  // ← ESC 抓/放光标
+            toggle_cursor_grab_on_esc, // ← ESC 抓/放光标
         )
             .chain(),
     );
@@ -429,7 +429,7 @@ fn main() {
             end_tick_system,
             update_hud,
             update_animal_indicator,
-            update_nest_indicator,    // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
+            update_nest_indicator, // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
             tick_recorder,
             periodic_screenshot,
             update_creatures,
@@ -449,13 +449,13 @@ fn spawn_networked_client(
     server_addr: std::net::SocketAddr,
     client_id_seed: u64,
 ) {
+    use lightyear::prelude::MessageReceiver;
     use lightyear::prelude::UdpIo;
     use lightyear::prelude::client::Connect;
     use lightyear::prelude::{LinkStart, LocalAddr, PeerAddr};
-    use lightyear::prelude::MessageReceiver;
-    use lk2_core::protocol::messages::ServerPosUpdate;
     use lightyear_netcode::client_plugin::{NetcodeClient, NetcodeConfig};
     use lightyear_netcode::prelude::Authentication;
+    use lk2_core::protocol::messages::ServerPosUpdate;
 
     info!(
         "[net] spawning client entity with UdpIo + LocalAddr(0.0.0.0:0) + PeerAddr({})",
@@ -578,7 +578,13 @@ fn debug_dump_replicated_entities(
     }
     tracing::info!(
         "[net-debug] total_entities={}, replicate={}, replicated={}, clientof={}, linked={}, playerpos={}, sample=[{}]",
-        total, rep, red, co, ln, pp, sample.join(", ")
+        total,
+        rep,
+        red,
+        co,
+        ln,
+        pp,
+        sample.join(", ")
     );
 }
 
@@ -602,12 +608,19 @@ fn debug_dump_replicated_entities(
 fn apply_server_pos_update(
     run_mode: Res<ClientRunMode>,
     mut receiver_q: Query<
-        &mut lightyear::prelude::MessageReceiver<
-            lk2_core::protocol::messages::ServerPosUpdate,
-        >,
+        &mut lightyear::prelude::MessageReceiver<lk2_core::protocol::messages::ServerPosUpdate>,
     >,
     mut player: ResMut<PlayerState>,
 ) {
+    // 临时禁掉: server sim player 没动 → 推初始 pos 把 client 拉回原点, 玩家没法自由探索山。
+    // 联网 sim 链路修好后再恢复 (要让 client 端 visible 跟随 server-side authoritative pos)。
+    if true {
+        // drain receiver (避免 buffer 涨爆)
+        for mut receiver in receiver_q.iter_mut() {
+            for _msg in receiver.receive() {}
+        }
+        return;
+    }
     if *run_mode != ClientRunMode::Online {
         return;
     }
@@ -864,23 +877,31 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn setup_light(mut commands: Commands) {
-    commands.spawn((
-        DirectionalLight { illuminance: 20000.0, shadows_enabled: false, ..default() },
-        Transform::from_xyz(30.0, 60.0, 20.0).looking_at(Vec3::ZERO, Vec3::Y),
-        Sun,
-    ));
+    // 主光 (Sun) — 启用阴影投射，给场景立体感
     commands.spawn((
         DirectionalLight {
-            illuminance: 8000.0,
-            shadows_enabled: false,
-            color: Color::srgb(0.8, 0.85, 1.0),
+            illuminance: 22000.0,
+            shadows_enabled: true,
+            color: Color::srgb(1.0, 0.96, 0.88),
             ..default()
         },
-        Transform::from_xyz(-30.0, 40.0, -20.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(40.0, 80.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Sun,
     ));
+    // 副光 (fill) — 冷色环境补光，无阴影
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 6000.0,
+            shadows_enabled: false,
+            color: Color::srgb(0.65, 0.75, 1.0),
+            ..default()
+        },
+        Transform::from_xyz(-40.0, 50.0, -25.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    // 环境光适度降低，让阴影区域更明显
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::WHITE,
-        brightness: 1.2,
+        color: Color::srgb(0.85, 0.88, 0.95),
+        brightness: 0.6,
         affects_lightmapped_meshes: true,
     });
 }
@@ -912,10 +933,18 @@ pub fn day_night_cycle(
     if let Ok(mut l) = fill.single_mut() {
         l.illuminance = 3000.0 * dayness + 150.0;
     }
+    // 白天浅蓝 → 黄昏橙 → 深夜深蓝: 强制 dayness=1 时纯 sky_color, 避免偏紫
+    let day = (0.45, 0.65, 0.95); // sky_color
+    let dusk = (0.95, 0.55, 0.30);
+    let night = (0.05, 0.07, 0.18);
+    // 单段 lerp: 白天 → 黄昏 (sunset_glow 高时) → 夜晚 (dayness 低时)
+    let w_dusk = sunset_glow;
+    let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);
+    let w_day = 1.0 - w_dusk - w_night;
     clear.0 = Color::srgb(
-        0.04 + 0.41 * dayness + 0.60 * sunset_glow,
-        0.06 + 0.59 * dayness + 0.30 * sunset_glow,
-        0.16 + 0.79 * dayness + 0.10 * sunset_glow,
+        day.0 * w_day + dusk.0 * w_dusk + night.0 * w_night,
+        day.1 * w_day + dusk.1 * w_dusk + night.1 * w_night,
+        day.2 * w_day + dusk.2 * w_dusk + night.2 * w_night,
     );
 }
 
@@ -954,6 +983,11 @@ fn setup_world(
     ));
     player.block_pos = spawn;
     player.pos = spawn_pos;
+    // auto_demo: 锁死出生地中心 (48.5, 16, 48.5) — 不管 spawn 算法算哪, demo 必须从这里开始看
+    if std::env::args().any(|a| a == "--auto-demo") {
+        player.block_pos = [48, 16, 48];
+        player.pos = Vec3::new(48.5, 16.0, 48.5);
+    }
     player.inventory.insert(ResourceKind::Wood, 0);
     player.inventory.insert(ResourceKind::Food, 5);
 

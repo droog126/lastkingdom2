@@ -42,10 +42,10 @@ impl Biome {
         let fx = (x as f32 / cell as f32) - cx as f32;
         let fz = (z as f32 / cell as f32) - cz as f32;
         // 4 角 value
-        let v00 = crate::world::terrain::hash01(cx,     0,     cz,     0xB10E);
-        let v10 = crate::world::terrain::hash01(cx + 1, 0,     cz,     0xB10E);
-        let v01 = crate::world::terrain::hash01(cx,     0,     cz + 1, 0xB10E);
-        let v11 = crate::world::terrain::hash01(cx + 1, 0,     cz + 1, 0xB10E);
+        let v00 = crate::world::terrain::hash01(cx, 0, cz, 0xB10E);
+        let v10 = crate::world::terrain::hash01(cx + 1, 0, cz, 0xB10E);
+        let v01 = crate::world::terrain::hash01(cx, 0, cz + 1, 0xB10E);
+        let v11 = crate::world::terrain::hash01(cx + 1, 0, cz + 1, 0xB10E);
         // smoothstep
         let sx = fx * fx * (3.0 - 2.0 * fx);
         let sz = fz * fz * (3.0 - 2.0 * fz);

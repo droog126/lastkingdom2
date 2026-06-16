@@ -113,12 +113,12 @@ impl TerrainModule for SpawnHillModule {
             return None;
         } // 圆外不管，让 Heightmap 接管
 
-        // 圆顶高度 = 中心高，往外按 1-cos 半圆降低（自然山丘曲线）
+        // 圆顶高度 = 中心最高 (t=1), 往外按 1-cos 半圆降到边缘最低 (t=0)
+        // 之前 `1.0 - t` 反了, 导致中心凹 (中心 dome_h=0), 玩家站在空气里看不到 mesh
         let dist = (dist2 as f32).sqrt();
-        let t = 1.0 - dist / r as f32;
-        let t = t.clamp(0.0, 1.0);
-        let dome_h = (1.0 - ((1.0 - t) * std::f32::consts::FRAC_PI_2).cos())
-            * self.max_height as f32;
+        let t = (1.0 - dist / r as f32).clamp(0.0, 1.0);
+        let dome_h =
+            (1.0 - (t * std::f32::consts::FRAC_PI_2).cos()) * self.max_height as f32;
         let surface = SEA_LEVEL + 1 + dome_h as i32;
 
         // 同时把 surface_y 写进 ctx（这样 Cave/Tree/Ore 能看到）
@@ -150,10 +150,9 @@ impl TerrainModule for SpawnHillModule {
             return None;
         }
         let dist = (dist2 as f32).sqrt();
-        let t = 1.0 - dist / r as f32;
-        let t = t.clamp(0.0, 1.0);
-        let dome_h = (1.0 - ((1.0 - t) * std::f32::consts::FRAC_PI_2).cos())
-            * self.max_height as f32;
+        let t = (1.0 - dist / r as f32).clamp(0.0, 1.0);
+        let dome_h =
+            (1.0 - (t * std::f32::consts::FRAC_PI_2).cos()) * self.max_height as f32;
         Some(SEA_LEVEL as f32 + 1.0 + dome_h)
     }
 }
@@ -166,9 +165,9 @@ impl TerrainModule for SpawnHillModule {
 pub struct VillageMarkModule {
     pub name: String,
     pub sites: Vec<(i32, i32)>, // (x, z) 位置
-    pub pole_height: i32,        // 旗杆高度
-    pub flag_w: i32,             // 旗面宽
-    pub flag_h: i32,             // 旗面高
+    pub pole_height: i32,       // 旗杆高度
+    pub flag_w: i32,            // 旗面宽
+    pub flag_h: i32,            // 旗面高
     pub enabled: bool,
     pub weight: f32,
 }
@@ -214,11 +213,17 @@ impl VillageMarkModule {
 }
 
 impl TerrainModule for VillageMarkModule {
-    fn name(&self) -> &str { &self.name }
-    fn weight(&self) -> f32 { self.weight }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn weight(&self) -> f32 {
+        self.weight
+    }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
-        if !self.enabled { return None; }
+        if !self.enabled {
+            return None;
+        }
         // 候选村庄列表 = 5 固定出生区村庄 + 无限村庄
         let mut all_sites: Vec<(i32, i32)> = self.sites.clone();
         if let Some((sx, sz)) = self.nearest_village(ctx.x, ctx.z) {
@@ -237,7 +242,9 @@ impl TerrainModule for VillageMarkModule {
                 return None;
             }
             // 旗面: 旗杆顶 (sx+1..sx+flag_w) x 旗杆顶
-            if dx >= 1 && dx <= self.flag_w && dz <= 0
+            if dx >= 1
+                && dx <= self.flag_w
+                && dz <= 0
                 && ctx.y >= self.pole_height - self.flag_h
                 && ctx.y < self.pole_height
             {
@@ -732,7 +739,7 @@ pub mod presets {
             name: "default".into(),
             modules: vec![
                 Box::new(SpawnHillModule::default()),
-                Box::new(VillageMarkModule::default()),  // 5 村旗
+                Box::new(VillageMarkModule::default()), // 5 村旗
                 Box::new(h),
                 Box::new(CaveModule::default()),
                 Box::new(WaterFillModule::default()),

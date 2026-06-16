@@ -56,8 +56,8 @@ pub fn setup_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
 pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     commands.spawn((
         Text::new("WANGUO ORIGINS v0.4  loading..."),
-        TextFont { font: fonts.cn.clone(), font_size: 22.0, ..default() },
-        TextColor(Color::srgb(1.0, 1.0, 1.0)),
+        TextFont { font: fonts.cn.clone(), font_size: 16.0, ..default() },
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.92)),
         TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
         Node { position_type: PositionType::Absolute, top: px(12), left: px(12), ..default() },
         HudText,
@@ -122,9 +122,9 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             ..default()
         },
         children![(
-            Text::new("[scanning...]"),
-            TextFont { font: fonts.cn.clone(), font_size: 24.0, ..default() },
-            TextColor(Color::srgb(1.0, 0.9, 0.4)),
+            Text::new(""),
+            TextFont { font: fonts.cn.clone(), font_size: 14.0, ..default() },
+            TextColor(Color::srgba(1.0, 0.9, 0.4, 0.7)), // 半透明,降低抢戏
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
             AnimalIndicatorText,
         )],
@@ -134,18 +134,18 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: px(96),
+            top: px(76),
             left: px(0),
             right: px(0),
-            height: px(28),
+            height: px(24),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             ..default()
         },
         children![(
-            Text::new("[nest scanning...]"),
-            TextFont { font: fonts.cn.clone(), font_size: 20.0, ..default() },
-            TextColor(Color::srgb(1.0, 0.6, 0.4)), // 偏橙红，跟动物指示器（黄）区分
+            Text::new(""),
+            TextFont { font: fonts.cn.clone(), font_size: 13.0, ..default() },
+            TextColor(Color::srgba(1.0, 0.6, 0.4, 0.6)), // 半透明橙红
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
             NestIndicatorText,
         )],
@@ -169,64 +169,53 @@ pub fn update_hud(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
-    obs: Res<TickObserver>,
+    _obs: Res<TickObserver>,
     time: Res<Time>,
     run_mode: Res<ClientRunMode>,
     hud_state_q: Query<&GameplayHudState>,
 ) {
     let fps = (1.0 / time.delta_secs().max(0.001)).round() as i32;
     let hud_state = hud_state_q.iter().next();
-    let tick_value = hud_state.map(|s| s.tick).unwrap_or(clock.tick);
-    let block_pos = hud_state.map(|s| s.player_block_pos).unwrap_or(player.block_pos);
+    let _tick_value = hud_state.map(|s| s.tick).unwrap_or(clock.tick);
+    let _block_pos = hud_state.map(|s| s.player_block_pos).unwrap_or(player.block_pos);
     let wood = hud_state.map(|s| s.pool_wood).unwrap_or(pool.get(ResourceKind::Wood));
     let food = hud_state.map(|s| s.pool_food).unwrap_or(pool.get(ResourceKind::Food));
     let apple = hud_state.map(|s| s.pool_apple).unwrap_or(pool.get(ResourceKind::Apple));
     let soul = hud_state.map(|s| s.pool_soul).unwrap_or(pool.get(ResourceKind::Soul));
     let flags = hud_state.map(|s| s.flag_count).unwrap_or(nations.flag_count);
     let monster_count = hud_state.map(|s| s.monster_count).unwrap_or(monsters.current_individuals);
-    let anomalies = hud_state.map(|s| s.observer_anomalies as usize).unwrap_or(obs.anomalies.len());
-    let invariants = hud_state.map(|s| s.observer_invariant_violations).unwrap_or(0);
+    let _anomalies =
+        hud_state.map(|s| s.observer_anomalies as usize).unwrap_or(_obs.anomalies.len());
+    let _invariants = hud_state.map(|s| s.observer_invariant_violations).unwrap_or(0);
 
     if let Ok(mut text) = q_top.single_mut() {
+        // 收敛 HUD：版本号 + fps + 资源 + 状态，去掉裸 debug 坐标和 tick observer 噪声
         **text = format!(
-            "WANGUO ORIGINS v0.4  [{fps} fps]  {}\n\
-             tick {} ({:.1}s)\n\
-             player @ {:?}\n\
-             Wood={}  Food={}  Apple={}  Soul={}\n\
-             flags={}/8  monsters={}\n\
-             anomalies={}  invariants={}",
+            "WANGUO ORIGINS v0.4  ·  {}  ·  {fps} fps\n\
+             Wood {}  Food {}  Apple {}  Soul {}\n\
+             flags {}/{}  monsters {}",
             run_mode.label(),
-            tick_value,
-            time.elapsed_secs(),
-            block_pos,
             wood,
             food,
             apple,
             soul,
             flags,
+            8,
             monster_count,
-            anomalies,
-            invariants,
         );
     }
 
     let goal = 10;
-    let progress_bar = {
-        let pct = (wood as f32 / goal as f32).clamp(0.0, 1.0);
-        let filled = (pct * 16.0) as usize;
-        format!("{}{}", "#".repeat(filled), "-".repeat(16 - filled))
-    };
     let status = if let Some(state) = hud_state {
         state.status_line.as_str()
     } else if wood >= goal {
-        "*** WIN! 10 wood collected. Try Found Nation (F) ***"
+        "press F to found nation"
     } else {
         ""
     };
     if let Ok(mut text) = q_bot.single_mut() {
         **text = format!(
-            "[WASD] move  [Space] jump  [Shift] sneak  [G] gather  [P] place  [H] craft  [F] found  [J/K] hit  [Esc] quit\n\
-             Goal: gather 10 wood    {wood}/{goal}  {progress_bar}\n\
+            "Goal: 10 wood   {wood}/{goal}\n\
              {status}",
         );
     }

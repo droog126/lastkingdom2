@@ -38,7 +38,9 @@ use lightyear::prelude::server::ServerUdpIo;
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
-use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback};
+use lk2_core::protocol::messages::{
+    BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
+};
 // lightyear 0.26.4 bug 绕开: `ServerMultiMessageSender` (lightyear_messages
 // server.rs:33 `metadata: Res<'w, PeerMetadata>`) 依赖 `Res<PeerMetadata>`,而
 // `PeerMetadata` 只在 `lightyear_connection::client::ConnectionPlugin::build`
@@ -327,9 +329,7 @@ fn spawn_server(mut commands: Commands) {
     let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
     let protocol_id: u64 = 0x4C4B3256_4E455457;
     let netcode_server = NetcodeServer::new(
-        NetcodeConfig::default()
-            .with_protocol_id(protocol_id)
-            .with_key(private_key),
+        NetcodeConfig::default().with_protocol_id(protocol_id).with_key(private_key),
     );
     info!(
         "[net] NetcodeServer initialized: protocol_id=0x{:x}, key=<fixed-dev>",
@@ -375,10 +375,11 @@ fn spawn_server(mut commands: Commands) {
     // 这是 fix "Replicate::on_insert 在 SingleServer mode 下 server 找不到
     // `&Server, With<Started>` → silent return → UpdatesMessage 永远不发"
     // 1% 卡点的硬保险。
-    info!("[net] manually inserting Started marker to server entity {:?}", server_id);
-    commands.entity(server_id).insert(
-        lightyear_connection::server::Started,
+    info!(
+        "[net] manually inserting Started marker to server entity {:?}",
+        server_id
     );
+    commands.entity(server_id).insert(lightyear_connection::server::Started);
 }
 
 // ============================================================================
@@ -405,7 +406,10 @@ fn spawn_player(mut commands: Commands) {
         (constant::SEA_LEVEL + 2) as f32 + 0.5,
         constant::WORLD_SIZE as f32 / 2.0 + 0.5,
     );
-    info!("[player] spawning authoritative player entity at {:?}", spawn);
+    info!(
+        "[player] spawning authoritative player entity at {:?}",
+        spawn
+    );
     commands.spawn((
         Name::new("Player"),
         bevy::prelude::Transform::from_translation(spawn),
@@ -444,9 +448,7 @@ fn replicate_player_for_connected(
     );
 
     // 1) 给 ClientOf entity 挂 ReplicationSender (lightyear 0.26 不会自动加)
-    commands.entity(client_of_entity).insert(
-        lightyear::prelude::ReplicationSender::default(),
-    );
+    commands.entity(client_of_entity).insert(lightyear::prelude::ReplicationSender::default());
     info!(
         "[net] ReplicationSender attached to ClientOf entity {:?} — now this client can receive replicated entities",
         client_of_entity
@@ -586,14 +588,8 @@ pub struct ServerTickCounter(pub u32);
 
 fn broadcast_player_pos(
     mut tick: ResMut<ServerTickCounter>,
-    q: Query<
-        &bevy::prelude::Transform,
-        With<lk2_core::protocol::components::PlayerPos>,
-    >,
-    server_q: Query<
-        &lightyear::prelude::Server,
-        With<lightyear_connection::server::Started>,
-    >,
+    q: Query<&bevy::prelude::Transform, With<lk2_core::protocol::components::PlayerPos>>,
+    server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
     mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
 ) {
     tick.0 = tick.0.wrapping_add(1);
