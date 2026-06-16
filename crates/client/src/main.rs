@@ -63,7 +63,7 @@ use crate::controller_systems::{
     ControllerPlugin, auto_step_up, character_movement, collect_input, ground_detection,
     knockback_decay,
 };
-use crate::pretty::{PrettyConfig, animate_avatar, spawn_pretty};
+use crate::pretty::{PrettyConfig, animate_avatar, animate_monsters, follow_monster_cubes, follow_player_avatar, spawn_pretty};
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_local_input, on_damage_result, on_hit_confirm,
     on_knockback_event, trigger_visual_effects,
@@ -416,6 +416,9 @@ fn main() {
     app.add_systems(Update, freefly_movement.before(first_person_camera));
     // nest-marker 任务: 旗杆位置每帧跟玩家 XZ 偏移 (从 chain 拆出来避免 tuple > 20)
     app.add_systems(Update, update_nest_marker_positions);
+    // avatar / monster cube 跟随玩家位置（之前 follow_player_avatar 没注册，所有
+    // avatar 都堆叠在 startup 时的位置，导致 camera 看不到移动后的 avatar）
+    app.add_systems(Update, (follow_player_avatar, follow_monster_cubes, animate_monsters).chain());
     // interpolate_online_player / apply_authoritative_snapshot 之前被加
     // 但函数没定义(都是 baseline 不稳定)。apply_networked_position
     // 已经够用 (server 复制 PlayerPos → 写本机玩家 Transform)。
@@ -934,9 +937,9 @@ pub fn day_night_cycle(
         l.illuminance = 3000.0 * dayness + 150.0;
     }
     // 白天浅蓝 → 黄昏橙 → 深夜深蓝: 强制 dayness=1 时纯 sky_color, 避免偏紫
-    let day = (0.45, 0.65, 0.95); // sky_color
+    let day = (0.55, 0.78, 0.98); // 调亮, 避免 dayness=0.5 跟 night blend 出深蓝紫
     let dusk = (0.95, 0.55, 0.30);
-    let night = (0.05, 0.07, 0.18);
+    let night = (0.18, 0.25, 0.45); // 调淡 (从 0.05/0.07/0.18), 深夜也带点蓝
     // 单段 lerp: 白天 → 黄昏 (sunset_glow 高时) → 夜晚 (dayness 低时)
     let w_dusk = sunset_glow;
     let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);

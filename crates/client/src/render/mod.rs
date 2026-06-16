@@ -54,9 +54,9 @@ impl Default for RenderConfig {
             max_blocks: 3000,
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
-            fog_color: Color::srgb(0.85, 0.90, 0.95), // 更亮，让远处物体保留颜色不糊成紫
-            fog_start: 38.0, // 32 太近 → 整片雾；38 略推后
-            fog_end: 120.0,  // 105 仍吃掉远景；120 拉远看到更多地形
+            fog_color: Color::srgb(0.78, 0.85, 0.95), // 中亮蓝灰
+            fog_start: 50.0, // 38 太近 → 整片雾染粉；50 让近景清晰, 远景雾
+            fog_end: 200.0,  // 120 仍吃掉远景；200 拉远看到更远地形
             auto_orbit: false,      // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
             auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
             auto_orbit_distance: 14.0, // 8 太近被山挡，14 视野开阔
@@ -65,7 +65,7 @@ impl Default for RenderConfig {
             auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
             mouse_look: true,       // 默认开：鼠标转视角（FPS 标准）
             smooth_terrain: true,   // 默认开：scalar field + MC
-            smooth_passes: 0,       // v1 不平滑（先看效果）
+            smooth_passes: 2,       // 0→2: 让 smooth mesh 出 vertex color 立体感（iter_1070 平的山）
             ground_step_threshold: 0.85, // 低矮起伏直接走，高墙才挡
         }
     }
@@ -216,7 +216,7 @@ pub fn spawn_terrain_around_player(
             // 受光模式（unlit=false）：让 directional light 在山脊/山谷产生明暗变化，
             // 解决 iter_1020 那种"大块纯色 PowerPoint 板"问题。
             let mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.55, 0.68, 0.42),
+                base_color: Color::srgb(0.42, 0.55, 0.30),  // 深草绿
                 emissive: Color::srgb(0.04, 0.05, 0.03).into(),
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
@@ -401,56 +401,6 @@ pub fn setup_atmosphere(
             falloff: bevy::pbr::FogFalloff::from_visibility(120.0),
         });
     }
-
-    if cfg.auto_orbit {
-        return;
-    }
-
-    return;
-
-    // ── 武器：剑（handle 棕 + blade 银）— 小尺寸贴屏幕右下角，斜 15° ──
-    let handle_mesh = meshes.add(Cuboid::new(0.18, 0.55, 0.18));
-    let handle_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.45, 0.28, 0.12),
-        perceptual_roughness: 0.6,
-        emissive: Color::srgb(0.10, 0.06, 0.02).into(),
-        ..default()
-    });
-    let blade_mesh = meshes.add(Cuboid::new(0.18, 1.20, 0.08));
-    let blade_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.92, 0.94, 1.00),
-        perceptual_roughness: 0.20,
-        metallic: 0.90,
-        emissive: Color::srgb(0.25, 0.27, 0.40).into(),
-        ..default()
-    });
-    let Ok(cam_entity) = camera.single() else {
-        warn!("setup_atmosphere: 找不到 Camera3d 实体，剑不 spawn");
-        return;
-    };
-    // 斜 15°（绕 Z 轴），让剑看起来"握着"
-    let tilt = Quat::from_rotation_z(15_f32.to_radians());
-    // 把手：相机本地，右下角
-    let handle = commands
-        .spawn((
-            HeldWeaponPart,
-            Mesh3d(handle_mesh),
-            MeshMaterial3d(handle_mat),
-            Transform::from_translation(Vec3::new(0.45, -0.55, -0.75)).with_rotation(tilt),
-        ))
-        .id();
-    // 刀刃：把手正上方叠
-    let blade = commands
-        .spawn((
-            HeldWeaponPart,
-            Mesh3d(blade_mesh),
-            MeshMaterial3d(blade_mat),
-            Transform::from_translation(Vec3::new(0.45, 0.10, -0.75)).with_rotation(tilt),
-        ))
-        .id();
-    commands.entity(cam_entity).add_child(handle);
-    commands.entity(cam_entity).add_child(blade);
-    info!("⚔ 剑已 spawn（缩小到右下角，斜 15°）");
 }
 
 /// 兜底盖板：玩家脚下 5m 一个 100×100 plane，从不漏（marching_cubes 缝 B 修复）
