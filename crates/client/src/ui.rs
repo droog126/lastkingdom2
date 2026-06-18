@@ -195,6 +195,15 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         Node { position_type: PositionType::Absolute, top: px(60), right: px(12), ..default() },
         HudPhaseText,
     ));
+
+    // 控制提示 (右下角, 避免与 HP/STA/Phase 重叠)
+    commands.spawn((
+        Text::new("I/O=Light/Heavy  L=Thrust\nU=Block  Y=Parry"),
+        TextFont { font: fonts.cn.clone(), font_size: 11.0, ..default() },
+        TextColor(Color::srgba(0.85, 0.85, 0.85, 0.85)),
+        TextShadow { offset: Vec2::new(1.0, 1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
+        Node { position_type: PositionType::Absolute, bottom: px(56), right: px(12), ..default() },
+    ));
 }
 
 pub fn update_hud(
@@ -276,7 +285,7 @@ pub fn update_hud(
             let bar = format!("{}{}",
                 "\u{2588}".repeat(filled as usize),
                 "\u{2591}".repeat((10 - filled) as usize));
-            **text = format!("HP {}/{}  {}\nI/O=Light/Heavy  U=Block  Y=Parry",
+            **text = format!("HP {}/{}  {}",
                 hp.current as i32, hp.max as i32, bar);
         }
         if let Ok(mut text) = q_hud.p3().single_mut() {
