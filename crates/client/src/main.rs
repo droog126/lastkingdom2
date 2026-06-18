@@ -169,6 +169,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let offline_mode = args.iter().any(|a| a == "--offline");
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
+    let first_person_mode = args.iter().any(|a| a == "--first-person");
 
     // 解析 --connect=<ip:port>（wire-network-and-loop 任务, 2026-06-10）
     // --offline 时强制 offline 模式（即使用户写了 --connect）
@@ -281,9 +282,24 @@ fn main() {
     }
 
     // ===== 4. 资源初始化 =====
-    app.init_resource::<RenderConfig>()
+    app        .init_resource::<RenderConfig>()
         .init_resource::<CameraAngles>()
         .init_resource::<SwordSwing>()
+        .insert_resource(CameraMode::default())
+        // --first-person 必须先于 auto-demo 的 RenderConfig Startup 设置，否则会被覆盖
+        .add_systems(
+            Startup,
+            move |mut mode: ResMut<CameraMode>, mut cfg: ResMut<RenderConfig>| {
+                if first_person_mode {
+                    *mode = CameraMode::FirstPerson;
+                    cfg.auto_orbit = false;
+                    cfg.auto_walk = false;
+                    cfg.auto_keys = false;
+                    cfg.mouse_look = true; // FP 必须能转视角才像样
+                    tracing::info!("📷 --first-person: CameraMode=FirstPerson, mouse_look=true");
+                }
+            },
+        )
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
                 cfg.auto_walk = false; // 玩家站定在山顶, 不会乱跑
@@ -305,7 +321,8 @@ fn main() {
         .init_resource::<TickRecorder>()
         .init_resource::<LastMoveDirection>()
         .init_resource::<FreeFlyState>()
-        .init_resource::<CameraMode>()
+        // NOTE: CameraMode 已通过上面 insert_resource(CameraMode::default()) 注册；
+        // 后续的 --first-person Startup system 会在最后覆盖成 FirstPerson。不要在这里 init_resource 重置。
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
@@ -319,7 +336,13 @@ fn main() {
         .insert_resource(scenario_state);
 
     // ===== 5. PvP / 控制器 plugins（合并 lk2-core 的协议 + 客户端实现）=====
-    app.add_plugins(ClientPvPPlugin).add_plugins(ControllerPlugin);
+    // V2 quick win: 注册 MatchState + Protection + SovereignSpark + MiningSite(本机可见但不写权威)
+    app.add_plugins(lk2_core::match_state::MatchStatePlugin)
+        .add_plugins(lk2_core::protection::ProtectionPlugin)
+        .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
+        .add_plugins(lk2_core::mining_site::MiningSitePlugin)
+        .add_plugins(ClientPvPPlugin)
+        .add_plugins(ControllerPlugin);
 
     // ===== 6. 启动系统（一次性 setup）=====
     app.add_systems(
@@ -941,7 +964,9 @@ pub fn day_night_cycle(
     let dusk = (0.95, 0.55, 0.30);
     let night = (0.18, 0.25, 0.45); // 调淡 (从 0.05/0.07/0.18), 深夜也带点蓝
     // 单段 lerp: 白天 → 黄昏 (sunset_glow 高时) → 夜晚 (dayness 低时)
-    let w_dusk = sunset_glow;
+// 默认 t=0.5 (正午) 时 w_dusk=1.0 → 整个画面都是橙色, 太丑
+// 改成: w_dusk *= 0.35 让默认偏白天, 只在 t~0.4/0.6 时才明显橙
+    let w_dusk = sunset_glow * 0.35;
     let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);
     let w_day = 1.0 - w_dusk - w_night;
     clear.0 = Color::srgb(

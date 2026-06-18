@@ -55,8 +55,8 @@ impl Default for RenderConfig {
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
             fog_color: Color::srgb(0.78, 0.85, 0.95), // 中亮蓝灰
-            fog_start: 50.0, // 38 太近 → 整片雾染粉；50 让近景清晰, 远景雾
-            fog_end: 200.0,  // 120 仍吃掉远景；200 拉远看到更远地形
+            fog_start: 80.0, // 50→80: 让 30m 内完全清晰, 80m 后才慢慢雾化
+            fog_end: 320.0,  // 200→320: 远景地形延伸到 ~250m 都还能看清
             auto_orbit: false,      // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
             auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
             auto_orbit_distance: 14.0, // 8 太近被山挡，14 视野开阔
@@ -392,13 +392,13 @@ pub fn setup_atmosphere(
 
     // 雾挂到主相机 (auto_orbit 也需要 fog)
     if let Ok(cam_entity) = camera.single() {
-        // visibility 120 = fog 在 120m 外才开始起作用 (10m 玩家周围完全清晰, 20m 山开始淡, 200m 看不见)
-        // 之前 from_visibility(50) 太近, 玩家周围 50m 内的 mesh 都在衰减, 整个画面被 mix
+        // visibility 250 = fog 在 250m 外才开始起作用 (近景完全清晰, 远景渐隐)
+        // 配合 cfg.fog_start=80, fog_end=320 给出"辽阔"的视觉感
         commands.entity(cam_entity).insert(DistanceFog {
             color: cfg.fog_color,
             directional_light_color: cfg.fog_color,
             directional_light_exponent: 2.0,
-            falloff: bevy::pbr::FogFalloff::from_visibility(120.0),
+            falloff: bevy::pbr::FogFalloff::from_visibility(250.0),
         });
     }
 }

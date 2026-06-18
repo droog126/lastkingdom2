@@ -5,6 +5,7 @@ use crate::render::{AnimalIndicatorText, NestIndicatorText};
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::diagnostics::SnapshotRole;
+use lk2_core::match_state::MatchClock;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
@@ -173,6 +174,7 @@ pub fn update_hud(
     time: Res<Time>,
     run_mode: Res<ClientRunMode>,
     hud_state_q: Query<&GameplayHudState>,
+    match_clock: Res<MatchClock>,
 ) {
     let fps = (1.0 / time.delta_secs().max(0.001)).round() as i32;
     let hud_state = hud_state_q.iter().next();
@@ -189,9 +191,15 @@ pub fn update_hud(
     let _invariants = hud_state.map(|s| s.observer_invariant_violations).unwrap_or(0);
 
     if let Ok(mut text) = q_top.single_mut() {
-        // 收敛 HUD：版本号 + fps + 资源 + 状态，去掉裸 debug 坐标和 tick observer 噪声
+        // 收敛 HUD：版本号 + fps + 资源 + 状态 + V2 阶段(quick win 验收)
+        // 阶段: 4 段, 显示中文 + 距离本阶段结束的秒数 mm:ss
+        let phase_label = match_clock.phase.label_zh();
+        let phase_remaining = match_clock.phase_remaining_secs();
+        let m = (phase_remaining / 60.0).floor() as i32;
+        let s = (phase_remaining - m as f32 * 60.0).floor() as i32;
+        let phase_line = format!("Phase: {}  T-{:02}:{:02}", phase_label, m, s);
         **text = format!(
-            "WANGUO ORIGINS v0.4  ·  {}  ·  {fps} fps\n\
+            "WANGUO ORIGINS v0.4  ·  {}  ·  {fps} fps  ·  {phase_line}\n\
              Wood {}  Food {}  Apple {}  Soul {}\n\
              flags {}/{}  monsters {}",
             run_mode.label(),

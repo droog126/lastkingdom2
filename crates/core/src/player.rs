@@ -28,3 +28,17 @@ pub struct PlayerState {
     pub blocks_gathered: u32,
     pub nations_founded: u32,
 }
+
+/// core 层玩家 marker Component
+///
+/// V2 引入。`Player`(留 render 那边)做"实体层身份",
+/// `PlayerTag` 在 core 模拟层做"权威玩家身份"。
+/// `protection` / `sovereign_spark` 等 V2 服务端模块用 `PlayerTag` 挂组件。
+#[derive(Component, Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct PlayerTag(pub u32);
+
+impl PlayerTag {
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}

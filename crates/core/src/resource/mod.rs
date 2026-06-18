@@ -55,6 +55,14 @@ pub enum ResourceKind {
     EarthRune,        // 洞穴
     VampireFang,      // 夜晚精英
     PhoenixFeather,   // 岩浆垂钓
+    // ---- V2 新增：法术 / 秘仪 / 建国权 ----
+    SpiritEssence,    // 灵质 (法术主消耗)
+    RuneStone,        // 符文石 (法阵、结界、符文塔)
+    RunePowder,       // 符文粉 (小型法术、陷阱)
+    StarSand,         // 星砂 (高阶法术、神器封印、王座推进)
+    RelicCore,        // 遗迹核心 (秘剑谱、法术环、仪式建筑)
+    SovereignSpark,   // 王权火种 (建国权)
+    SparkFragment,    // 火种碎片 (国家灭亡回流, 3 碎片合成 1 火种)
 }
 
 impl ResourceKind {
@@ -87,6 +95,15 @@ impl ResourceKind {
             EarthRune => 20,
             VampireFang => 20,
             PhoenixFeather => 10,
+            // V2 上限 (来自《表格包》: 灵质 2400 / 符文石 1400 / 符文粉 900 / 星砂 900 /
+            // 遗迹核心 48 / 王权火种 6 / 火种碎片 18)
+            SpiritEssence => 2_400,
+            RuneStone => 1_400,
+            RunePowder => 900,
+            StarSand => 900,
+            RelicCore => 48,
+            SovereignSpark => 6,
+            SparkFragment => 18,
         }
     }
 
@@ -119,6 +136,14 @@ impl ResourceKind {
             EarthRune => "大地符文",
             VampireFang => "吸血鬼之牙",
             PhoenixFeather => "凤凰羽毛",
+            // V2 中文
+            SpiritEssence => "灵质",
+            RuneStone => "符文石",
+            RunePowder => "符文粉",
+            StarSand => "星砂",
+            RelicCore => "遗迹核心",
+            SovereignSpark => "王权火种",
+            SparkFragment => "火种碎片",
         }
     }
 
@@ -149,6 +174,14 @@ impl ResourceKind {
         ResourceKind::EarthRune,
         ResourceKind::VampireFang,
         ResourceKind::PhoenixFeather,
+        // V2 (32 总)
+        ResourceKind::SpiritEssence,
+        ResourceKind::RuneStone,
+        ResourceKind::RunePowder,
+        ResourceKind::StarSand,
+        ResourceKind::RelicCore,
+        ResourceKind::SovereignSpark,
+        ResourceKind::SparkFragment,
     ];
 }
 
@@ -500,7 +533,7 @@ mod tests {
     #[test]
     fn all_25_resources_present() {
         // 总纲表 1 列了 25 种（含冰心晶体的别名也算 1 种）
-        assert_eq!(ResourceKind::ALL.len(), 25);
+        assert_eq!(ResourceKind::ALL.len(), 32);
     }
 
     #[test]

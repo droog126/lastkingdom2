@@ -28,7 +28,9 @@ param(
     # 用于 debug client transport 行为。
     [switch]$NoServer = $false,
     # 联机模式 client 连的地址 (默认 127.0.0.1:5000, 跟 lk2-core::transport::DEFAULT_PORT)
-    [string]$ServerAddr = "127.0.0.1:5000"
+    [string]$ServerAddr = "127.0.0.1:5000",
+    # 强制 FirstPerson（替代 auto-orbit 俯瞰）— 调试 FP 体验用
+    [switch]$FirstPerson = $false
 )
 
 $ProjectRoot = $PSScriptRoot
@@ -118,6 +120,11 @@ if ($Offline) {
         -RedirectStandardOutput $serverLog -RedirectStandardError "$serverLog.err"
     # 等 server 跑完 self_check (大约 1 秒, 给 3 秒 buffer)
     Start-Sleep -Seconds 3
+}
+
+if ($FirstPerson) {
+    $clientArgs += "--first-person"
+    Write-Host ">>> FirstPerson ON (camera 在玩家眼睛位置 + 鼠标视角)" -ForegroundColor Cyan
 }
 
 # 启 client (前台, 让截图 + state JSON 写出来)

@@ -31,14 +31,18 @@ pub mod constant;
 pub mod controller;
 pub mod creature;
 pub mod diagnostics;
+pub mod match_state;
+pub mod mining_site;
 pub mod monster;
 pub mod nation;
 pub mod player;
 pub mod protocol;
+pub mod protection;
 pub mod pvp;
 pub mod resource;
 pub mod scenario;
 pub mod sim;
+pub mod sovereign_spark;
 pub mod transport;
 pub mod world;
 

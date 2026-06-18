@@ -202,6 +202,11 @@ fn main() {
         // 但运行时 server 缺 link/sync/netcode, netcode 起不来。
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
+        // V2 quick win: 注册 MatchState + Protection + SovereignSpark + MiningSite(服务端权威)
+        .add_plugins(lk2_core::match_state::MatchStatePlugin)
+        .add_plugins(lk2_core::protection::ProtectionPlugin)
+        .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
+        .add_plugins(lk2_core::mining_site::MiningSitePlugin)
         .add_plugins(ServerPvPPlugin)
         // wire-network-and-loop 任务（2026-06-10）补: bevy 0.18 的 Message
         // 总线（本地 event，区别于 lightyear register 的网络 message）需要
