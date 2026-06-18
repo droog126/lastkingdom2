@@ -1117,36 +1117,41 @@ pub fn process_combat_intents_system(
 /// 范围搜索: 用 `attacker.translation` 在 XZ 平面 8m 内筛 candidate,然后 sweep_hits。
 pub fn process_attack_hits_system(
     fixed_tick: Res<FixedTick>,
-    mut q_attacker: Query<(
-        Entity,
-        &Transform,
-        &mut AttackState,
-        &mut Stamina,
-        &mut StunState,
-        &WeaponStats,
-    )>,
-    mut q_target: Query<(
-        Entity,
-        &Transform,
-        &mut Health,
-        &mut Stamina,
-        &mut BlockState,
-        &mut ParryWindow,
-        &mut StunState,
-        &mut Knockback,
+    mut queries: ParamSet<(
+        Query<(
+            Entity,
+            &Transform,
+            &mut AttackState,
+            &mut Stamina,
+            &mut StunState,
+            &WeaponStats,
+        )>,
+        Query<(
+            Entity,
+            &Transform,
+            &mut Health,
+            &mut Stamina,
+            &mut BlockState,
+            &mut ParryWindow,
+            &mut StunState,
+            &mut Knockback,
+        )>,
     )>,
 ) {
     // 收集所有攻击者(Active 期)— 一次性取所有,避免 long-term borrow
-    let attackers: Vec<Entity> = q_attacker
-        .iter()
-        .filter(|(_, _, att, _, _, _)| att.is_active())
-        .map(|(e, _, _, _, _, _)| e)
-        .collect();
+    let attackers: Vec<Entity> = {
+        let q0 = queries.p0();
+        q0.iter()
+            .filter(|(_, _, att, _, _, _)| att.is_active())
+            .map(|(e, _, _, _, _, _)| e)
+            .collect()
+    };
 
     for attacker_entity in attackers {
         // Step 1: snapshot 攻击者信息(不持 borrow)
         let attacker_info = {
-            let Ok((_, xf, att, sta, _, weapon)) = q_attacker.get(attacker_entity) else {
+            let q0 = queries.p0();
+            let Ok((_, xf, att, sta, _, weapon)) = q0.get(attacker_entity) else {
                 continue;
             };
             if !att.is_active() {
@@ -1176,7 +1181,8 @@ pub fn process_attack_hits_system(
 
         // Step 2: 扣 STA + 标记 hit_apps=1(单次短 borrow)
         {
-            let Ok((_, _, mut att, mut sta, _, _)) = q_attacker.get_mut(attacker_entity) else {
+            let mut q0 = queries.p0();
+            let Ok((_, _, mut att, mut sta, _, _)) = q0.get_mut(attacker_entity) else {
                 continue;
             };
             if sta_now < atk_cost {
@@ -1196,85 +1202,92 @@ pub fn process_attack_hits_system(
         let mut attacker_stun_apply: Option<(StunSource, f32)> = None;
 
         // Step 4: 扫目标 (8m XZ 平面)
-        for (
-            target_entity,
-            tgt_xf,
-            mut tgt_hp,
-            mut tgt_sta,
-            mut tgt_block,
-            mut tgt_parry,
-            mut tgt_stun,
-            mut tgt_kb,
-        ) in q_target.iter_mut()
         {
-            if target_entity == attacker_entity {
-                continue; // 不打自己
-            }
-            let delta = tgt_xf.translation - atk_pos;
-            let dist_sq = delta.x * delta.x + delta.z * delta.z;
-            if dist_sq > 64.0 {
-                continue;
-            }
-            if !sweep_hits(
-                atk_pos,
-                atk_forward,
-                tgt_xf.translation,
-                weapon_reach,
-                sweep_half_angle,
-            ) {
-                continue;
-            }
-
-            let (events, actual_damage) = resolve_hit(
-                attacker_entity,
+            let mut q1 = queries.p1();
+            for (
                 target_entity,
-                attack_kind,
-                weapon_damage,
-                &mut tgt_parry,
-                &mut tgt_block,
-                &mut tgt_stun,
-                &mut tgt_sta,
-                &mut tgt_kb,
-                atk_pos,
-                atk_forward,
-                tgt_xf.translation,
-                weapon_reach,
-            );
+                tgt_xf,
+                mut tgt_hp,
+                mut tgt_sta,
+                mut tgt_block,
+                mut tgt_parry,
+                mut tgt_stun,
+                mut tgt_kb,
+            ) in q1.iter_mut()
+            {
+                if target_entity == attacker_entity {
+                    continue; // 不打自己
+                }
+                let delta = tgt_xf.translation - atk_pos;
+                let dist_sq = delta.x * delta.x + delta.z * delta.z;
+                if dist_sq > 64.0 {
+                    continue;
+                }
+                if !sweep_hits(
+                    atk_pos,
+                    atk_forward,
+                    tgt_xf.translation,
+                    weapon_reach,
+                    sweep_half_angle,
+                ) {
+                    continue;
+                }
 
-            // 应用伤害
-            if actual_damage > 0.0 {
-                tgt_hp.damage(actual_damage, fixed_tick.0, 6); // 6 tick 无敌帧
-            }
+                let (events, actual_damage) = resolve_hit(
+                    attacker_entity,
+                    target_entity,
+                    attack_kind,
+                    weapon_damage,
+                    &mut tgt_parry,
+                    &mut tgt_block,
+                    &mut tgt_stun,
+                    &mut tgt_sta,
+                    &mut tgt_kb,
+                    atk_pos,
+                    atk_forward,
+                    tgt_xf.translation,
+                    weapon_reach,
+                );
 
-            // 收集 stun apply(攻击者)
-            for evt in &events {
-                if let CombatEvent::Stunned {
-                    entity,
-                    source,
-                    duration_secs,
-                } = evt
+                // 应用伤害
+                if actual_damage > 0.0 {
+                    tgt_hp.damage(actual_damage, fixed_tick.0, 6); // 6 tick 无敌帧
+                }
+
+                // 收集 stun apply(攻击者)
+                for evt in &events {
+                    if let CombatEvent::Stunned {
+                        entity,
+                        source,
+                        duration_secs,
+                    } = evt
+                    {
+                        if *entity == attacker_entity {
+                            attacker_stun_apply = Some((*source, *duration_secs));
+                        }
+                    }
+                }
+
+                // 标记 AttackState.hit_apps = 2(已命中至少一个目标)
                 {
-                    if *entity == attacker_entity {
-                        attacker_stun_apply = Some((*source, *duration_secs));
+                    let mut q0 = queries.p0();
+                    if let Ok((_, _, mut att, _, _, _)) = q0.get_mut(attacker_entity) {
+                        if let Some(a) = att.current.as_mut() {
+                            if a.hit_apps <= 1 {
+                                a.hit_apps = 2;
+                            }
+                        }
                     }
                 }
-            }
 
-            // 标记 AttackState.hit_apps = 2(已命中至少一个目标)
-            if let Ok((_, _, mut att, _, _, _)) = q_attacker.get_mut(attacker_entity) {
-                if let Some(a) = att.current.as_mut() {
-                    if a.hit_apps <= 1 {
-                        a.hit_apps = 2;
-                    }
-                }
+                break; // MVP: 一击只命中一个目标
             }
-
-            break; // MVP: 一击只命中一个目标
         }
 
         // Step 5: 应用 attacker stun(招架反击)— target loop 已结束,borrow 释放
         if let Some((source, secs)) = attacker_stun_apply {
-            if let Ok((_, _, _, _, mut stun, _)) = q_attacker.get_mut(attacker_entity) {
+            let mut q0 = queries.p0();
+            if let Ok((_, _, _, _, mut stun, _)) = q0.get_mut(attacker_entity) {
                 stun.apply(secs, source);
             }
         }
