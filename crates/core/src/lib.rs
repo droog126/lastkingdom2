@@ -31,6 +31,7 @@ pub mod constant;
 pub mod controller;
 pub mod creature;
 pub mod diagnostics;
+pub mod equipment;
 pub mod match_state;
 pub mod mining_site;
 pub mod monster;
