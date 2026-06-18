@@ -343,6 +343,7 @@ fn main() {
         .add_plugins(lk2_core::mining_site::MiningSitePlugin)
         .add_plugins(lk2_core::terrain_overlay::TerrainOverlayPlugin)
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
+        .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(ClientPvPPlugin)
         .add_plugins(ControllerPlugin);
 

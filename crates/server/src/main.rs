@@ -209,6 +209,7 @@ fn main() {
         .add_plugins(lk2_core::mining_site::MiningSitePlugin)
         .add_plugins(lk2_core::terrain_overlay::TerrainOverlayPlugin)
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
+        .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(ServerPvPPlugin)
         // wire-network-and-loop 任务（2026-06-10）补: bevy 0.18 的 Message
         // 总线（本地 event，区别于 lightyear register 的网络 message）需要

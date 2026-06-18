@@ -29,6 +29,7 @@
 pub mod clock;
 pub mod constant;
 pub mod controller;
+pub mod combat;
 pub mod creature;
 pub mod diagnostics;
 pub mod equipment;
