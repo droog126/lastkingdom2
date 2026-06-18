@@ -1168,9 +1168,16 @@ fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
 
 fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>) {
     use lk2_core::pvp::WeaponId;
+    use lk2_core::combat::{
+        AttackState as CombatAttackState, BlockState as CombatBlockState, Downed as CombatDowned,
+        Health as CombatHealth, InputBuffer as CombatInputBuffer, Knockback as CombatKnockback,
+        ParryWindow as CombatParryWindow, Stamina as CombatStamina, StunState as CombatStunState,
+    };
     let iron = WeaponId::IronSword.stats();
     for entity in player.iter() {
-        commands.entity(entity).insert((
+        let mut cmd = commands.entity(entity);
+        // 第 1 批:物理 + 角色控制 + V1 PvP (≤15 个)
+        cmd.insert((
             RigidBody::Kinematic,
             Collider::capsule(0.3, 0.9),
             LinearVelocity::default(),
@@ -1193,10 +1200,23 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
             Hitbox::default(),
             lk2_core::pvp::Ping(0.0),
             PositionHistory::new(60),
-            Health(20.0),
+            Health(100.0), // protocol Health 同步给其他客户端
+        ));
+        // 第 2 批:V2 战斗组件 (HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer)
+        // 表格包 §19.1 hp_max=100, §19.2 STA max=100
+        cmd.insert((
+            CombatHealth::default(),                  // HP 100/100, 6 tick 无敌帧
+            CombatStamina::default(),                 // STA 100, 18/s 恢复
+            CombatBlockState::default(),              // 格挡 45% 减伤, 6/s 持续扣, 4/次冲击
+            CombatParryWindow::default(),             // 招架 0.16s 窗口, 0.40s 反击窗口
+            CombatStunState::default(),
+            CombatKnockback::default(),
+            CombatAttackState::default(),
+            CombatDowned::default(),                  // 8s 倒地, 复活到 50% HP
+            CombatInputBuffer::new(0.16, 30),         // 0.16s 输入缓冲 (~5 tick)
         ));
         info!(
-            "⚔ PvP 组件已挂载（铁剑 reach={}, dmg={}）+ 角色控制器",
+            "⚔ PvP 组件已挂载（铁剑 reach={}, dmg={}）+ V2 战斗组件（HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer）",
             iron.reach, iron.damage
         );
     }
