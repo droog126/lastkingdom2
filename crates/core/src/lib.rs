@@ -43,6 +43,7 @@ pub mod resource;
 pub mod scenario;
 pub mod sim;
 pub mod sovereign_spark;
+pub mod terrain_overlay;
 pub mod transport;
 pub mod world;
 
