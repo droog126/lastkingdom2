@@ -11,6 +11,7 @@
 #![allow(dead_code)]
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -22,7 +23,7 @@ use std::fmt;
 ///
 /// 每个资源有：最大上限、专属产地、再生规则。资源池守恒：
 /// 任何 Add 必有对应的 Sub，反之亦然。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceKind {
     // ---- 基础资源 ----
     Wood,

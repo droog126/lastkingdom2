@@ -57,13 +57,15 @@ impl Default for RenderConfig {
             fog_color: Color::srgb(0.78, 0.85, 0.95), // 中亮蓝灰
             fog_start: 80.0,                          // 50→80: 让 30m 内完全清晰, 80m 后才慢慢雾化
             fog_end: 320.0,                           // 200→320: 远景地形延伸到 ~250m 都还能看清
-            auto_orbit: false,      // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
+            auto_orbit: true,       // 改默认=true: dev 模式也开 auto-orbit 俯瞰，让玩家能看见自己+周围
+                                    // (不是 FirstPerson 贴脸后看见蓝天+cube 不知道在哪)
             auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
-            auto_orbit_distance: 14.0, // 8 太近被山挡，14 视野开阔
+            auto_orbit_distance: 18.0, // 14→18: 视野更宽，能看见周围地形+怪物
             auto_walk: false,       // 默认玩家控制；--auto-demo 开启
             auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
             auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
-            mouse_look: true,       // 默认开：鼠标转视角（FPS 标准）
+            mouse_look: false,      // 改默认=false: auto_orbit 时不要鼠标转视角破坏俯瞰
+                                    // --first-person 启动会打开
             smooth_terrain: true,   // 默认开：scalar field + MC
             smooth_passes: 2, // 0→2: 让 smooth mesh 出 vertex color 立体感（iter_1070 平的山）
             ground_step_threshold: 0.85, // 低矮起伏直接走，高墙才挡

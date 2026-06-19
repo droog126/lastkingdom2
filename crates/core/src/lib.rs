@@ -37,6 +37,7 @@ pub mod match_state;
 pub mod mining_site;
 pub mod monster;
 pub mod nation;
+pub mod objectives;
 pub mod player;
 pub mod protocol;
 pub mod protection;

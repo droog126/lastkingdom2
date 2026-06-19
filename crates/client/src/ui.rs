@@ -13,6 +13,7 @@ use lk2_core::diagnostics::SnapshotRole;
 use lk2_core::match_state::MatchClock;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
+use lk2_core::objectives::{ObjectiveKind, ObjectiveProgress, Objectives};
 use lk2_core::player::PlayerState;
 use lk2_core::protocol::components::GameplayHudState;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
@@ -31,6 +32,17 @@ pub struct HudStaText;
 
 #[derive(Component)]
 pub struct HudPhaseText;
+
+/// 当前 quest chain 的激活任务 + 进度（左侧面板，紧贴左上角 HUD 下方）
+#[derive(Component)]
+pub struct HudObjectiveText;
+
+/// 新完成任务的 flash 提示（屏幕中央，0.8 秒淡出）
+#[derive(Component)]
+pub struct HudObjectiveFlashText {
+    pub shown_at_secs: f32,
+    pub text: String,
+}
 
 #[derive(Resource)]
 pub struct UiFonts {
@@ -204,6 +216,36 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         TextShadow { offset: Vec2::new(1.0, 1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, bottom: px(56), right: px(12), ..default() },
     ));
+
+    // 当前 Objective 文本（左侧 HUD 顶部下方 76px，紧贴 phase 倒数指示器）
+    commands.spawn((
+        Text::new("Objective: -"),
+        TextFont { font: fonts.cn.clone(), font_size: 14.0, ..default() },
+        TextColor(Color::srgb(0.85, 0.95, 1.0)),
+        TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
+        Node { position_type: PositionType::Absolute, top: px(86), left: px(12), ..default() },
+        HudObjectiveText,
+    ));
+
+    // Objective 完成 flash（屏幕中央偏上，2.5s 后自动清空文本）
+    commands.spawn((
+        Text::new(""),
+        TextFont { font: fonts.cn.clone(), font_size: 28.0, ..default() },
+        TextColor(Color::srgba(1.0, 0.95, 0.4, 0.95)), // 高 alpha,事件触发时显文本,2.5s 后清空
+        TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Percent(35.0),
+            left: Val::Percent(0.0),
+            right: Val::Percent(0.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        HudObjectiveFlashText {
+            shown_at_secs: -100.0,
+            text: String::new(),
+        },
+    ));
 }
 
 pub fn update_hud(
@@ -213,12 +255,16 @@ pub fn update_hud(
         Query<&mut Text, With<HudHpText>>,
         Query<&mut Text, With<HudStaText>>,
         Query<&mut Text, With<HudPhaseText>>,
+        Query<(&mut Text, &mut HudObjectiveFlashText), Without<HudText>>,
+        Query<&mut Text, (With<HudObjectiveText>, Without<HudObjectiveFlashText>)>,
     )>,
     clock: Res<SimClock>,
     player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    objectives: Res<Objectives>, // T6 quest chain: 用 current objective 替代写死 "Goal: 10 wood"
+    mut completed_events: MessageReader<lk2_core::objectives::ObjectiveCompleted>,
     _obs: Res<TickObserver>,
     time: Res<Time>,
     run_mode: Res<ClientRunMode>,
@@ -264,16 +310,43 @@ pub fn update_hud(
     }
 
     let goal = 10;
-    let status = if let Some(state) = hud_state {
-        state.status_line.as_str()
-    } else if wood >= goal {
-        "press F to found nation"
+    // ---- T6 任务链：用 current objective 替代写死 "Goal: 10 wood" ----
+    // 玩家立刻能看见要做什么、进度多少 → "啥也玩不了" → "知道要干啥"
+    let (goal_text, status) = if let Some(obj) = objectives.current() {
+        let progress = match &obj.progress {
+            ObjectiveProgress::Count(n) => format!("{}/{}", n, match &obj.kind {
+                ObjectiveKind::GatherResource { count, .. } => *count,
+                _ => 0,
+            }),
+            ObjectiveProgress::Flag(b) => if *b { "✓".to_string() } else { "○".to_string() },
+            ObjectiveProgress::Pop(n) => format!("{}/{}", n, match &obj.kind {
+                ObjectiveKind::UpgradePop { target } => *target as i64,
+                _ => 0,
+            }),
+            ObjectiveProgress::CountU(n) => format!("{}/{}", n, match &obj.kind {
+                ObjectiveKind::KillMonsters { count } => *count as i64,
+                _ => 0,
+            }),
+            ObjectiveProgress::AtPosition { reached } => if *reached { "✓".to_string() } else { "○".to_string() },
+            ObjectiveProgress::Empty => "?".to_string(),
+        };
+        let label = obj.kind.short_label();
+        if obj.done {
+            (format!("✓ {} [完成]", label), "press F to advance".to_string())
+        } else {
+            (format!("Quest: {}  {}", label, progress),
+             match &obj.kind {
+                 ObjectiveKind::GatherResource { kind: ResourceKind::Wood, .. } if wood >= 10 => "press F to found nation".to_string(),
+                 ObjectiveKind::FoundNation => if player.nation_id.is_some() { "国已创".to_string() } else { "press F to found".to_string() },
+                 _ => "".to_string(),
+             })
+        }
     } else {
-        ""
+        (format!("Goal: 10 wood   {wood}/{goal}"), "press F to found nation".to_string())
     };
     if let Ok(mut text) = q_hud.p1().single_mut() {
         **text = format!(
-            "Goal: 10 wood   {wood}/{goal}\n\
+            "{goal_text}\n\
              {status}",
         );
     }
@@ -318,5 +391,35 @@ pub fn update_hud(
         if let Ok(mut text) = q_hud.p2().single_mut() { **text = "HP --/--".into(); }
         if let Ok(mut text) = q_hud.p3().single_mut() { **text = "STA --/--".into(); }
         if let Ok(mut text) = q_hud.p4().single_mut() { **text = "Phase: --".into(); }
+    }
+
+    // ---- T6 左侧面板：当前 Objective（短标签 + 进度条）----
+    if let Ok(mut text) = q_hud.p6().single_mut() {
+        if let Some(obj) = objectives.current() {
+            let progress = obj.kind.progress_str(&obj.progress);
+            **text = format!("📜 {}  {}", obj.kind.short_label(), progress);
+        } else {
+            // 全部完成
+            let done = objectives.all.iter().filter(|o| o.done).count();
+            **text = format!("🏆 全部完成 ({}/{})", done, objectives.all.len());
+        }
+    }
+
+    // ---- T6 完成 flash：监听 ObjectiveCompleted → 屏幕中央显示 2.5s,后清空 ----
+    let now_secs = time.elapsed_secs();
+    for ev in completed_events.read() {
+        if let Ok((mut text, mut flash)) = q_hud.p5().single_mut() {
+            flash.shown_at_secs = now_secs;
+            flash.text = format!("✓ {}", ev.kind.short_label());
+            **text = flash.text.clone();
+        }
+    }
+    if let Ok((mut text, mut flash)) = q_hud.p5().single_mut() {
+        let since = now_secs - flash.shown_at_secs;
+        if since > 2.5 && !flash.text.is_empty() {
+            // 超时清空 → text 空 = TextColor 高 alpha 也看不见
+            **text = String::new();
+            flash.text.clear();
+        }
     }
 }

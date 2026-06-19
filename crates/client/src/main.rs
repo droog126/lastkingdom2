@@ -347,6 +347,7 @@ fn main() {
         .add_plugins(lk2_core::terrain_overlay::TerrainOverlayPlugin)
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
+        .add_plugins(lk2_core::objectives::ObjectivesPlugin) // T6 quest chain: q1 砍 10 木 / q2 创国 / q3 食物 / q4 人口 / q5 杀怪 / q6 到山顶
         .add_plugins(ClientPvPPlugin)
         .add_plugins(ControllerPlugin);
 
@@ -366,6 +367,8 @@ fn main() {
             setup_hud,
             self_check,
             setup_player_pvp,
+            lk2_core::objectives::setup_default_objectives, // T6: 启动时塞默认 quest chain
+            lk2_core::objectives::setup_default_objectives, // ← T6 quest chain: 塞 default_chain (q1..q6)
         )
             .chain(),
     );
