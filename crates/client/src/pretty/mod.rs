@@ -403,11 +403,15 @@ pub fn follow_player_avatar(
     }
 }
 
-/// Update 怪物 cube 位置（跟随 PlayerState），让怪物永远在玩家周围画圆
-pub fn follow_monster_cubes(mut q: Query<(&mut Transform, &MonsterCube)>) {
+/// Update 怪物 cube 位置 — xz 跟 spawn 时算的 base (圆周位置), y 用
+/// effective_ground_height(base.x, base.z) 让怪物贴地表, 不再悬空
+pub fn follow_monster_cubes(
+    mut q: Query<(&mut Transform, &MonsterCube)>,
+    game_world: Res<GameWorld>,
+) {
     for (mut t, mc) in q.iter_mut() {
-        t.translation.x = mc.base.x;
-        t.translation.z = mc.base.z;
+        let ground_top = effective_ground_height(&game_world, mc.base.x as i32, mc.base.z as i32);
+        t.translation = Vec3::new(mc.base.x, ground_top + 0.5, mc.base.z);
     }
 }
 
