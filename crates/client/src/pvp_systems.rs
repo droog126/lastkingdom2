@@ -314,3 +314,63 @@ pub fn collect_combat_input_offline(
         buf.push(CombatIntent::ParryAttempt, tick);
     }
 }
+
+// ---------------------------------------------------------------------------
+// T6 玩法循环：offline F 键 = 创国（与 objective q2_found_nation 联动）
+// ---------------------------------------------------------------------------
+
+use lk2_core::nation::{NationId, NationRegistry};
+use lk2_core::objectives::{ObjectiveKind, Objectives};
+use lk2_core::player::PlayerState;
+use lk2_core::resource::GlobalResourcePool;
+
+/// offline 模式按 F 创国：仅当 current objective 是 FoundNation 且未完成时才生效
+/// （避免任意时刻按 F 都能创,跟 objective chain 解耦）
+pub fn offline_found_nation_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    run_mode: Res<ClientRunMode>,
+    objectives: Res<Objectives>,
+    mut player: ResMut<PlayerState>,
+    mut nations: ResMut<NationRegistry>,
+    mut pool: ResMut<GlobalResourcePool>,
+) {
+    if *run_mode != ClientRunMode::Offline {
+        return;
+    }
+    if !keys.just_pressed(KeyCode::KeyF) {
+        return;
+    }
+    // 只在当前 objective 期望创国时才响应
+    let wants_found = objectives
+        .current()
+        .map(|o| matches!(o.kind, ObjectiveKind::FoundNation) && !o.done)
+        .unwrap_or(false);
+    if !wants_found {
+        return;
+    }
+    if player.nation_id.is_some() {
+        return; // 已经有国,忽略
+    }
+    if !nations.can_found_new() {
+        info!("[F] 国旗已满 8,无法再创国");
+        return;
+    }
+    let cost = nations.next_flag_cost() as i64;
+    let flag_count = nations.flag_count;
+    match nations.found(
+        &mut pool,
+        0,
+        format!("PlayerNation#{}", flag_count + 1),
+        player.block_pos,
+        0,
+    ) {
+        Ok(NationId(id)) => {
+            player.nation_id = Some(NationId(id));
+            player.nations_founded += 1;
+            info!("[F] 创国成功 id={} cost={}", id, cost);
+        }
+        Err(e) => {
+            warn!("[F] 创国失败: {}", e);
+        }
+    }
+}

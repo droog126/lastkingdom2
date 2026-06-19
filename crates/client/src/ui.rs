@@ -5,9 +5,8 @@ use crate::render::{AnimalIndicatorText, NestIndicatorText, Player};
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::combat::{
-    AttackPhase, AttackState as CombatAttackState, Downed as CombatDowned,
-    Health as CombatHealth, ParryWindow as CombatParryWindow, Stamina as CombatStamina,
-    StunState as CombatStunState,
+    AttackPhase, AttackState as CombatAttackState, Downed as CombatDowned, Health as CombatHealth,
+    ParryWindow as CombatParryWindow, Stamina as CombatStamina, StunState as CombatStunState,
 };
 use lk2_core::diagnostics::SnapshotRole;
 use lk2_core::match_state::MatchClock;
@@ -241,10 +240,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             justify_content: JustifyContent::Center,
             ..default()
         },
-        HudObjectiveFlashText {
-            shown_at_secs: -100.0,
-            text: String::new(),
-        },
+        HudObjectiveFlashText { shown_at_secs: -100.0, text: String::new() },
     ));
 }
 
@@ -270,7 +266,17 @@ pub fn update_hud(
     run_mode: Res<ClientRunMode>,
     hud_state_q: Query<&GameplayHudState>,
     match_clock: Res<MatchClock>,
-    q_player_combat: Query<(&CombatHealth, &CombatStamina, &CombatAttackState, &CombatParryWindow, &CombatStunState, &CombatDowned), With<Player>>,
+    q_player_combat: Query<
+        (
+            &CombatHealth,
+            &CombatStamina,
+            &CombatAttackState,
+            &CombatParryWindow,
+            &CombatStunState,
+            &CombatDowned,
+        ),
+        With<Player>,
+    >,
 ) {
     let fps = (1.0 / time.delta_secs().max(0.001)).round() as i32;
     let hud_state = hud_state_q.iter().next();
@@ -314,35 +320,77 @@ pub fn update_hud(
     // 玩家立刻能看见要做什么、进度多少 → "啥也玩不了" → "知道要干啥"
     let (goal_text, status) = if let Some(obj) = objectives.current() {
         let progress = match &obj.progress {
-            ObjectiveProgress::Count(n) => format!("{}/{}", n, match &obj.kind {
-                ObjectiveKind::GatherResource { count, .. } => *count,
-                _ => 0,
-            }),
-            ObjectiveProgress::Flag(b) => if *b { "✓".to_string() } else { "○".to_string() },
-            ObjectiveProgress::Pop(n) => format!("{}/{}", n, match &obj.kind {
-                ObjectiveKind::UpgradePop { target } => *target as i64,
-                _ => 0,
-            }),
-            ObjectiveProgress::CountU(n) => format!("{}/{}", n, match &obj.kind {
-                ObjectiveKind::KillMonsters { count } => *count as i64,
-                _ => 0,
-            }),
-            ObjectiveProgress::AtPosition { reached } => if *reached { "✓".to_string() } else { "○".to_string() },
+            ObjectiveProgress::Count(n) => format!(
+                "{}/{}",
+                n,
+                match &obj.kind {
+                    ObjectiveKind::GatherResource { count, .. } => *count,
+                    _ => 0,
+                }
+            ),
+            ObjectiveProgress::Flag(b) => {
+                if *b {
+                    "✓".to_string()
+                } else {
+                    "○".to_string()
+                }
+            }
+            ObjectiveProgress::Pop(n) => format!(
+                "{}/{}",
+                n,
+                match &obj.kind {
+                    ObjectiveKind::UpgradePop { target } => *target as i64,
+                    _ => 0,
+                }
+            ),
+            ObjectiveProgress::CountU(n) => format!(
+                "{}/{}",
+                n,
+                match &obj.kind {
+                    ObjectiveKind::KillMonsters { count } => *count as i64,
+                    _ => 0,
+                }
+            ),
+            ObjectiveProgress::AtPosition { reached } => {
+                if *reached {
+                    "✓".to_string()
+                } else {
+                    "○".to_string()
+                }
+            }
             ObjectiveProgress::Empty => "?".to_string(),
         };
         let label = obj.kind.short_label();
         if obj.done {
-            (format!("✓ {} [完成]", label), "press F to advance".to_string())
+            (
+                format!("✓ {} [完成]", label),
+                "press F to advance".to_string(),
+            )
         } else {
-            (format!("Quest: {}  {}", label, progress),
-             match &obj.kind {
-                 ObjectiveKind::GatherResource { kind: ResourceKind::Wood, .. } if wood >= 10 => "press F to found nation".to_string(),
-                 ObjectiveKind::FoundNation => if player.nation_id.is_some() { "国已创".to_string() } else { "press F to found".to_string() },
-                 _ => "".to_string(),
-             })
+            (
+                format!("Quest: {}  {}", label, progress),
+                match &obj.kind {
+                    ObjectiveKind::GatherResource { kind: ResourceKind::Wood, .. }
+                        if wood >= 10 =>
+                    {
+                        "press F to found nation".to_string()
+                    }
+                    ObjectiveKind::FoundNation => {
+                        if player.nation_id.is_some() {
+                            "国已创".to_string()
+                        } else {
+                            "press F to found".to_string()
+                        }
+                    }
+                    _ => "".to_string(),
+                },
+            )
         }
     } else {
-        (format!("Goal: 10 wood   {wood}/{goal}"), "press F to found nation".to_string())
+        (
+            format!("Goal: 10 wood   {wood}/{goal}"),
+            "press F to found nation".to_string(),
+        )
     };
     if let Ok(mut text) = q_hud.p1().single_mut() {
         **text = format!(
@@ -355,19 +403,24 @@ pub fn update_hud(
     if let Ok((hp, sta, att, parry, stun, down)) = q_player_combat.single() {
         if let Ok(mut text) = q_hud.p2().single_mut() {
             let filled = (hp.ratio() * 10.0).clamp(0.0, 10.0) as i32;
-            let bar = format!("{}{}",
+            let bar = format!(
+                "{}{}",
                 "\u{2588}".repeat(filled as usize),
-                "\u{2591}".repeat((10 - filled) as usize));
-            **text = format!("HP {}/{}  {}",
-                hp.current as i32, hp.max as i32, bar);
+                "\u{2591}".repeat((10 - filled) as usize)
+            );
+            **text = format!("HP {}/{}  {}", hp.current as i32, hp.max as i32, bar);
         }
         if let Ok(mut text) = q_hud.p3().single_mut() {
             let filled = (sta.ratio() * 10.0).clamp(0.0, 10.0) as i32;
-            let bar = format!("{}{}",
+            let bar = format!(
+                "{}{}",
                 "\u{2588}".repeat(filled as usize),
-                "\u{2591}".repeat((10 - filled) as usize));
-            **text = format!("STA {}/{}  {}  regen {:.0}/s",
-                sta.current as i32, sta.max as i32, bar, sta.regen_per_sec);
+                "\u{2591}".repeat((10 - filled) as usize)
+            );
+            **text = format!(
+                "STA {}/{}  {}  regen {:.0}/s",
+                sta.current as i32, sta.max as i32, bar, sta.regen_per_sec
+            );
         }
         if let Ok(mut text) = q_hud.p4().single_mut() {
             **text = if down.downed {
@@ -388,9 +441,15 @@ pub fn update_hud(
             };
         }
     } else {
-        if let Ok(mut text) = q_hud.p2().single_mut() { **text = "HP --/--".into(); }
-        if let Ok(mut text) = q_hud.p3().single_mut() { **text = "STA --/--".into(); }
-        if let Ok(mut text) = q_hud.p4().single_mut() { **text = "Phase: --".into(); }
+        if let Ok(mut text) = q_hud.p2().single_mut() {
+            **text = "HP --/--".into();
+        }
+        if let Ok(mut text) = q_hud.p3().single_mut() {
+            **text = "STA --/--".into();
+        }
+        if let Ok(mut text) = q_hud.p4().single_mut() {
+            **text = "Phase: --".into();
+        }
     }
 
     // ---- T6 左侧面板：当前 Objective（短标签 + 进度条）----

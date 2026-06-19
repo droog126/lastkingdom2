@@ -69,7 +69,8 @@ use crate::pretty::{
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
-    on_damage_result, on_hit_confirm, on_knockback_event, trigger_visual_effects,
+    offline_found_nation_input, on_damage_result, on_hit_confirm, on_knockback_event,
+    trigger_visual_effects,
 };
 use crate::render::{
     AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection,
@@ -453,10 +454,18 @@ fn main() {
     // avatar 都堆叠在 startup 时的位置，导致 camera 看不到移动后的 avatar）
     app.add_systems(
         Update,
-        (follow_player_avatar, follow_ground_discs, follow_monster_cubes, animate_monsters).chain(),
+        (
+            follow_player_avatar,
+            follow_ground_discs,
+            follow_monster_cubes,
+            animate_monsters,
+        )
+            .chain(),
     );
     // 离线模式本地战斗输入 (P4 闭环: I/O/L = Attack, U = Block, Y = Parry)
     app.add_systems(Update, collect_combat_input_offline);
+    // 离线模式 F 键 = 创国（仅当当前 objective 是 FoundNation 时生效,T6 quest chain)
+    app.add_systems(Update, offline_found_nation_input);
     // interpolate_online_player / apply_authoritative_snapshot 之前被加
     // 但函数没定义(都是 baseline 不稳定)。apply_networked_position
     // 已经够用 (server 复制 PlayerPos → 写本机玩家 Transform)。
