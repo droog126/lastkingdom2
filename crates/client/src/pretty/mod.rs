@@ -148,112 +148,30 @@ pub fn spawn_pretty(
     }
 
     // ---- 玩家 avatar ----
+    // 简化: 只留身体 + 头, 砍头发/眼睛/旗杆/旗面/旗面条/腿
+    // 之前 9 块拼出来远看是"一坨", 现在 2 块清晰, 比例正常
     if cfg.show_player_avatar {
-        // 身体（红）— 1.4x 大, 让 14m orbit 视角看清
+        // 身体（红）
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            player.pos + Vec3::new(0.0, 1.25, 0.0),
-            Vec3::new(1.26, 1.9, 0.84),
+            player.pos + Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 2.0, 0.7),
             Color::srgb(0.95, 0.30, 0.30),
-            Vec3::new(0.0, 1.25, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
         );
-        // 头（肤色）
+        // 头（肤色, 顶上 0.15m 让衔接自然）
         spawn_avatar_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
-            player.pos + Vec3::new(0.0, 3.0, 0.0),
-            Vec3::new(1.15, 1.15, 1.15),
+            player.pos + Vec3::new(0.0, 2.55, 0.0),
+            Vec3::new(0.7, 0.7, 0.7),
             Color::srgb(0.98, 0.82, 0.68),
-            Vec3::new(0.0, 3.0, 0.0),
+            Vec3::new(0.0, 2.55, 0.0),
         );
-        // 头发（深棕）
-        spawn_avatar_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos + Vec3::new(0.0, 3.7, 0.0),
-            Vec3::new(1.26, 0.38, 1.26),
-            Color::srgb(0.20, 0.12, 0.05),
-            Vec3::new(0.0, 3.7, 0.0),
-        );
-        // 眼睛 — 白色珠子
-        spawn_avatar_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos + Vec3::new(-0.28, 3.05, -0.58),
-            Vec3::new(0.22, 0.22, 0.11),
-            Color::srgb(0.95, 0.95, 0.95),
-            Vec3::new(-0.28, 3.05, -0.58),
-        );
-        spawn_avatar_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos + Vec3::new(0.28, 3.05, -0.58),
-            Vec3::new(0.22, 0.22, 0.11),
-            Color::srgb(0.95, 0.95, 0.95),
-            Vec3::new(0.28, 3.05, -0.58),
-        );
-        // 腿（深蓝）
-        spawn_avatar_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos + Vec3::new(-0.28, 0.42, 0.0),
-            Vec3::new(0.46, 0.92, 0.70),
-            Color::srgb(0.18, 0.22, 0.65),
-            Vec3::new(-0.28, 0.42, 0.0),
-        );
-        spawn_avatar_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos + Vec3::new(0.28, 0.42, 0.0),
-            Vec3::new(0.46, 0.92, 0.70),
-            Color::srgb(0.18, 0.22, 0.65),
-            Vec3::new(0.28, 0.42, 0.0),
-        );
-        // 旗杆（白色高杆）— 加粗 0.16→0.25 远距离更显眼
-        spawn_avatar_cube(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos + Vec3::new(0.0, 5.5, 0.0),
-            Vec3::new(0.25, 4.0, 0.25),
-            Color::srgb(0.98, 0.98, 0.98),
-            Vec3::new(0.0, 5.5, 0.0),
-        );
-        // 旗面（鲜橙色 + 高 emissive）— 加大 1.6→2.0 让远处可见
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(2.0, 1.2, 0.06))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.55, 0.10),
-                emissive: Color::srgb(0.80, 0.44, 0.08).into(),
-                perceptual_roughness: 0.6,
-                metallic: 0.0,
-                ..default()
-            })),
-            Transform::from_translation(player.pos + Vec3::new(1.1, 6.5, 0.0)),
-            AvatarPart { offset: Vec3::new(1.1, 6.5, 0.0) },
-        ));
-        // 旗面深红条
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(2.0, 0.35, 0.07))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.85, 0.18, 0.10),
-                emissive: Color::srgb(0.68, 0.14, 0.08).into(),
-                perceptual_roughness: 0.6,
-                metallic: 0.0,
-                ..default()
-            })),
-            Transform::from_translation(player.pos + Vec3::new(1.1, 5.95, 0.0)),
-            AvatarPart { offset: Vec3::new(1.1, 5.95, 0.0) },
-        ));
-        info!("🧍 玩家 avatar + 旗 已 spawn at {:?}", player.pos);
+        info!("🧍 玩家 avatar (简版 body+head) 已 spawn at {:?}", player.pos);
     }
 
     // ---- 怪物 cube（每只一种颜色） ----
@@ -301,14 +219,15 @@ pub fn spawn_pretty(
 
     // ---- 树（深棕树干 + 绿色树冠）— 8 棵绕玩家圆周分布 ----
     let ground_y = player.pos.y - 2.0;
-    // 8 棵树, 每 45° 一棵, 半径 7m (从 5m 拉到 7m 让 orbit 相机 14m 高能全看到)
+    // 8 棵树, 半径 20m (从 13m 拉远避免 14m 俯瞰相机时树挡在玩家面前成一坨)
+    // 树干砍到 2 格, 树冠 1x2x1 缩小, 让树不再喧宾夺主
     for i in 0..8 {
         let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
-        let r = 13.0;
+        let r = 20.0;
         let t_x = player.pos.x + angle.cos() * r;
         let t_z = player.pos.z + angle.sin() * r;
-        // 树干：3 格高
-        for h in 0..3 {
+        // 树干：2 格高 (砍掉 1 格)
+        for h in 0..2 {
             spawn_cube(
                 &mut commands,
                 &mut meshes,
@@ -318,24 +237,16 @@ pub fn spawn_pretty(
                 Color::srgb(0.45, 0.27, 0.10),
             );
         }
-        // 树冠：2x2x2 绿色 — 下沉 0.3m 让它贴着树干顶 (避免悬浮感)
-        for dx in 0..2 {
-            for dy in 0..2 {
-                for dz in 0..2 {
-                    spawn_cube(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        Vec3::new(
-                            t_x - 0.5 + dx as f32,
-                            ground_y + 3.7 + dy as f32,
-                            t_z - 0.5 + dz as f32,
-                        ),
-                        Vec3::new(0.7, 0.7, 0.7),
-                        Color::srgb(0.25, 0.55, 0.20),
-                    );
-                }
-            }
+        // 树冠：1x2x1 绿色 (砍 2x2x2→1x2x1, 体积减半)
+        for dy in 0..2 {
+            spawn_cube(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                Vec3::new(t_x, ground_y + 3.0 + dy as f32, t_z),
+                Vec3::new(0.9, 0.9, 0.9),
+                Color::srgb(0.25, 0.55, 0.20),
+            );
         }
     }
 
