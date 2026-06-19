@@ -1,0 +1,65 @@
+{
+  "name": "shape_demo_test",
+  "record_window": null,
+  "steps": [
+    { "type": "log", "msg": "=== shape_demo: 验证 add_geo_layer 动态叠加几何 ===" },
+    { "type": "wait_ticks", "ticks": 2 },
+    { "type": "screenshot", "name": "before_geo" },
+    { "type": "log", "msg": "--- 动态 push 一个 Tower (Wood cylinder @ 50,48) ---" },
+    {
+      "type": "add_geo_layer",
+      "layer": {
+        "name": "scenario_tower",
+        "weight": 20.0,
+        "fill": { "Replace": "Wood" },
+        "shapes": [
+          {
+            "kind": "cylinder",
+            "name": "tower_body",
+            "center_x": 50,
+            "center_z": 48,
+            "y_min": 0,
+            "y_max": 40,
+            "radius": 2.0
+          }
+        ],
+        "biome_override": null,
+        "enabled": true
+      }
+    },
+    { "type": "wait_ticks", "ticks": 2 },
+    { "type": "move_to", "pos": [50, 14, 48] },
+    { "type": "screenshot", "name": "after_tower" },
+    { "type": "log", "msg": "--- 推一个 Crystal Ball (FrostcoreOre sphere @ 70,16,70) ---" },
+    {
+      "type": "add_geo_layer",
+      "layer": {
+        "name": "scenario_crystal",
+        "weight": 20.0,
+        "fill": { "Replace": "FrostcoreOre" },
+        "shapes": [
+          {
+            "kind": "sphere",
+            "name": "crystal_ball",
+            "center": [70, 16, 70],
+            "radius": 4.0
+          }
+        ],
+        "biome_override": null,
+        "enabled": true
+      }
+    },
+    { "type": "wait_ticks", "ticks": 2 },
+    { "type": "screenshot", "name": "after_crystal" },
+    { "type": "log", "msg": "--- 移除 tower（保留 crystal）---" },
+    { "type": "remove_geo_layer", "name": "scenario_tower" },
+    { "type": "wait_ticks", "ticks": 2 },
+    { "type": "screenshot", "name": "after_remove_tower" },
+    { "type": "log", "msg": "--- 清空 overlay ---" },
+    { "type": "clear_geo_overlay" },
+    { "type": "wait_ticks", "ticks": 2 },
+    { "type": "screenshot", "name": "after_clear" },
+    { "type": "log", "msg": "=== 完成 ===" },
+    { "type": "quit" }
+  ]
+}

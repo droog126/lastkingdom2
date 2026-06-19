@@ -19,6 +19,7 @@ use std::collections::HashSet;
 
 use crate::constant::*;
 use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
+use crate::world::terrain::TerrainModule;
 
 // ---------------------------------------------------------------------------
 // Biome
@@ -199,12 +200,18 @@ pub struct World {
     pub size: i32,
     /// true = 未被显式 set 的块由 pipeline 按需生成；false = 纯空测试世界。
     pub procedural: bool,
-    /// 稠密缓存内被玩家或系统明确写过的位置。用于区分“未生成的 Air”和“被挖空的 Air”。
+    /// 稠密缓存内被玩家或系统明确写过的位置。用于区分"未生成的 Air"和"被挖空的 Air"。
     pub edited: HashSet<(i32, i32, i32)>,
     /// 噪声种子（用于 generate_voxel 按需生成）
     pub seed: u64,
     /// 地形生成 pipeline（可配置地形系统的核心）
     pub pipeline: std::sync::Arc<terrain::TerrainPipeline>,
+    /// 动态叠加几何层（按需追加，无需重建世界）。
+    /// scenario JSON 的 `add_geo_primitive` step 会 push 进来。
+    /// 每次 generate_voxel 先用 overlay 生成再 fallback 到 pipeline。
+    pub geo_overlay: Vec<terrain::ShapeLayer>,
+    /// overlay 里的 ShapeLayer 名字集合（便于按名移除 / 调试）
+    pub geo_overlay_names: std::collections::HashSet<String>,
 }
 
 pub mod terrain;
@@ -219,7 +226,32 @@ impl World {
             edited: HashSet::new(),
             seed: 0xDEADBEEF,
             pipeline: std::sync::Arc::new(terrain::presets::default_preset()),
+            geo_overlay: Vec::new(),
+            geo_overlay_names: std::collections::HashSet::new(),
         }
+    }
+
+    /// 动态 push 一个 ShapeLayer overlay（scenario / 任务 / 玩家放置都能用）
+    /// 同名 layer 会被替换。
+    pub fn push_geo_layer(&mut self, layer: terrain::ShapeLayer) {
+        let name = layer.name.clone();
+        self.geo_overlay.retain(|l| l.name != name);
+        self.geo_overlay.push(layer);
+        self.geo_overlay_names.insert(name);
+    }
+
+    /// 按名字移除 overlay
+    pub fn remove_geo_layer(&mut self, name: &str) -> bool {
+        let before = self.geo_overlay.len();
+        self.geo_overlay.retain(|l| l.name != name);
+        self.geo_overlay_names.remove(name);
+        self.geo_overlay.len() != before
+    }
+
+    /// 清空所有 overlay
+    pub fn clear_geo_overlay(&mut self) {
+        self.geo_overlay.clear();
+        self.geo_overlay_names.clear();
     }
 
     pub fn with_pipeline(size: i32, pipeline: terrain::TerrainPipeline) -> Self {
@@ -255,6 +287,31 @@ impl World {
     /// 按需生成 voxel — 用配置化 pipeline（XZ 无限，Y 有限）
     /// 确定性：同样 (x, y, z, pipeline.seed) → 同样结果
     pub fn generate_voxel(&self, x: i32, y: i32, z: i32) -> BlockType {
+        // 1. overlay (按 weight 降序，第一个 Some 胜出)
+        let mut sorted: Vec<&terrain::ShapeLayer> = self.geo_overlay.iter().collect();
+        sorted.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for layer in &sorted {
+            let mut ctx = terrain::TerrainContext {
+                x,
+                y,
+                z,
+                seed: self.seed,
+                surface_y: None,
+                biome: None,
+            };
+            if let Some(b) = layer.decide(&mut ctx) {
+                if let Some(biome) = layer.biome_override {
+                    // biome 不在 voxel 上，但保留给上层读
+                    let _ = biome;
+                }
+                return b;
+            }
+        }
+        // 2. pipeline
         self.pipeline.generate(x, y, z)
     }
 

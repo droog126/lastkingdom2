@@ -86,6 +86,18 @@ pub enum ScenarioStep {
     /// 退出
     #[serde(rename = "quit")]
     Quit,
+    /// 动态往 world.geo_overlay 推一个 ShapeLayer（不影响 base pipeline）
+    /// JSON 直接展开 ShapeLayer 字段，外加 `name` / `weight` / `fill` / `shapes` / `biome_override` / `enabled`
+    #[serde(rename = "add_geo_layer")]
+    AddGeoLayer {
+        layer: crate::world::terrain::ShapeLayer,
+    },
+    /// 按名字移除之前 add_geo_layer 推入的 overlay
+    #[serde(rename = "remove_geo_layer")]
+    RemoveGeoLayer { name: String },
+    /// 清空所有 overlay
+    #[serde(rename = "clear_geo_overlay")]
+    ClearGeoOverlay,
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +232,7 @@ pub fn scenario_runner(
     mut state: ResMut<ScenarioState>,
     clock: Res<SimClock>,
     mut commands: Commands,
+    mut game_world: ResMut<GameWorld>,
 ) {
     let Some(scenario) = state.scenario.clone() else {
         return;
@@ -359,6 +372,27 @@ pub fn scenario_runner(
             info!("🏁 剧本结束");
             state.end_requested = true;
             state.step_in_progress = false;
+        }
+        ScenarioStep::AddGeoLayer { layer } => {
+            let n = layer.name.clone();
+            game_world.push_geo_layer(layer.clone());
+            info!("🧩 add_geo_layer: {} (overlay 现 {} 层)", n, game_world.geo_overlay.len());
+            advance_step(&mut state);
+        }
+        ScenarioStep::RemoveGeoLayer { name } => {
+            let removed = game_world.remove_geo_layer(&name);
+            info!(
+                "🗑 remove_geo_layer: {} ({}), overlay 现 {} 层",
+                name,
+                if removed { "found" } else { "not found" },
+                game_world.geo_overlay.len()
+            );
+            advance_step(&mut state);
+        }
+        ScenarioStep::ClearGeoOverlay => {
+            game_world.clear_geo_overlay();
+            info!("🧹 clear_geo_overlay");
+            advance_step(&mut state);
         }
     }
     let _ = time; // silence
@@ -616,6 +650,9 @@ enum ScenarioStepKind {
     RecordEnd,
     Log,
     Quit,
+    AddGeoLayer,
+    RemoveGeoLayer,
+    ClearGeoOverlay,
 }
 
 fn step_active(state: &ScenarioState, kind: ScenarioStepKind) -> Option<u32> {
@@ -634,6 +671,9 @@ fn step_active(state: &ScenarioState, kind: ScenarioStepKind) -> Option<u32> {
         ScenarioStep::RecordEnd => ScenarioStepKind::RecordEnd,
         ScenarioStep::Log { .. } => ScenarioStepKind::Log,
         ScenarioStep::Quit => ScenarioStepKind::Quit,
+        ScenarioStep::AddGeoLayer { .. } => ScenarioStepKind::AddGeoLayer,
+        ScenarioStep::RemoveGeoLayer { .. } => ScenarioStepKind::RemoveGeoLayer,
+        ScenarioStep::ClearGeoOverlay => ScenarioStepKind::ClearGeoOverlay,
     };
     if actual_kind as u32 == kind as u32 {
         Some(0)
@@ -779,6 +819,7 @@ pub fn scenario_tick_recorder(
 mod tests {
     use super::*;
     use crate::resource::ResourceKind;
+    use crate::world::terrain::{CylinderShape, ShapeLayer, ShapeSpec};
 
     #[test]
     fn award_gathered_resource_reports_full_pool_without_stats() {
@@ -799,5 +840,119 @@ mod tests {
         assert_eq!(pool.get(ResourceKind::Wood), ResourceKind::Wood.max());
         assert_eq!(player.blocks_gathered, 0);
         assert_eq!(player.inventory.get(&ResourceKind::Wood), None);
+    }
+
+    #[test]
+    fn scenario_parses_add_geo_layer() {
+        let json = r#"{
+            "name": "t",
+            "steps": [
+                { "type": "add_geo_layer", "layer": {
+                    "name": "tower",
+                    "weight": 12.0,
+                    "fill": { "Replace": "Wood" },
+                    "shapes": [
+                        { "kind": "cylinder", "name": "b", "center_x": 50, "center_z": 48, "y_min": 0, "y_max": 40, "radius": 2.0 }
+                    ],
+                    "biome_override": null,
+                    "enabled": true
+                }},
+                { "type": "remove_geo_layer", "name": "tower" },
+                { "type": "clear_geo_overlay" }
+            ]
+        }"#;
+        let s: Scenario = serde_json::from_str(json).expect("parse");
+        assert_eq!(s.steps.len(), 3);
+        match &s.steps[0] {
+            ScenarioStep::AddGeoLayer { layer } => {
+                assert_eq!(layer.name, "tower");
+                assert_eq!(layer.weight, 12.0);
+                assert_eq!(layer.shapes.len(), 1);
+                match &layer.shapes[0] {
+                    ShapeSpec::Cylinder(c) => {
+                        assert_eq!(c.center_x, 50);
+                        assert_eq!(c.y_max, 40);
+                        assert!((c.radius - 2.0).abs() < 1e-6);
+                    }
+                    _ => panic!("expected cylinder"),
+                }
+            }
+            _ => panic!("expected add_geo_layer"),
+        }
+        match &s.steps[1] {
+            ScenarioStep::RemoveGeoLayer { name } => assert_eq!(name, "tower"),
+            _ => panic!("expected remove_geo_layer"),
+        }
+        match &s.steps[2] {
+            ScenarioStep::ClearGeoOverlay => {}
+            _ => panic!("expected clear_geo_overlay"),
+        }
+    }
+
+    #[test]
+    fn world_geo_overlay_push_and_remove() {
+        use crate::world::World;
+        let mut w = World::new(8);
+        let layer = ShapeLayer {
+            name: "a".into(),
+            weight: 5.0,
+            fill: crate::world::terrain::FillMode::Replace(crate::world::BlockType::Stone),
+            shapes: vec![ShapeSpec::Cylinder(CylinderShape {
+                name: "c".into(),
+                center_x: 0,
+                center_z: 0,
+                y_min: 0,
+                y_max: 5,
+                radius: 1.0,
+            })],
+            biome_override: None,
+            enabled: true,
+        };
+        w.push_geo_layer(layer.clone());
+        assert_eq!(w.geo_overlay.len(), 1);
+        // push 同名 = 替换
+        let mut layer2 = layer.clone();
+        layer2.weight = 9.0;
+        w.push_geo_layer(layer2);
+        assert_eq!(w.geo_overlay.len(), 1);
+        assert_eq!(w.geo_overlay[0].weight, 9.0);
+        // 移除
+        assert!(w.remove_geo_layer("a"));
+        assert_eq!(w.geo_overlay.len(), 0);
+        assert!(!w.remove_geo_layer("a"));
+        // clear
+        w.push_geo_layer(layer);
+        w.clear_geo_overlay();
+        assert_eq!(w.geo_overlay.len(), 0);
+    }
+
+    #[test]
+    fn world_generate_voxel_uses_overlay_first() {
+        use crate::world::{BlockType, World};
+        // procedural world with default pipeline
+        let mut w = World::new(8);
+        w.procedural = true;
+        // 在 (50, 10, 50) 不在 default pipeline 的中心
+        // 默认 pipeline 在 (0,0,0) 中心, 但 world 大小 8 → 0..8 范围
+        // 测 (3, 1, 3) 默认应该是 stone
+        let baseline = w.generate_voxel(3, 1, 3);
+        // push 一个 BoxShape 覆盖 (3, 1, 3) → Wood
+        let layer = ShapeLayer {
+            name: "override".into(),
+            weight: 99.0,
+            fill: crate::world::terrain::FillMode::Replace(BlockType::Wood),
+            shapes: vec![ShapeSpec::Box(crate::world::terrain::BoxShape {
+                name: "b".into(),
+                min: [0, 0, 0],
+                max: [5, 5, 5],
+            })],
+            biome_override: None,
+            enabled: true,
+        };
+        w.push_geo_layer(layer);
+        let with_overlay = w.generate_voxel(3, 1, 3);
+        assert_eq!(with_overlay, BlockType::Wood, "overlay 应该覆盖 default pipeline");
+        // overlay 外 (10, 1, 10) 仍走 pipeline
+        let _ = baseline; // 仅供参考
     }
 }

@@ -4,12 +4,22 @@
 //! - `TerrainModule` trait：每个模块决定"看 (x,y,z) 我要放什么 block"
 //! - `TerrainPipeline`：按顺序执行模块列表，第一个返回 Some 的胜出
 //! - `Preset`：命名配置包（default / flat / mountainous / random）
+//! - [`shapes`]: 几何 Primitive 系统（盒/球/椭球/圆柱/平面/噪声丘/布尔减）
+//!   + [`shapes::ShapeLayer`] 让一组 primitive 直接变成一个 Module
 //!
 //! 用法：
 //! ```ignore
 //! let preset = presets::default_preset();
 //! let block = preset.pipeline.generate(x, y, z);
 //! ```
+
+pub mod shapes;
+
+pub use shapes::{
+    BoxShape, CylinderShape, EllipsoidShape, FillMode, HillShape, ModuleSpec, NoiseFieldShape,
+    NoiseHillShape, PipelineSpec, PlaneShape, Shape, ShapeLayer, ShapeSpec, SphereShape,
+    SubtractShape,
+};
 
 use crate::world::{Biome, BlockType, SEA_LEVEL};
 
@@ -735,10 +745,29 @@ pub mod presets {
         let mut h = HeightmapModule { seed: 0xDEADBEEF, ..Default::default() };
         h.amplitude_big = 16.0;
         h.amplitude_detail = 5.0;
+        // 新增 ShapeLayer：把"出生圆顶山 + 头顶 dome 顶"用 Shape 重做一份（与 SpawnHill 协作）
+        let spawn_island = shapes::ShapeLayer {
+            name: "spawn_island".into(),
+            weight: 9.5,
+            fill: shapes::FillMode::AdaptiveSurface {
+                surface: BlockType::Leaves,
+                subsurface: BlockType::Dirt,
+            },
+            shapes: vec![shapes::ShapeSpec::Hill(shapes::HillShape {
+                name: "spawn_dome".into(),
+                center_x: 48,
+                center_z: 48,
+                radius: 22.0,
+                max_height: 22.0,
+            })],
+            biome_override: Some(Biome::Jungle),
+            enabled: true,
+        };
         TerrainPipeline {
             name: "default".into(),
             modules: vec![
-                Box::new(SpawnHillModule::default()),
+                Box::new(spawn_island),     // ShapeLayer 覆盖优先级 9.5（比 heightmap 高）
+                Box::new(SpawnHillModule::default()), // 原 SpawnHill 仍在（10.0）
                 Box::new(VillageMarkModule::default()), // 5 村旗
                 Box::new(h),
                 Box::new(CaveModule::default()),
@@ -848,7 +877,7 @@ pub mod presets {
 
     /// 所有 preset 名（用于 F8 循环切换）
     pub fn preset_names() -> &'static [&'static str] {
-        &["default", "flat", "mountainous", "lold_arena"]
+        &["default", "flat", "mountainous", "lold_arena", "shape_demo"]
     }
 
     pub fn by_name(name: &str) -> TerrainPipeline {
@@ -857,10 +886,74 @@ pub mod presets {
             "flat" => flat_preset(),
             "mountainous" => mountainous_preset(),
             "lold_arena" | "random" => lold_arena_preset(),
+            "shape_demo" => shape_demo_preset(),
             other => {
                 eprintln!("[terrain] unknown preset '{}', using default", other);
                 default_preset()
             }
+        }
+    }
+
+    /// 纯 Shape 演示 preset：1 个岛（噪声丘）+ 1 个塔（圆柱）+ 1 球装饰
+    /// ——证明不依赖 WorldGenerator 时间建模，全部按需 query。
+    pub fn shape_demo_preset() -> TerrainPipeline {
+        let island = ShapeLayer {
+            name: "island".into(),
+            weight: 10.0,
+            fill: FillMode::AdaptiveSurface {
+                surface: BlockType::Dirt,
+                subsurface: BlockType::Stone,
+            },
+            shapes: vec![ShapeSpec::NoiseHill(NoiseHillShape {
+                name: "island_hill".into(),
+                center_x: 48,
+                center_z: 48,
+                radius: 28.0,
+                seed: 0xCAFE,
+                freq: 0.06,
+                peak_height: 18.0,
+            })],
+            biome_override: Some(Biome::Jungle),
+            enabled: true,
+        };
+        let tower = ShapeLayer {
+            name: "tower".into(),
+            weight: 11.0, // 比岛更高 → 在岛上放塔
+            fill: FillMode::Replace(BlockType::Wood),
+            shapes: vec![ShapeSpec::Cylinder(CylinderShape {
+                name: "tower_body".into(),
+                center_x: 48,
+                center_z: 48,
+                y_min: 0,
+                y_max: 50,
+                radius: 2.0,
+            })],
+            biome_override: None,
+            enabled: true,
+        };
+        let crystal = ShapeLayer {
+            name: "crystal".into(),
+            weight: 12.0,
+            fill: FillMode::Replace(BlockType::FrostcoreOre),
+            shapes: vec![ShapeSpec::Sphere(SphereShape {
+                name: "crystal_ball".into(),
+                center: [70, 16, 70],
+                radius: 4.0,
+            })],
+            biome_override: Some(Biome::Tundra),
+            enabled: true,
+        };
+        TerrainPipeline {
+            name: "shape_demo".into(),
+            modules: vec![
+                Box::new(island),
+                Box::new(tower),
+                Box::new(crystal),
+                Box::new(WaterFillModule::default()),
+            ],
+            vertical_min: 0,
+            vertical_max: crate::world::VERTICAL_SIZE,
+            seed: 0xDEADBEEF,
         }
     }
 }
