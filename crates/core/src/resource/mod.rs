@@ -108,6 +108,16 @@ impl ResourceKind {
     }
 
     /// 中文标签（debug 日志用）
+    /// Demo/self-check startup injection. Keep this below each resource cap so invariants stay
+    /// meaningful even for scarce resources such as SovereignSpark.
+    pub const fn demo_initial_amount(self) -> i64 {
+        let max = self.max();
+        let half = max / 2;
+        let capped = if half < 50 { half } else { 50 };
+        let floored = if capped > 1 { capped } else { 1 };
+        if floored < max { floored } else { max }
+    }
+
     pub const fn label_zh(self) -> &'static str {
         use ResourceKind::*;
         match self {
@@ -534,6 +544,22 @@ mod tests {
     fn all_25_resources_present() {
         // 总纲表 1 列了 25 种（含冰心晶体的别名也算 1 种）
         assert_eq!(ResourceKind::ALL.len(), 32);
+    }
+
+    #[test]
+    fn demo_initial_amount_never_exceeds_resource_max() {
+        for k in ResourceKind::ALL {
+            let init = k.demo_initial_amount();
+            assert!(init > 0, "demo init should seed {}", k.label_zh());
+            assert!(
+                init <= k.max(),
+                "demo init for {} should stay <= max, got {} > {}",
+                k.label_zh(),
+                init,
+                k.max()
+            );
+        }
+        assert_eq!(ResourceKind::SovereignSpark.demo_initial_amount(), 3);
     }
 
     #[test]

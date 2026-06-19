@@ -21,6 +21,7 @@ param(
     [switch]$SkipBuild = $false,
     # 启用 Bevy 动态链接 (开发期增量 build 快, binary 会动态加载 lib 而非静态链接)
     [switch]$Dynamic = $true,
+    [switch]$Online = $false,
     # 联机模式 (默认 $true): 同时启 lk2-server + lk2-client --connect=...
     # 离线模式: 只启 lk2-client --offline (旧行为)
     [switch]$Offline = $false,
@@ -35,6 +36,9 @@ param(
 
 $ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
+
+$UseOffline = (-not $Online) -and (-not $NoServer)
+if ($Offline) { $UseOffline = $true }
 
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
 # RUST_LOG 已在 param 默认值里塞好 (默认读 $env:RUST_LOG 否则用 lightyear debug 默认)
@@ -57,10 +61,10 @@ $featureArgs = if ($Dynamic) { "--features dev-dynamic-linking" } else { "" }
 if ($Dynamic) { Write-Host ">>> dynamic linking ON <<<" -ForegroundColor Cyan }
 
 # 1a. 决定 build 哪些 crate. 联机模式需要 client + server, 离线模式只需 client
-$buildTargets = if ($Offline -or $NoServer) { @("lk2-client") } else { @("lk2-client","lk2-server") }
+$buildTargets = if ($UseOffline -or $NoServer) { @("lk2-client") } else { @("lk2-client","lk2-server") }
 $serverExePath = Join-Path $ProjectRoot "target\debug\lk2-server.exe"
 $clientExePath = Join-Path $ProjectRoot "target\debug\lk2-client.exe"
-$needServerBuild = (-not $Offline) -and (-not $NoServer) -and (-not (Test-Path $serverExePath))
+$needServerBuild = (-not $UseOffline) -and (-not $NoServer) -and (-not (Test-Path $serverExePath))
 $needClientBuild = -not (Test-Path $clientExePath)
 
 if (-not $SkipBuild) {
@@ -98,7 +102,7 @@ $serverProc = $null
 $serverLog = Join-Path $ProjectRoot "screenshots\loop_server.log"
 $clientLog = Join-Path $ProjectRoot "screenshots\loop_run.log"
 $mode = "online"
-if ($Offline) {
+if ($UseOffline) {
     $mode = "offline"
     $clientArgs = @("--offline","--auto-demo")
     Write-Host ">>> Mode: OFFLINE (no server, client --offline --auto-demo) ${Seconds}s ..." -ForegroundColor Green

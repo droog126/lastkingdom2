@@ -20,7 +20,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::resource::{GlobalResourcePool, ResourceKind};
+use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 
 // ---------------------------------------------------------------------------
 // Kinds (对齐表格包 §5.2 矿坑模块表)
@@ -318,6 +318,14 @@ impl MiningSiteRegistry {
     }
 }
 
+pub fn award_mining_yield(
+    pool: &mut GlobalResourcePool,
+    kind: ResourceKind,
+    amount: i64,
+) -> Result<i64, PoolError> {
+    pool.try_add(kind, amount)
+}
+
 // ---------------------------------------------------------------------------
 // Events (Messages in bevy 0.18)
 // ---------------------------------------------------------------------------
@@ -413,27 +421,39 @@ pub fn tick_mining_slots(
         let amount = ((base_amount as f32) * mult).round() as i64;
         if amount > 0 {
             // 写全局资源池 (force_add 绕过 max 限制? 不, 用 try_add)
-            let _ = pool.try_add(kind, amount);
-            completed_events.write(MiningSlotCompleted {
-                site_id,
-                slot_index: slot.slot_index,
-                player_id,
-                mode: slot.mode,
-                yield_kind: kind,
-                yield_amount: amount,
-                at_wall_secs: match_clock.wall_secs,
-            });
-            info!(
-                "[mine] site {} ({}) slot {} → player {} +{} {:?} (tier={:?}, mult={:.2})",
-                site_id,
-                site_kind.label_zh(),
-                slot.slot_index,
-                player_id,
-                amount,
-                kind,
-                tier,
-                mult
-            );
+            match award_mining_yield(&mut pool, kind, amount) {
+                Ok(_) => {
+                    completed_events.write(MiningSlotCompleted {
+                        site_id,
+                        slot_index: slot.slot_index,
+                        player_id,
+                        mode: slot.mode,
+                        yield_kind: kind,
+                        yield_amount: amount,
+                        at_wall_secs: match_clock.wall_secs,
+                    });
+                    info!(
+                        "[mine] site {} ({}) slot {} → player {} +{} {:?} (tier={:?}, mult={:.2})",
+                        site_id,
+                        site_kind.label_zh(),
+                        slot.slot_index,
+                        player_id,
+                        amount,
+                        kind,
+                        tier,
+                        mult
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "[mine] failed to award yield for site {} slot {} player {}: {}",
+                        site_id,
+                        slot.slot_index,
+                        player_id,
+                        err
+                    );
+                }
+            }
         }
         // 扣矿坑自身总池 (每个完整循环扣 1.5% 模拟消耗, 跟表格包 §5.2 枯竭节奏一致)
         // 注意: 这里只读 site 不能直接改; 真正的 remaining_pct 改写在下面专门一轮
@@ -613,5 +633,26 @@ mod tests {
         assert!(!s.is_occupied());
         assert_eq!(s.progress_ticks, 0);
         assert_eq!(s.mode, MiningMode::Steady);
+    }
+
+    #[test]
+    fn award_mining_yield_reports_full_pool() {
+        let mut pool = GlobalResourcePool::new();
+        pool.try_add(ResourceKind::SpiritEssence, ResourceKind::SpiritEssence.max())
+            .unwrap();
+
+        let err = award_mining_yield(&mut pool, ResourceKind::SpiritEssence, 1).unwrap_err();
+
+        assert!(matches!(
+            err,
+            PoolError::WouldExceedMax {
+                kind: ResourceKind::SpiritEssence,
+                ..
+            }
+        ));
+        assert_eq!(
+            pool.get(ResourceKind::SpiritEssence),
+            ResourceKind::SpiritEssence.max()
+        );
     }
 }

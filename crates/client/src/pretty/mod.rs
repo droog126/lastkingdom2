@@ -38,7 +38,7 @@ pub struct AvatarPart {
 /// 怪物 marker + 相对玩家 offset（spawn 时记录，follow 时跟随 player 移动）
 #[derive(Component)]
 pub struct MonsterCube {
-    pub offset: Vec3,
+    pub base: Vec3,
 }
 
 /// 启动时 spawn 水面 + 玩家 avatar
@@ -80,7 +80,7 @@ pub fn spawn_pretty(
 
         // 外圈大圆盘 (直径 5.5)
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(5.5, 0.18))),
+            Mesh3d(meshes.add(Cylinder::new(1.4, 0.08))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.32, 0.48, 0.20),
                 emissive: Color::srgb(0.02, 0.04, 0.015).into(),
@@ -88,13 +88,16 @@ pub fn spawn_pretty(
                 metallic: 0.0,
                 ..default()
             })),
-            Transform::from_translation(Vec3::new(player.pos.x, player.pos.y + ground_y - 0.05, player.pos.z)),
-            AvatarPart { offset: Vec3::new(0.0, ground_y - 0.05, 0.0) },
+            Transform::from_translation(Vec3::new(
+                player.pos.x,
+                player.pos.y + ground_y - 0.05,
+                player.pos.z,
+            )),
         ));
 
         // 内圈小圆盘 (直径 3.0) — 高 0.20m 让台阶明显
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(3.0, 0.20))),
+            Mesh3d(meshes.add(Cylinder::new(0.55, 0.08))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.45, 0.62, 0.28),
                 emissive: Color::srgb(0.03, 0.05, 0.02).into(),
@@ -102,8 +105,11 @@ pub fn spawn_pretty(
                 metallic: 0.0,
                 ..default()
             })),
-            Transform::from_translation(Vec3::new(player.pos.x, player.pos.y + ground_y + 0.15, player.pos.z)),
-            AvatarPart { offset: Vec3::new(0.0, ground_y + 0.15, 0.0) },
+            Transform::from_translation(Vec3::new(
+                player.pos.x,
+                player.pos.y + ground_y + 0.15,
+                player.pos.z,
+            )),
         ));
     }
 
@@ -228,7 +234,7 @@ pub fn spawn_pretty(
         for (i, (color, _name)) in monster_kinds.iter().enumerate() {
             let angle = (i as f32) * 1.2566;
             // 从 8-15m 缩到 3-5m，让 demo 怪物一定在玩家视野内（画面更满）
-            let r = 3.0 + (i as f32) * 0.5;
+            let r = 10.0 + (i as f32) * 1.8;
             let offset = Vec3::new(angle.cos() * r, 0.5, angle.sin() * r);
             let pos = player.pos + offset;
             let entity = spawn_cube(
@@ -239,7 +245,7 @@ pub fn spawn_pretty(
                 Vec3::new(0.8, 1.2, 0.8),
                 *color,
             );
-            commands.entity(entity).insert(MonsterCube { offset });
+            commands.entity(entity).insert(MonsterCube { base: pos });
         }
         info!("👹 5 个怪物 cube 已 spawn");
     }
@@ -264,7 +270,7 @@ pub fn spawn_pretty(
     // 8 棵树, 每 45° 一棵, 半径 7m (从 5m 拉到 7m 让 orbit 相机 14m 高能全看到)
     for i in 0..8 {
         let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
-        let r = 7.0;
+        let r = 13.0;
         let t_x = player.pos.x + angle.cos() * r;
         let t_z = player.pos.z + angle.sin() * r;
         // 树干：3 格高
@@ -320,8 +326,8 @@ pub fn spawn_pretty(
             1 => Color::srgb(0.58, 0.55, 0.50), // 中灰
             _ => Color::srgb(0.50, 0.52, 0.48), // 灰绿
         };
-        let r_x = player.pos.x + rx;
-        let r_z = player.pos.z + rz;
+        let r_x = player.pos.x + rx * 1.8;
+        let r_z = player.pos.z + rz * 1.8;
         spawn_cube(
             &mut commands,
             &mut meshes,
@@ -334,9 +340,16 @@ pub fn spawn_pretty(
 
     // ---- 花朵（小彩色斑点缀在 spawn 周围 2-6m，10 朵） ----
     let flower_positions: [(f32, f32); 10] = [
-        (2.5, 2.5), (-2.8, 3.2), (3.2, -1.5), (-3.5, -2.5),
-        (4.2, -0.8), (-4.8, 1.5), (1.2, -4.5),
-        (5.0, 3.5), (-4.2, -5.0), (3.8, 5.2),
+        (2.5, 2.5),
+        (-2.8, 3.2),
+        (3.2, -1.5),
+        (-3.5, -2.5),
+        (4.2, -0.8),
+        (-4.8, 1.5),
+        (1.2, -4.5),
+        (5.0, 3.5),
+        (-4.2, -5.0),
+        (3.8, 5.2),
     ];
     let flower_colors = [
         Color::srgb(0.98, 0.30, 0.55), // 粉红
@@ -347,21 +360,21 @@ pub fn spawn_pretty(
     ];
     for (i, (fx, fz)) in flower_positions.iter().enumerate() {
         let f_color = flower_colors[i % flower_colors.len()];
-        let f_x = player.pos.x + fx;
-        let f_z = player.pos.z + fz;
+        let f_x = player.pos.x + fx * 2.0;
+        let f_z = player.pos.z + fz * 2.0;
         spawn_cube(
             &mut commands,
             &mut meshes,
             &mut materials,
             Vec3::new(f_x, ground_y + 0.4, f_z),
-            Vec3::new(0.4, 0.55, 0.4),  // 加大 0.3→0.4 让花更显眼
+            Vec3::new(0.4, 0.55, 0.4), // 加大 0.3→0.4 让花更显眼
             f_color,
         );
     }
 
     // ---- 远景山丘（大绿块在 15m 外, 给画面深度感） ----
     // 4 个方向各放一块, 距离 15m, 高度 3.0m, 提到玩家头顶高度
-    let hill_distance = 15.0;
+    let hill_distance = 28.0;
     let hill_offsets: [(f32, f32); 4] = [
         (hill_distance, hill_distance),
         (-hill_distance, hill_distance),
@@ -382,7 +395,6 @@ pub fn spawn_pretty(
                 ..default()
             })),
             Transform::from_translation(Vec3::new(h_x, ground_y + 2.5, h_z)),
-            AvatarPart { offset: Vec3::new(*hx, 2.5, *hz) },
         ));
     }
 }
@@ -426,33 +438,28 @@ fn spawn_cube(
 
 /// Update 玩家 avatar 位置（跟随 PlayerState）
 /// avatar 在 spawn 时存了相对 player.pos 的 offset，每帧 t.translation = player.pos + offset
-pub fn follow_player_avatar(
-    mut q: Query<(&mut Transform, &AvatarPart)>,
-    player: Res<PlayerState>,
-) {
+pub fn follow_player_avatar(mut q: Query<(&mut Transform, &AvatarPart)>, player: Res<PlayerState>) {
     for (mut t, part) in q.iter_mut() {
         t.translation = player.pos + part.offset;
     }
 }
 
 /// Update 怪物 cube 位置（跟随 PlayerState），让怪物永远在玩家周围画圆
-pub fn follow_monster_cubes(
-    mut q: Query<(&mut Transform, &MonsterCube)>,
-    player: Res<PlayerState>,
-) {
+pub fn follow_monster_cubes(mut q: Query<(&mut Transform, &MonsterCube)>) {
     for (mut t, mc) in q.iter_mut() {
-        t.translation = player.pos + mc.offset;
+        t.translation.x = mc.base.x;
+        t.translation.z = mc.base.z;
     }
 }
 
 /// 怪物 Idle 动画：上下浮动 + 慢速旋转，看起来像活的
-pub fn animate_monsters(time: Res<Time>, mut q: Query<&mut Transform, With<MonsterCube>>) {
+pub fn animate_monsters(time: Res<Time>, mut q: Query<(&mut Transform, &MonsterCube)>) {
     let t = time.elapsed_secs();
-    for (i, mut transform) in q.iter_mut().enumerate() {
+    for (i, (mut transform, monster)) in q.iter_mut().enumerate() {
         let phase = (i as f32) * 0.7;
         // 上下浮动（每只怪不同 phase）
         let bob = (t * 1.5 + phase).sin() * 0.12;
-        transform.translation.y += bob;
+        transform.translation = monster.base + Vec3::Y * bob;
         // 慢速 yaw 旋转
         transform.rotate_y(0.4 * time.delta_secs());
     }
@@ -472,16 +479,16 @@ pub fn animate_avatar(
         // spawn_pretty 新尺寸 (1.4x): body y=1.25, head y=3.0, hair y=3.7, eyes y=3.05, legs y=0.42
         // flag pole y=4.5 (3.8m 高), flag y=6.5 (1.4x0.9x0.06), red strip y=6.0
         let offset = match i {
-            0 => Vec3::new(0.0, 1.25 + bob, 0.0),    // body (1.9m 高)
-            1 => Vec3::new(0.0, 3.0 + bob, 0.0),     // head
-            2 => Vec3::new(0.0, 3.7 + bob, 0.0),     // hair
-            3 => Vec3::new(-0.28, 3.05 + bob, -0.58),// L eye
-            4 => Vec3::new(0.28, 3.05 + bob, -0.58), // R eye
-            5 => Vec3::new(-0.28, 0.42, 0.0),        // L leg
-            6 => Vec3::new(0.28, 0.42, 0.0),         // R leg
-            7 => Vec3::new(0.0, 4.5 + bob, 0.0),     // flag pole (3.8m 高, 中心 y=4.5)
-            8 => Vec3::new(0.7, 6.5 + bob, 0.0),     // flag (orange, 加大后中心 y=6.5)
-            9 => Vec3::new(0.7, 6.0 + bob, 0.0),     // flag red strip (旗面下方)
+            0 => Vec3::new(0.0, 1.25 + bob, 0.0),     // body (1.9m 高)
+            1 => Vec3::new(0.0, 3.0 + bob, 0.0),      // head
+            2 => Vec3::new(0.0, 3.7 + bob, 0.0),      // hair
+            3 => Vec3::new(-0.28, 3.05 + bob, -0.58), // L eye
+            4 => Vec3::new(0.28, 3.05 + bob, -0.58),  // R eye
+            5 => Vec3::new(-0.28, 0.42, 0.0),         // L leg
+            6 => Vec3::new(0.28, 0.42, 0.0),          // R leg
+            7 => Vec3::new(0.0, 4.5 + bob, 0.0),      // flag pole (3.8m 高, 中心 y=4.5)
+            8 => Vec3::new(0.7, 6.5 + bob, 0.0),      // flag (orange, 加大后中心 y=6.5)
+            9 => Vec3::new(0.7, 6.0 + bob, 0.0),      // flag red strip (旗面下方)
             _ => Vec3::ZERO,
         };
         transform.translation = base + offset;

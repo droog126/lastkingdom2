@@ -1069,6 +1069,7 @@ pub fn tick_attack_state_system(
 /// - `BlockEnd` → `BlockState.stop()`
 /// - `ParryAttempt` → `ParryWindow.begin()`(短窗口,在 block 启动时短暂可触发)
 pub fn process_combat_intents_system(
+    fixed_tick: Res<FixedTick>,
     mut q: Query<(
         &mut InputBuffer,
         &mut AttackState,
@@ -1081,7 +1082,7 @@ pub fn process_combat_intents_system(
 ) {
     for (mut buf, mut att, mut block, mut parry, sta, stun, down) in q.iter_mut() {
         // 用 saturating::MAX 占位 (无时间信息时,保留全部)
-        let intents = buf.drain_fresh(u32::MAX);
+        let intents = buf.drain_fresh(fixed_tick.0);
         for intent in intents {
             match intent {
                 CombatIntent::Attack(kind) => {

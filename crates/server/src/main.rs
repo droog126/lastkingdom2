@@ -641,7 +641,7 @@ fn setup_world(
 
     use lk2_core::resource::ResourceKind;
     for k in ResourceKind::ALL {
-        let init = 50.min(k.max() / 2).max(10);
+        let init = k.demo_initial_amount();
         let _ = pool.force_add(*k, init);
     }
 

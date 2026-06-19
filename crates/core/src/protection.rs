@@ -104,10 +104,7 @@ pub fn can_attack(
 }
 
 /// 目标能否被攻击
-pub fn can_be_attacked(
-    target_protection: Option<&Protection>,
-    match_clock: &MatchClock,
-) -> bool {
+pub fn can_be_attacked(target_protection: Option<&Protection>, match_clock: &MatchClock) -> bool {
     if match_clock.phase.global_protection() {
         return false;
     }
@@ -158,7 +155,10 @@ pub fn ensure_opening_protection(
     if *initialized {
         return;
     }
-    if !matches!(match_clock.phase, crate::match_state::MatchPhase::AshOpening) {
+    if !matches!(
+        match_clock.phase,
+        crate::match_state::MatchPhase::AshOpening
+    ) {
         return;
     }
     let mut count = 0;
@@ -234,8 +234,8 @@ mod tests {
         assert!(!can_attack(Some(&prot), None, &c));
         // 同时也不能被打
         assert!(!can_be_attacked(Some(&prot), &c));
-        // 但别人可以打我
-        assert!(can_attack(None, Some(&prot), &c));
+        // Protected players cannot be targeted either.
+        assert!(!can_attack(None, Some(&prot), &c));
     }
 
     #[test]

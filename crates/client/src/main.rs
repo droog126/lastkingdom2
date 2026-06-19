@@ -46,8 +46,8 @@ use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::creature::{
-    CreatureSpawnerDone, player_attack_creatures as offline_player_attack_creatures,
-    spawn_creatures, update_creatures,
+    CreatureSpawnerDone, despawn_dead_creatures,
+    player_attack_creatures as offline_player_attack_creatures, spawn_creatures, update_creatures,
 };
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
@@ -63,7 +63,10 @@ use crate::controller_systems::{
     ControllerPlugin, auto_step_up, character_movement, collect_input, ground_detection,
     knockback_decay,
 };
-use crate::pretty::{PrettyConfig, animate_avatar, animate_monsters, follow_monster_cubes, follow_player_avatar, spawn_pretty};
+use crate::pretty::{
+    PrettyConfig, animate_avatar, animate_monsters, follow_monster_cubes, follow_player_avatar,
+    spawn_pretty,
+};
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
     on_damage_result, on_hit_confirm, on_knockback_event, trigger_visual_effects,
@@ -282,7 +285,7 @@ fn main() {
     }
 
     // ===== 4. 资源初始化 =====
-    app        .init_resource::<RenderConfig>()
+    app.init_resource::<RenderConfig>()
         .init_resource::<CameraAngles>()
         .init_resource::<SwordSwing>()
         .insert_resource(CameraMode::default())
@@ -401,6 +404,7 @@ fn main() {
             first_person_camera,
             held_weapon_follow,
             player_input,
+            sync_player_combat_anchor,
             offline_player_attack_creatures,
             animate_avatar,
             spawn_terrain_around_player,
@@ -444,7 +448,10 @@ fn main() {
     app.add_systems(Update, update_nest_marker_positions);
     // avatar / monster cube 跟随玩家位置（之前 follow_player_avatar 没注册，所有
     // avatar 都堆叠在 startup 时的位置，导致 camera 看不到移动后的 avatar）
-    app.add_systems(Update, (follow_player_avatar, follow_monster_cubes, animate_monsters).chain());
+    app.add_systems(
+        Update,
+        (follow_player_avatar, follow_monster_cubes, animate_monsters).chain(),
+    );
     // 离线模式本地战斗输入 (P4 闭环: I/O/L = Attack, U = Block, Y = Parry)
     app.add_systems(Update, collect_combat_input_offline);
     // interpolate_online_player / apply_authoritative_snapshot 之前被加
@@ -463,6 +470,7 @@ fn main() {
             update_nest_indicator, // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
             tick_recorder,
             periodic_screenshot,
+            despawn_dead_creatures,
             update_creatures,
             day_night_cycle,
             exit_on_esc,
@@ -903,7 +911,6 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-        Player,
     ));
 }
 
@@ -924,14 +931,14 @@ fn setup_light(mut commands: Commands) {
         DirectionalLight {
             illuminance: 6000.0,
             shadows_enabled: false,
-            color: Color::srgb(0.85, 0.88, 0.95),  // 中性蓝白, 不偏冷
+            color: Color::srgb(0.85, 0.88, 0.95), // 中性蓝白, 不偏冷
             ..default()
         },
         Transform::from_xyz(-40.0, 50.0, -25.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     // 环境光适度降低，让阴影区域更明显
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.92, 0.90, 0.85),  // 暖白, 不偏冷紫
+        color: Color::srgb(0.92, 0.90, 0.85), // 暖白, 不偏冷紫
         brightness: 0.6,
         affects_lightmapped_meshes: true,
     });
@@ -969,8 +976,8 @@ pub fn day_night_cycle(
     let dusk = (0.95, 0.55, 0.30);
     let night = (0.18, 0.25, 0.45); // 调淡 (从 0.05/0.07/0.18), 深夜也带点蓝
     // 单段 lerp: 白天 → 黄昏 (sunset_glow 高时) → 夜晚 (dayness 低时)
-// 默认 t=0.5 (正午) 时 w_dusk=1.0 → 整个画面都是橙色, 太丑
-// 改成: w_dusk *= 0.35 让默认偏白天, 只在 t~0.4/0.6 时才明显橙
+    // 默认 t=0.5 (正午) 时 w_dusk=1.0 → 整个画面都是橙色, 太丑
+    // 改成: w_dusk *= 0.35 让默认偏白天, 只在 t~0.4/0.6 时才明显橙
     let w_dusk = sunset_glow * 0.35;
     let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);
     let w_day = 1.0 - w_dusk - w_night;
@@ -987,7 +994,7 @@ pub fn day_night_cycle(
 
 #[allow(clippy::too_many_arguments)]
 fn setup_world(
-    _commands: Commands,
+    mut commands: Commands,
     mut game_world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
@@ -998,7 +1005,7 @@ fn setup_world(
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     for k in ResourceKind::ALL {
-        let init = 50.min(k.max() / 2).max(10);
+        let init = k.demo_initial_amount();
         let _ = pool.force_add(*k, init);
     }
 
@@ -1024,11 +1031,23 @@ fn setup_world(
     player.inventory.insert(ResourceKind::Wood, 0);
     player.inventory.insert(ResourceKind::Food, 5);
 
+    commands.spawn((
+        Player,
+        Transform::from_translation(player.pos),
+        GlobalTransform::default(),
+    ));
+
     info!(
         "🌍 世界已生成: {}³, 玩家在 {:?}",
         constant::WORLD_SIZE,
         spawn
     );
+}
+
+fn sync_player_combat_anchor(mut q: Query<&mut Transform, With<Player>>, player: Res<PlayerState>) {
+    for mut transform in q.iter_mut() {
+        transform.translation = player.pos;
+    }
 }
 
 /// 启动自检：跑 100 tick headless sim invariants
@@ -1169,12 +1188,12 @@ fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
 // ---------------------------------------------------------------------------
 
 fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>) {
-    use lk2_core::pvp::WeaponId;
     use lk2_core::combat::{
         AttackState as CombatAttackState, BlockState as CombatBlockState, Downed as CombatDowned,
         Health as CombatHealth, InputBuffer as CombatInputBuffer, Knockback as CombatKnockback,
         ParryWindow as CombatParryWindow, Stamina as CombatStamina, StunState as CombatStunState,
     };
+    use lk2_core::pvp::WeaponId;
     let iron = WeaponId::IronSword.stats();
     for entity in player.iter() {
         let mut cmd = commands.entity(entity);
@@ -1207,15 +1226,15 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
         // 第 2 批:V2 战斗组件 (HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer)
         // 表格包 §19.1 hp_max=100, §19.2 STA max=100
         cmd.insert((
-            CombatHealth::default(),                  // HP 100/100, 6 tick 无敌帧
-            CombatStamina::default(),                 // STA 100, 18/s 恢复
-            CombatBlockState::default(),              // 格挡 45% 减伤, 6/s 持续扣, 4/次冲击
-            CombatParryWindow::default(),             // 招架 0.16s 窗口, 0.40s 反击窗口
+            CombatHealth::default(),      // HP 100/100, 6 tick 无敌帧
+            CombatStamina::default(),     // STA 100, 18/s 恢复
+            CombatBlockState::default(),  // 格挡 45% 减伤, 6/s 持续扣, 4/次冲击
+            CombatParryWindow::default(), // 招架 0.16s 窗口, 0.40s 反击窗口
             CombatStunState::default(),
             CombatKnockback::default(),
             CombatAttackState::default(),
-            CombatDowned::default(),                  // 8s 倒地, 复活到 50% HP
-            CombatInputBuffer::new(0.16, 30),         // 0.16s 输入缓冲 (~5 tick)
+            CombatDowned::default(),          // 8s 倒地, 复活到 50% HP
+            CombatInputBuffer::new(0.16, 30), // 0.16s 输入缓冲 (~5 tick)
         ));
         info!(
             "⚔ PvP 组件已挂载（铁剑 reach={}, dmg={}）+ V2 战斗组件（HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer）",

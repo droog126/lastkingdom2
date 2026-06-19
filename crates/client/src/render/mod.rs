@@ -55,8 +55,8 @@ impl Default for RenderConfig {
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
             fog_color: Color::srgb(0.78, 0.85, 0.95), // 中亮蓝灰
-            fog_start: 80.0, // 50→80: 让 30m 内完全清晰, 80m 后才慢慢雾化
-            fog_end: 320.0,  // 200→320: 远景地形延伸到 ~250m 都还能看清
+            fog_start: 80.0,                          // 50→80: 让 30m 内完全清晰, 80m 后才慢慢雾化
+            fog_end: 320.0,                           // 200→320: 远景地形延伸到 ~250m 都还能看清
             auto_orbit: false,      // 默认玩家控制；--auto-demo 开启（loop.ps1 用）
             auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
             auto_orbit_distance: 14.0, // 8 太近被山挡，14 视野开阔
@@ -65,7 +65,7 @@ impl Default for RenderConfig {
             auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
             mouse_look: true,       // 默认开：鼠标转视角（FPS 标准）
             smooth_terrain: true,   // 默认开：scalar field + MC
-            smooth_passes: 2,       // 0→2: 让 smooth mesh 出 vertex color 立体感（iter_1070 平的山）
+            smooth_passes: 2, // 0→2: 让 smooth mesh 出 vertex color 立体感（iter_1070 平的山）
             ground_step_threshold: 0.85, // 低矮起伏直接走，高墙才挡
         }
     }
@@ -216,7 +216,7 @@ pub fn spawn_terrain_around_player(
             // 受光模式（unlit=false）：让 directional light 在山脊/山谷产生明暗变化，
             // 解决 iter_1020 那种"大块纯色 PowerPoint 板"问题。
             let mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.55, 0.68, 0.22),  // 黄绿, 配暖 ambient 不会染粉
+                base_color: Color::srgb(0.55, 0.68, 0.22), // 黄绿, 配暖 ambient 不会染粉
                 emissive: Color::srgb(0.06, 0.08, 0.03).into(),
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
@@ -1380,6 +1380,18 @@ pub fn auto_demo(
         }
         if *auto_frame == 242 {
             keys.release(KeyCode::KeyJ);
+        }
+        if *auto_frame == 300 || *auto_frame == 520 {
+            keys.press(KeyCode::KeyI);
+        }
+        if *auto_frame == 302 || *auto_frame == 522 {
+            keys.release(KeyCode::KeyI);
+        }
+        if *auto_frame == 360 {
+            keys.press(KeyCode::KeyK);
+        }
+        if *auto_frame == 362 {
+            keys.release(KeyCode::KeyK);
         }
         // t=8.0s: 再按 F（应失败：已有国家）
         if *auto_frame == 480 {

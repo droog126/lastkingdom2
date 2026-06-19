@@ -58,9 +58,12 @@ pub const PROTOCOL_ID: u64 = 0x1cbe_4f9e_d4a0_4c2b;
 /// assert_eq!(addr.port(),5000);
 /// ```
 pub fn server_listen_addr() -> SocketAddr {
-    let port: u16 =
-        std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_PORT);
+    let port = server_listen_port_from_env(std::env::var("LK2_PORT").ok().as_deref());
     SocketAddr::from(([0, 0, 0, 0], port))
+}
+
+fn server_listen_port_from_env(raw: Option<&str>) -> u16 {
+    raw.and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_PORT)
 }
 
 // ---------------------------------------------------------------------------
@@ -194,28 +197,22 @@ mod tests {
 
     #[test]
     fn server_listen_addr_default() {
-        // Without LK2_PORT set ->0.0.0.0:5000.
-        // SAFETY: cargo test runs unit tests in parallel by default, but
-        // env mutations on a const-named var are best-effort (this test
-        // only asserts the default port when the env var is unset).
-        unsafe {
-            std::env::remove_var("LK2_PORT");
-        }
-        let addr = server_listen_addr();
-        assert_eq!(addr.port(), DEFAULT_PORT);
-        assert!(addr.ip().is_unspecified());
+        assert_eq!(server_listen_port_from_env(None), DEFAULT_PORT);
+        assert_eq!(
+            server_listen_port_from_env(Some("not-a-port")),
+            DEFAULT_PORT
+        );
     }
 
     #[test]
     fn server_listen_addr_env_override() {
-        unsafe {
-            std::env::set_var("LK2_PORT", "7777");
-        }
+        assert_eq!(server_listen_port_from_env(Some("7777")), 7777);
+    }
+
+    #[test]
+    fn server_listen_addr_uses_unspecified_ip() {
         let addr = server_listen_addr();
-        assert_eq!(addr.port(), 7777);
-        unsafe {
-            std::env::remove_var("LK2_PORT");
-        }
+        assert!(addr.ip().is_unspecified());
     }
 
     #[test]

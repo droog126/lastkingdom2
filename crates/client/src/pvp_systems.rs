@@ -13,7 +13,6 @@ use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::Predicted;
-use lk2_core::clock::SimClock;
 use lk2_core::combat::{AttackType, CombatIntent, InputBuffer};
 use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{CombatReady, Health};
@@ -279,15 +278,17 @@ use crate::ui::ClientRunMode;
 
 pub fn collect_combat_input_offline(
     keys: Res<ButtonInput<KeyCode>>,
-    clock: Res<SimClock>,
+    tick: Res<FixedTick>,
     run_mode: Res<ClientRunMode>,
     mut q_player: Query<&mut InputBuffer, With<Player>>,
 ) {
     if *run_mode != ClientRunMode::Offline {
         return;
     }
-    let Ok(mut buf) = q_player.single_mut() else { return; };
-    let tick: u32 = clock.tick.try_into().unwrap_or(u32::MAX);
+    let Ok(mut buf) = q_player.single_mut() else {
+        return;
+    };
+    let tick = tick.0;
 
     // I = 轻击 (与 HUD 提示一致)
     if keys.just_pressed(KeyCode::KeyI) {

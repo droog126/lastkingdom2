@@ -132,7 +132,8 @@ impl MatchClock {
 
     /// 距离阶段结束的剩余秒数
     pub fn phase_remaining_secs(&self) -> f32 {
-        let end = match self.phase {
+        let phase = MatchPhase::from_wall_secs(self.wall_secs);
+        let end = match phase {
             MatchPhase::AshOpening => 300.0,
             MatchPhase::Wildland => 1080.0,
             MatchPhase::SovereignReveal => 2100.0,
@@ -198,11 +199,7 @@ pub fn advance_match_clock(
     let dt = time.delta_secs();
     clock.advance(dt);
     if let Some((from, to)) = clock.refresh_phase() {
-        phase_events.write(MatchPhaseChanged {
-            from,
-            to,
-            at_wall_secs: clock.wall_secs,
-        });
+        phase_events.write(MatchPhaseChanged { from, to, at_wall_secs: clock.wall_secs });
         info!(
             "[match] phase {} → {} at {:.1}s ({} left)",
             from.label_zh(),
@@ -227,8 +224,14 @@ mod tests {
         assert_eq!(MatchPhase::from_wall_secs(299.9), MatchPhase::AshOpening);
         assert_eq!(MatchPhase::from_wall_secs(300.0), MatchPhase::Wildland);
         assert_eq!(MatchPhase::from_wall_secs(1079.9), MatchPhase::Wildland);
-        assert_eq!(MatchPhase::from_wall_secs(1080.0), MatchPhase::SovereignReveal);
-        assert_eq!(MatchPhase::from_wall_secs(2099.9), MatchPhase::SovereignReveal);
+        assert_eq!(
+            MatchPhase::from_wall_secs(1080.0),
+            MatchPhase::SovereignReveal
+        );
+        assert_eq!(
+            MatchPhase::from_wall_secs(2099.9),
+            MatchPhase::SovereignReveal
+        );
         assert_eq!(MatchPhase::from_wall_secs(2100.0), MatchPhase::Endgame);
     }
 
@@ -263,5 +266,13 @@ mod tests {
         assert!((c.phase_remaining_secs() - 200.0).abs() < 0.5);
         c.wall_secs = 1500.0; // SovereignReveal
         assert!((c.phase_remaining_secs() - 600.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn phase_remaining_projects_from_wall_secs_even_before_refresh() {
+        let mut c = MatchClock::default();
+        assert_eq!(c.phase, MatchPhase::AshOpening);
+        c.wall_secs = 600.0;
+        assert!((c.phase_remaining_secs() - 480.0).abs() < 0.5);
     }
 }

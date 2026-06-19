@@ -31,7 +31,7 @@ use crate::clock::SimClock;
 use crate::monster::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::player::PlayerState;
-use crate::resource::GlobalResourcePool;
+use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
 
@@ -150,6 +150,18 @@ impl ScenarioState {
             move_to_started_at_tick: None,
         }
     }
+}
+
+pub fn award_gathered_resource(
+    pool: &mut GlobalResourcePool,
+    player: &mut PlayerState,
+    kind: ResourceKind,
+    amount: i64,
+) -> Result<i64, PoolError> {
+    let new_value = pool.try_add(kind, amount)?;
+    *player.inventory.entry(kind).or_insert(0) += amount;
+    player.blocks_gathered += amount as u32;
+    Ok(new_value)
 }
 
 // ---------------------------------------------------------------------------
@@ -425,12 +437,22 @@ pub fn simulate_player_actions(
         let b = game_world.get(x, y, z);
         if let Some((res, _)) = b.yields() {
             if b.is_solid() {
-                game_world.set(x, y, z, BlockType::Air);
-                let _ = pool.try_add(res, 1);
-                *player.inventory.entry(res).or_insert(0) += 1;
-                player.blocks_gathered += 1;
-                state.pending_gather_left -= 1;
-                info!("⛏ 采掘 {:?} (还 {} 次)", res, state.pending_gather_left);
+                match award_gathered_resource(&mut pool, &mut player, res, 1) {
+                    Ok(_) => {
+                        game_world.set(x, y, z, BlockType::Air);
+                        state.pending_gather_left -= 1;
+                        info!("⛏ 采掘 {:?} (还 {} 次)", res, state.pending_gather_left);
+                    }
+                    Err(err) => {
+                        warn!("[scenario] failed to award gathered {:?}: {}", res, err);
+                        state.pending_gather_left -= 1;
+                        warn!(
+                            "[scenario] skipped gather step for {:?} (还 {} 次)",
+                            res,
+                            state.pending_gather_left
+                        );
+                    }
+                }
             } else {
                 info!("方块不可采掘，找下一个");
                 // 走一格再试（先过滤掉 OOB，避免再触发 OUT OF BOUNDS 日志）
@@ -750,5 +772,32 @@ pub fn scenario_tick_recorder(
         {
             let _ = writeln!(f, "{}", line);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resource::ResourceKind;
+
+    #[test]
+    fn award_gathered_resource_reports_full_pool_without_stats() {
+        let mut pool = GlobalResourcePool::new();
+        let mut player = PlayerState::default();
+        pool.try_add(ResourceKind::Wood, ResourceKind::Wood.max()).unwrap();
+
+        let err =
+            award_gathered_resource(&mut pool, &mut player, ResourceKind::Wood, 1).unwrap_err();
+
+        assert!(matches!(
+            err,
+            PoolError::WouldExceedMax {
+                kind: ResourceKind::Wood,
+                ..
+            }
+        ));
+        assert_eq!(pool.get(ResourceKind::Wood), ResourceKind::Wood.max());
+        assert_eq!(player.blocks_gathered, 0);
+        assert_eq!(player.inventory.get(&ResourceKind::Wood), None);
     }
 }
