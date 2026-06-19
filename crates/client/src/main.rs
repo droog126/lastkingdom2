@@ -82,7 +82,7 @@ use crate::render::{
     underlay_follow_player, update_animal_indicator, update_nest_indicator,
     update_nest_marker_positions,
 };
-use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud};
+use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
 
 // ---- 重新导出 lk2-core PvP 数据（main.rs 里要直接用） ----
 use leafwing_input_manager::prelude::ActionState;
@@ -478,6 +478,7 @@ fn main() {
             simulation_tick,
             end_tick_system,
             update_hud,
+            update_tutorial_overlay, // ← 5s 倒计时 + 1s 淡出, 然后 despawn
             update_animal_indicator,
             update_nest_indicator, // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
             tick_recorder,

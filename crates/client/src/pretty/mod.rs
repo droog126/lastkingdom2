@@ -49,7 +49,11 @@ pub fn follow_ground_discs(
     player: Res<PlayerState>,
     game_world: Res<GameWorld>,
     mut q: Query<
-        (&mut Transform, Option<&GroundDiscOuter>, Option<&GroundDiscInner>),
+        (
+            &mut Transform,
+            Option<&GroundDiscOuter>,
+            Option<&GroundDiscInner>,
+        ),
         (Without<AvatarPart>, Without<MonsterCube>),
     >,
 ) {
@@ -115,14 +119,16 @@ pub fn spawn_pretty(
     {
         let ground_y = -0.5; // 玩家脚下 0.5m（相对玩家）
 
-        // 外圈大圆盘 (直径 8.0)
+        // 外圈大圆盘 (直径 12.0) — 8→12 让 disc 伸出玩家身体外，永远能看见自己位置
+        // alpha 0.65 让它不像石头, 像光圈
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(4.0, 0.10))),
+            Mesh3d(meshes.add(Cylinder::new(6.0, 0.10))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.32, 0.48, 0.20),
-                emissive: Color::srgb(0.02, 0.04, 0.015).into(),
+                base_color: Color::srgba(0.32, 0.48, 0.20, 0.65),
+                emissive: Color::srgb(0.20, 0.40, 0.10).into(), // 自发光让 disc 在阴影里也亮
                 perceptual_roughness: 0.95,
                 metallic: 0.0,
+                alpha_mode: AlphaMode::Blend,
                 ..default()
             })),
             Transform::from_translation(Vec3::new(
@@ -133,14 +139,15 @@ pub fn spawn_pretty(
             GroundDiscOuter,
         ));
 
-        // 内圈小圆盘 (直径 3.6) — 高 0.18m 让台阶明显
+        // 内圈小圆盘 (直径 5.0) — 3.6→5.0, 加高 0.1 让台阶明显
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(1.8, 0.10))),
+            Mesh3d(meshes.add(Cylinder::new(2.5, 0.10))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.45, 0.62, 0.28),
-                emissive: Color::srgb(0.03, 0.05, 0.02).into(),
+                base_color: Color::srgba(0.55, 0.75, 0.30, 0.85),
+                emissive: Color::srgb(0.30, 0.50, 0.15).into(),
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
+                alpha_mode: AlphaMode::Blend,
                 ..default()
             })),
             Transform::from_translation(Vec3::new(
@@ -176,10 +183,14 @@ pub fn spawn_pretty(
             Color::srgb(0.98, 0.82, 0.68),
             Vec3::new(0.0, 2.55, 0.0),
         );
-        info!("🧍 玩家 avatar (简版 body+head) 已 spawn at {:?}", player.pos);
+        info!(
+            "🧍 玩家 avatar (简版 body+head) 已 spawn at {:?}",
+            player.pos
+        );
     }
 
-    // ---- 怪物 cube（每只一种颜色） ----
+    // ---- 怪物（球体 + 颜色，5 种，5-15m 圆周，落地） ----
+    // 改 cube→sphere (半径 0.5) 让它看起来像生物, 不再像方块
     if cfg.show_monster_cubes {
         let monster_kinds = [
             (Color::srgb(0.5, 0.85, 0.2), "Snake"),
@@ -190,21 +201,27 @@ pub fn spawn_pretty(
         ];
         for (i, (color, _name)) in monster_kinds.iter().enumerate() {
             let angle = (i as f32) * 1.2566;
-            // 从 8-15m 缩到 3-5m，让 demo 怪物一定在玩家视野内（画面更满）
-            let r = 10.0 + (i as f32) * 1.8;
+            let r = 6.0 + (i as f32) * 1.5; // 6-12m 圆周，更靠近玩家
             let offset = Vec3::new(angle.cos() * r, 0.5, angle.sin() * r);
             let pos = player.pos + offset;
-            let entity = spawn_cube(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                pos,
-                Vec3::new(0.8, 1.2, 0.8),
-                *color,
-            );
-            commands.entity(entity).insert(MonsterCube { base: pos });
+            // 球体 + 自发光 + 稍大 (半径 0.5 → 直径 1m, 跟原 cube 0.8x1.2x0.8 体量一致)
+            let entity = commands
+                .spawn((
+                    Mesh3d(meshes.add(Sphere::new(0.5))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: *color,
+                        emissive: LinearRgba::from(*color) * 0.4, // 自发光 0.4x 颜色, 远处也能看见
+                        perceptual_roughness: 0.6,
+                        metallic: 0.0,
+                        ..default()
+                    })),
+                    Transform::from_translation(pos),
+                    MonsterCube { base: pos },
+                ))
+                .id();
+            let _ = entity;
         }
-        info!("👹 5 个怪物 cube 已 spawn");
+        info!("👹 5 个怪物球体已 spawn (6-12m 圆周, 朝 player 走)");
     }
 
     // ---- 云朵（白色大方块漂在天上） ----
@@ -394,8 +411,7 @@ pub fn follow_player_avatar(
     player: Res<PlayerState>,
     game_world: Res<GameWorld>,
 ) {
-    let ground_top =
-        effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+    let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
     // offset.y 是相对 player.pos 的偏移, 但 player.pos.y 跟地表不贴, 所以用 ground_top 替换基准 y
     for (mut t, part) in q.iter_mut() {
         t.translation = Vec3::new(player.pos.x, ground_top + part.offset.y, player.pos.z)
@@ -403,13 +419,32 @@ pub fn follow_player_avatar(
     }
 }
 
-/// Update 怪物 cube 位置 — xz 跟 spawn 时算的 base (圆周位置), y 用
-/// effective_ground_height(base.x, base.z) 让怪物贴地表, 不再悬空
+/// Update 怪物位置 — 朝玩家慢慢走 (P5 intent/commit AI 雏形)
+/// 距离 < 12m 时朝 player 方向走 0.6 m/s, 距离 > 12m 时回 base
+/// y 用 effective_ground_height 贴地
+/// 注意: 这里 *mut* MonsterCube 才能持续更新 base 字段 (不然每帧都从老 base 算, 怪物会瞬移回原位)
 pub fn follow_monster_cubes(
-    mut q: Query<(&mut Transform, &MonsterCube)>,
+    mut q: Query<(&mut Transform, &mut MonsterCube)>,
     game_world: Res<GameWorld>,
+    player: Res<PlayerState>,
+    time: Res<Time>,
 ) {
-    for (mut t, mc) in q.iter_mut() {
+    let dt = time.delta_secs();
+    for (mut t, mut mc) in q.iter_mut() {
+        // 朝玩家方向 (xz)
+        let to_player = player.pos - mc.base;
+        let dist = (to_player.x * to_player.x + to_player.z * to_player.z).sqrt();
+        let dir = if dist > 0.1 {
+            Vec3::new(to_player.x / dist, 0.0, to_player.z / dist)
+        } else {
+            Vec3::ZERO
+        };
+        // 12m 内朝 player 走, 12m 外不动 (保持原 base 圆周)
+        let speed = if dist < 12.0 { 0.6 } else { 0.0 };
+        let new_base = mc.base + dir * speed * dt;
+        // 不要走进玩家 1.5m 内 (避免穿模)
+        let new_dist = ((new_base.x - player.pos.x).powi(2) + (new_base.z - player.pos.z).powi(2)).sqrt();
+        mc.base = if new_dist < 1.5 { mc.base } else { new_base };
         let ground_top = effective_ground_height(&game_world, mc.base.x as i32, mc.base.z as i32);
         t.translation = Vec3::new(mc.base.x, ground_top + 0.5, mc.base.z);
     }

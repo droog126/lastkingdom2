@@ -32,6 +32,12 @@ pub struct HudStaText;
 #[derive(Component)]
 pub struct HudPhaseText;
 
+/// Tutorial overlay (顶部中央), 5s 后淡出
+#[derive(Component)]
+pub struct TutorialOverlay {
+    pub remaining_secs: f32,
+}
+
 /// 当前 quest chain 的激活任务 + 进度（左侧面板，紧贴左上角 HUD 下方）
 #[derive(Component)]
 pub struct HudObjectiveText;
@@ -134,6 +140,30 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
         Node { position_type: PositionType::Absolute, bottom: px(12), left: px(12), ..default() },
         HudFooter,
+    ));
+
+    // ---- Tutorial Overlay (5s 后淡出, 中心顶部) ----
+    // 玩家第一次进游戏立刻看见控制 + 目标, 5s 后淡出 (alpha 1→0 over 1s)
+    commands.spawn((
+        Text::new(
+            "WASD 移动  ·  鼠标左键 挖/攻击  ·  E 拾取\n\
+             F 建国家  ·  鼠标右键 防御  ·  1/2/3 换工具\n\
+             目标: 砍 10 木 → 建国家 → 收 30 食物 → 升人口 → 杀 5 怪 → 到山顶",
+        ),
+        TextFont { font: fonts.cn.clone(), font_size: 16.0, ..default() },
+        TextColor(Color::srgba(0.95, 0.95, 0.95, 1.0)),
+        TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(140),
+            left: px(0),
+            right: px(0),
+            margin: UiRect::horizontal(Val::Auto),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        TutorialOverlay { remaining_secs: 5.0 },
     ));
 
     commands.spawn((
@@ -480,5 +510,29 @@ pub fn update_hud(
             **text = String::new();
             flash.text.clear();
         }
+    }
+}
+
+/// Tutorial overlay 倒计时 + 淡出系统
+/// 5s 内保持 alpha 1.0, 然后 1s 内淡出到 0, 然后 despawn
+pub fn update_tutorial_overlay(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut TutorialOverlay, &mut TextColor)>,
+) {
+    for (entity, mut overlay, mut color) in q.iter_mut() {
+        overlay.remaining_secs -= time.delta_secs();
+        if overlay.remaining_secs <= 0.0 {
+            // 完全淡出后 despawn
+            commands.entity(entity).despawn();
+            continue;
+        }
+        // 5s 前 alpha=1.0, 1s 淡出
+        let alpha = if overlay.remaining_secs > 1.0 {
+            1.0
+        } else {
+            overlay.remaining_secs.max(0.0)
+        };
+        color.0 = color.0.with_alpha(alpha);
     }
 }
