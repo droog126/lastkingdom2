@@ -29,6 +29,38 @@ impl Default for PrettyConfig {
 #[derive(Component)]
 pub struct WaterMarker;
 
+/// 玩家脚下外圈深绿地盘（草地块）— 跟随玩家移动
+#[derive(Component)]
+pub struct GroundDiscOuter;
+
+/// 玩家脚下内圈亮绿地盘（"小广场"）— 跟随玩家移动
+#[derive(Component)]
+pub struct GroundDiscInner;
+
+/// 每帧把外圈+内圈圆盘跟到玩家 XZ 位置。
+/// 玩家在 setup_world 之后移动时，ground 不会"留在原地"漂浮。
+/// 用单个 query (Without<AvatarPart, MonsterCube>) 一次拿所有 ground disc entity,
+/// 循环内按 marker 区分 y 偏移 — 避免双 query B0001 conflict。
+pub fn follow_ground_discs(
+    player: Res<PlayerState>,
+    mut q: Query<
+        (&mut Transform, Option<&GroundDiscOuter>, Option<&GroundDiscInner>),
+        (Without<AvatarPart>, Without<MonsterCube>),
+    >,
+) {
+    let ground_y = -0.5;
+    for (mut t, is_outer, is_inner) in &mut q {
+        let dy = if is_outer.is_some() {
+            ground_y - 0.05
+        } else if is_inner.is_some() {
+            ground_y + 0.13
+        } else {
+            ground_y
+        };
+        t.translation = Vec3::new(player.pos.x, player.pos.y + dy, player.pos.z);
+    }
+}
+
 /// 玩家 avatar 各部件 marker + 相对玩家的偏移
 #[derive(Component)]
 pub struct AvatarPart {
@@ -73,14 +105,14 @@ pub fn spawn_pretty(
     }
 
     // ---- 玩家脚下"基地盘"（给画面一个明确的"地面"感，避免漂浮） ----
-    // 双层圆盘: 外圈深绿(直径5.5) 当草地, 内圈亮绿(直径3.5) 当"小广场"
-    // 高差加大: 内圈高 0.25m 让"台阶"明显
+    // 双层圆盘: 外圈深绿当草地, 内圈亮绿当"小广场"
+    // 加大: 外圈半径 4m (直径 8m), 内圈 1.8m, 高差 0.18m 让"台阶"明显
     {
         let ground_y = -0.5; // 玩家脚下 0.5m（相对玩家）
 
-        // 外圈大圆盘 (直径 5.5)
+        // 外圈大圆盘 (直径 8.0)
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(1.4, 0.08))),
+            Mesh3d(meshes.add(Cylinder::new(4.0, 0.10))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.32, 0.48, 0.20),
                 emissive: Color::srgb(0.02, 0.04, 0.015).into(),
@@ -93,11 +125,12 @@ pub fn spawn_pretty(
                 player.pos.y + ground_y - 0.05,
                 player.pos.z,
             )),
+            GroundDiscOuter,
         ));
 
-        // 内圈小圆盘 (直径 3.0) — 高 0.20m 让台阶明显
+        // 内圈小圆盘 (直径 3.6) — 高 0.18m 让台阶明显
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.55, 0.08))),
+            Mesh3d(meshes.add(Cylinder::new(1.8, 0.10))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.45, 0.62, 0.28),
                 emissive: Color::srgb(0.03, 0.05, 0.02).into(),
@@ -107,9 +140,10 @@ pub fn spawn_pretty(
             })),
             Transform::from_translation(Vec3::new(
                 player.pos.x,
-                player.pos.y + ground_y + 0.15,
+                player.pos.y + ground_y + 0.13,
                 player.pos.z,
             )),
+            GroundDiscInner,
         ));
     }
 

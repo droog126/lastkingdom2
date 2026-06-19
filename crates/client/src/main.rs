@@ -64,8 +64,8 @@ use crate::controller_systems::{
     knockback_decay,
 };
 use crate::pretty::{
-    PrettyConfig, animate_avatar, animate_monsters, follow_monster_cubes, follow_player_avatar,
-    spawn_pretty,
+    PrettyConfig, animate_avatar, animate_monsters, follow_ground_discs, follow_monster_cubes,
+    follow_player_avatar, spawn_pretty,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -450,7 +450,7 @@ fn main() {
     // avatar 都堆叠在 startup 时的位置，导致 camera 看不到移动后的 avatar）
     app.add_systems(
         Update,
-        (follow_player_avatar, follow_monster_cubes, animate_monsters).chain(),
+        (follow_player_avatar, follow_ground_discs, follow_monster_cubes, animate_monsters).chain(),
     );
     // 离线模式本地战斗输入 (P4 闭环: I/O/L = Attack, U = Block, Y = Parry)
     app.add_systems(Update, collect_combat_input_offline);
