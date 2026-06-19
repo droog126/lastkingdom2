@@ -62,7 +62,7 @@ pub fn follow_ground_discs(
         let dy = if is_outer.is_some() {
             ground_top - 0.05
         } else if is_inner.is_some() {
-            ground_top + 0.13
+            ground_top + 0.25 // 抬高 0.13→0.25, 让 disc 在 avatar 脚下凸出
         } else {
             ground_top
         };
@@ -122,7 +122,7 @@ pub fn spawn_pretty(
         // 外圈大圆盘 (直径 12.0) — 8→12 让 disc 伸出玩家身体外，永远能看见自己位置
         // alpha 0.65 让它不像石头, 像光圈
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(6.0, 0.10))),
+            Mesh3d(meshes.add(Cylinder::new(6.0, 0.20))), // 加厚 0.10→0.20 让台阶明显
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgba(0.32, 0.48, 0.20, 0.65),
                 emissive: Color::srgb(0.20, 0.40, 0.10).into(), // 自发光让 disc 在阴影里也亮
@@ -139,9 +139,9 @@ pub fn spawn_pretty(
             GroundDiscOuter,
         ));
 
-        // 内圈小圆盘 (直径 5.0) — 3.6→5.0, 加高 0.1 让台阶明显
+        // 内圈小圆盘 (直径 5.0) — 3.6→5.0, 加高 0.2 让台阶明显
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(2.5, 0.10))),
+            Mesh3d(meshes.add(Cylinder::new(2.5, 0.20))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgba(0.55, 0.75, 0.30, 0.85),
                 emissive: Color::srgb(0.30, 0.50, 0.15).into(),
@@ -152,7 +152,7 @@ pub fn spawn_pretty(
             })),
             Transform::from_translation(Vec3::new(
                 player.pos.x,
-                player.pos.y + ground_y + 0.13,
+                player.pos.y + ground_y + 0.25, // 抬高 0.13→0.25 让 disc 高出 avatar 脚下
                 player.pos.z,
             )),
             GroundDiscInner,
@@ -440,11 +440,11 @@ pub fn follow_monster_cubes(
             Vec3::ZERO
         };
         // 12m 内朝 player 走, 12m 外不动 (保持原 base 圆周)
-        let speed = if dist < 12.0 { 0.6 } else { 0.0 };
+        let speed = if dist < 12.0 { 0.4 } else { 0.0 }; // 0.6→0.4 慢一点
         let new_base = mc.base + dir * speed * dt;
-        // 不要走进玩家 1.5m 内 (避免穿模)
+        // 不要走进玩家 2.5m 内 (避免穿模 + 不挤压玩家)
         let new_dist = ((new_base.x - player.pos.x).powi(2) + (new_base.z - player.pos.z).powi(2)).sqrt();
-        mc.base = if new_dist < 1.5 { mc.base } else { new_base };
+        mc.base = if new_dist < 2.5 { mc.base } else { new_base };
         let ground_top = effective_ground_height(&game_world, mc.base.x as i32, mc.base.z as i32);
         t.translation = Vec3::new(mc.base.x, ground_top + 0.5, mc.base.z);
     }

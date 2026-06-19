@@ -142,7 +142,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         HudFooter,
     ));
 
-    // ---- Tutorial Overlay (5s 后淡出, 中心顶部) ----
+    // ---- Tutorial Overlay (5s 后淡出, 顶部居中) ----
     // 玩家第一次进游戏立刻看见控制 + 目标, 5s 后淡出 (alpha 1→0 over 1s)
     commands.spawn((
         Text::new(
@@ -150,17 +150,15 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
              F 建国家  ·  鼠标右键 防御  ·  1/2/3 换工具\n\
              目标: 砍 10 木 → 建国家 → 收 30 食物 → 升人口 → 杀 5 怪 → 到山顶",
         ),
-        TextFont { font: fonts.cn.clone(), font_size: 16.0, ..default() },
+        TextFont { font: fonts.cn.clone(), font_size: 18.0, ..default() },
         TextColor(Color::srgba(0.95, 0.95, 0.95, 1.0)),
+        TextLayout::new_with_justify(Justify::Center), // ← 关键: TextLayout 让 text 居中 (bevy 0.18 Justify)
         TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node {
             position_type: PositionType::Absolute,
             top: px(140),
-            left: px(0),
-            right: px(0),
-            margin: UiRect::horizontal(Val::Auto),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
+            left: px(60),  // 让出左上 HUD 区域
+            right: px(60), // 文字 100% width 居中显示
             ..default()
         },
         TutorialOverlay { remaining_secs: 5.0 },
