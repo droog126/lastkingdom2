@@ -22,7 +22,7 @@ mod greedy_mesh;
 use greedy_mesh::build_all_terrain_meshes_aabb;
 
 mod marching_cubes;
-mod scalar_field;
+pub mod scalar_field;
 mod smooth_mesh;
 
 /// 体素渲染配置

@@ -11,6 +11,8 @@ use bevy::prelude::*;
 use lk2_core::player::PlayerState;
 use lk2_core::world::{Biome, World as GameWorld};
 
+use crate::render::scalar_field::effective_ground_height;
+
 /// 视觉增强配置
 #[derive(Resource, Debug, Clone)]
 pub struct PrettyConfig {
@@ -37,27 +39,30 @@ pub struct GroundDiscOuter;
 #[derive(Component)]
 pub struct GroundDiscInner;
 
-/// 每帧把外圈+内圈圆盘跟到玩家 XZ 位置。
+/// 每帧把外圈+内圈圆盘贴到玩家脚下**地表**。
 /// 玩家在 setup_world 之后移动时，ground 不会"留在原地"漂浮。
+/// y 用 effective_ground_height(player.x, player.z) 而不是写死 player.y - 0.5,
+/// 这样无论玩家站在山顶还是水边, 圆盘都贴 solid 块顶。
 /// 用单个 query (Without<AvatarPart, MonsterCube>) 一次拿所有 ground disc entity,
 /// 循环内按 marker 区分 y 偏移 — 避免双 query B0001 conflict。
 pub fn follow_ground_discs(
     player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
     mut q: Query<
         (&mut Transform, Option<&GroundDiscOuter>, Option<&GroundDiscInner>),
         (Without<AvatarPart>, Without<MonsterCube>),
     >,
 ) {
-    let ground_y = -0.5;
+    let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
     for (mut t, is_outer, is_inner) in &mut q {
         let dy = if is_outer.is_some() {
-            ground_y - 0.05
+            ground_top - 0.05
         } else if is_inner.is_some() {
-            ground_y + 0.13
+            ground_top + 0.13
         } else {
-            ground_y
+            ground_top
         };
-        t.translation = Vec3::new(player.pos.x, player.pos.y + dy, player.pos.z);
+        t.translation = Vec3::new(player.pos.x, dy, player.pos.z);
     }
 }
 
@@ -383,9 +388,18 @@ fn spawn_cube(
 
 /// Update 玩家 avatar 位置（跟随 PlayerState）
 /// avatar 在 spawn 时存了相对 player.pos 的 offset，每帧 t.translation = player.pos + offset
-pub fn follow_player_avatar(mut q: Query<(&mut Transform, &AvatarPart)>, player: Res<PlayerState>) {
+/// 改用 effective_ground_height 贴地表, 避免 avatar 跟圆盘一起飘水
+pub fn follow_player_avatar(
+    mut q: Query<(&mut Transform, &AvatarPart)>,
+    player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
+) {
+    let ground_top =
+        effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+    // offset.y 是相对 player.pos 的偏移, 但 player.pos.y 跟地表不贴, 所以用 ground_top 替换基准 y
     for (mut t, part) in q.iter_mut() {
-        t.translation = player.pos + part.offset;
+        t.translation = Vec3::new(player.pos.x, ground_top + part.offset.y, player.pos.z)
+            + Vec3::new(part.offset.x, 0.0, part.offset.z);
     }
 }
 
