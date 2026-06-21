@@ -55,12 +55,14 @@ impl Default for RenderConfig {
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
             fog_color: Color::srgb(0.78, 0.85, 0.95), // 中亮蓝灰
-            fog_start: 80.0,                          // 50→80: 让 30m 内完全清晰, 80m 后才慢慢雾化
-            fog_end: 320.0,                           // 200→320: 远景地形延伸到 ~250m 都还能看清
+            fog_start: 130.0, // 50→80→130: 让 50m 内完全清晰, fog 退后让地形颜色显出来
+            fog_end: 360.0,   // 200→320→360: 远景还能看清
             auto_orbit: true, // 改默认=true: dev 模式也开 auto-orbit 俯瞰，让玩家能看见自己+周围
             // (不是 FirstPerson 贴脸后看见蓝天+cube 不知道在哪)
             auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
-            auto_orbit_distance: 18.0, // 14→18: 视野更宽，能看见周围地形+怪物
+            // 22m 水平 + 14m 高: 让 20m 圆周的树/石头/花都进视野，28m 远景山丘也看得到
+            // (之前 16.5+10.5 太近, 20m 树顶超出 FOV 上半, 山丘完全看不到)
+            auto_orbit_distance: 22.0,
             auto_walk: false,       // 默认玩家控制；--auto-demo 开启
             auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
             auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
@@ -214,14 +216,18 @@ pub fn spawn_terrain_around_player(
         let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
-            // 单一 material：vertex color 模式 + 平滑 terrain。
-            // 受光模式（unlit=false）：让 directional light 在山脊/山谷产生明暗变化，
-            // 解决 iter_1020 那种"大块纯色 PowerPoint 板"问题。
+            // 顶点色模式：base_color WHITE 让 mesh 顶点色直接显色。
+            // smooth_mesh::build_smooth_mesh 输出带 vertex color 的三角形 (smooth_mesh.rs:80-95)
             let mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.55, 0.68, 0.22), // 黄绿, 配暖 ambient 不会染粉
-                emissive: Color::srgb(0.06, 0.08, 0.03).into(),
+                base_color: Color::WHITE,
+                // 弱 emissive 让顶点色在阴影里也能透出来, 避免灯光把整片"洗蓝"
+                emissive: Color::srgb(0.10, 0.12, 0.08).into(),
+                // Marching Cubes normals are still rough; unlit keeps vertex colors stable
+                // and prevents bad normals from producing black triangle speckles.
+                unlit: true,
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
+                cull_mode: None,
                 ..default()
             });
             let mesh_handle = meshes.add(sm.mesh.clone());
@@ -383,24 +389,22 @@ pub struct TerrainChunk;
 pub fn setup_atmosphere(
     mut commands: Commands,
     cfg: Res<RenderConfig>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    _meshes: ResMut<Assets<Mesh>>,
+    _materials: ResMut<Assets<StandardMaterial>>,
     camera: Query<Entity, With<Camera3d>>,
 ) {
     // 雾
     // bevy 0.18: DistanceFog 组件挂在 camera 上
     use bevy::pbr::DistanceFog;
-    commands.insert_resource(ClearColor(cfg.sky_color));
+    commands.insert_resource(ClearColor(Color::srgb(0.20, 0.45, 0.78)));
 
     // 雾挂到主相机 (auto_orbit 也需要 fog)
     if let Ok(cam_entity) = camera.single() {
-        // visibility 250 = fog 在 250m 外才开始起作用 (近景完全清晰, 远景渐隐)
-        // 配合 cfg.fog_start=80, fog_end=320 给出"辽阔"的视觉感
         commands.entity(cam_entity).insert(DistanceFog {
             color: cfg.fog_color,
             directional_light_color: cfg.fog_color,
             directional_light_exponent: 2.0,
-            falloff: bevy::pbr::FogFalloff::from_visibility(250.0),
+            falloff: bevy::pbr::FogFalloff::Linear { start: cfg.fog_start, end: cfg.fog_end },
         });
     }
 }
@@ -1527,15 +1531,16 @@ pub fn first_person_camera(
 
     // auto-demo + auto-orbit：俯瞰 orbit 模式（之前这个分支不存在，玩家被第一人称贴脸，
     // 根本看不到自己的 avatar，所以 iter_85/90/96 的 player 维度都只拿 2-3 分）
-    // 相机绕玩家在水平面上慢转，抬高 25m 俯视，dist 默认 6.5m
+    // 相机绕玩家在水平面上慢转，水平 22m + 抬高 14m 俯视
+    // (22+14 是 2026-06-21 实测 iter_1450 看不到 20m 树/28m 山丘 → 拉远修复)
     if cfg.auto_orbit && !cfg.mouse_look {
         *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
         let a = *orbit_angle;
-        let target = player.pos + Vec3::Y * 1.4;
+        let target = player.pos - Vec3::Y * 1.25;
         let cam_pos = target
             + Vec3::new(
                 a.cos() * cfg.auto_orbit_distance,
-                14.0,
+                14.0, // 抬高让 20m 圆周树顶 (ground_y+5) 进入 FOV
                 a.sin() * cfg.auto_orbit_distance,
             );
         tf.translation = cam_pos;
