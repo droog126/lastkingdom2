@@ -2,47 +2,75 @@
 # Usage: powershell -File loop.ps1
 # Each loop: build (if needed) -> run 12s -> kill -> list new screenshots
 #
-# 默认 (2026-06-11 wire-network-and-loop 任务后): 启 lk2-server + lk2-client
-# 走 `--connect=127.0.0.1:5000` 双进程联机模式, 验证 client 能连 server
-# 跑 sim tick + 截图。
-# 单机模式 (--offline) 还在: 传 `-Offline` 切回, 或 `-NoServer` 启 client
-# 但不启 server (client --connect= 但没 server 在听, 会 connect 失败)。
+# Default: online mode starts lk2-server + lk2-client.
+# Client connects to 127.0.0.1:5000 unless -Offline or -NoServer is used.
+# The loop runs sim ticks and captures screenshots/state JSON.
+# Offline mode runs only lk2-client --offline --auto-demo.
+# -NoServer runs the client connect path without starting a server.
 
 param(
-    # 默认 30s: UDP connect 握手 + lightyear replication 第一次 tick 推到 client 端
-    # 需要 12~30s。wire-network-and-loop 任务早期 12s 没看到 [net] applied PlayerPos
-    # log 主要是 handshake 还没完成。30s 给 lightyear NetcodeClientPlugin + ReplicationReceiver
-    # 留足时间 (首次 connect + 首次 heartbeat + 首次 component tick = ~3 个 RTT)。
+    # Default 60s gives network startup and replication enough time.
+    # Earlier short loops missed initial replicated PlayerPos in online mode.
+    # Keep verbose lightyear logs unless RUST_LOG is already set.
+    # The loop may be shortened with -Seconds for offline visual checks.
     [int]$Seconds = 60,
     [string]$RUST_LOG = $(if ($env:RUST_LOG) { $env:RUST_LOG } else { "info,lightyear_replication=debug,lightyear_connection=debug,lightyear_send=debug,lightyear_receive=debug" }),
-    # 默认 SkipBuild=true: 冷编译 lightyear 0.26 + leafwing 需要 22+ 分钟,
-    # 超过 30 min cap 装不下, 也撞 lightyear + bevy 0.18 API drift 编译错。
-    # 只在 binary 已经编过、增量 build 时才用 -Build
+    # Build is enabled by default here; cold builds can be slow.
+    # Use -SkipBuild only when binaries already exist and no code changed.
+    # Incremental dev builds are usually fast with dynamic linking.
     [switch]$SkipBuild = $false,
-    # 启用 Bevy 动态链接 (开发期增量 build 快, binary 会动态加载 lib 而非静态链接)
+    # Enable Bevy dynamic linking for faster dev builds.
     [switch]$Dynamic = $true,
     [switch]$Online = $false,
-    # 联机模式 (默认 $true): 同时启 lk2-server + lk2-client --connect=...
-    # 离线模式: 只启 lk2-client --offline (旧行为)
+    # Online mode starts lk2-server and lk2-client together.
+    # Offline mode starts only lk2-client --offline.
     [switch]$Offline = $false,
-    # 不启 server (默认 false). 用 -NoServer 跑 client --connect= 但没 server,
-    # 用于 debug client transport 行为。
+    # NoServer starts the client connect path without a local server.
+    # Useful for debugging client transport behavior.
     [switch]$NoServer = $false,
-    # 联机模式 client 连的地址 (默认 127.0.0.1:5000, 跟 lk2-core::transport::DEFAULT_PORT)
+    # Server address used by online client mode.
     [string]$ServerAddr = "127.0.0.1:5000",
-    # 强制 FirstPerson（替代 auto-orbit 俯瞰）— 调试 FP 体验用
+    # Force first-person camera for FP debugging.
     [switch]$FirstPerson = $false
 )
 
 $ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
 
+# Decision gate: require the previous iter_NN/decision.md before another loop.
+# This keeps the closed-loop AI workflow honest and reviewable.
+# Disable only for urgent debug or CI dry runs.
+[switch]$RequireDecision = $true
+
+if ($RequireDecision) {
+    $prevDirs = Get-ChildItem "$ProjectRoot\screenshots\iter_*" -Directory -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($prevDirs.Count -gt 0) {
+        $prevIterDir = $prevDirs[0].FullName
+        $prevIterName = $prevDirs[0].Name
+        $prevDecision = Join-Path $prevIterDir "decision.md"
+        if (-not (Test-Path $prevDecision)) {
+            Write-Host "" -ForegroundColor Red
+            Write-Host "=============================================" -ForegroundColor Red
+            Write-Host "  FAIL: $prevIterName/decision.md MISSING" -ForegroundColor Red
+            Write-Host "=============================================" -ForegroundColor Red
+            Write-Host " Previous loop ($prevIterName) has no decision.md; refusing next loop." -ForegroundColor Red
+            Write-Host " Write $prevDecision, then run loop.ps1 again." -ForegroundColor Red
+            Write-Host " Template: $prevIterDir\decision.template.md" -ForegroundColor Red
+            Write-Host " See Agent.md decision template and completion criteria." -ForegroundColor Red
+            Write-Host "" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host ">>> [OK] previous $prevIterName/decision.md exists -- decision gate green" -ForegroundColor Green
+    }
+}
+
 $UseOffline = (-not $Online) -and (-not $NoServer)
 if ($Offline) { $UseOffline = $true }
 
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
-# RUST_LOG 已在 param 默认值里塞好 (默认读 $env:RUST_LOG 否则用 lightyear debug 默认)
-# 强制写一次到 env var, 给子进程继承
+# RUST_LOG was selected in the param default; pass it to child processes.
+# 瀵搫鍩楅崘娆庣濞嗏€冲煂 env var, 缂佹瑥鐡欐潻娑氣柤缂佈勫
 $env:RUST_LOG = $RUST_LOG
 $rustSysroot = (& rustc --print sysroot).Trim()
 $runtimePaths = @(
@@ -52,15 +80,20 @@ $runtimePaths = @(
 ) | Where-Object { Test-Path $_ }
 $env:PATH = (($runtimePaths + @($env:PATH)) -join ";")
 
-# 0. Kill any old lk2-client / lk2-server processes (loop 之前清场)
+# 0. Kill any old lk2-client / lk2-server processes before the loop.
 Get-Process -Name "lk2-client","lk2-server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-# 1. Build (default 跳过, 改用 -Build flag 显式打开)
-$featureArgs = if ($Dynamic) { "--features dev-dynamic-linking" } else { "" }
+# 1. Build targets unless -SkipBuild is set.
+# Key point: when client uses bevy dynamic_linking, lk2-core must enable it too.
+# Otherwise core may link static Bevy while client links dynamic Bevy, causing LNK2019.
+# Cargo unifies dependency features, but not crate-local feature names automatically.
+$featureArgs = if ($Dynamic) { "--features dev-dynamic-linking,lk2-core/dev-dynamic-linking" } else { ""
+    # Static linking path: core does not need dev-dynamic-linking.
+}
 if ($Dynamic) { Write-Host ">>> dynamic linking ON <<<" -ForegroundColor Cyan }
 
-# 1a. 决定 build 哪些 crate. 联机模式需要 client + server, 离线模式只需 client
+# 1a. Decide build targets: online needs client+server; offline only needs client.
 $buildTargets = if ($UseOffline -or $NoServer) { @("lk2-client") } else { @("lk2-client","lk2-server") }
 $serverExePath = Join-Path $ProjectRoot "target\debug\lk2-server.exe"
 $clientExePath = Join-Path $ProjectRoot "target\debug\lk2-client.exe"
@@ -70,7 +103,7 @@ $needClientBuild = -not (Test-Path $clientExePath)
 if (-not $SkipBuild) {
     foreach ($t in $buildTargets) {
         Write-Host ">>> cargo build -p $t $featureArgs ..." -ForegroundColor Cyan
-        $buildOutput = cmd /c "cargo build -p $t $featureArgs" 2>&1
+        $buildOutput = cmd /c "cargo build -p $t $featureArgs 2>&1"
         $buildOutput | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) {
             Write-Host ">>> BUILD FAILED for $t" -ForegroundColor Red
@@ -78,15 +111,15 @@ if (-not $SkipBuild) {
         }
     }
 } else {
-    # 就算 -SkipBuild, 缺 binary 时也要建 (本会话第一次跑 loop 常见)
+    # Even with -SkipBuild, build missing binaries on the first loop run.
     if ($needClientBuild) {
         Write-Host ">>> client binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
-        cmd /c "cargo build -p lk2-client $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        cmd /c "cargo build -p lk2-client $featureArgs 2>&1" | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
     }
     if ($needServerBuild) {
         Write-Host ">>> server binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
-        cmd /c "cargo build -p lk2-server $featureArgs" 2>&1 | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        cmd /c "cargo build -p lk2-server $featureArgs 2>&1" | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
     }
 }
@@ -97,7 +130,7 @@ if (-not (Test-Path $clientExePath)) {
     exit 1
 }
 
-# 决定模式
+# 閸愬啿鐣惧Ο鈥崇础
 $serverProc = $null
 $serverLog = Join-Path $ProjectRoot "screenshots\loop_server.log"
 $clientLog = Join-Path $ProjectRoot "screenshots\loop_run.log"
@@ -118,46 +151,46 @@ if ($UseOffline) {
     $clientArgs = @("--connect=$ServerAddr","--auto-demo")
     Write-Host ">>> Mode: ONLINE (server + client --connect=$ServerAddr) ${Seconds}s ..." -ForegroundColor Green
 
-    # 启 server 后台
+    # Start server in the background.
     Write-Host ">>> Starting lk2-server (background) ..." -ForegroundColor Cyan
     $serverProc = Start-Process -FilePath $serverExePath -PassThru -NoNewWindow `
         -RedirectStandardOutput $serverLog -RedirectStandardError "$serverLog.err"
-    # 等 server 跑完 self_check (大约 1 秒, 给 3 秒 buffer)
+    # Give server self_check a short startup buffer.
     Start-Sleep -Seconds 3
 }
 
 if ($FirstPerson) {
     $clientArgs += "--first-person"
-    Write-Host ">>> FirstPerson ON (camera 在玩家眼睛位置 + 鼠标视角)" -ForegroundColor Cyan
+    Write-Host ">>> FirstPerson ON (camera at player eye height + mouse look)" -ForegroundColor Cyan
 }
 
-# 启 client (前台, 让截图 + state JSON 写出来)
+# Start client in the foreground so screenshots and state JSON are written.
 Write-Host ">>> Starting lk2-client ($mode) ..." -ForegroundColor Cyan
 
-# bevy 0.18 dev-dynamic-linking: binary 编译时记下一个 hash dll 文件名 (e.g. bevy_dylib-aac6d477a9e16431.dll)
-# 每次 cargo build dll 文件名会变 (新 hash), 但 binary 期待的还是老 hash → 弹窗 "找不到 bevy_dylib-XXX.dll"
-# 修法: 启动 client 前, 把最新的 bevy_dylib-*.dll 拷贝到 binary 期待的名字 + 同目录
+# Bevy dev-dynamic-linking records a hashed bevy_dylib name in the binary.
+# If the newest dll hash changes, Windows may fail to locate the expected dll.
+# Keep aliases in target/debug so the client can start reliably.
 $debugDir = Split-Path -Parent $clientExePath
 $expectedName = $null
-# 1) 找 binary 期待哪个 dll 名字 (用 Get-PEDependency 或扫 .rdata)
-#    简化: 直接从 binary 错误日志提取; 这里是固定从错误信息拿
+# 1) Find the newest bevy_dylib-*.dll in the binary directory.
+#    This is enough for the local dev loop.
 $candidateDlls = Get-ChildItem "$debugDir\bevy_dylib-*.dll" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
 if ($candidateDlls.Count -gt 0) {
     $latestDll = $candidateDlls[0].FullName
-    # binary 期待的名字: 它是 bevy build.rs 在编译时 hardcode, 同一个 hash 每次 build 都一样
-    # 取最新 dll 的"基名"作为新名字 (同一个 build session 内的 dll hash 一致)
+    # The binary expects a hashed dll name from Bevy build.rs.
+    # Use the newest dll basename from this build session.
     $latestBaseName = $candidateDlls[0].Name
     Write-Host ">>> found bevy dll: $latestBaseName" -ForegroundColor DarkGray
-    # 2) 同时保留 bevy_dylib.dll 别名 (cargo 自带)
+    # 2) 閸氬本妞傛穱婵堟殌 bevy_dylib.dll 閸掝偄鎮?(cargo 閼奉亜鐢?
     $vanilla = Join-Path $debugDir "bevy_dylib.dll"
     if (-not (Test-Path $vanilla)) {
         Copy-Item $latestDll $vanilla -Force
-        Write-Host ">>> copied → bevy_dylib.dll (vanilla alias)" -ForegroundColor DarkGray
+        Write-Host ">>> copied bevy_dylib.dll (vanilla alias)" -ForegroundColor DarkGray
     }
-    # 3) 关键: binary 期待 hashed name (aac6d477a9e16431 是上次 build 的)
-    #    如果最新 dll hash 跟 binary 期待的不一致, 需要在 binary 目录里留 hashed name 版本
-    #    (binary 通过 bevy_dylib-<hash>.dll 这个名字 lookup)
-    #    trick: 用 $PATH 探测 — 把 debugDir 加到 PATH 让 Windows 自动找到
+    # 3) Keep the hashed dll name available in target/debug.
+    #    If newest dll hash and binary expectation diverge, PATH/debugDir handles lookup.
+    #    (binary 闁俺绻?bevy_dylib-<hash>.dll 鏉╂瑤閲滈崥宥呯摟 lookup)
+    #    The debug directory is on PATH before client launch.
 }
 
 $clientProc = Start-Process -FilePath $clientExePath -ArgumentList $clientArgs -PassThru -NoNewWindow `
@@ -173,7 +206,7 @@ Start-Sleep -Seconds 1
 # 3. List results
 Write-Host ""
 Write-Host "=== Latest screenshots ===" -ForegroundColor Yellow
-# iter_NN.png 在 screenshots/iter_NN/iter_NN.png (子目录)
+# iter_NN.png is copied to screenshots/iter_NN/iter_NN.png.
 Get-ChildItem "$ProjectRoot\screenshots\iter_*\iter_*.png" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 5 |
     ForEach-Object { "  $($_.FullName.Substring($ProjectRoot.Length + 1)) ($($_.Length / 1KB | ForEach-Object {'{0:N1}KB' -f $_}))" }
@@ -184,7 +217,7 @@ Get-ChildItem "$ProjectRoot\screenshots\state_*.json" -ErrorAction SilentlyConti
     Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
     ForEach-Object { "  $($_.Name)" }
 
-# 联机模式多输出 server 端关键 log, 帮 AI 验证"client 连上 server"
+# In online mode, also print key server log lines for connection validation.
 if ($mode -in @("online","noserver")) {
     Write-Host ""
     Write-Host "=== Server log (last 8 lines) ===" -ForegroundColor Yellow
@@ -193,8 +226,8 @@ if ($mode -in @("online","noserver")) {
     } else {
         Write-Host "  (no server log file at $serverLog)" -ForegroundColor DarkGray
     }
-    # 检查 server self_check / tick 关键标记
-    $serverCheckOk = (Test-Path $serverLog) -and (Select-String -Path $serverLog -Pattern "自检.*100 tick 全部通过|Server UDP socket bound" -Quiet)
+    # Check server self_check / tick markers.
+    $serverCheckOk = (Test-Path $serverLog) -and (Select-String -Path $serverLog -Pattern "閼奉亝顥?*100 tick 閸忋劑鍎撮柅姘崇箖|Server UDP socket bound" -Quiet)
     if ($serverCheckOk) {
         Write-Host "  [OK] server self-check passed + socket bound" -ForegroundColor Green
     } else {
@@ -208,7 +241,7 @@ Write-Host ">>> Done. AI: read latest screenshot + state JSON, decide next round
 #4. SCORE protocol reminder -- find latest iter and drop decision.template.md
 $latestIterDir = $null
 $latestIterName = $null
-# 按 LastWriteTime 排序 (不是 Name — 'iter_99' 字符串 > 'iter_100' 字符串, 数字排序会跑偏)
+# Sort by LastWriteTime; iter_99 vs iter_100 string ordering is misleading.
 $ssDirs = Get-ChildItem "$ProjectRoot\screenshots\iter_*" -Directory -ErrorAction SilentlyContinue |
  Sort-Object LastWriteTime -Descending
 if ($ssDirs.Count -gt0) {
@@ -217,39 +250,49 @@ if ($ssDirs.Count -gt0) {
  $prevIterName = if ($ssDirs.Count -gt1) { $ssDirs[1].Name } else { "" }
  $decTplPath = Join-Path $latestIterDir "decision.template.md"
  $decTpl = @"
-# $latestIterName -- DECISION PLACEHOLDER (AI must fill)
-
-> 本文件由 loop.ps1 自动生成,提醒下一轮 AI必填 `decision.md`。
->详见 `Agent.md` § 十 SCORE协议。
-
-##必填字段
-
-\`\`\`markdown
 # $latestIterName decision
 
-score: sky=X player=Y terrain=Z decor=W hud=V total=N.N /10
-vs_prev: $prevIterName -- [升 / 平 /降] -- 一句话原因(要引用 diff.json 的 delta)
+task: [loop goal]
+result: pass / partial / fail
+
+score:
+- sky: X/10
+- player: X/10
+- terrain: X/10
+- decor: X/10
+- hud: X/10
+- gameplay: X/10
+- total: X.X/10
+
+vs_prev:
+- visual: improved / same / worse, with reason
+- state: key delta from diff.json$(if ($prevIterName) { " compared with $prevIterName" } else { "" })
+
 problems:
- - [具体问题1]
- - [具体问题2]
- - [具体问题3]
-plan:
- - [下一轮改什么文件 / 函数]
- - [改完之后预期哪个维度 +X 分]
-\`\`\`
+- [concrete problem 1]
+- [concrete problem 2]
+- [concrete problem 3]
 
-##评分提示 (0-10)
+tests:
+- [command run]
+- [result]
 
-- Sky: 全黑=0,浅蓝=5,渐变+雾=10
-- Player:不可见=0, 小黑点=5, avatar清晰=10
-- Terrain: 全无体素=0,边缘可见=5,平台+树+水+怪物=10
-- Decor: 全空=0,1 类=5, 多类聚集=10
-- HUD: 方块=0, 可读但占太多=5,紧凑不挡视线=10
+next:
+- [single best next action]
+
+## Scoring guide (0-10)
+
+- Sky: readable sky; not black/white screen.
+- Player: player is visible with direction and height cues.
+- Terrain: terrain is recognizable and spawn point is standable.
+- Decor: trees, water, animals, monsters, and props have layers.
+- HUD: readable and not blocking the key scene.
+- Gameplay: auto demo moves state forward and changes are explainable.
 "@
  Set-Content -Path $decTplPath -Value $decTpl -Encoding UTF8
  Write-Host ""
  Write-Host "=== SCORE reminder written: $decTplPath ===" -ForegroundColor Cyan
- Write-Host ">>> NEXT AI: 必须给本轮0-10 打分 +写 decision.md (不要跳过!)" -ForegroundColor Yellow
+ Write-Host ">>> NEXT AI: score this loop from 0-10 and write decision.md before continuing." -ForegroundColor Yellow
 } else {
  Write-Host ""
  Write-Host "[warn] no iter_* directory found -- can't write decision.template.md" -ForegroundColor Yellow

@@ -36,6 +36,13 @@ Get-ChildItem screenshots\iter_*\iter_*.png | Sort LastWriteTime -Descending | S
 
 Legacy note: the old root `minecraft_bevy` package and `launchers/` wrappers were removed. Do not route new work through them.
 
+## Modeling assets
+
+- If AI needs to create or modify 3D models, use Blender through Python scripts.
+- Blender launcher path: `F:\BLENDER\blender-launcher.exe`
+- Preferred command shape: `& "F:\BLENDER\blender-launcher.exe" --background --python tools\build_all_models.py`
+- Keep generated assets reproducible from scripts under `tools/`; do not commit `__pycache__`, Blender backups, or local absolute-path config.
+
 ## Code style
 
 - `rustfmt.toml` — `max_width = 100`, `comment_width = 100`, `tab_spaces = 4`, `use_field_init_shorthand = true`, `newline_style = "Unix"`

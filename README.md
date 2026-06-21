@@ -1,213 +1,87 @@
-# 万国起源：最后一国 钻石版
+# Wanguo Origins: Last Kingdom Diamond
 
-Bevy 0.18.1 上的 **体素 sim + 渲染 demo workspace**。
+Bevy 0.18.1 voxel simulation and rendering demo with a closed-loop AI iteration workflow.
 
-> 状态：仓库根现在是 **virtual workspace**。废弃的 `minecraft_bevy` 根包已经删除；请改用 `lk2-client` / `lk2-server` 入口。
+The core workflow is: run the game, capture screenshots and state JSON, inspect the result, decide the next change, then build and run again. Read [Agent.md](./Agent.md) before making code changes.
 
----
-
-## 零、闭环 AI 迭代
-
-> 这是核心设计：游戏自己跑、自己截屏、截屏可以读出来评估、再改代码再跑。
-
-```
-   ┌──────────┐     每 5 秒      ┌──────────┐
-   │ 运行 .exe │───────────────▶│iter_N.png│
-   └──────────┘                  └──────────┘
-        ▲                              │
-        │                              ▼
-   修代码 (main.rs / render.rs)   AI 读图 (Read tool)
-        │                              │
-        └────── 下一次迭代 ◀───────────┘
-```
-
-每一张 iter_N.png 都是带 HUD 的全屏截屏（1280×720）。HUD 直接显示 tick 数、玩家坐标、4 个关键资源、怪物数、invariant 状态。
-
----
-
-## 一、目录
-
-```
-F:\rustProject\lastkingdom2\
-├── Cargo.toml                  # workspace 根（无 package）
-├── crates/
-│   ├── core/                   # 共享 sim / 数据 / 协议
-│   ├── client/                 # Bevy 客户端（渲染 / HUD / 输入 / 截图）
-│   └── server/                 # headless 服务端（权威 sim / UDP）
-├── screenshots/                # 闭环截图
-│   └── iter_NN/iter_NN.png     # 每轮截图
-└── README.md
-```
-
----
-
-## 二、运行
+## Quick Start
 
 ```powershell
-$env:BEVY_DISABLE_ACCESSIBILITY = "1"
-$env:RUST_LOG = "info"
+cargo build --workspace
+$env:BEVY_DISABLE_ACCESSIBILITY="1"
+$env:RUST_LOG="info"
 cargo run -p lk2-client -- --offline
 ```
 
-联机模式：
+Closed-loop run:
 
 ```powershell
-cargo run -p lk2-server
-cargo run -p lk2-client -- --connect=127.0.0.1:5000
+.\loop.ps1
 ```
 
-### 自动 demo 行为
+Useful validation entry points:
 
-启动后**不需要任何键盘输入**，游戏自己跑：
-
-| 阶段 | 时间 | 行为 |
-| --- | --- | --- |
-| 启动自检 | 0-1s | 跑 100 tick headless，全部 invariants 通过则 ✅ |
-| 自动 demo | 持续 | 玩家每 1.2 秒自动向随机方向走 1 格，遇 solid 向上飞 |
-| 自动 orbit | 持续 | 相机绕玩家旋转，每 5 秒转 110° |
-| 自动截图 | 每 5s | 保存 `screenshots/iter_NN.png`（NN 递增） |
-| HUD 更新 | 每 3s | 左上角文字 overlay 更新 sim 状态 |
-
-### 手动操作（可选）
-
-| 键 | 动作 |
-| --- | --- |
-| `WASD` / `Space` / `Shift` | 玩家 1 格移动（不能穿 solid） |
-| `G` | 采集当前方块 |
-| `F` | 创国（消耗 wood） |
-| `U` | 升级人口上限 |
-| `J` | 攻击 4 格内怪物 |
-| `T` | 加速 60 tick |
-| `ESC` | 退出 |
-
----
-
-## 三、闭环 AI 迭代演示
-
-`screenshots/` 目录保留每次迭代的截图。实际迭代过程：
-
-| Iter | 改动 | 结果 |
-| --- | --- | --- |
-| 1 | 基础体素地形 + sky 蓝 + 600 块 | 全是棕色，没水/玩家/动效 |
-| 2 | 加双灯、加 ambient 1.2 | 不再黑面，水/光可见 |
-| 3 | 拉近相机 24→12，加水+玩家+5 怪物 cube | 玩家仍藏在山后 |
-| 4 | 加 HUD overlay (英文) | tick/资源实时可见 |
-| 5 | 加旗杆+红旗+5 树+6 朵云 | 玩家从远处也能看到 |
-| 6 | 玩家 demo 模式可"飞"过障碍 | 玩家升到 y=20 高空，截图完美 |
-
-每一轮都遵循：
-1. 看上一轮截图（`Read` 工具看 `iter_NN.png`）
-2. 找问题（"玩家看不到" / "水不够" / "阴影全黑"）
-3. 改 1-2 个函数
-4. 重建（`cargo build`）
-5. 重跑 + 截图
-6. 对比
-
----
-
-## 四、模块架构
-
-### 资源池（守恒总线）
-- 25 种资源 + max 上限
-- `try_add` / `try_sub` / `force_add`
-- `apply_transfer(pool, transfer)`：按 src 分类
-  - 收入类（Regen/Init/PlayerGather/MonsterDrop）→ `force_add`
-  - 支出类（Nation）→ `try_sub`
-- `verify_conservation()` 每 tick 断言
-
-### 3 个生态群落
-| Biome | Z 区间 | 专属矿石 |
-| --- | --- | --- |
-| Desert | z ≥ 2n/3 | SunstoneOre |
-| Tundra | n/3 ≤ z < 2n/3 | FrostcoreOre |
-| Jungle | z < n/3 | LivingRoot |
-
-### 国家系统
-- 最多 8 面国旗
-- 创国成本 `[10, 15, 20, 25, 30, 40, 50, 60]` 灵魂
-- 人口上限 5 → 10 → 15 → 20
-- HP=100，归零解散 + 释放 founding_order
-
-### 怪物生态
-- 5 王国 × 3-6 小巢 上限
-- 80 小巢 + 1500 个体上限
-- 5 分钟无活动 → 休眠
-- 死亡：`food * 25%` 转 soul
-
-### 体素渲染（render/mod.rs）
-- 玩家周围 R 半径内的 solid 块 → spawn PBR cube
-- 共享 cube mesh + 8 种 BlockType 的 shared materials
-- 距离衰减 fog (start=18, end=48)
-
-### 视觉增强（pretty/mod.rs）
-- 水面（半透明蓝 plane，sea level+0.45）
-- 玩家 avatar（身体/头/发/眼/腿/旗杆/红旗）— 9 个 cube
-- 5 种怪物（按颜色区分 Snake/FrostElf/SandWurm/Treant/AetherWraith）
-- 5 棵树（深棕树干 + 绿色 2x2x2 树冠）
-- 6 朵云（白色半透明 cube，y=24-26）
-
-### Tick 闭环 debug（ai/mod.rs）
-- 50 单元测试覆盖
-- 5 个 invariants：资源守恒 / 怪物计数 / 国旗上限 / 玩家出界 / tick 时长
-- 5 个 anomaly 检测：决策振荡 / tick spike / 资源跳变 / 结构异变 / 国家瞬灭
-- snapshot digest 便于重放
-
----
-
-## 五、入口
-
-- 离线 demo / 截图闭环：`cargo run -p lk2-client -- --offline`
-- 服务端：`cargo run -p lk2-server`
-- 客户端联机：`cargo run -p lk2-client -- --connect=127.0.0.1:5000`
-- 闭环脚本：`.\loop.ps1`
-- 旧根包 `minecraft_bevy`、`launchers/native`、`launchers/wasm` 已删除
-
-## 六、性能
-
-- ~50 单元测试全过（50 passed, 0 failed）
-- 启动自检 100 tick headless < 1ms
-- 运行时 ~150-170 fps（AMD RX 7700 XT + 32³ 体素）
-
----
-
-## 七、迭代历史
-
-### 修过的 bug
-| # | 描述 | 修复 |
-| --- | --- | --- |
-| 1 | `apply_transfer` 把 `PlayerGather` 当"转出"，池子里没资源 | 改按 src 分类 |
-| 2 | `idx()` i32 → usize 类型错 | `as usize` |
-| 3 | `Wood` BlockType 和 ResourceKind 同名歧义 | `ResourceKind as R` |
-| 4 | `visible_blocks` 半开区间少 1 元素 | `..+1` |
-| 5 | u64 vs i64 比较 | `as i64` |
-| 6 | `try_sub(0)` 失败 | `if x > 0` |
-| 7 | `dissolve` 不释放 founding_order | BTreeSet.remove |
-| 8 | HUD 中文字体方块 | 改英文 |
-| 9 | GameWorld 没 init_resource | 加 init_resource |
-| 10 | 资源 force_add(50) 越界 | `min(50, max/2)` |
-| 11 | 玩家 demo 卡在方块里 | 飞行模式：被挡时向上找空位 |
-
-### 后续可加
-- 战争迷雾（球形 + 阻挡衰减）
-- 怪物 AI 决策（当前只有 MonsterMove 占位）
-- 资源点再生具体逻辑
-- save/load
-- 阴影（当前 `shadows_enabled = false` 性能优先）
-
----
-
-## 八、依赖
-
-```toml
-bevy = "0.18.1"
-broccoli = "0.6.6"  # 锁定（0.6.7 触发 compt 1.10 转换）
-compt = ">=1.9, <1.10"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+```powershell
+.\tdd.ps1 -Scope core
+.\tdd.ps1 -Scope changed
+.\tdd.ps1 -Scope workspace
+.\tdd.ps1 -Scope fmt
 ```
 
-### 编译环境
-- rustup 1.89.0-x86_64-pc-windows-gnu（msvc 装不下，gnu 够用）
-- D:\cargo\config.toml 走 rsproxy.cn 镜像
-- `BEVY_DISABLE_ACCESSIBILITY=1`
+## Project Layout
 
+- `crates/core/src/` - shared simulation, rules, protocol, world, AI, resources, combat, terrain
+- `crates/client/src/` - Bevy client, rendering, HUD, input, screenshots, offline auto-demo
+- `crates/server/src/` - headless server, self-check, authoritative simulation, UDP entry point
+- `assets/` - art assets and generated GLB models
+- `assets/procedural/pretty/` - generated visual models
+- `assets/procedural/eco/` - generated ecology models
+- `tools/` - Python scripts for Blender model generation and asset validation
+- `scenarios/` - scenario JSON scripts
+- `screenshots/` - closed-loop output, ignored by Git except archived material
+- `docs/` and `document/` - design notes and architecture plans
+- `loop.ps1` - build/run/capture closed-loop driver
+- `tdd.ps1` - validation command wrapper
+- `Agent.md` - AI-agent operating manual
+
+## Closed-Loop Output
+
+Each loop writes an iteration directory like:
+
+- `screenshots/iter_NN/iter_NN.png`
+- `screenshots/iter_NN/final_state.json`
+- `screenshots/iter_NN/decision.template.md`
+- `screenshots/iter_NN/decision.md` after AI review
+
+The next iteration should not proceed without a completed `decision.md`.
+
+## Modeling Workflow
+
+Model generation must be reproducible from Python scripts and Blender. Use:
+
+```powershell
+& "F:\BLENDER\blender-launcher.exe" --background --python tools\build_all_models.py
+& "F:\BLENDER\blender-launcher.exe" --background --python tools\create_eco_models.py
+```
+
+After generating models, validate assets:
+
+```powershell
+python tools\validate_pretty_glbs.py
+python tools\verify_poly_budget.py
+```
+
+Do not commit Python caches, Blender backup files, temporary exports, or local absolute-path config.
+
+## Development Rules
+
+- Use Bevy 0.18.1 APIs such as `Mesh3d` and `MeshMaterial3d`.
+- Do not use deprecated `PbrBundle` or `MaterialMeshBundle`.
+- Share mesh and material handles for repeated block types.
+- Throttle logs in systems that run every tick.
+- Prefer tests in `crates/core` for game rules and state transitions.
+- Keep changes small and tied to the current task.
+
+## Current Status Signals
+
+The demo has visible terrain, player, HUD, monsters, ecology objects, resources, and observer state. The latest loop state should be judged from the newest `screenshots/iter_*` directory, not from stale README claims.

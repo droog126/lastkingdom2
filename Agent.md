@@ -102,7 +102,40 @@ Rust 约束：
 
 ---
 
-## 5. 验证命令
+## 5. 建模与美术资产
+
+需要生成或修改 3D 模型时，必须使用 Blender 的 Python 脚本流程，不要手工在编辑器里改完再让仓库状态不可复现。
+
+本机 Blender 启动器固定为：
+
+```powershell
+F:\BLENDER\blender-launcher.exe
+```
+
+推荐命令格式：
+
+```powershell
+& "F:\BLENDER\blender-launcher.exe" --background --python tools\build_all_models.py
+& "F:\BLENDER\blender-launcher.exe" --background --python tools\create_eco_models.py
+```
+
+建模规则：
+
+- 新模型优先放在 `assets/procedural/pretty/` 或 `assets/procedural/eco/`
+- 生成脚本放在 `tools/`，让模型可以从脚本重新生成
+- 修改模型时同步更新对应 `MANIFEST.json`
+- 生成后运行资产验证脚本：
+
+```powershell
+python tools\validate_pretty_glbs.py
+python tools\verify_poly_budget.py
+```
+
+不要提交 `__pycache__/`、临时导出文件、Blender 自动备份文件或本机绝对路径配置。需要在代码里引用模型时，使用 Bevy asset server 的仓库相对路径。
+
+---
+
+## 6. 验证命令
 
 按改动范围选择最小验证集。
 
@@ -151,7 +184,7 @@ TDD backlog 和测试分层见 `document/tdd.md`。
 
 ---
 
-## 6. 闭环运行
+## 7. 闭环运行
 
 视觉、玩法、客户端体验、自动 demo 相关任务必须跑闭环。
 
@@ -180,7 +213,7 @@ $env:RUST_LOG="info"
 
 ---
 
-## 7. decision.md 模板
+## 8. decision.md 模板
 
 每轮闭环结束后写：
 
@@ -220,7 +253,7 @@ next:
 
 ---
 
-## 8. 闭环评分重点
+## 9. 闭环评分重点
 
 视觉维度：
 
@@ -239,7 +272,7 @@ next:
 
 ---
 
-## 9. 项目结构速查
+## 10. 项目结构速查
 
 - `crates/core/src/`：共享逻辑，TDD 首选位置
 - `crates/client/src/main.rs`：Bevy client 入口、HUD、截图、offline demo
@@ -252,7 +285,7 @@ next:
 
 ---
 
-## 10. 常见坑
+## 11. 常见坑
 
 - `cargo build` 不带 package/feature 会拖慢 Bevy 开发链路
 - dev 阶段 client/server build 必须带 `--features dev-dynamic-linking`
@@ -266,7 +299,7 @@ next:
 
 ---
 
-## 11. 完成标准
+## 12. 完成标准
 
 一个任务完成必须同时满足：
 

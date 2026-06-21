@@ -76,13 +76,15 @@ use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::creature::{CreatureSpawnerDone, update_creatures};
+use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{SimRole, advance_demo_tick};
+use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
+use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
 // ---- 服务端 crate 内部模块的导出 ----
@@ -232,6 +234,7 @@ fn main() {
         .init_resource::<GlobalResourcePool>()
         .init_resource::<NationRegistry>()
         .init_resource::<MonsterEcosystem>()
+        .init_resource::<EcoCycle>()
         .init_resource::<TickObserver>()
         .init_resource::<TickRecorder>()
         .init_resource::<CreatureSpawnerDone>()
@@ -259,16 +262,20 @@ fn main() {
         // (原因: Replicate on_insert 钩子只对 connect 之后才注册的 client 生效,
         //  在 connect 前挂 Replicate 会被漏掉, client 收不到初始复制)。
         .add_observer(replicate_player_for_connected)
-        // ====== Update ======
+        // ====== Update (presentation-free helpers) ======
+        .add_systems(Update, update_creatures)
+        // ====== FixedUpdate (authority sim) ======
+        .configure_sets(
+            FixedUpdate,
+            (SimSet::Interaction, SimSet::ScoreAndAudit, SimSet::Snapshot).chain(),
+        )
         .add_systems(
-            Update,
+            FixedUpdate,
             (
-                simulation_tick,
-                end_tick_system,
-                tick_recorder,
-                update_creatures,
-            )
-                .chain(),
+                simulation_tick.in_set(SimSet::Interaction),
+                end_tick_system.in_set(SimSet::ScoreAndAudit),
+                tick_recorder.in_set(SimSet::Snapshot),
+            ),
         )
         // ====== FixedUpdate (server PvP) ======
         .add_systems(
@@ -633,6 +640,7 @@ fn setup_world(
     mut game_world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
+    mut eco: ResMut<EcoCycle>,
 ) {
     // 默认 preset (跟原来一致)
     let pipeline = lk2_core::world::terrain::presets::by_name("default");
@@ -650,6 +658,10 @@ fn setup_world(
         constant::SEA_LEVEL + 1,
         constant::WORLD_SIZE / 2,
     ]);
+    *eco = EcoCycle::demo_at(Vec2::new(
+        constant::WORLD_SIZE as f32 * 0.5,
+        constant::WORLD_SIZE as f32 * 0.5,
+    ));
 
     info!("🌍 世界已生成: {}³ (server)", constant::WORLD_SIZE);
 }
@@ -659,6 +671,7 @@ fn self_check(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
     info!(">>> 服务端启动自检 100 tick ...");
@@ -667,6 +680,7 @@ fn self_check(
         &pool,
         &nations,
         &monsters,
+        &eco,
         &mut obs,
         [
             constant::WORLD_SIZE / 2,
@@ -697,17 +711,19 @@ fn port_from_env() -> u16 {
 // ============================================================================
 
 fn simulation_tick(
-    time: Res<Time>,
+    fixed_time: Res<Time<Fixed>>,
     mut clock: ResMut<SimClock>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
+    mut eco: ResMut<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
-    let _ = advance_demo_tick(
-        &time,
+    let _ = advance_fixed_authority_tick(
+        fixed_time.delta_secs(),
         &mut clock,
         &mut pool,
         &mut monsters,
+        &mut eco,
         &mut obs,
         SimRole::ServerAuthority,
     );
@@ -754,6 +770,7 @@ fn tick_recorder(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
 ) {
@@ -770,6 +787,7 @@ fn tick_recorder(
         &pool,
         &nations,
         &monsters,
+        &eco,
         &obs,
         &game_world,
         SimRole::ServerAuthority.into(),
