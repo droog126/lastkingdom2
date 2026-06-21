@@ -173,12 +173,7 @@ impl Default for BlockState {
     fn default() -> Self {
         // 表格包 §18.3 橡木圆盾: 格挡 45, 稳定 35
         // 减伤 45% / 每秒扣 6 STA / 每次受击扣 4 STA
-        Self {
-            blocking: false,
-            drain_per_sec: 6.0,
-            damage_reduction: 0.45,
-            per_hit_cost: 4.0,
-        }
+        Self { blocking: false, drain_per_sec: 6.0, damage_reduction: 0.45, per_hit_cost: 4.0 }
     }
 }
 
@@ -311,11 +306,7 @@ pub struct StunState {
 
 impl Default for StunState {
     fn default() -> Self {
-        Self {
-            stunned: false,
-            stun_timer: 0.0,
-            source: StunSource::None,
-        }
+        Self { stunned: false, stun_timer: 0.0, source: StunSource::None }
     }
 }
 
@@ -383,12 +374,7 @@ pub struct Knockback {
 
 impl Default for Knockback {
     fn default() -> Self {
-        Self {
-            direction: Vec3::ZERO,
-            magnitude: 0.0,
-            remaining_secs: 0.0,
-            total_secs: 0.0,
-        }
+        Self { direction: Vec3::ZERO, magnitude: 0.0, remaining_secs: 0.0, total_secs: 0.0 }
     }
 }
 
@@ -464,7 +450,11 @@ pub enum CombatEvent {
     /// 攻击被招架
     Parried { attacker: Entity, defender: Entity },
     /// 硬直触发
-    Stunned { entity: Entity, source: StunSource, duration_secs: f32 },
+    Stunned {
+        entity: Entity,
+        source: StunSource,
+        duration_secs: f32,
+    },
     /// 击退施加
     Knockback { victim: Entity, magnitude: f32 },
 }
@@ -527,9 +517,9 @@ pub fn resolve_hit(
     defender_stamina: &mut Stamina,
     defender_knockback: &mut Knockback,
     attacker_pos: Vec3,
-    attacker_forward: Vec3,
+    _attacker_forward: Vec3,
     defender_pos: Vec3,
-    reach: f32,
+    _reach: f32,
 ) -> (Vec<CombatEvent>, f32) {
     let mut events = Vec::new();
     let raw = weapon_damage * attack.damage_multiplier();
@@ -538,10 +528,7 @@ pub fn resolve_hit(
     if defender_parry.try_parry() {
         defender_parry.consume_on_success();
         // 攻击者 stun 0.6s (表格包 §18.2 / 招架反击窗口)
-        events.push(CombatEvent::Parried {
-            attacker,
-            defender,
-        });
+        events.push(CombatEvent::Parried { attacker, defender });
         events.push(CombatEvent::Stunned {
             entity: attacker,
             source: StunSource::Parried,
@@ -554,10 +541,7 @@ pub fn resolve_hit(
     // 2) 格挡 → 减伤 + 扣 STA
     if defender_block.blocking {
         let actual = defender_block.apply_hit(raw, defender_stamina);
-        events.push(CombatEvent::Blocked {
-            attacker,
-            defender,
-        });
+        events.push(CombatEvent::Blocked { attacker, defender });
         events.push(CombatEvent::DamageDealt {
             attacker,
             victim: defender,
@@ -568,21 +552,13 @@ pub fn resolve_hit(
         if matches!(attack, AttackType::Heavy) {
             let dir = (defender_pos - attacker_pos).normalize_or_zero();
             defender_knockback.apply(dir, 0.5, 0.20);
-            events.push(CombatEvent::Knockback {
-                victim: defender,
-                magnitude: 0.5,
-            });
+            events.push(CombatEvent::Knockback { victim: defender, magnitude: 0.5 });
         }
         return (events, actual);
     }
 
     // 3) 命中 (无招架无格挡)
-    events.push(CombatEvent::DamageDealt {
-        attacker,
-        victim: defender,
-        attack,
-        damage: raw,
-    });
+    events.push(CombatEvent::DamageDealt { attacker, victim: defender, attack, damage: raw });
 
     // 击退
     if attack.knockback_strength() > 0.0 {
@@ -630,11 +606,7 @@ pub struct Health {
 impl Default for Health {
     fn default() -> Self {
         // 表格包 §19.1: hp_max 默认 100
-        Self {
-            current: 100.0,
-            max: 100.0,
-            invuln_until_tick: 0,
-        }
+        Self { current: 100.0, max: 100.0, invuln_until_tick: 0 }
     }
 }
 
@@ -701,12 +673,7 @@ impl Default for Downed {
     fn default() -> Self {
         // 表格包 §4 downed_bleedout=45s (公开赛救援窗)
         // MVP 默认 8s (够 demo 用,长线改 45s)
-        Self {
-            downed: false,
-            timer: 0.0,
-            total_secs: 8.0,
-            revive_hp_ratio: 0.5,
-        }
+        Self { downed: false, timer: 0.0, total_secs: 8.0, revive_hp_ratio: 0.5 }
     }
 }
 
@@ -789,7 +756,13 @@ pub struct AttackState {
 
 impl AttackState {
     /// 开始一次攻击 (返回是否成功 — STA 够、没在 stun/down 才允许)
-    pub fn try_start(&mut self, kind: AttackType, stamina: &Stamina, stun: &StunState, downed: &Downed) -> bool {
+    pub fn try_start(
+        &mut self,
+        kind: AttackType,
+        stamina: &Stamina,
+        stun: &StunState,
+        downed: &Downed,
+    ) -> bool {
         if self.current.is_some() {
             return false; // 已经在攻击中
         }
@@ -804,13 +777,8 @@ impl AttackState {
             AttackType::Thrust => (AttackPhase::Windup, 0.10),
             AttackType::Heavy => (AttackPhase::Windup, 0.18),
         };
-        self.current = Some(ActiveAttack {
-            kind,
-            phase,
-            phase_timer: phase_secs,
-            phase_secs,
-            hit_apps: 0,
-        });
+        self.current =
+            Some(ActiveAttack { kind, phase, phase_timer: phase_secs, phase_secs, hit_apps: 0 });
         true
     }
 
@@ -947,368 +915,366 @@ impl InputBuffer {
 
 pub mod systems {
 
-use bevy::prelude::*;
-use super::*;
-use crate::pvp::{FixedTick, WeaponStats};
+    use super::*;
+    use crate::pvp::{FixedTick, WeaponStats};
+    use bevy::prelude::*;
 
-// ---------------------------------------------------------------------------
-// 1. regen_stamina — 每 tick 恢复 STA (除战斗姿态 / stun 中)
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // 1. regen_stamina — 每 tick 恢复 STA (除战斗姿态 / stun 中)
+    // ---------------------------------------------------------------------------
 
-/// 每 tick 恢复 Stamina
-///
-/// 战斗姿态 (`StunState.stunned` / `Downed.downed`) 时恢复减半,模拟喘气。
-pub fn regen_stamina_system(
-    fixed_time: Res<Time<Fixed>>,
-    mut q: Query<(&mut Stamina, Option<&StunState>, Option<&Downed>)>,
-) {
-    let dt = fixed_time.delta_secs();
-    for (mut sta, stun, downed) in q.iter_mut() {
-        let in_combat = stun.map(|s| s.stunned).unwrap_or(false)
-            || downed.map(|d| d.downed).unwrap_or(false);
-        if in_combat {
-            // 战斗/倒地中 → regen 减半
-            sta.current = (sta.current + sta.regen_per_sec * 0.5 * dt).min(sta.max);
-        } else {
-            sta.regen(dt);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 2. tick_parry_window — 招架窗口倒计时
-// ---------------------------------------------------------------------------
-
-/// 每 tick 倒计时 ParryWindow
-pub fn tick_parry_window_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut ParryWindow>) {
-    let dt = fixed_time.delta_secs();
-    for mut p in q.iter_mut() {
-        p.tick(dt);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 3. tick_stun — 硬直倒计时
-// ---------------------------------------------------------------------------
-
-/// 每 tick 倒计时 StunState
-pub fn tick_stun_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut StunState>) {
-    let dt = fixed_time.delta_secs();
-    for mut s in q.iter_mut() {
-        s.tick(dt);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 4. tick_knockback — 击退推 entity Transform
-// ---------------------------------------------------------------------------
-
-/// 每 tick 把 Knockback 速度加到 entity 的 Transform.translation
-///
-/// 注: 真实物理由 PvPController / kinematic body 处理,本 system 只算位置 delta。
-/// MVP 简化: 直接 translate(velocity * dt),Y 不动(避免飞天)。
-pub fn tick_knockback_system(
-    fixed_time: Res<Time<Fixed>>,
-    mut q: Query<(&mut Knockback, &mut Transform)>,
-) {
-    let dt = fixed_time.delta_secs();
-    for (mut kb, mut xf) in q.iter_mut() {
-        let v = kb.tick(dt);
-        if v == Vec3::ZERO {
-            continue;
-        }
-        xf.translation.x += v.x * dt;
-        xf.translation.z += v.z * dt;
-        // Y 不动 — 击退不抬高玩家 (避免浮空)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 5. tick_downed — 倒地倒计时,归 0 时自动复活到 50% HP
-// ---------------------------------------------------------------------------
-
-/// 每 tick 倒计时 Downed;归 0 时调用 Health.heal 复活
-pub fn tick_downed_system(
-    fixed_time: Res<Time<Fixed>>,
-    mut q: Query<(&mut Downed, &mut Health)>,
-) {
-    let dt = fixed_time.delta_secs();
-    for (mut down, mut hp) in q.iter_mut() {
-        if down.tick(dt) {
-            // 复活: HP 恢复到 max * revive_ratio
-            let target = hp.max * down.revive_hp_ratio;
-            let need = (target - hp.current).max(0.0);
-            hp.heal(need);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 6. tick_attack_state — 推进 Windup/Active/Recovery 三阶段
-// ---------------------------------------------------------------------------
-
-/// 每 tick 推进 AttackState 三阶段 (Windup → Active → Recovery → None)
-pub fn tick_attack_state_system(
-    fixed_time: Res<Time<Fixed>>,
-    mut q: Query<&mut AttackState>,
-) {
-    let dt = fixed_time.delta_secs();
-    for mut att in q.iter_mut() {
-        att.tick(dt);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 7. process_combat_intents — 把 InputBuffer 的 CombatIntent 落到状态
-// ---------------------------------------------------------------------------
-
-/// 把 InputBuffer 里的 CombatIntent 应用到对应组件
-///
-/// - `Attack(Light/Thrust/Heavy)` → 调 `AttackState.try_start`(扣 STA)
-/// - `BlockStart` → `BlockState.start()`
-/// - `BlockEnd` → `BlockState.stop()`
-/// - `ParryAttempt` → `ParryWindow.begin()`(短窗口,在 block 启动时短暂可触发)
-pub fn process_combat_intents_system(
-    fixed_tick: Res<FixedTick>,
-    mut q: Query<(
-        &mut InputBuffer,
-        &mut AttackState,
-        &mut BlockState,
-        &mut ParryWindow,
-        &Stamina,
-        &StunState,
-        &Downed,
-    )>,
-) {
-    for (mut buf, mut att, mut block, mut parry, sta, stun, down) in q.iter_mut() {
-        // 用 saturating::MAX 占位 (无时间信息时,保留全部)
-        let intents = buf.drain_fresh(fixed_tick.0);
-        for intent in intents {
-            match intent {
-                CombatIntent::Attack(kind) => {
-                    let _ = att.try_start(kind, sta, stun, down);
-                }
-                CombatIntent::BlockStart => {
-                    block.start();
-                    // 招架窗口在 block 启动时短暂开启 — 给玩家"举盾 + 精确时点"
-                    parry.begin();
-                }
-                CombatIntent::BlockEnd => {
-                    block.stop();
-                }
-                CombatIntent::ParryAttempt => {
-                    parry.begin();
-                }
+    /// 每 tick 恢复 Stamina
+    ///
+    /// 战斗姿态 (`StunState.stunned` / `Downed.downed`) 时恢复减半,模拟喘气。
+    pub fn regen_stamina_system(
+        fixed_time: Res<Time<Fixed>>,
+        mut q: Query<(&mut Stamina, Option<&StunState>, Option<&Downed>)>,
+    ) {
+        let dt = fixed_time.delta_secs();
+        for (mut sta, stun, downed) in q.iter_mut() {
+            let in_combat = stun.map(|s| s.stunned).unwrap_or(false)
+                || downed.map(|d| d.downed).unwrap_or(false);
+            if in_combat {
+                // 战斗/倒地中 → regen 减半
+                sta.current = (sta.current + sta.regen_per_sec * 0.5 * dt).min(sta.max);
+            } else {
+                sta.regen(dt);
             }
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// 8. process_attack_hits — Active 阶段 sweep_hits,resolve_hit,扣 HP
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // 2. tick_parry_window — 招架窗口倒计时
+    // ---------------------------------------------------------------------------
 
-/// 在 AttackState.current 是 Active 阶段时,扫周围 Hitbox entities,resolve_hit,扣 HP。
-///
-/// 设计要点 (dev order §4 验收):
-/// - "命中判定不依赖视觉剑轨单帧" → 整个 Active 期内都判定
-/// - "两个玩家本地/局域测试能互相攻击" → 任何带 Health+Hitbox+Transform 的 entity 都可被命中
-/// - "格挡能降低伤害" / "招架窗口" → 由被命中方组件在 resolve_hit 中处理
-///
-/// 范围搜索: 用 `attacker.translation` 在 XZ 平面 8m 内筛 candidate,然后 sweep_hits。
-pub fn process_attack_hits_system(
-    fixed_tick: Res<FixedTick>,
-    mut queries: ParamSet<(
-        Query<(
-            Entity,
-            &Transform,
+    /// 每 tick 倒计时 ParryWindow
+    pub fn tick_parry_window_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut ParryWindow>) {
+        let dt = fixed_time.delta_secs();
+        for mut p in q.iter_mut() {
+            p.tick(dt);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 3. tick_stun — 硬直倒计时
+    // ---------------------------------------------------------------------------
+
+    /// 每 tick 倒计时 StunState
+    pub fn tick_stun_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut StunState>) {
+        let dt = fixed_time.delta_secs();
+        for mut s in q.iter_mut() {
+            s.tick(dt);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 4. tick_knockback — 击退推 entity Transform
+    // ---------------------------------------------------------------------------
+
+    /// 每 tick 把 Knockback 速度加到 entity 的 Transform.translation
+    ///
+    /// 注: 真实物理由 PvPController / kinematic body 处理,本 system 只算位置 delta。
+    /// MVP 简化: 直接 translate(velocity * dt),Y 不动(避免飞天)。
+    pub fn tick_knockback_system(
+        fixed_time: Res<Time<Fixed>>,
+        mut q: Query<(&mut Knockback, &mut Transform)>,
+    ) {
+        let dt = fixed_time.delta_secs();
+        for (mut kb, mut xf) in q.iter_mut() {
+            let v = kb.tick(dt);
+            if v == Vec3::ZERO {
+                continue;
+            }
+            xf.translation.x += v.x * dt;
+            xf.translation.z += v.z * dt;
+            // Y 不动 — 击退不抬高玩家 (避免浮空)
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 5. tick_downed — 倒地倒计时,归 0 时自动复活到 50% HP
+    // ---------------------------------------------------------------------------
+
+    /// 每 tick 倒计时 Downed;归 0 时调用 Health.heal 复活
+    pub fn tick_downed_system(
+        fixed_time: Res<Time<Fixed>>,
+        mut q: Query<(&mut Downed, &mut Health)>,
+    ) {
+        let dt = fixed_time.delta_secs();
+        for (mut down, mut hp) in q.iter_mut() {
+            if down.tick(dt) {
+                // 复活: HP 恢复到 max * revive_ratio
+                let target = hp.max * down.revive_hp_ratio;
+                let need = (target - hp.current).max(0.0);
+                hp.heal(need);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 6. tick_attack_state — 推进 Windup/Active/Recovery 三阶段
+    // ---------------------------------------------------------------------------
+
+    /// 每 tick 推进 AttackState 三阶段 (Windup → Active → Recovery → None)
+    pub fn tick_attack_state_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut AttackState>) {
+        let dt = fixed_time.delta_secs();
+        for mut att in q.iter_mut() {
+            att.tick(dt);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 7. process_combat_intents — 把 InputBuffer 的 CombatIntent 落到状态
+    // ---------------------------------------------------------------------------
+
+    /// 把 InputBuffer 里的 CombatIntent 应用到对应组件
+    ///
+    /// - `Attack(Light/Thrust/Heavy)` → 调 `AttackState.try_start`(扣 STA)
+    /// - `BlockStart` → `BlockState.start()`
+    /// - `BlockEnd` → `BlockState.stop()`
+    /// - `ParryAttempt` → `ParryWindow.begin()`(短窗口,在 block 启动时短暂可触发)
+    pub fn process_combat_intents_system(
+        fixed_tick: Res<FixedTick>,
+        mut q: Query<(
+            &mut InputBuffer,
             &mut AttackState,
-            &mut Stamina,
-            &mut StunState,
-            &WeaponStats,
-        )>,
-        Query<(
-            Entity,
-            &Transform,
-            &mut Health,
-            &mut Stamina,
             &mut BlockState,
             &mut ParryWindow,
-            &mut StunState,
-            &mut Knockback,
+            &Stamina,
+            &StunState,
+            &Downed,
         )>,
-    )>,
-) {
-    // 收集所有攻击者(Active 期)— 一次性取所有,避免 long-term borrow
-    let attackers: Vec<Entity> = {
-        let q0 = queries.p0();
-        q0.iter()
-            .filter(|(_, _, att, _, _, _)| att.is_active())
-            .map(|(e, _, _, _, _, _)| e)
-            .collect()
-    };
-
-    for attacker_entity in attackers {
-        // Step 1: snapshot 攻击者信息(不持 borrow)
-        let attacker_info = {
-            let q0 = queries.p0();
-            let Ok((_, xf, att, sta, _, weapon)) = q0.get(attacker_entity) else {
-                continue;
-            };
-            if !att.is_active() {
-                continue;
+    ) {
+        for (mut buf, mut att, mut block, mut parry, sta, stun, down) in q.iter_mut() {
+            // 用 saturating::MAX 占位 (无时间信息时,保留全部)
+            let intents = buf.drain_fresh(fixed_tick.0);
+            for intent in intents {
+                match intent {
+                    CombatIntent::Attack(kind) => {
+                        let _ = att.try_start(kind, sta, stun, down);
+                    }
+                    CombatIntent::BlockStart => {
+                        block.start();
+                        // 招架窗口在 block 启动时短暂开启 — 给玩家"举盾 + 精确时点"
+                        parry.begin();
+                    }
+                    CombatIntent::BlockEnd => {
+                        block.stop();
+                    }
+                    CombatIntent::ParryAttempt => {
+                        parry.begin();
+                    }
+                }
             }
-            let kind = match att.current_kind() {
-                Some(k) => k,
-                None => continue,
-            };
-            Some((
-                xf.translation,
-                (*xf.forward()).into(),
-                weapon.damage,
-                weapon.reach,
-                weapon.sweep_angle_deg * 0.5,
-                kind,
-                sta.current,
-            ))
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 8. process_attack_hits — Active 阶段 sweep_hits,resolve_hit,扣 HP
+    // ---------------------------------------------------------------------------
+
+    /// 在 AttackState.current 是 Active 阶段时,扫周围 Hitbox entities,resolve_hit,扣 HP。
+    ///
+    /// 设计要点 (dev order §4 验收):
+    /// - "命中判定不依赖视觉剑轨单帧" → 整个 Active 期内都判定
+    /// - "两个玩家本地/局域测试能互相攻击" → 任何带 Health+Hitbox+Transform 的 entity 都可被命中
+    /// - "格挡能降低伤害" / "招架窗口" → 由被命中方组件在 resolve_hit 中处理
+    ///
+    /// 范围搜索: 用 `attacker.translation` 在 XZ 平面 8m 内筛 candidate,然后 sweep_hits。
+    pub fn process_attack_hits_system(
+        fixed_tick: Res<FixedTick>,
+        mut queries: ParamSet<(
+            Query<(
+                Entity,
+                &Transform,
+                &mut AttackState,
+                &mut Stamina,
+                &mut StunState,
+                &WeaponStats,
+            )>,
+            Query<(
+                Entity,
+                &Transform,
+                &mut Health,
+                &mut Stamina,
+                &mut BlockState,
+                &mut ParryWindow,
+                &mut StunState,
+                &mut Knockback,
+            )>,
+        )>,
+    ) {
+        // 收集所有攻击者(Active 期)— 一次性取所有,避免 long-term borrow
+        let attackers: Vec<Entity> = {
+            let q0 = queries.p0();
+            q0.iter()
+                .filter(|(_, _, att, _, _, _)| att.is_active())
+                .map(|(e, _, _, _, _, _)| e)
+                .collect()
         };
-        let (atk_pos, atk_forward, weapon_damage, weapon_reach, sweep_half_angle, attack_kind, sta_now) =
-            match attacker_info {
+
+        for attacker_entity in attackers {
+            // Step 1: snapshot 攻击者信息(不持 borrow)
+            let attacker_info = {
+                let q0 = queries.p0();
+                let Ok((_, xf, att, sta, _, weapon)) = q0.get(attacker_entity) else {
+                    continue;
+                };
+                if !att.is_active() {
+                    continue;
+                }
+                let kind = match att.current_kind() {
+                    Some(k) => k,
+                    None => continue,
+                };
+                Some((
+                    xf.translation,
+                    (*xf.forward()).into(),
+                    weapon.damage,
+                    weapon.reach,
+                    weapon.sweep_angle_deg * 0.5,
+                    kind,
+                    sta.current,
+                ))
+            };
+            let (
+                atk_pos,
+                atk_forward,
+                weapon_damage,
+                weapon_reach,
+                sweep_half_angle,
+                attack_kind,
+                sta_now,
+            ) = match attacker_info {
                 Some(v) => v,
                 None => continue,
             };
 
-        let atk_cost = attack_kind.stamina_cost();
+            let atk_cost = attack_kind.stamina_cost();
 
-        // Step 2: 扣 STA + 标记 hit_apps=1(单次短 borrow)
-        {
-            let mut q0 = queries.p0();
-            let Ok((_, _, mut att, mut sta, _, _)) = q0.get_mut(attacker_entity) else {
-                continue;
-            };
-            if sta_now < atk_cost {
-                // STA 不够 → 强制结束攻击
-                att.current = None;
-                continue;
-            }
-            if let Some(a) = att.current.as_mut() {
-                if a.hit_apps == 0 {
-                    sta.consume(atk_cost);
-                    a.hit_apps = 1;
-                }
-            }
-        }
-
-        // Step 3: 收集攻击者将被应用的 stun(招架反击)
-        let mut attacker_stun_apply: Option<(StunSource, f32)> = None;
-
-        // Step 4: 扫目标 (8m XZ 平面)
-        {
-            let mut q1 = queries.p1();
-            for (
-                target_entity,
-                tgt_xf,
-                mut tgt_hp,
-                mut tgt_sta,
-                mut tgt_block,
-                mut tgt_parry,
-                mut tgt_stun,
-                mut tgt_kb,
-            ) in q1.iter_mut()
+            // Step 2: 扣 STA + 标记 hit_apps=1(单次短 borrow)
             {
-                if target_entity == attacker_entity {
-                    continue; // 不打自己
-                }
-                let delta = tgt_xf.translation - atk_pos;
-                let dist_sq = delta.x * delta.x + delta.z * delta.z;
-                if dist_sq > 64.0 {
+                let mut q0 = queries.p0();
+                let Ok((_, _, mut att, mut sta, _, _)) = q0.get_mut(attacker_entity) else {
+                    continue;
+                };
+                if sta_now < atk_cost {
+                    // STA 不够 → 强制结束攻击
+                    att.current = None;
                     continue;
                 }
-                if !sweep_hits(
-                    atk_pos,
-                    atk_forward,
-                    tgt_xf.translation,
-                    weapon_reach,
-                    sweep_half_angle,
-                ) {
-                    continue;
-                }
-
-                let (events, actual_damage) = resolve_hit(
-                    attacker_entity,
-                    target_entity,
-                    attack_kind,
-                    weapon_damage,
-                    &mut tgt_parry,
-                    &mut tgt_block,
-                    &mut tgt_stun,
-                    &mut tgt_sta,
-                    &mut tgt_kb,
-                    atk_pos,
-                    atk_forward,
-                    tgt_xf.translation,
-                    weapon_reach,
-                );
-
-                // 应用伤害
-                if actual_damage > 0.0 {
-                    tgt_hp.damage(actual_damage, fixed_tick.0, 6); // 6 tick 无敌帧
-                }
-
-                // 收集 stun apply(攻击者)
-                for evt in &events {
-                    if let CombatEvent::Stunned {
-                        entity,
-                        source,
-                        duration_secs,
-                    } = evt
-                    {
-                        if *entity == attacker_entity {
-                            attacker_stun_apply = Some((*source, *duration_secs));
-                        }
+                if let Some(a) = att.current.as_mut() {
+                    if a.hit_apps == 0 {
+                        sta.consume(atk_cost);
+                        a.hit_apps = 1;
                     }
                 }
+            }
 
-                // 标记 AttackState.hit_apps = 2(已命中至少一个目标)
+            // Step 3: 收集攻击者将被应用的 stun(招架反击)
+            let mut attacker_stun_apply: Option<(StunSource, f32)> = None;
+
+            // Step 4: 扫目标 (8m XZ 平面)
+            {
+                let mut q1 = queries.p1();
+                for (
+                    target_entity,
+                    tgt_xf,
+                    mut tgt_hp,
+                    mut tgt_sta,
+                    mut tgt_block,
+                    mut tgt_parry,
+                    mut tgt_stun,
+                    mut tgt_kb,
+                ) in q1.iter_mut()
                 {
-                    let mut q0 = queries.p0();
-                    if let Ok((_, _, mut att, _, _, _)) = q0.get_mut(attacker_entity) {
-                        if let Some(a) = att.current.as_mut() {
-                            if a.hit_apps <= 1 {
-                                a.hit_apps = 2;
+                    if target_entity == attacker_entity {
+                        continue; // 不打自己
+                    }
+                    let delta = tgt_xf.translation - atk_pos;
+                    let dist_sq = delta.x * delta.x + delta.z * delta.z;
+                    if dist_sq > 64.0 {
+                        continue;
+                    }
+                    if !sweep_hits(
+                        atk_pos,
+                        atk_forward,
+                        tgt_xf.translation,
+                        weapon_reach,
+                        sweep_half_angle,
+                    ) {
+                        continue;
+                    }
+
+                    let (events, actual_damage) = resolve_hit(
+                        attacker_entity,
+                        target_entity,
+                        attack_kind,
+                        weapon_damage,
+                        &mut tgt_parry,
+                        &mut tgt_block,
+                        &mut tgt_stun,
+                        &mut tgt_sta,
+                        &mut tgt_kb,
+                        atk_pos,
+                        atk_forward,
+                        tgt_xf.translation,
+                        weapon_reach,
+                    );
+
+                    // 应用伤害
+                    if actual_damage > 0.0 {
+                        tgt_hp.damage(actual_damage, fixed_tick.0, 6); // 6 tick 无敌帧
+                    }
+
+                    // 收集 stun apply(攻击者)
+                    for evt in &events {
+                        if let CombatEvent::Stunned { entity, source, duration_secs } = evt {
+                            if *entity == attacker_entity {
+                                attacker_stun_apply = Some((*source, *duration_secs));
                             }
                         }
                     }
+
+                    // 标记 AttackState.hit_apps = 2(已命中至少一个目标)
+                    {
+                        let mut q0 = queries.p0();
+                        if let Ok((_, _, mut att, _, _, _)) = q0.get_mut(attacker_entity) {
+                            if let Some(a) = att.current.as_mut() {
+                                if a.hit_apps <= 1 {
+                                    a.hit_apps = 2;
+                                }
+                            }
+                        }
+                    }
+
+                    break; // MVP: 一击只命中一个目标
                 }
-
-                break; // MVP: 一击只命中一个目标
             }
-        }
 
-        // Step 5: 应用 attacker stun(招架反击)— target loop 已结束,borrow 释放
-        if let Some((source, secs)) = attacker_stun_apply {
-            let mut q0 = queries.p0();
-            if let Ok((_, _, _, _, mut stun, _)) = q0.get_mut(attacker_entity) {
-                stun.apply(secs, source);
+            // Step 5: 应用 attacker stun(招架反击)— target loop 已结束,borrow 释放
+            if let Some((source, secs)) = attacker_stun_apply {
+                let mut q0 = queries.p0();
+                if let Ok((_, _, _, _, mut stun, _)) = q0.get_mut(attacker_entity) {
+                    stun.apply(secs, source);
+                }
             }
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// 9. emit_combat_events — 收集本 tick 战斗事件并写入 MessageWriter
-// ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // 9. emit_combat_events — 收集本 tick 战斗事件并写入 MessageWriter
+    // ---------------------------------------------------------------------------
 
-/// 简化版: 把本次攻击造成的事件聚合到 CombatEvent message
-///
-/// MVP 不细究: 完整的事件流由 process_attack_hits_system 直接 emit,
-/// 此处只做 placeholder(让 MessageWriter 注册有意义)。
-pub fn emit_combat_events_system(_: MessageWriter<CombatEvent>) {
-    // placeholder: 事件已在 process_attack_hits_system 内部收集
-    // (Vec<CombatEvent>) 然后通过 message writer 转发给客户端表现层。
-    // MVP: 暂不转发,events 直接由系统消费 (process_attack_hits 内部已处理)。
-}
-
+    /// 简化版: 把本次攻击造成的事件聚合到 CombatEvent message
+    ///
+    /// MVP 不细究: 完整的事件流由 process_attack_hits_system 直接 emit,
+    /// 此处只做 placeholder(让 MessageWriter 注册有意义)。
+    pub fn emit_combat_events_system(_: MessageWriter<CombatEvent>) {
+        // placeholder: 事件已在 process_attack_hits_system 内部收集
+        // (Vec<CombatEvent>) 然后通过 message writer 转发给客户端表现层。
+        // MVP: 暂不转发,events 直接由系统消费 (process_attack_hits 内部已处理)。
+    }
 } // pub mod systems
 
 // ---------------------------------------------------------------------------
@@ -1365,9 +1331,15 @@ mod tests {
     #[test]
     fn attack_stamina_costs_match_doc() {
         // 表格包 §18.3 范围: 5-12 STA
-        assert!(AttackType::Light.stamina_cost() >= 5.0 && AttackType::Light.stamina_cost() <= 12.0);
-        assert!(AttackType::Thrust.stamina_cost() >= 5.0 && AttackType::Thrust.stamina_cost() <= 12.0);
-        assert!(AttackType::Heavy.stamina_cost() >= 5.0 && AttackType::Heavy.stamina_cost() <= 12.0);
+        assert!(
+            AttackType::Light.stamina_cost() >= 5.0 && AttackType::Light.stamina_cost() <= 12.0
+        );
+        assert!(
+            AttackType::Thrust.stamina_cost() >= 5.0 && AttackType::Thrust.stamina_cost() <= 12.0
+        );
+        assert!(
+            AttackType::Heavy.stamina_cost() >= 5.0 && AttackType::Heavy.stamina_cost() <= 12.0
+        );
         // 重击应 > 轻击
         assert!(AttackType::Heavy.stamina_cost() > AttackType::Light.stamina_cost());
         // 重击 cooldown 应 > 轻击
@@ -1397,11 +1369,7 @@ mod tests {
 
     #[test]
     fn stamina_regen_clamp_to_max() {
-        let mut s = Stamina {
-            current: 50.0,
-            max: 100.0,
-            regen_per_sec: 20.0,
-        };
+        let mut s = Stamina { current: 50.0, max: 100.0, regen_per_sec: 20.0 };
         s.regen(1.0); // +20
         assert!((s.current - 70.0).abs() < 0.01);
         s.regen(2.0); // +40 → 110 → clamp 100
@@ -1586,8 +1554,15 @@ mod tests {
             Entity::PLACEHOLDER,
             AttackType::Light,
             20.0,
-            &mut parry, &mut block, &mut stun, &mut sta, &mut kb,
-            Vec3::ZERO, Vec3::X, Vec3::new(2.0, 0.0, 0.0), 4.0,
+            &mut parry,
+            &mut block,
+            &mut stun,
+            &mut sta,
+            &mut kb,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(2.0, 0.0, 0.0),
+            4.0,
         );
         assert!(events.iter().any(|e| matches!(e, CombatEvent::Blocked { .. })));
         // 20 * (1 - 0.45) = 11
@@ -1607,14 +1582,23 @@ mod tests {
             Entity::PLACEHOLDER,
             AttackType::Heavy,
             30.0,
-            &mut parry, &mut block, &mut stun, &mut sta, &mut kb,
-            Vec3::ZERO, Vec3::X, Vec3::new(2.0, 0.0, 0.0), 4.0,
+            &mut parry,
+            &mut block,
+            &mut stun,
+            &mut sta,
+            &mut kb,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(2.0, 0.0, 0.0),
+            4.0,
         );
         assert!(events.iter().any(|e| matches!(e, CombatEvent::Parried { .. })));
         // 招架不造成伤害
         assert_eq!(dmg, 0.0);
         // 攻击者应该被 stun (事件里有 Stunned 标记 source=Parried)
-        let stun_evt = events.iter().find(|e| matches!(e, CombatEvent::Stunned { source: StunSource::Parried, .. }));
+        let stun_evt = events
+            .iter()
+            .find(|e| matches!(e, CombatEvent::Stunned { source: StunSource::Parried, .. }));
         assert!(stun_evt.is_some(), "招架后攻击者应被 stun");
     }
 
@@ -1630,13 +1614,22 @@ mod tests {
             Entity::PLACEHOLDER,
             AttackType::Heavy,
             30.0,
-            &mut parry, &mut block, &mut stun, &mut sta, &mut kb,
-            Vec3::ZERO, Vec3::X, Vec3::new(2.0, 0.0, 0.0), 4.0,
+            &mut parry,
+            &mut block,
+            &mut stun,
+            &mut sta,
+            &mut kb,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(2.0, 0.0, 0.0),
+            4.0,
         );
         // Heavy 未被格挡/招架 → defender stun 0.4s
         assert!(stun.stunned);
         assert!((stun.stun_timer - 0.4).abs() < 0.01);
-        let stun_evt = events.iter().find(|e| matches!(e, CombatEvent::Stunned { source: StunSource::HeavyHit, .. }));
+        let stun_evt = events
+            .iter()
+            .find(|e| matches!(e, CombatEvent::Stunned { source: StunSource::HeavyHit, .. }));
         assert!(stun_evt.is_some());
         // 击退应施加
         assert!(kb.is_active());
@@ -1654,13 +1647,24 @@ mod tests {
             Entity::PLACEHOLDER,
             AttackType::Light,
             20.0,
-            &mut parry, &mut block, &mut stun, &mut sta, &mut kb,
-            Vec3::ZERO, Vec3::X, Vec3::new(2.0, 0.0, 0.0), 4.0,
+            &mut parry,
+            &mut block,
+            &mut stun,
+            &mut sta,
+            &mut kb,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(2.0, 0.0, 0.0),
+            4.0,
         );
         assert!(!stun.stunned, "轻击不应 stun");
         assert!(dmg > 0.0);
         // 不应有 HeavyHit stun event
-        assert!(!events.iter().any(|e| matches!(e, CombatEvent::Stunned { source: StunSource::HeavyHit, .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, CombatEvent::Stunned { source: StunSource::HeavyHit, .. }))
+        );
     }
 
     #[test]
@@ -1759,7 +1763,7 @@ mod tests {
     #[test]
     fn attack_state_light_progresses_through_phases() {
         let mut att = AttackState::default();
-        let mut sta = Stamina::default();
+        let sta = Stamina::default();
         let stun = StunState::default();
         let down = Downed::default();
         // 起手
@@ -1903,14 +1907,14 @@ mod tests {
     #[test]
     fn e2e_resolve_hit_parry_breaks_attacker_combo() {
         // 攻击者 100 STA,准备连击 → 第一次被招架 → attacker stun → 后续攻击应被阻
-        let mut atk_sta = Stamina::default();
+        let atk_sta = Stamina::default();
         let mut atk_stun = StunState::default();
         let mut def_parry = ParryWindow::default();
         let mut def_block = BlockState::default();
         let mut def_stun = StunState::default();
         let mut def_sta = Stamina::default();
         let mut def_kb = Knockback::default();
-        let mut def_hp = Health::default();
+        let def_hp = Health::default();
 
         def_parry.begin(); // defender 在招架窗口
 

@@ -38,10 +38,10 @@ impl CreatureKind {
     }
     pub const fn size(self) -> Vec3 {
         match self {
-            CreatureKind::Pig => Vec3::new(0.40, 0.32, 0.55),
-            CreatureKind::Sheep => Vec3::new(0.42, 0.42, 0.55),
-            CreatureKind::Cow => Vec3::new(0.50, 0.50, 0.65),
-            CreatureKind::Chicken => Vec3::new(0.22, 0.28, 0.25),
+            CreatureKind::Pig => Vec3::new(0.58, 0.44, 0.78),
+            CreatureKind::Sheep => Vec3::new(0.62, 0.58, 0.78),
+            CreatureKind::Cow => Vec3::new(0.78, 0.70, 0.98),
+            CreatureKind::Chicken => Vec3::new(0.34, 0.42, 0.36),
         }
     }
     pub fn label_zh(self) -> &'static str {
@@ -51,6 +51,18 @@ impl CreatureKind {
             CreatureKind::Cow => "牛",
             CreatureKind::Chicken => "鸡",
         }
+    }
+}
+
+pub fn creature_material(kind: CreatureKind) -> StandardMaterial {
+    let color = kind.color();
+    StandardMaterial {
+        base_color: color,
+        emissive: (color.to_linear() * 0.35).into(),
+        unlit: true,
+        perceptual_roughness: 0.85,
+        metallic: 0.0,
+        ..default()
     }
 }
 
@@ -78,7 +90,10 @@ pub fn award_creature_drop(
 
 pub const CREATURE_TRAINING_ATTACK_RANGE_SQ: f32 = 25.0;
 
-pub fn creature_attack_distance_sq(player_block_pos: [i32; 3], creature_block_pos: [i32; 3]) -> f32 {
+pub fn creature_attack_distance_sq(
+    player_block_pos: [i32; 3],
+    creature_block_pos: [i32; 3],
+) -> f32 {
     let dx = (creature_block_pos[0] - player_block_pos[0]) as f32;
     let dz = (creature_block_pos[2] - player_block_pos[2]) as f32;
     dx * dx + dz * dz
@@ -275,18 +290,10 @@ fn spawn_debug_creature_at(
     fixed_wander_secs: f32,
 ) -> bool {
     let mesh_h = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let mat_h = materials.add(StandardMaterial {
-        base_color: kind.color(),
-        perceptual_roughness: 0.85,
-        ..default()
-    });
+    let mat_h = materials.add(creature_material(kind));
     commands.spawn((
         Creature { kind, block_pos: [x, y, z] },
-        CreatureAI {
-            wander_timer: 0.0,
-            next_wander_secs: fixed_wander_secs,
-            bob_phase: 0.0,
-        },
+        CreatureAI { wander_timer: 0.0, next_wander_secs: fixed_wander_secs, bob_phase: 0.0 },
         Mesh3d(mesh_h),
         MeshMaterial3d(mat_h),
         Transform::from_translation(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5))
@@ -361,7 +368,10 @@ pub fn despawn_dead_creatures(
             continue;
         }
         if let Err(err) = award_creature_drop(&mut pool, &mut player, creature.kind) {
-            warn!("[creature] failed to award drop for dead {:?}: {}", creature.kind, err);
+            warn!(
+                "[creature] failed to award drop for dead {:?}: {}",
+                creature.kind, err
+            );
         }
         commands.entity(entity).despawn();
     }
@@ -394,7 +404,10 @@ pub fn player_attack_creatures(
                 info!("⚔ 你杀了一只{}（+3 {:?}）", kind.label_zh(), drop);
             }
             Err(err) => {
-                warn!("[creature] failed to award drop for attacked {:?}: {}", kind, err);
+                warn!(
+                    "[creature] failed to award drop for attacked {:?}: {}",
+                    kind, err
+                );
             }
         }
         commands.entity(e).despawn();
@@ -508,10 +521,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            PoolError::WouldExceedMax {
-                kind: ResourceKind::Food,
-                ..
-            }
+            PoolError::WouldExceedMax { kind: ResourceKind::Food, .. }
         ));
         assert_eq!(pool.get(ResourceKind::Food), ResourceKind::Food.max());
         assert_eq!(player.monsters_killed, 0);
@@ -522,6 +532,15 @@ mod tests {
         let d2 = creature_attack_distance_sq([48, 16, 48], [48, 16, 46]);
         assert_eq!(d2, 4.0);
         assert!(d2 <= CREATURE_TRAINING_ATTACK_RANGE_SQ);
+    }
+
+    #[test]
+    fn creature_material_keeps_small_animals_readable() {
+        let material = creature_material(CreatureKind::Cow);
+
+        assert_eq!(material.base_color, CreatureKind::Cow.color());
+        assert!(material.unlit);
+        assert_eq!(material.metallic, 0.0);
     }
 
     #[test]

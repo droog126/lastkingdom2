@@ -52,10 +52,7 @@ pub enum ObjectiveKind {
     /// 击杀 N 个怪物（任意种类）。
     KillMonsters { count: u32 },
     /// 走到 (x, y, z) 半径 radius 内。
-    ReachPosition {
-        pos: [i32; 3],
-        radius: i32,
-    },
+    ReachPosition { pos: [i32; 3], radius: i32 },
 }
 
 impl ObjectiveKind {
@@ -80,7 +77,11 @@ impl ObjectiveKind {
                 format!("{} / {}", p, count)
             }
             (ObjectiveKind::FoundNation, ObjectiveProgress::Flag(b)) => {
-                if *b { "完成".into() } else { "未完成".into() }
+                if *b {
+                    "完成".into()
+                } else {
+                    "未完成".into()
+                }
             }
             (ObjectiveKind::UpgradePop { target }, ObjectiveProgress::Pop(p)) => {
                 format!("{} / {}", p, target)
@@ -120,7 +121,9 @@ pub enum ObjectiveProgress {
     /// 创国标记
     Flag(bool),
     /// 到达位置
-    AtPosition { reached: bool },
+    AtPosition {
+        reached: bool,
+    },
 }
 
 impl ObjectiveProgress {
@@ -158,21 +161,15 @@ impl Objective {
             ObjectiveKind::KillMonsters { .. } => ObjectiveProgress::CountU(0),
             ObjectiveKind::ReachPosition { .. } => ObjectiveProgress::AtPosition { reached: false },
         };
-        Self {
-            id: id.into(),
-            kind,
-            progress,
-            done: false,
-        }
+        Self { id: id.into(), kind, progress, done: false }
     }
 
     /// 当前进度是否满足 kind 的完成阈值
     pub fn check_complete(&self) -> bool {
         match (&self.kind, &self.progress) {
-            (
-                ObjectiveKind::GatherResource { count, .. },
-                ObjectiveProgress::Count(p),
-            ) => *p >= *count,
+            (ObjectiveKind::GatherResource { count, .. }, ObjectiveProgress::Count(p)) => {
+                *p >= *count
+            }
             (ObjectiveKind::FoundNation, ObjectiveProgress::Flag(b)) => *b,
             (ObjectiveKind::UpgradePop { target }, ObjectiveProgress::Pop(p)) => *p >= *target,
             (ObjectiveKind::KillMonsters { count }, ObjectiveProgress::CountU(p)) => *p >= *count,
@@ -238,8 +235,7 @@ impl Objectives {
         // 标完成
         self.all[i].done = true;
         // 推下一条未完成
-        let next = (i + 1..self.all.len())
-            .find(|&j| !self.all[j].done);
+        let next = (i + 1..self.all.len()).find(|&j| !self.all[j].done);
         self.current_idx = next;
         true
     }
@@ -249,18 +245,15 @@ impl Objectives {
         let mut o = Objectives::new();
         o.push(Objective::new(
             "q1_gather_wood",
-            ObjectiveKind::GatherResource {
-                kind: ResourceKind::Wood,
-                count: 10,
-            },
+            ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 },
         ));
-        o.push(Objective::new("q2_found_nation", ObjectiveKind::FoundNation));
+        o.push(Objective::new(
+            "q2_found_nation",
+            ObjectiveKind::FoundNation,
+        ));
         o.push(Objective::new(
             "q3_gather_food",
-            ObjectiveKind::GatherResource {
-                kind: ResourceKind::Food,
-                count: 30,
-            },
+            ObjectiveKind::GatherResource { kind: ResourceKind::Food, count: 30 },
         ));
         o.push(Objective::new(
             "q4_upgrade_pop",
@@ -272,10 +265,7 @@ impl Objectives {
         ));
         o.push(Objective::new(
             "q6_reach_summit",
-            ObjectiveKind::ReachPosition {
-                pos: [48, 30, 48],
-                radius: 5,
-            },
+            ObjectiveKind::ReachPosition { pos: [48, 30, 48], radius: 5 },
         ));
         o
     }
@@ -304,7 +294,7 @@ pub fn auto_advance_objectives(
     player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
-    monsters: Res<MonsterEcosystem>,
+    _monsters: Res<MonsterEcosystem>,
     match_clock: Res<MatchClock>,
     mut completed_events: MessageWriter<ObjectiveCompleted>,
 ) {
@@ -426,12 +416,10 @@ pub struct ObjectivesPlugin;
 
 impl Plugin for ObjectivesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Objectives>()
-            .add_message::<ObjectiveCompleted>()
-            .add_systems(
-                FixedUpdate,
-                (auto_advance_objectives, objective_phase_hints).chain(),
-            );
+        app.init_resource::<Objectives>().add_message::<ObjectiveCompleted>().add_systems(
+            FixedUpdate,
+            (auto_advance_objectives, objective_phase_hints).chain(),
+        );
     }
 }
 
@@ -622,10 +610,7 @@ mod tests {
         // 验证 ObjectiveCompleted 的 kind/id 字段语义
         let ev = ObjectiveCompleted {
             id: "q1".into(),
-            kind: ObjectiveKind::GatherResource {
-                kind: ResourceKind::Wood,
-                count: 10,
-            },
+            kind: ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 },
             at_wall_secs: 12.5,
         };
         assert_eq!(ev.id, "q1");
@@ -638,10 +623,7 @@ mod tests {
 
     #[test]
     fn objective_kind_progress_str_format() {
-        let k = ObjectiveKind::GatherResource {
-            kind: ResourceKind::Wood,
-            count: 10,
-        };
+        let k = ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 };
         let p = ObjectiveProgress::Count(5);
         assert_eq!(k.progress_str(&p), "5 / 10");
     }
