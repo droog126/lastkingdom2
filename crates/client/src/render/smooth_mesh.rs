@@ -59,8 +59,8 @@ pub fn build_smooth_mesh(
     // 4) 法线平滑（按 position hash 共享顶点，邻接三角形法线平均）
     let (positions, normals) = smooth_normals(&vertices, &indices);
 
-    // 5) 顶点色（按 y 分层：grass/dirt/stone）
-    let colors: Vec<[f32; 4]> = positions.iter().map(|p| layer_color(p[1])).collect();
+    // 5) Vertex color: a restrained 3-color palette with soft spatial mixing.
+    let colors: Vec<[f32; 4]> = positions.iter().map(|p| terrain_color(*p)).collect();
 
     // 6) build bevy::Mesh
     let mut mesh = Mesh::new(
@@ -75,20 +75,60 @@ pub fn build_smooth_mesh(
     Some(SmoothMesh { mesh, collider_trimesh: positions, collider_indices: indices })
 }
 
-/// 按 Y 分层上色：
-///   y >= high  (默认 20) → grass 绿
-///   y <  high  & y >= mid (默认 12) → dirt 棕
-///   y <  mid               → stone 灰
-fn layer_color(y: f32) -> [f32; 4] {
-    const HIGH: f32 = 18.0;
-    const MID: f32 = 8.0;
-    if y >= HIGH {
-        [0.25, 0.55, 0.18, 1.0] // grass 绿
-    } else if y >= MID {
-        [0.55, 0.36, 0.20, 1.0] // dirt 棕
+/// Terrain vertex color: 3 主色 (草/土/石) + 大块噪声分区, 让颜色块明显可见
+///
+/// 之前: GRASS/MOSS/EARTH 三个绿棕色微差, 权重重叠后整片灰绿一片 (iter_1382 看到的就是
+/// 一片灰蓝 — fog + 同色 = "纯色没风格")。
+///
+/// 现在:
+///  - 3 个色彼此差距大 (鲜绿 / 暖棕 / 灰白) — 任何混合都能看出 "这地方是草地/那块是土/那里是石"
+///  - 大块噪声 (freq 0.05~0.10) 决定"主色块"分布, 让玩家能看见色块边界
+///  - 中块噪声 (freq 0.30) 在主色块内嵌入"补丁" = 2nd 色
+///  - 高频噪声 (freq 0.85) 微调明暗, 给地表质感
+///  - 高度只占 15% 权重 (之前 25%), 防止玩家站在 Y=24 高处把整片地形都判成 STONE
+///  - 输出亮度整体提升 (1.25x) 抵消 fog 把颜色洗白的部分
+fn terrain_color(p: [f32; 3]) -> [f32; 4] {
+    // 3 主色 — 鲜亮 / 高饱和, 任何 mix 都看得出
+    const GRASS: [f32; 3] = [0.38, 0.74, 0.24]; // 鲜绿
+    const DIRT: [f32; 3] = [0.68, 0.45, 0.20]; // 暖棕
+    const STONE: [f32; 3] = [0.78, 0.76, 0.70]; // 浅灰
+
+    let zone_n = (p[0] * 0.08 + p[2] * 0.10).sin() * 0.5 + 0.5;
+    let patch_n = (p[0] * 0.32 + p[2] * 0.28).sin() * 0.5 + 0.5;
+    let fine_n = ((p[0] * 0.85).sin() * (p[2] * 0.73).cos()) * 0.5 + 0.5;
+    let height_t = ((p[1] - 4.0) / 40.0).clamp(0.0, 1.0);
+
+    // 主色: zone 主导 (85%), height 调味 (15%)
+    let main_zone = zone_n * 0.85 + height_t * 0.15;
+    let (main_rgb, main_w) = if main_zone < 0.40 {
+        (GRASS, 0.60)
+    } else if main_zone < 0.66 {
+        (DIRT, 0.60)
     } else {
-        [0.55, 0.55, 0.55, 1.0] // stone 灰
-    }
+        (STONE, 0.60)
+    };
+
+    // 次色: 按 patch_n 选 (与 main 不同) — 让色块内能看到 "这里有点第二种颜色"
+    let sec_rgb = if main_zone < 0.40 {
+        if patch_n > 0.55 { DIRT } else { STONE }
+    } else if main_zone < 0.66 {
+        if patch_n > 0.50 { GRASS } else { STONE }
+    } else {
+        if patch_n > 0.55 { DIRT } else { GRASS }
+    };
+    let sec_w = 0.25 + patch_n * 0.10;
+
+    let total = main_w + sec_w;
+    let shade = (fine_n - 0.5) * 0.06;
+    [
+        (((main_rgb[0] * main_w + sec_rgb[0] * sec_w) / total) * (1.0 + shade) * 1.25)
+            .clamp(0.0, 1.0),
+        (((main_rgb[1] * main_w + sec_rgb[1] * sec_w) / total) * (1.0 + shade) * 1.25)
+            .clamp(0.0, 1.0),
+        (((main_rgb[2] * main_w + sec_rgb[2] * sec_w) / total) * (1.0 + shade) * 1.25)
+            .clamp(0.0, 1.0),
+        1.0,
+    ]
 }
 
 /// Laplacian smoothing：对每个顶点位置 = 邻接顶点平均

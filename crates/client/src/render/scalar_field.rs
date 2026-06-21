@@ -131,6 +131,7 @@ fn find_first_solid_y(world: &GameWorld, x: i32, z: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lk2_core::world::terrain::presets;
 
     #[test]
     fn density_field_41x41x41() {
@@ -140,5 +141,23 @@ mod tests {
         // 内部全 air → 全部角点 density 应该接近 0
         let max = field.data.iter().cloned().fold(0.0_f32, f32::max);
         assert!(max < 0.5, "全 air 时角点最大 density 应 < 0.5, got {}", max);
+    }
+
+    /// superflat 时 effective_ground_height(48, 48) 必须返回 13 (SEA_LEVEL+1),
+    /// 否则 main.rs 的 auto-demo spawn y 会算错 → 玩家悬浮 / 陷地.
+    /// 之前 iter_1354 截图发现 avatar spawn at (48.5, **16.0**, 48.5) — 说明 runtime 实际
+    /// 返回 16, 但 terrain::superflat_preset 测试返回 13, 矛盾. 本测试做端到端验证:
+    /// pipeline.surface_f32 → effective_ground_height 全链路.
+    #[test]
+    fn effective_ground_height_superflat_at_spawn_is_13() {
+        let pipeline = presets::superflat_preset();
+        let world = GameWorld::with_pipeline(96, pipeline);
+        let h = effective_ground_height(&world, 48, 48);
+        assert!(
+            (h - 13.0).abs() < 0.01,
+            "superflat at (48, 48) effective_ground_height 应等于 13, got {} \
+             — 若失败, 检查 pipeline.surface_f32 与 effective_ground_height 是否走通",
+            h
+        );
     }
 }

@@ -49,13 +49,14 @@ use lk2_core::creature::{
     CreatureSpawnerDone, despawn_dead_creatures,
     player_attack_creatures as offline_player_attack_creatures, spawn_creatures, update_creatures,
 };
+use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
 use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{SimRole, advance_demo_tick};
+use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
 // ---- 客户端 crate 内部模块的导出 ----
@@ -85,6 +86,8 @@ use crate::render::{
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
 
 // ---- 重新导出 lk2-core PvP 数据（main.rs 里要直接用） ----
+const AUTO_DEMO_WAIT_TICKS: u64 = 1_800;
+
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
 use lk2_core::protocol::PlayerAction;
@@ -228,7 +231,7 @@ fn main() {
                 lk2_core::scenario::ScenarioStep::Log {
                     msg: "=== idle: 玩家不动看动物 ===".into(),
                 },
-                lk2_core::scenario::ScenarioStep::WaitTicks { ticks: 1000 },
+                lk2_core::scenario::ScenarioStep::WaitTicks { ticks: AUTO_DEMO_WAIT_TICKS },
             ],
         }
     } else {
@@ -321,6 +324,7 @@ fn main() {
         .init_resource::<GlobalResourcePool>()
         .init_resource::<NationRegistry>()
         .init_resource::<MonsterEcosystem>()
+        .init_resource::<EcoCycle>()
         .init_resource::<TickObserver>()
         .init_resource::<TickRecorder>()
         .init_resource::<LastMoveDirection>()
@@ -1069,6 +1073,7 @@ fn self_check(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
     info!(">>> 启动自检 100 tick ...");
@@ -1077,6 +1082,7 @@ fn self_check(
         &pool,
         &nations,
         &monsters,
+        &eco,
         &mut obs,
         [
             constant::WORLD_SIZE / 2,
@@ -1097,17 +1103,19 @@ fn self_check(
 // In offline mode the client advances the shared sim locally for demo/self-loop use.
 
 fn simulation_tick(
-    time: Res<Time>,
+    fixed_time: Res<Time<Fixed>>,
     mut clock: ResMut<SimClock>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
+    mut eco: ResMut<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
-    let _ = advance_demo_tick(
-        &time,
+    let _ = advance_fixed_authority_tick(
+        fixed_time.delta_secs(),
         &mut clock,
         &mut pool,
         &mut monsters,
+        &mut eco,
         &mut obs,
         SimRole::ClientOffline,
     );
@@ -1148,6 +1156,7 @@ fn periodic_screenshot(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
@@ -1177,6 +1186,7 @@ fn periodic_screenshot(
         &pool,
         &nations,
         &monsters,
+        &eco,
         &obs,
         &game_world,
         *run_mode,
@@ -1274,6 +1284,7 @@ fn tick_recorder(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
@@ -1291,6 +1302,7 @@ fn tick_recorder(
         &pool,
         &nations,
         &monsters,
+        &eco,
         &obs,
         &game_world,
         *run_mode,
@@ -1309,6 +1321,7 @@ fn build_state_json(
     pool: &GlobalResourcePool,
     nations: &NationRegistry,
     monsters: &MonsterEcosystem,
+    eco: &EcoCycle,
     obs: &TickObserver,
     game_world: &GameWorld,
     run_mode: ClientRunMode,
@@ -1320,8 +1333,121 @@ fn build_state_json(
         pool,
         nations,
         monsters,
+        eco,
         obs,
         game_world,
         run_mode.snapshot_role(),
     )
+}
+
+fn build_state_diff_for_iter(iter_id: u32, state: &serde_json::Value) -> Option<serde_json::Value> {
+    if iter_id <= 1 {
+        return None;
+    }
+    let prev_path = format!("screenshots/iter_{:02}/final_state.json", iter_id - 1);
+    let prev_raw = std::fs::read_to_string(prev_path).ok()?;
+    let prev_state: serde_json::Value = serde_json::from_str(&prev_raw).ok()?;
+    Some(build_state_diff(&prev_state, state))
+}
+
+fn build_state_diff(prev: &serde_json::Value, current: &serde_json::Value) -> serde_json::Value {
+    let mut deltas = Vec::new();
+    for path in [
+        "tick",
+        "player.monsters_killed",
+        "player.blocks_gathered",
+        "player.nations_founded",
+        "pool.wood",
+        "pool.food",
+        "pool.apple",
+        "pool.soul",
+        "nations.flag_count",
+        "nations.total_nations",
+        "monsters.current",
+        "monsters.kingdoms",
+        "monsters.nests",
+        "creatures.passive_current",
+        "eco_cycle.rabbits",
+        "eco_cycle.berry_bushes",
+        "eco_cycle.fruit",
+        "eco_cycle.fruit_eaten",
+        "eco_cycle.fruit_grown",
+        "observer.anomalies",
+        "observer.invariant_violations",
+    ] {
+        if let Some(delta) = diff_numeric_path(prev, current, path) {
+            deltas.push(delta);
+        }
+    }
+
+    deltas.sort_by(|a, b| {
+        let a_abs = a["delta_abs"].as_f64().unwrap_or(0.0);
+        let b_abs = b["delta_abs"].as_f64().unwrap_or(0.0);
+        b_abs.partial_cmp(&a_abs).unwrap_or(std::cmp::Ordering::Equal).then_with(|| {
+            a["path"].as_str().unwrap_or_default().cmp(b["path"].as_str().unwrap_or_default())
+        })
+    });
+
+    serde_json::json!({
+        "prev_tick": value_at_path(prev, "tick").and_then(|v| v.as_u64()),
+        "tick": value_at_path(current, "tick").and_then(|v| v.as_u64()),
+        "resource_deltas": deltas,
+    })
+}
+
+fn diff_numeric_path(
+    prev: &serde_json::Value,
+    current: &serde_json::Value,
+    path: &str,
+) -> Option<serde_json::Value> {
+    let prev_num = value_at_path(prev, path)?.as_f64()?;
+    let current_num = value_at_path(current, path)?.as_f64()?;
+    let delta = current_num - prev_num;
+    if delta.abs() < f64::EPSILON {
+        return None;
+    }
+    Some(serde_json::json!({
+        "path": path,
+        "previous": prev_num,
+        "current": current_num,
+        "delta": delta,
+        "delta_abs": delta.abs(),
+    }))
+}
+
+fn value_at_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_self_check_resources_are_registered() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<GameWorld>()
+            .init_resource::<GlobalResourcePool>()
+            .init_resource::<NationRegistry>()
+            .init_resource::<MonsterEcosystem>()
+            .init_resource::<EcoCycle>()
+            .init_resource::<TickObserver>();
+
+        assert!(app.world().contains_resource::<GameWorld>());
+        assert!(app.world().contains_resource::<GlobalResourcePool>());
+        assert!(app.world().contains_resource::<NationRegistry>());
+        assert!(app.world().contains_resource::<MonsterEcosystem>());
+        assert!(app.world().contains_resource::<EcoCycle>());
+        assert!(app.world().contains_resource::<TickObserver>());
+    }
+
+    #[test]
+    fn auto_demo_waits_long_enough_for_first_screenshot() {
+        assert!(AUTO_DEMO_WAIT_TICKS >= 1_500);
+    }
 }

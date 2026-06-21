@@ -7,11 +7,21 @@ edition = "2024"
 name = "lk2-client"
 path = "src/main.rs"
 
+[[example]]
+name = "audit_player"
+path = "examples/audit_player.rs"
+
 [features]
 # 启用 Bevy 动态链接，大幅缩短开发期增量编译时间。
 # 用法: cargo run -p lk2-client --features dev-dynamic-linking
-# 注意: 仅供开发使用，切勿在发布构建中启用。
+# 注意：仅供开发使用，切勿在发布构建中启用。
 dev-dynamic-linking = ["bevy/dynamic_linking"]
+
+# audit-pretty-models: 在 spawn_pretty 末尾额外 spawn 所有
+# assets/procedural/pretty/*.glb 在玩家周围, 方便不替换原 pretty 代码就能
+# 验证新资产在引擎里实际渲染. 默认不启用, 跑法:
+#   cargo run -p lk2-client --features audit-pretty-models -- --offline
+audit-pretty-models = []
 
 # ============================================================================
 # 客户端 binary：DefaultPlugins + lightyear ClientPlugins + 渲染 + 输入 + UI
