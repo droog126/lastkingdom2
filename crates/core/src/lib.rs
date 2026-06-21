@@ -27,11 +27,12 @@
 #![allow(unused_imports)]
 
 pub mod clock;
+pub mod combat;
 pub mod constant;
 pub mod controller;
-pub mod combat;
 pub mod creature;
 pub mod diagnostics;
+pub mod eco_cycle;
 pub mod equipment;
 pub mod match_state;
 pub mod mining_site;
@@ -39,8 +40,8 @@ pub mod monster;
 pub mod nation;
 pub mod objectives;
 pub mod player;
-pub mod protocol;
 pub mod protection;
+pub mod protocol;
 pub mod pvp;
 pub mod resource;
 pub mod scenario;
@@ -48,6 +49,7 @@ pub mod sim;
 pub mod sovereign_spark;
 pub mod terrain_overlay;
 pub mod transport;
+pub mod v2;
 pub mod world;
 
 // ai 依赖 scenario 类型，scenario 依赖 player — player 必须先

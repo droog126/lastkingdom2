@@ -22,6 +22,22 @@ pub const VERTICAL_SIZE: i32 = 96;
 
 pub const SEA_LEVEL: i32 = 12;
 
+/// 实体水面 mesh 的 y 坐标（f32）— 与 SEA_LEVEL 同高。
+///
+/// 设计：superflat 地形 surface 在 SEA_LEVEL + 1 处，水面在 SEA_LEVEL，
+/// 水面永远在 ground surface **下方** 至少 1m，玩家在岸上时脚下
+/// 是 ground（y=SEA_LEVEL+1），脚下 1m 处是水面（y=SEA_LEVEL），
+/// 不会"站在水里"。
+///
+/// 之前 v1（2026-06-19）water_y = SEA_LEVEL + 1.5 → 水面比地面高 0.5m，
+/// 跟玩家脚面 y=13.0 (ground_y+0.5) 几乎齐平，俯瞰时水面会穿过 avatar 脚底
+/// 视觉上"玩家站在水里"。本常量锁死这个 invariant。
+pub const WATER_Y: f32 = SEA_LEVEL as f32;
+
+/// superflat 地形 surface 的 y 坐标（f32）— 永远 = SEA_LEVEL + 1。
+/// 与 `WATER_Y` 的关系是测试的硬不变量: `WATER_Y + 1 == SUPERFLAT_GROUND_Y`。
+pub const SUPERFLAT_GROUND_Y: f32 = SEA_LEVEL as f32 + 1.0;
+
 /// 兼容老代码：等于 VERTICAL_SIZE
 pub const WORLD_SIZE: i32 = VERTICAL_SIZE;
 /// 世界中心 (中立商人 / 王国位置基座)
@@ -71,3 +87,36 @@ pub const NEST_DORMANCY_SECS: u32 = 5 * 60;
 
 /// 启用严格守恒检查（debug 模式 + 测试）
 pub const STRICT_CONSERVATION_CHECK: bool = true;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// invariant: 水面 (WATER_Y) 必须在 superflat 地面 (SUPERFLAT_GROUND_Y) **下方**。
+    /// 否则 client 水面 mesh 会盖在玩家脚下，视觉上"玩家站在水里"。
+    /// 之前 v1 (iter_1357) water_y = SEA_LEVEL + 1.5 = 13.5 比 ground (13) 高 0.5m，
+    /// 跟玩家脚面 y=13.5 几乎齐平。本测试锁死 WATER_Y < SUPERFLAT_GROUND_Y。
+    #[test]
+    fn water_below_ground_invariant() {
+        assert!(
+            WATER_Y < SUPERFLAT_GROUND_Y,
+            "WATER_Y ({}) 必须 < SUPERFLAT_GROUND_Y ({}), 否则玩家'站在水里'",
+            WATER_Y,
+            SUPERFLAT_GROUND_Y
+        );
+        // 至少差 1m，玩家/装饰物踩在 ground 上不会"浸"在水里
+        assert!(
+            SUPERFLAT_GROUND_Y - WATER_Y >= 1.0,
+            "WATER_Y ({}) 到 SUPERFLAT_GROUND_Y ({}) 至少差 1m, got {}",
+            WATER_Y,
+            SUPERFLAT_GROUND_Y,
+            SUPERFLAT_GROUND_Y - WATER_Y
+        );
+    }
+
+    /// invariant: WATER_Y 必须等于 SEA_LEVEL (单一信息源)
+    #[test]
+    fn water_y_equals_sea_level() {
+        assert_eq!(WATER_Y as i32, SEA_LEVEL);
+    }
+}

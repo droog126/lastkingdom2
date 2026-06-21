@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-# 默认 lib 入口为 src/lib.rs
+# 默认 lib 入口�?src/lib.rs
 path = "src/lib.rs"
+
+[features]
+# 跟 client/server 对齐, 让 feature unification 把 bevy 也开 dynamic_linking.
+# 否则 lk2-core 用 static bevy, client 用 dyn bevy → 链接失败 (LNK2019)
+dev-dynamic-linking = ["bevy/dynamic_linking"]
 
 [dependencies]
 # bevy — sim crate 需要 ECS + 一些常用的 render types (Color / Transform / Mesh3d)

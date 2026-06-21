@@ -91,10 +91,7 @@ mod tests {
 
     #[test]
     fn match_state_ordering() {
-        assert_eq!(
-            MatchState::OpeningProtection.next(),
-            MatchState::WildRace
-        );
+        assert_eq!(MatchState::OpeningProtection.next(), MatchState::WildRace);
         assert_eq!(MatchState::WildRace.next(), MatchState::SovereignRise);
         assert_eq!(MatchState::SovereignRise.next(), MatchState::Endgame);
         assert_eq!(MatchState::Endgame.next(), MatchState::Finished);

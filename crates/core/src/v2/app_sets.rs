@@ -60,31 +60,6 @@ pub enum PresentationSet {
     TransformSync,
 }
 
-/// 把所有 SimSet 串成一个 chain，按顺序在 FixedUpdate 跑
-///
-/// 用法：
-/// ```ignore
-/// app.configure_sets(
-///     FixedUpdate,
-///     SimSet::chain().run_if(in_state(AppState::InMatch)),
-/// );
-/// ```
-impl SimSet {
-    pub fn chain() -> SystemSetChain {
-        SystemSetChain(())
-    }
-}
-
-/// 标记类型，只为 chain() 能返回 SystemSet tuple
-pub struct SystemSetChain(());
-
-impl IntoSystemConfigs for SystemSetChain {
-    // 留空 — 真实注册用 .configure_sets 的 tuple 写法
-    fn into_system_configs(self) -> SystemConfigs {
-        SystemConfigs::new()
-    }
-}
-
 /// 把 12 个 SimSet 装进 tuple 的辅助宏（避免手写 12 行 .chain()）
 #[macro_export]
 macro_rules! sim_set_tuple {
