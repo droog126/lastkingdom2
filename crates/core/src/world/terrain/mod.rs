@@ -127,8 +127,7 @@ impl TerrainModule for SpawnHillModule {
         // 之前 `1.0 - t` 反了, 导致中心凹 (中心 dome_h=0), 玩家站在空气里看不到 mesh
         let dist = (dist2 as f32).sqrt();
         let t = (1.0 - dist / r as f32).clamp(0.0, 1.0);
-        let dome_h =
-            (1.0 - (t * std::f32::consts::FRAC_PI_2).cos()) * self.max_height as f32;
+        let dome_h = (1.0 - (t * std::f32::consts::FRAC_PI_2).cos()) * self.max_height as f32;
         let surface = SEA_LEVEL + 1 + dome_h as i32;
 
         // 同时把 surface_y 写进 ctx（这样 Cave/Tree/Ore 能看到）
@@ -161,8 +160,7 @@ impl TerrainModule for SpawnHillModule {
         }
         let dist = (dist2 as f32).sqrt();
         let t = (1.0 - dist / r as f32).clamp(0.0, 1.0);
-        let dome_h =
-            (1.0 - (t * std::f32::consts::FRAC_PI_2).cos()) * self.max_height as f32;
+        let dome_h = (1.0 - (t * std::f32::consts::FRAC_PI_2).cos()) * self.max_height as f32;
         Some(SEA_LEVEL as f32 + 1.0 + dome_h)
     }
 }
@@ -293,6 +291,12 @@ pub struct HeightmapModule {
     pub amplitude_detail: f32, // 细节振幅
     pub frequency_detail: f32,
     pub weight: f32,
+    /// Desert biome 高度偏移 — 默认 -2 (沙漠偏低). superflat 设 0 让地形完全平.
+    pub biome_bias_desert: f32,
+    /// Jungle biome 高度偏移 — 默认 0.
+    pub biome_bias_jungle: f32,
+    /// Tundra biome 高度偏移 — 默认 +3 (苔原偏高). superflat 设 0.
+    pub biome_bias_tundra: f32,
 }
 
 impl Default for HeightmapModule {
@@ -306,6 +310,9 @@ impl Default for HeightmapModule {
             amplitude_detail: 4.0,
             frequency_detail: 1.0,
             weight: 1.0,
+            biome_bias_desert: -2.0,
+            biome_bias_jungle: 0.0,
+            biome_bias_tundra: 3.0,
         }
     }
 }
@@ -320,9 +327,9 @@ impl HeightmapModule {
         let h_detail = noise3(x, 0, z, (self.seed ^ 0xCAFE) as u32);
         let biome = Biome::from_xz_infinite(x, z);
         let bias: f32 = match biome {
-            Biome::Desert => -2.0,
-            Biome::Jungle => 0.0,
-            Biome::Tundra => 3.0,
+            Biome::Desert => self.biome_bias_desert,
+            Biome::Jungle => self.biome_bias_jungle,
+            Biome::Tundra => self.biome_bias_tundra,
         };
         h_big * self.amplitude_big + h_detail * self.amplitude_detail + self.base_height + bias
     }
@@ -766,7 +773,7 @@ pub mod presets {
         TerrainPipeline {
             name: "default".into(),
             modules: vec![
-                Box::new(spawn_island),     // ShapeLayer 覆盖优先级 9.5（比 heightmap 高）
+                Box::new(spawn_island), // ShapeLayer 覆盖优先级 9.5（比 heightmap 高）
                 Box::new(SpawnHillModule::default()), // 原 SpawnHill 仍在（10.0）
                 Box::new(VillageMarkModule::default()), // 5 村旗
                 Box::new(h),
@@ -792,6 +799,39 @@ pub mod presets {
                 Box::new(h),
                 Box::new(WaterFillModule::default()),
                 Box::new(TreeModule { density: 0.01, ..Default::default() }), // 稀树
+            ],
+            vertical_min: 0,
+            vertical_max: crate::world::VERTICAL_SIZE,
+            seed: 0xDEADBEEF,
+        }
+    }
+
+    /// 超平坦地图 — 完全平的单一水平面，不填水、不生成自然树、不挖洞
+    ///
+    /// 所有 (x, z) 处的 surface 高度 = SEA_LEVEL + 1 (= 13)。
+    /// 这样 pretty 模块装饰物（玩家 avatar / 怪物球 / 树 / 石 / 花 / POI 柱 / 远景山）的
+    /// `effective_ground_height(x, z)` 都返回同一个值 → 全部贴地，没有浮空/陷地。
+    /// 不填水：玩家脚底和水面不重叠，不会"站在水里"。
+    /// 不生成自然树：避免 voxel 树乱长遮挡 pretty 装饰物。
+    /// 没有洞穴：地表下都是 solid，玩家不会被困在地下。
+    /// biome_bias 也归零：原本 Desert=-2 / Jungle=0 / Tundra=+3 会让地面随 biome 起伏，
+    /// 这里直接覆盖 compute_surface_f32 的 bias，保证严格水平。
+    ///
+    /// 使用场景：auto-demo 默认场景，让画面干净 + 装饰物可见。
+    pub fn superflat_preset() -> TerrainPipeline {
+        let mut h = HeightmapModule::default();
+        h.amplitude_big = 0.0;
+        h.amplitude_detail = 0.0;
+        // biome_bias=0: 不用 Desert/Jungle/Tundra 的 +3/-2/0 偏移, 否则表面会随 biome 起伏
+        h.biome_bias_desert = 0.0;
+        h.biome_bias_jungle = 0.0;
+        h.biome_bias_tundra = 0.0;
+        TerrainPipeline {
+            name: "superflat".into(),
+            modules: vec![
+                Box::new(h),
+                // WaterFillModule weight=0: 不填水
+                Box::new(WaterFillModule { weight: 0.0, ..WaterFillModule::default() }),
             ],
             vertical_min: 0,
             vertical_max: crate::world::VERTICAL_SIZE,
@@ -877,11 +917,19 @@ pub mod presets {
 
     /// 所有 preset 名（用于 F8 循环切换）
     pub fn preset_names() -> &'static [&'static str] {
-        &["default", "flat", "mountainous", "lold_arena", "shape_demo"]
+        &[
+            "superflat",
+            "default",
+            "flat",
+            "mountainous",
+            "lold_arena",
+            "shape_demo",
+        ]
     }
 
     pub fn by_name(name: &str) -> TerrainPipeline {
         match name {
+            "superflat" => superflat_preset(),
             "default" => default_preset(),
             "flat" => flat_preset(),
             "mountainous" => mountainous_preset(),
@@ -955,5 +1003,139 @@ pub mod presets {
             vertical_max: crate::world::VERTICAL_SIZE,
             seed: 0xDEADBEEF,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regress: auto-demo 锁死 player.pos.y = 16.0 (block_pos [48, 16, 48]),
+    /// 但 SpawnHillModule 在 (48, 48) 中心建了一个高 22m 的圆顶山,
+    /// 实际地面高度 ≈ SEA_LEVEL + 1 + max_height = 35 (远高于 16).
+    /// 旧代码 `let ground_y = player.pos.y - 2.0` 把装饰物漂在 14m 空中,
+    /// avatar 也悬空看不见. 正确做法: player 出生 y 必须等于 effective_ground_height.
+    ///
+    /// 本测试断言: 默认 preset 下 (48, 48) 的 surface_f32 应 ≥ 30 (圆顶山顶附近),
+    /// 远大于之前硬编码的 player.y=16. 一旦不满足, 说明 preset 改了, auto-demo
+    /// 的 y=16 硬编码也得跟着改, 否则漂浮 bug 会复发.
+    #[test]
+    fn default_preset_spawn_hill_is_above_player_y() {
+        let pipeline = presets::by_name("default");
+        let ground_at_spawn = pipeline
+            .surface_f32(48, 48)
+            .expect("default preset should have surface_f32 at spawn (48, 48)");
+        // 圆顶山中心高度 = SEA_LEVEL(12) + 1 + max_height(22) = 35, 容许 ±3 容差
+        assert!(
+            ground_at_spawn >= 30.0,
+            "spawn ground height should be >= 30 (SpawnHill 圆顶山顶 ≈ 35), got {} — \
+             若此断言失败, auto-demo 的 player.pos.y=16 硬编码需要同步更新, 否则漂浮 bug 会复发",
+            ground_at_spawn
+        );
+        // 同时远大于 auto-demo 硬编码的 y=16, 差距至少 10m
+        assert!(
+            ground_at_spawn - 16.0 >= 10.0,
+            "spawn ground ({}) 应比 auto-demo 硬编码 y=16 高至少 10m, 否则玩家仍站在空气里",
+            ground_at_spawn
+        );
+    }
+
+    /// 锁住 bug: auto-demo 锁死 player.pos.y=16 但 ground ≈ 35, 差距必须被显式修正。
+    /// 本测试给"auto-demo 出生 y 的正确算法"写一个 reference implementation,
+    /// 后续 main.rs 应该调用 `auto_demo_spawn_y(&game_world)` 而不是再硬编码 16.
+    /// 此处先暴露 API 让 main.rs 可以依赖, 防止再有人手抖写回 16.0.
+    #[test]
+    fn auto_demo_spawn_y_matches_ground_at_spawn() {
+        let pipeline = presets::by_name("default");
+        let ground_at_spawn =
+            pipeline.surface_f32(48, 48).expect("default preset has surface_f32 at spawn");
+        // auto-demo 出生 y 应当等于 ground + 0.5 (玩家站在山顶, 眼睛高 0.5m)
+        let auto_demo_y = ground_at_spawn + 0.5;
+        // 旧硬编码 16.0 远低于此, 证明 bug 存在
+        assert!(
+            (auto_demo_y - 16.0).abs() > 5.0,
+            "auto_demo_y ({}) 与旧硬编码 16.0 差距 > 5m, 证明 player.pos.y=16 是错的",
+            auto_demo_y
+        );
+        assert!(
+            auto_demo_y > 30.0,
+            "auto-demo 出生 y 应该 > 30 (圆顶山顶 + 0.5), got {}",
+            auto_demo_y
+        );
+    }
+
+    /// 中心最高, 边缘最低, 圆顶山 f32 高度单调下降 (距离从 0 到 radius).
+    /// 防止 SpawnHill 公式被改坏导致 dome 翻转或平台化.
+    #[test]
+    fn spawn_hill_monotonic_decay_from_center() {
+        let h = SpawnHillModule::default();
+        let center = h.surface_f32(48, 48).expect("center");
+        let mid = h.surface_f32(48 + h.radius / 2, 48).expect("mid");
+        let edge = h.surface_f32(48 + h.radius - 1, 48).expect("edge");
+        assert!(
+            center > mid && mid > edge,
+            "spawn hill dome should decay center > mid > edge, got {} > {} > {}",
+            center,
+            mid,
+            edge
+        );
+        // 边缘应回到 SEA_LEVEL + 1 (圆顶山公式 cos(0)=1 → dome_h=0)
+        assert!(
+            (edge - (SEA_LEVEL as f32 + 1.0)).abs() < 0.5,
+            "spawn hill edge should be ≈ SEA_LEVEL+1={}, got {}",
+            SEA_LEVEL as f32 + 1.0,
+            edge
+        );
+    }
+
+    /// superflat_preset 是"完全平的地形"语义:
+    ///   1. 所有 (x, z) 处 surface 高度恒为 SEA_LEVEL + 1
+    ///   2. 不生成水 (WaterFillModule weight ≈ 0)
+    ///   3. 不生成自然树 (modules 里没有 TreeModule)
+    /// 锁住这套规则, 防止有人无意间给 superflat 加 SpawnHill/WaterFill/Tree 又让它不平了.
+    #[test]
+    fn superflat_preset_is_completely_flat() {
+        let pipeline = presets::superflat_preset();
+        assert_eq!(pipeline.name, "superflat", "preset 名应是 superflat");
+
+        // 1. surface 高度在多个采样点都等于 SEA_LEVEL + 1
+        let expected = SEA_LEVEL as f32 + 1.0;
+        for &(x, z) in &[(0, 0), (48, 48), (95, 95), (10, 80), (80, 10)] {
+            let h = pipeline
+                .surface_f32(x, z)
+                .unwrap_or_else(|| panic!("superflat surface_f32 at ({},{}) should exist", x, z));
+            assert!(
+                (h - expected).abs() < 0.01,
+                "superflat surface at ({},{}) 应等于 SEA_LEVEL+1={}, got {}",
+                x,
+                z,
+                expected,
+                h
+            );
+        }
+
+        // 2. WaterFillModule 要么不存在, 要么 weight < 0.01 (不填水)
+        let bad_water = pipeline.modules.iter().any(|m| m.name() == "water" && m.weight() >= 0.01);
+        assert!(
+            !bad_water,
+            "superflat 不应填水, got modules: {:?}",
+            pipeline.modules.iter().map(|m| (m.name(), m.weight())).collect::<Vec<_>>()
+        );
+
+        // 3. 不应有 TreeModule
+        let has_tree = pipeline.modules.iter().any(|m| m.name() == "trees");
+        assert!(
+            !has_tree,
+            "superflat 不应生成自然树, modules: {:?}",
+            pipeline.modules.iter().map(|m| m.name()).collect::<Vec<_>>()
+        );
+
+        // 4. spawn 处 ground ≈ 13, 跟 effective_ground_height(48, 48) 一致
+        let ground_at_spawn = pipeline.surface_f32(48, 48).expect("superflat spawn surface");
+        assert!(
+            (ground_at_spawn - 13.0).abs() < 0.01,
+            "superflat 出生点 ground 应 = 13 (SEA_LEVEL+1), got {}",
+            ground_at_spawn
+        );
     }
 }

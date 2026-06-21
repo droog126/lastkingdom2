@@ -62,7 +62,10 @@ pub enum FillMode {
     /// 只贴地表 — 只填 primitive 表面 1 格
     Surface(BlockType),
     /// 自适应地表 — 表层用 `surface`，表层下用 `subsurface`
-    AdaptiveSurface { surface: BlockType, subsurface: BlockType },
+    AdaptiveSurface {
+        surface: BlockType,
+        subsurface: BlockType,
+    },
 }
 
 impl FillMode {
@@ -110,9 +113,12 @@ impl Shape for BoxShape {
     }
     fn contains(&self, x: i32, y: i32, z: i32) -> Option<bool> {
         Some(
-            x >= self.min[0] && x <= self.max[0]
-                && y >= self.min[1] && y <= self.max[1]
-                && z >= self.min[2] && z <= self.max[2],
+            x >= self.min[0]
+                && x <= self.max[0]
+                && y >= self.min[1]
+                && y <= self.max[1]
+                && z >= self.min[2]
+                && z <= self.max[2],
         )
     }
 }
@@ -606,9 +612,7 @@ impl ShapeLayer {
     }
 
     fn any_inside(&self, x: i32, y: i32, z: i32) -> bool {
-        self.shapes
-            .iter()
-            .any(|spec| eval_spec(spec, x, y, z) == Some(true))
+        self.shapes.iter().any(|spec| eval_spec(spec, x, y, z) == Some(true))
     }
 }
 
@@ -683,11 +687,7 @@ mod tests {
 
     #[test]
     fn box_contains_interior_and_boundary() {
-        let b = BoxShape {
-            name: "b".into(),
-            min: [0, 0, 0],
-            max: [3, 3, 3],
-        };
+        let b = BoxShape { name: "b".into(), min: [0, 0, 0], max: [3, 3, 3] };
         // 边界包含
         assert_eq!(b.contains(0, 0, 0), Some(true));
         assert_eq!(b.contains(3, 3, 3), Some(true));
@@ -701,11 +701,7 @@ mod tests {
 
     #[test]
     fn sphere_contains_radius() {
-        let s = SphereShape {
-            name: "s".into(),
-            center: [0, 0, 0],
-            radius: 5.0,
-        };
+        let s = SphereShape { name: "s".into(), center: [0, 0, 0], radius: 5.0 };
         assert_eq!(s.contains(0, 0, 0), Some(true));
         assert_eq!(s.contains(5, 0, 0), Some(true)); // 边界
         assert_eq!(s.contains(6, 0, 0), Some(false));
@@ -715,11 +711,7 @@ mod tests {
 
     #[test]
     fn ellipsoid_non_uniform() {
-        let e = EllipsoidShape {
-            name: "e".into(),
-            center: [0, 0, 0],
-            radii: [10.0, 2.0, 10.0],
-        };
+        let e = EllipsoidShape { name: "e".into(), center: [0, 0, 0], radii: [10.0, 2.0, 10.0] };
         assert_eq!(e.contains(0, 0, 0), Some(true));
         assert_eq!(e.contains(10, 0, 0), Some(true)); // X 边界
         assert_eq!(e.contains(0, 2, 0), Some(true)); // Y 边界
@@ -787,12 +779,8 @@ mod tests {
 
     #[test]
     fn noise_field_is_deterministic() {
-        let n1 = NoiseFieldShape {
-            name: "n".into(),
-            seed: 42,
-            freq: [0.1, 0.1, 0.1],
-            threshold: 0.5,
-        };
+        let n1 =
+            NoiseFieldShape { name: "n".into(), seed: 42, freq: [0.1, 0.1, 0.1], threshold: 0.5 };
         let n2 = n1.clone();
         for x in -10..10 {
             for y in -10..10 {
@@ -855,12 +843,10 @@ mod tests {
 
     #[test]
     fn shape_layer_replace_fills_interior() {
-        let layer = ShapeLayer::new("stone_box", 5.0, FillMode::Replace(BlockType::Stone))
-            .with_shape(ShapeSpec::Box(BoxShape {
-                name: "b".into(),
-                min: [0, 0, 0],
-                max: [4, 4, 4],
-            }));
+        let layer =
+            ShapeLayer::new("stone_box", 5.0, FillMode::Replace(BlockType::Stone)).with_shape(
+                ShapeSpec::Box(BoxShape { name: "b".into(), min: [0, 0, 0], max: [4, 4, 4] }),
+            );
         assert_eq!(layer.evaluate(2, 2, 2), Some(BlockType::Stone));
         // 外 → None
         assert_eq!(layer.evaluate(10, 2, 2), None);
@@ -893,16 +879,8 @@ mod tests {
             weight: 1.0,
             fill: FillMode::Replace(BlockType::Wood),
             shapes: vec![
-                ShapeSpec::Box(BoxShape {
-                    name: "a".into(),
-                    min: [0, 0, 0],
-                    max: [2, 2, 2],
-                }),
-                ShapeSpec::Box(BoxShape {
-                    name: "b".into(),
-                    min: [5, 0, 0],
-                    max: [7, 2, 2],
-                }),
+                ShapeSpec::Box(BoxShape { name: "a".into(), min: [0, 0, 0], max: [2, 2, 2] }),
+                ShapeSpec::Box(BoxShape { name: "b".into(), min: [5, 0, 0], max: [7, 2, 2] }),
             ],
             biome_override: None,
             enabled: true,

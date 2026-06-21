@@ -329,14 +329,19 @@ mod tests {
         for l in &labels {
             assert!(!l.is_empty(), "label_zh 不能为空");
             // 中文 / 不应是英文 (避免英文 ID 漏配)
-            assert!(l.chars().any(|c| c as u32 > 127), "label_zh 应是中文: {:?}", l);
+            assert!(
+                l.chars().any(|c| c as u32 > 127),
+                "label_zh 应是中文: {:?}",
+                l
+            );
         }
     }
 
     #[test]
     fn stone_wall_stronger_than_wood() {
         assert!(
-            OverlayKind::StoneWall.default_durability() > OverlayKind::WoodWall.default_durability(),
+            OverlayKind::StoneWall.default_durability()
+                > OverlayKind::WoodWall.default_durability(),
             "石墙应比木墙耐久高"
         );
     }
@@ -392,7 +397,10 @@ mod tests {
         // 不可破坏的覆盖层永远不算 destroyed
         let mut r = TerrainOverlayEntity::new(2, OverlayKind::Road, [0.0, 0.0, 0.0]);
         r.durability = 0.0;
-        assert!(!r.is_destroyed(), "Road 是不可破坏覆盖层,durability=0 也不应算 destroyed");
+        assert!(
+            !r.is_destroyed(),
+            "Road 是不可破坏覆盖层,durability=0 也不应算 destroyed"
+        );
         let _ = r;
     }
 
@@ -446,7 +454,11 @@ mod tests {
             OverlayKind::RuneSlot,
             OverlayKind::Altar,
         ] {
-            assert!(k.default_footprint_radius() > 0.0, "{:?} footprint 必须 > 0", k);
+            assert!(
+                k.default_footprint_radius() > 0.0,
+                "{:?} footprint 必须 > 0",
+                k
+            );
         }
     }
 }

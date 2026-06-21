@@ -57,13 +57,13 @@ pub enum ResourceKind {
     VampireFang,      // 夜晚精英
     PhoenixFeather,   // 岩浆垂钓
     // ---- V2 新增：法术 / 秘仪 / 建国权 ----
-    SpiritEssence,    // 灵质 (法术主消耗)
-    RuneStone,        // 符文石 (法阵、结界、符文塔)
-    RunePowder,       // 符文粉 (小型法术、陷阱)
-    StarSand,         // 星砂 (高阶法术、神器封印、王座推进)
-    RelicCore,        // 遗迹核心 (秘剑谱、法术环、仪式建筑)
-    SovereignSpark,   // 王权火种 (建国权)
-    SparkFragment,    // 火种碎片 (国家灭亡回流, 3 碎片合成 1 火种)
+    SpiritEssence,  // 灵质 (法术主消耗)
+    RuneStone,      // 符文石 (法阵、结界、符文塔)
+    RunePowder,     // 符文粉 (小型法术、陷阱)
+    StarSand,       // 星砂 (高阶法术、神器封印、王座推进)
+    RelicCore,      // 遗迹核心 (秘剑谱、法术环、仪式建筑)
+    SovereignSpark, // 王权火种 (建国权)
+    SparkFragment,  // 火种碎片 (国家灭亡回流, 3 碎片合成 1 火种)
 }
 
 impl ResourceKind {

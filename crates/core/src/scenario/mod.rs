@@ -376,7 +376,11 @@ pub fn scenario_runner(
         ScenarioStep::AddGeoLayer { layer } => {
             let n = layer.name.clone();
             game_world.push_geo_layer(layer.clone());
-            info!("🧩 add_geo_layer: {} (overlay 现 {} 层)", n, game_world.geo_overlay.len());
+            info!(
+                "🧩 add_geo_layer: {} (overlay 现 {} 层)",
+                n,
+                game_world.geo_overlay.len()
+            );
             advance_step(&mut state);
         }
         ScenarioStep::RemoveGeoLayer { name } => {
@@ -482,8 +486,7 @@ pub fn simulate_player_actions(
                         state.pending_gather_left -= 1;
                         warn!(
                             "[scenario] skipped gather step for {:?} (还 {} 次)",
-                            res,
-                            state.pending_gather_left
+                            res, state.pending_gather_left
                         );
                     }
                 }
@@ -832,10 +835,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            PoolError::WouldExceedMax {
-                kind: ResourceKind::Wood,
-                ..
-            }
+            PoolError::WouldExceedMax { kind: ResourceKind::Wood, .. }
         ));
         assert_eq!(pool.get(ResourceKind::Wood), ResourceKind::Wood.max());
         assert_eq!(player.blocks_gathered, 0);
@@ -951,7 +951,11 @@ mod tests {
         };
         w.push_geo_layer(layer);
         let with_overlay = w.generate_voxel(3, 1, 3);
-        assert_eq!(with_overlay, BlockType::Wood, "overlay 应该覆盖 default pipeline");
+        assert_eq!(
+            with_overlay,
+            BlockType::Wood,
+            "overlay 应该覆盖 default pipeline"
+        );
         // overlay 外 (10, 1, 10) 仍走 pipeline
         let _ = baseline; // 仅供参考
     }

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::ai::TickObserver;
 use crate::clock::SimClock;
 use crate::constant;
+use crate::eco_cycle::EcoCycle;
 use crate::monster::MonsterEcosystem;
 use crate::resource::{GlobalResourcePool, ResourceKind};
 
@@ -33,6 +34,7 @@ pub fn advance_demo_tick(
     clock: &mut SimClock,
     pool: &mut GlobalResourcePool,
     monsters: &mut MonsterEcosystem,
+    eco: &mut EcoCycle,
     obs: &mut TickObserver,
     role: SimRole,
 ) -> bool {
@@ -47,6 +49,7 @@ pub fn advance_demo_tick(
     let _ = pool.try_add(ResourceKind::Food, 2);
     obs.begin_tick();
     monsters.tick(pool);
+    eco.tick();
 
     if clock.tick % 10 == 0 {
         info!(
@@ -59,4 +62,92 @@ pub fn advance_demo_tick(
     }
 
     true
+}
+
+/// Advance the authoritative fixed-step demo clock once.
+///
+/// This is the bridge while the V2 systems are being moved out of the old
+/// `Update` demo loop. Every `FixedUpdate` increments the authoritative tick,
+/// but the legacy ecosystem/resource demo work remains a slow 1-second step.
+/// That keeps render frame rate independent from gameplay ticks without making
+/// food/apple regeneration 30x faster.
+pub fn advance_fixed_authority_tick(
+    delta_secs: f32,
+    clock: &mut SimClock,
+    pool: &mut GlobalResourcePool,
+    monsters: &mut MonsterEcosystem,
+    eco: &mut EcoCycle,
+    obs: &mut TickObserver,
+    role: SimRole,
+) -> bool {
+    clock.tick += 1;
+    clock.slow_tick_accum += delta_secs.max(0.0);
+
+    if clock.slow_tick_accum + f32::EPSILON < constant::SLOW_TICK_SECS {
+        return false;
+    }
+
+    clock.slow_tick_accum -= constant::SLOW_TICK_SECS;
+    let _ = pool.try_add(ResourceKind::Apple, 1);
+    let _ = pool.try_add(ResourceKind::Food, 2);
+    obs.begin_tick();
+    monsters.tick(pool);
+    eco.tick();
+
+    if clock.tick % 300 == 0 {
+        info!(
+            "⏱ {} {}: monsters={}, food={}",
+            role.tick_log_label(),
+            clock.tick,
+            monsters.current_individuals,
+            pool.get(ResourceKind::Food)
+        );
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_authority_tick_advances_every_call_but_slow_logic_waits_one_second() {
+        let mut clock = SimClock::default();
+        let mut pool = GlobalResourcePool::default();
+        let mut monsters = MonsterEcosystem::default();
+        let mut eco = EcoCycle::default();
+        let mut obs = TickObserver::default();
+
+        let initial_food = pool.get(ResourceKind::Food);
+        for _ in 0..29 {
+            let ran_slow = advance_fixed_authority_tick(
+                1.0 / 30.0,
+                &mut clock,
+                &mut pool,
+                &mut monsters,
+                &mut eco,
+                &mut obs,
+                SimRole::ServerAuthority,
+            );
+            assert!(!ran_slow);
+        }
+
+        assert_eq!(clock.tick, 29);
+        assert_eq!(pool.get(ResourceKind::Food), initial_food);
+
+        let ran_slow = advance_fixed_authority_tick(
+            1.0 / 30.0,
+            &mut clock,
+            &mut pool,
+            &mut monsters,
+            &mut eco,
+            &mut obs,
+            SimRole::ServerAuthority,
+        );
+
+        assert!(ran_slow);
+        assert_eq!(clock.tick, 30);
+        assert_eq!(pool.get(ResourceKind::Food), initial_food + 2);
+    }
 }

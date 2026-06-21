@@ -424,7 +424,7 @@ mod tests {
     use super::*;
 
     fn reg_with_souls(souls: i64) -> (NationRegistry, GlobalResourcePool) {
-        let mut reg = NationRegistry::new();
+        let reg = NationRegistry::new();
         let mut pool = GlobalResourcePool::new();
         pool.force_add(ResourceKind::Soul, souls);
         (reg, pool)

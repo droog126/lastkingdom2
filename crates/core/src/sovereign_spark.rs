@@ -199,9 +199,7 @@ pub fn consume_spark_for_founding(
             continue;
         }
         let Some(holder) = spark.holder else { continue };
-        let is_founding = players
-            .iter()
-            .any(|p| p.id() == holder && /* has FounderIntent */ false);
+        let is_founding = players.iter().any(|p| p.id() == holder && /* has FounderIntent */ false);
         if !is_founding {
             continue;
         }
@@ -213,13 +211,7 @@ pub fn consume_spark_for_founding(
         // V2 改造 TODO: 让 found 接受"消耗物 = 火种"而不只是 soul
         let nation_name = format!("Nation-{}", holder);
         let tick = match_clock.wall_secs as u64;
-        let result = registry.found(
-            &mut pool,
-            holder,
-            nation_name.clone(),
-            [0, 0, 0],
-            tick,
-        );
+        let result = registry.found(&mut pool, holder, nation_name.clone(), [0, 0, 0], tick);
         let nation_id = match result {
             Ok(id) => Some(id),
             Err(e) => {
@@ -260,10 +252,7 @@ pub fn recirculate_spark_on_nation_end(
             // MVP 简化: 给全局资源池回 50 soul
             let _ = pool.try_add(ResourceKind::Soul, 50);
             spark.recirculated = true;
-            info!(
-                "[spark] id={} recirculated to +50 Soul (V2 §5.4)",
-                spark.id
-            );
+            info!("[spark] id={} recirculated to +50 Soul (V2 §5.4)", spark.id);
             // 状态保留 Consumed,等下次现世事件由 EventService 显式重生
         }
     }
@@ -334,8 +323,7 @@ mod tests {
     #[test]
     fn consumed_spark_recirculates_to_pool() {
         // 模拟"国家灭亡 → recirculate_spark_on_nation_end"
-        let mut s = Spark::new(1, [0.0; 3], 0.0);
-        s.status = SparkStatus::Consumed;
+        let _s = Spark { status: SparkStatus::Consumed, ..Spark::new(1, [0.0; 3], 0.0) };
         // pool 增加 50
         let mut pool = GlobalResourcePool::default();
         let _ = pool.try_add(ResourceKind::Soul, 50);

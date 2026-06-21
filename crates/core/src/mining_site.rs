@@ -111,7 +111,7 @@ impl MiningSiteKind {
     /// 稳采/强采下, 一个 slot 完成一次采掘所需 tick 数 (30Hz fixed update)
     pub fn gather_ticks(self, mode: MiningMode) -> u32 {
         let base = match self {
-            Self::SurfacePit => 30 * 12,     // 12s
+            Self::SurfacePit => 30 * 12,    // 12s
             Self::CaveFissure => 30 * 15,   // 15s
             Self::MoonRidge => 30 * 14,     // 14s
             Self::SpiritSink => 30 * 18,    // 18s
@@ -191,20 +191,21 @@ pub enum DepletionTier {
 }
 
 impl DepletionTier {
-    pub fn from_percent(p: f32) -> Self {
-        // 表格包 §4: tier_1=45% 进入低产, tier_2=80% 进入近枯竭
-        // 0% 算 Depleted, 100% 算 Normal
-        if p <= 0.0 {
+    pub fn from_remaining_pct(remaining_pct: f32) -> Self {
+        let remaining_pct = remaining_pct.clamp(0.0, 100.0);
+        if remaining_pct <= 0.0 {
             Self::Depleted
-        } else if p < 45.0 {
-            Self::Normal
-        } else if p < 80.0 {
-            Self::LowYield
-        } else if p < 100.0 {
+        } else if remaining_pct <= 20.0 {
             Self::NearEmpty
+        } else if remaining_pct <= 55.0 {
+            Self::LowYield
         } else {
             Self::Normal
         }
+    }
+
+    pub fn from_percent(p: f32) -> Self {
+        Self::from_remaining_pct(p)
     }
 
     /// 该阶段的产出乘数
@@ -259,7 +260,7 @@ impl MiningSite {
     }
 
     pub fn depletion_tier(&self) -> DepletionTier {
-        DepletionTier::from_percent(self.remaining_pct)
+        DepletionTier::from_remaining_pct(self.remaining_pct)
     }
 }
 
@@ -280,13 +281,7 @@ pub struct MiningSlot {
 
 impl MiningSlot {
     pub fn new(site_id: u32, slot_index: u32) -> Self {
-        Self {
-            site_id,
-            slot_index,
-            occupant: None,
-            progress_ticks: 0,
-            mode: MiningMode::Steady,
-        }
+        Self { site_id, slot_index, occupant: None, progress_ticks: 0, mode: MiningMode::Steady }
     }
 
     pub fn is_occupied(&self) -> bool {
@@ -384,10 +379,7 @@ pub fn tick_mining_slots(
         };
         // 找 site
         let site_id = slot.site_id;
-        let site_kind = sites
-            .iter()
-            .find(|s| s.id == site_id)
-            .map(|s| s.kind);
+        let site_kind = sites.iter().find(|s| s.id == site_id).map(|s| s.kind);
         let Some(site_kind) = site_kind else {
             // site 不存在 (被销毁), 清空 slot
             slot.occupant = None;
@@ -447,10 +439,7 @@ pub fn tick_mining_slots(
                 Err(err) => {
                     warn!(
                         "[mine] failed to award yield for site {} slot {} player {}: {}",
-                        site_id,
-                        slot.slot_index,
-                        player_id,
-                        err
+                        site_id, slot.slot_index, player_id, err
                     );
                 }
             }
@@ -468,10 +457,9 @@ pub fn tick_mining_slots(
     // 单 slot ≈ 5400/540 = 10 次循环; 4 slot ≈ 40 次循环, 永远采不完)  → 改用每 tick 0.005% 扣
     for mut site in sites.iter_mut() {
         // 简化: 每个 occupied slot 每 tick 扣 0.005%
-        let occupied = slots
-            .iter()
-            .filter(|(_, s)| s.occupant.is_some() && s.site_id == site.id)
-            .count() as f32;
+        let occupied =
+            slots.iter().filter(|(_, s)| s.occupant.is_some() && s.site_id == site.id).count()
+                as f32;
         let drain = 0.005 * occupied;
         if drain > 0.0 && site.remaining_pct > 0.0 {
             let old_tier = site.depletion_tier();
@@ -539,7 +527,10 @@ mod tests {
         assert_eq!(MiningSiteKind::MoonRidge.id_str(), "mine_moon_ridge");
         assert_eq!(MiningSiteKind::SpiritSink.id_str(), "mine_spirit_sink");
         assert_eq!(MiningSiteKind::RelicQuarry.id_str(), "mine_relic_quarry");
-        assert_eq!(MiningSiteKind::CalamityBloom.id_str(), "mine_calamity_bloom");
+        assert_eq!(
+            MiningSiteKind::CalamityBloom.id_str(),
+            "mine_calamity_bloom"
+        );
     }
 
     #[test]
@@ -554,20 +545,53 @@ mod tests {
             MiningSiteKind::CalamityBloom,
         ] {
             let n = k.default_slot_count();
-            assert!((2..=6).contains(&n), "{:?} slot_count={} out of range", k, n);
+            assert!(
+                (2..=6).contains(&n),
+                "{:?} slot_count={} out of range",
+                k,
+                n
+            );
         }
     }
 
     #[test]
     fn depletion_tier_thresholds() {
-        // 0% = Depleted, 100% = Normal, 中间走 LowYield (45-80) / NearEmpty (80-100)
-        assert_eq!(DepletionTier::from_percent(0.0), DepletionTier::Depleted);
-        assert_eq!(DepletionTier::from_percent(0.1), DepletionTier::Normal);
-        assert_eq!(DepletionTier::from_percent(44.9), DepletionTier::Normal);
-        assert_eq!(DepletionTier::from_percent(45.0), DepletionTier::LowYield);
-        assert_eq!(DepletionTier::from_percent(80.0), DepletionTier::NearEmpty);
-        assert_eq!(DepletionTier::from_percent(99.9), DepletionTier::NearEmpty);
-        assert_eq!(DepletionTier::from_percent(100.0), DepletionTier::Normal);
+        assert_eq!(
+            DepletionTier::from_remaining_pct(100.0),
+            DepletionTier::Normal
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(55.1),
+            DepletionTier::Normal
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(55.0),
+            DepletionTier::LowYield
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(20.1),
+            DepletionTier::LowYield
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(20.0),
+            DepletionTier::NearEmpty
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(0.1),
+            DepletionTier::NearEmpty
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(0.0),
+            DepletionTier::Depleted
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(-1.0),
+            DepletionTier::Depleted
+        );
+        assert_eq!(
+            DepletionTier::from_remaining_pct(120.0),
+            DepletionTier::Normal
+        );
     }
 
     #[test]
@@ -579,17 +603,19 @@ mod tests {
         ] {
             let steady = k.gather_ticks(MiningMode::Steady);
             let hard = k.gather_ticks(MiningMode::Hard);
-            assert!(hard < steady, "{:?} hard ({}) >= steady ({})", k, hard, steady);
+            assert!(
+                hard < steady,
+                "{:?} hard ({}) >= steady ({})",
+                k,
+                hard,
+                steady
+            );
         }
     }
 
     #[test]
     fn registry_allocates_unique_ids() {
-        let mut r = MiningSiteRegistry {
-            common_count: 10,
-            rich_count: 4,
-            ..Default::default()
-        };
+        let mut r = MiningSiteRegistry { common_count: 10, rich_count: 4, ..Default::default() };
         let a = r.alloc_id();
         let b = r.alloc_id();
         assert_ne!(a, b);
@@ -619,7 +645,7 @@ mod tests {
         site.remaining_pct = 50.0;
         assert_eq!(site.depletion_tier(), DepletionTier::LowYield);
         assert!((site.depletion_tier().yield_multiplier() - 0.7).abs() < 0.01);
-        site.remaining_pct = 90.0;
+        site.remaining_pct = 10.0;
         assert_eq!(site.depletion_tier(), DepletionTier::NearEmpty);
         assert!((site.depletion_tier().yield_multiplier() - 0.3).abs() < 0.01);
         site.remaining_pct = 0.0;
@@ -638,17 +664,17 @@ mod tests {
     #[test]
     fn award_mining_yield_reports_full_pool() {
         let mut pool = GlobalResourcePool::new();
-        pool.try_add(ResourceKind::SpiritEssence, ResourceKind::SpiritEssence.max())
-            .unwrap();
+        pool.try_add(
+            ResourceKind::SpiritEssence,
+            ResourceKind::SpiritEssence.max(),
+        )
+        .unwrap();
 
         let err = award_mining_yield(&mut pool, ResourceKind::SpiritEssence, 1).unwrap_err();
 
         assert!(matches!(
             err,
-            PoolError::WouldExceedMax {
-                kind: ResourceKind::SpiritEssence,
-                ..
-            }
+            PoolError::WouldExceedMax { kind: ResourceKind::SpiritEssence, .. }
         ));
         assert_eq!(
             pool.get(ResourceKind::SpiritEssence),

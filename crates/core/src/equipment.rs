@@ -253,7 +253,14 @@ pub struct EquipmentInstance {
 
 impl EquipmentInstance {
     /// 构造一个新装备 (auto 算 max_durability = base * quality.durability_multiplier)
-    pub fn new(id: u32, item_id: &str, slot: EquipmentSlot, quality: EquipmentQuality, base_max: f32, weight: f32) -> Self {
+    pub fn new(
+        id: u32,
+        item_id: &str,
+        slot: EquipmentSlot,
+        quality: EquipmentQuality,
+        base_max: f32,
+        weight: f32,
+    ) -> Self {
         let max = base_max * quality.durability_multiplier();
         Self {
             id,
@@ -362,11 +369,7 @@ impl EquipmentState {
 
     /// 全部已破裂的装备 ID (留死亡掉落 / 拆分回收用)
     pub fn broken_ids(&self) -> Vec<u32> {
-        self.slots
-            .values()
-            .filter(|e| e.is_broken())
-            .map(|e| e.id)
-            .collect()
+        self.slots.values().filter(|e| e.is_broken()).map(|e| e.id).collect()
     }
 }
 
@@ -408,8 +411,7 @@ pub struct EquipmentPlugin;
 
 impl Plugin for EquipmentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<EquipmentChangedMsg>()
-            .add_message::<EquipmentDurabilityChangedMsg>();
+        app.add_message::<EquipmentChangedMsg>().add_message::<EquipmentDurabilityChangedMsg>();
     }
 }
 
@@ -449,7 +451,11 @@ mod tests {
         for s in EquipmentSlot::ALL {
             let l = s.label_zh();
             assert!(!l.is_empty(), "label_zh 不能为空: {:?}", s);
-            assert!(l.chars().any(|c| c as u32 > 127), "label_zh 应是中文: {:?}", s);
+            assert!(
+                l.chars().any(|c| c as u32 > 127),
+                "label_zh 应是中文: {:?}",
+                s
+            );
         }
     }
 
@@ -465,11 +471,13 @@ mod tests {
     #[test]
     fn arcane_stronger_than_crafted() {
         assert!(
-            EquipmentQuality::Arcane.stat_multiplier() > EquipmentQuality::Crafted.stat_multiplier(),
+            EquipmentQuality::Arcane.stat_multiplier()
+                > EquipmentQuality::Crafted.stat_multiplier(),
             "Arcane 应比 Crafted 主属性强"
         );
         assert!(
-            EquipmentQuality::Refined.stat_multiplier() > EquipmentQuality::Crafted.stat_multiplier(),
+            EquipmentQuality::Refined.stat_multiplier()
+                > EquipmentQuality::Crafted.stat_multiplier(),
             "Refined 应比 Crafted 主属性强"
         );
     }
@@ -503,9 +511,18 @@ mod tests {
         assert_eq!(DurabilityState::from_percent(1.0), DurabilityState::Normal);
         assert_eq!(DurabilityState::from_percent(0.50), DurabilityState::Normal);
         assert_eq!(DurabilityState::from_percent(0.25), DurabilityState::Normal);
-        assert_eq!(DurabilityState::from_percent(0.249), DurabilityState::Damaged);
-        assert_eq!(DurabilityState::from_percent(0.10), DurabilityState::Damaged);
-        assert_eq!(DurabilityState::from_percent(0.01), DurabilityState::Damaged);
+        assert_eq!(
+            DurabilityState::from_percent(0.249),
+            DurabilityState::Damaged
+        );
+        assert_eq!(
+            DurabilityState::from_percent(0.10),
+            DurabilityState::Damaged
+        );
+        assert_eq!(
+            DurabilityState::from_percent(0.01),
+            DurabilityState::Damaged
+        );
         assert_eq!(DurabilityState::from_percent(0.0), DurabilityState::Broken);
     }
 
@@ -515,15 +532,19 @@ mod tests {
         assert!(DurabilityState::Normal.effectiveness() > 0.0);
         assert!(DurabilityState::Damaged.effectiveness() > 0.0);
         // 受损应 < 正常
-        assert!(
-            DurabilityState::Damaged.effectiveness() < DurabilityState::Normal.effectiveness()
-        );
+        assert!(DurabilityState::Damaged.effectiveness() < DurabilityState::Normal.effectiveness());
     }
 
     #[test]
     fn equipment_damage_clamp() {
-        let mut e =
-            EquipmentInstance::new(1, "blade_plain_duelist", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 160.0, 4.0);
+        let mut e = EquipmentInstance::new(
+            1,
+            "blade_plain_duelist",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            160.0,
+            4.0,
+        );
         assert!((e.current_durability - 160.0).abs() < 0.01);
 
         // 扣 50 → 110
@@ -547,8 +568,14 @@ mod tests {
 
     #[test]
     fn equipment_repair_clamp() {
-        let mut e =
-            EquipmentInstance::new(2, "shield_wood", EquipmentSlot::OffHand, EquipmentQuality::Crafted, 100.0, 3.0);
+        let mut e = EquipmentInstance::new(
+            2,
+            "shield_wood",
+            EquipmentSlot::OffHand,
+            EquipmentQuality::Crafted,
+            100.0,
+            3.0,
+        );
         e.current_durability = 20.0;
         e.repair(30.0);
         assert!((e.current_durability - 50.0).abs() < 0.01);
@@ -558,7 +585,14 @@ mod tests {
 
     #[test]
     fn unique_damage_is_noop() {
-        let mut e = EquipmentInstance::new(3, "relic_crown_shard", EquipmentSlot::Relic, EquipmentQuality::Unique, 100.0, 0.0);
+        let mut e = EquipmentInstance::new(
+            3,
+            "relic_crown_shard",
+            EquipmentSlot::Relic,
+            EquipmentQuality::Unique,
+            100.0,
+            0.0,
+        );
         assert_eq!(e.current_durability, 100.0);
         e.damage(50.0);
         assert_eq!(e.current_durability, 100.0, "Unique 不走普通耐久");
@@ -569,25 +603,76 @@ mod tests {
 
     #[test]
     fn quality_durability_affects_max() {
-        let crude = EquipmentInstance::new(10, "x", EquipmentSlot::MainHand, EquipmentQuality::Crude, 100.0, 1.0);
-        let crafted = EquipmentInstance::new(11, "x", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 100.0, 1.0);
-        let refined = EquipmentInstance::new(12, "x", EquipmentSlot::MainHand, EquipmentQuality::Refined, 100.0, 1.0);
-        let arcane = EquipmentInstance::new(13, "x", EquipmentSlot::MainHand, EquipmentQuality::Arcane, 100.0, 1.0);
+        let crude = EquipmentInstance::new(
+            10,
+            "x",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crude,
+            100.0,
+            1.0,
+        );
+        let crafted = EquipmentInstance::new(
+            11,
+            "x",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            100.0,
+            1.0,
+        );
+        let refined = EquipmentInstance::new(
+            12,
+            "x",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Refined,
+            100.0,
+            1.0,
+        );
+        let arcane = EquipmentInstance::new(
+            13,
+            "x",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Arcane,
+            100.0,
+            1.0,
+        );
 
-        assert!((crude.max_durability - 80.0).abs() < 0.01, "Crude 100*0.8=80");
+        assert!(
+            (crude.max_durability - 80.0).abs() < 0.01,
+            "Crude 100*0.8=80"
+        );
         assert!((crafted.max_durability - 100.0).abs() < 0.01);
-        assert!((refined.max_durability - 115.0).abs() < 0.01, "Refined 100*1.15=115");
-        assert!((arcane.max_durability - 110.0).abs() < 0.01, "Arcane 100*1.10=110");
+        assert!(
+            (refined.max_durability - 115.0).abs() < 0.01,
+            "Refined 100*1.15=115"
+        );
+        assert!(
+            (arcane.max_durability - 110.0).abs() < 0.01,
+            "Arcane 100*1.10=110"
+        );
     }
 
     #[test]
     fn effective_multiplier_combines_quality_and_durability() {
         // Crafted + Normal = 1.0 * 1.0 = 1.0
-        let mut e = EquipmentInstance::new(20, "x", EquipmentSlot::Body, EquipmentQuality::Crafted, 100.0, 1.0);
+        let e = EquipmentInstance::new(
+            20,
+            "x",
+            EquipmentSlot::Body,
+            EquipmentQuality::Crafted,
+            100.0,
+            1.0,
+        );
         assert!((e.effective_multiplier() - 1.0).abs() < 0.001);
 
         // Refined + Normal = 1.08 * 1.0 = 1.08
-        let mut e2 = EquipmentInstance::new(21, "x", EquipmentSlot::Body, EquipmentQuality::Refined, 100.0, 1.0);
+        let mut e2 = EquipmentInstance::new(
+            21,
+            "x",
+            EquipmentSlot::Body,
+            EquipmentQuality::Refined,
+            100.0,
+            1.0,
+        );
         assert!((e2.effective_multiplier() - 1.08).abs() < 0.001);
 
         // Refined + Damaged = 1.08 * 0.75 = 0.81
@@ -599,7 +684,14 @@ mod tests {
         assert_eq!(e2.effective_multiplier(), 0.0);
 
         // Unique + 任何耐久 = 1.0
-        let mut eu = EquipmentInstance::new(22, "x", EquipmentSlot::Relic, EquipmentQuality::Unique, 100.0, 0.0);
+        let mut eu = EquipmentInstance::new(
+            22,
+            "x",
+            EquipmentSlot::Relic,
+            EquipmentQuality::Unique,
+            100.0,
+            0.0,
+        );
         eu.current_durability = 0.0; // 试图扣
         assert_eq!(eu.effective_multiplier(), 1.0, "Unique 永远 1.0");
     }
@@ -607,8 +699,22 @@ mod tests {
     #[test]
     fn state_equip_replaces_same_slot() {
         let mut st = EquipmentState::new();
-        let sword1 = EquipmentInstance::new(1, "blade_plain_duelist", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 160.0, 4.0);
-        let sword2 = EquipmentInstance::new(2, "blade_moonsteel_rapier", EquipmentSlot::MainHand, EquipmentQuality::Arcane, 140.0, 3.0);
+        let sword1 = EquipmentInstance::new(
+            1,
+            "blade_plain_duelist",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            160.0,
+            4.0,
+        );
+        let sword2 = EquipmentInstance::new(
+            2,
+            "blade_moonsteel_rapier",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Arcane,
+            140.0,
+            3.0,
+        );
 
         assert!(st.equip(sword1).is_none());
         assert_eq!(st.count(), 1);
@@ -623,7 +729,14 @@ mod tests {
     #[test]
     fn state_equip_same_id_is_noop() {
         let mut st = EquipmentState::new();
-        let sword = EquipmentInstance::new(1, "blade_plain_duelist", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 160.0, 4.0);
+        let sword = EquipmentInstance::new(
+            1,
+            "blade_plain_duelist",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            160.0,
+            4.0,
+        );
         st.equip(sword.clone());
         // 再 equip 同一个 id → 应是 noop
         let result = st.equip(sword);
@@ -633,7 +746,14 @@ mod tests {
     #[test]
     fn state_unequip_removes() {
         let mut st = EquipmentState::new();
-        let sword = EquipmentInstance::new(1, "blade_plain_duelist", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 160.0, 4.0);
+        let sword = EquipmentInstance::new(
+            1,
+            "blade_plain_duelist",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            160.0,
+            4.0,
+        );
         st.equip(sword);
         let removed = st.unequip(EquipmentSlot::MainHand);
         assert_eq!(removed.unwrap().id, 1);
@@ -646,24 +766,66 @@ mod tests {
     #[test]
     fn state_total_weight_sums_all() {
         let mut st = EquipmentState::new();
-        st.equip(EquipmentInstance::new(1, "a", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 100.0, 4.0));
-        st.equip(EquipmentInstance::new(2, "b", EquipmentSlot::OffHand, EquipmentQuality::Crafted, 100.0, 3.0));
-        st.equip(EquipmentInstance::new(3, "c", EquipmentSlot::Body, EquipmentQuality::Crafted, 100.0, 10.0));
+        st.equip(EquipmentInstance::new(
+            1,
+            "a",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            100.0,
+            4.0,
+        ));
+        st.equip(EquipmentInstance::new(
+            2,
+            "b",
+            EquipmentSlot::OffHand,
+            EquipmentQuality::Crafted,
+            100.0,
+            3.0,
+        ));
+        st.equip(EquipmentInstance::new(
+            3,
+            "c",
+            EquipmentSlot::Body,
+            EquipmentQuality::Crafted,
+            100.0,
+            10.0,
+        ));
         assert!((st.total_weight() - 17.0).abs() < 0.01);
     }
 
     #[test]
     fn state_broken_ids_lists_broken_only() {
         let mut st = EquipmentState::new();
-        let mut sword = EquipmentInstance::new(1, "a", EquipmentSlot::MainHand, EquipmentQuality::Crafted, 100.0, 4.0);
+        let mut sword = EquipmentInstance::new(
+            1,
+            "a",
+            EquipmentSlot::MainHand,
+            EquipmentQuality::Crafted,
+            100.0,
+            4.0,
+        );
         sword.current_durability = 0.0; // 破裂
         st.equip(sword);
 
-        let mut shield = EquipmentInstance::new(2, "b", EquipmentSlot::OffHand, EquipmentQuality::Crafted, 100.0, 3.0);
+        let mut shield = EquipmentInstance::new(
+            2,
+            "b",
+            EquipmentSlot::OffHand,
+            EquipmentQuality::Crafted,
+            100.0,
+            3.0,
+        );
         shield.current_durability = 50.0; // 正常
         st.equip(shield);
 
-        let mut body = EquipmentInstance::new(3, "c", EquipmentSlot::Body, EquipmentQuality::Crafted, 100.0, 10.0);
+        let mut body = EquipmentInstance::new(
+            3,
+            "c",
+            EquipmentSlot::Body,
+            EquipmentQuality::Crafted,
+            100.0,
+            10.0,
+        );
         body.current_durability = 20.0; // 受损 (不是破裂)
         st.equip(body);
 

@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn end_tick_passes_for_clean_state() {
-        let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+        let (world, mut pool, nations, mut monsters) = fresh_world();
         let mut obs = TickObserver::new();
         for tick in 0..10 {
             obs.begin_tick();
@@ -574,7 +574,7 @@ mod tests {
 
     #[test]
     fn end_tick_detects_overdrawn_pool() {
-        let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+        let (world, mut pool, nations, monsters) = fresh_world();
         // 强制让池子出 bug：add 后没 audit
         pool.force_add(ResourceKind::Wood, 1000);
         pool.try_sub(ResourceKind::Wood, 100).unwrap();
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn end_tick_detects_flag_cap_violation() {
-        let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+        let (world, pool, mut nations, monsters) = fresh_world();
         // 强制超 8 面
         nations.flag_count = crate::constant::MAX_NATIONAL_FLAGS + 1;
         let mut obs = TickObserver::new();
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn end_tick_detects_player_out_of_bounds() {
-        let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+        let (world, pool, nations, monsters) = fresh_world();
         let mut obs = TickObserver::new();
         obs.begin_tick();
         let err = obs
@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn end_tick_detects_monster_count_mismatch() {
-        let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+        let (world, pool, nations, mut monsters) = fresh_world();
         monsters.current_individuals += 10; // 强制不一致
         let mut obs = TickObserver::new();
         obs.begin_tick();
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn report_includes_inv_count_and_anomalies() {
-        let (mut world, mut pool, mut nations, mut monsters) = fresh_world();
+        let (world, pool, mut nations, monsters) = fresh_world();
         let mut obs = TickObserver::new();
         obs.begin_tick();
         obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap();

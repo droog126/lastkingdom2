@@ -6,7 +6,8 @@
 //!
 //! 字段：
 //! - `tick`                 — 当前 sim tick 编号
-//! - `last_tick_wall`       — 上次 tick 的真实时间（防 1 帧多次 tick）
+//! - `last_tick_wall`       — 上次 legacy wall-clock tick 的真实时间
+//! - `slow_tick_accum`      — FixedUpdate 权威 tick 中用于 1s 慢逻辑的累积器
 //! - `last_hud_wall`        — HUD 节流
 //! - `last_screenshot_wall` — 截图节流
 //! - `screenshot_count`     — 已截图数（自增命名 `iter_NN.png`）
@@ -17,6 +18,7 @@ use bevy::prelude::*;
 pub struct SimClock {
     pub tick: u64,
     pub last_tick_wall: f32,
+    pub slow_tick_accum: f32,
     pub last_hud_wall: f32,
     pub last_screenshot_wall: f32,
     pub screenshot_count: u32,
@@ -43,6 +45,7 @@ impl Default for SimClock {
         Self {
             tick: 0,
             last_tick_wall: 0.0,
+            slow_tick_accum: 0.0,
             last_hud_wall: 0.0,
             last_screenshot_wall: 0.0,
             screenshot_count: max_iter,

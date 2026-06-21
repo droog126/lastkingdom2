@@ -289,20 +289,10 @@ impl World {
     pub fn generate_voxel(&self, x: i32, y: i32, z: i32) -> BlockType {
         // 1. overlay (按 weight 降序，第一个 Some 胜出)
         let mut sorted: Vec<&terrain::ShapeLayer> = self.geo_overlay.iter().collect();
-        sorted.sort_by(|a, b| {
-            b.weight
-                .partial_cmp(&a.weight)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        sorted.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
         for layer in &sorted {
-            let mut ctx = terrain::TerrainContext {
-                x,
-                y,
-                z,
-                seed: self.seed,
-                surface_y: None,
-                biome: None,
-            };
+            let mut ctx =
+                terrain::TerrainContext { x, y, z, seed: self.seed, surface_y: None, biome: None };
             if let Some(b) = layer.decide(&mut ctx) {
                 if let Some(biome) = layer.biome_override {
                     // biome 不在 voxel 上，但保留给上层读
