@@ -1,0 +1,38 @@
+{
+  "version": 5,
+  "spec": "v5-cute 梦幻可爱 Q 版 (糖果色 + 强 emissive + 大眼睛 + smooth 球形 + y ≤ 0.8m 贴地)",
+  "format": "glb",
+  "assets": {
+    "eco": [
+      "rabbit",
+      "berry_bush",
+      "berry_fruit",
+      "co2_bubble"
+    ],
+    "pretty": [
+      "player_avatar",
+      "monster_snake",
+      "monster_frost_elf",
+      "monster_sand_wurm",
+      "monster_treant",
+      "monster_aether_wraith",
+      "cloud_puff",
+      "tree",
+      "rock_dark",
+      "rock_mid",
+      "rock_moss",
+      "flower_0",
+      "flower_1",
+      "flower_2",
+      "flower_3",
+      "flower_4",
+      "hill",
+      "poi_pillar_red",
+      "poi_pillar_cyan",
+      "poi_pillar_pink",
+      "poi_pillar_gold",
+      "ground_disc_outer",
+      "ground_disc_inner"
+    ]
+  }
+}
