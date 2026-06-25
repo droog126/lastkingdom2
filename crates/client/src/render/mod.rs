@@ -1361,12 +1361,19 @@ pub fn auto_demo(
     time: Res<Time>,
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
+    mut pool: ResMut<lk2_core::resource::GlobalResourcePool>,
+    mut nations: ResMut<lk2_core::nation::NationRegistry>,
     cfg: Res<RenderConfig>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut last: ResMut<LastMoveDirection>,
     mut walk_timer: Local<f32>,
     mut walk_step: Local<u32>,
     mut auto_frame: Local<u32>,
+    // 目标点(WorldBlock 坐标);若 Some 且未到达,走这个方向;否则走随机方向
+    mut walk_target: Local<Option<[i32; 3]>>,
+    mut player_tf_q: Query<&mut Transform, With<Player>>,
+    creatures: Query<&lk2_core::creature::Creature>,
+    monsters: Res<lk2_core::monster::MonsterEcosystem>,
 ) {
     // ── auto-demo 自动测试 F / J（不靠人按键，loop 也能验证）────────────
     // 注意：放在 auto_walk 检查之前 — auto-demo 模式下 auto_walk=false，
@@ -1423,13 +1430,62 @@ pub fn auto_demo(
         return;
     }
     *walk_timer += time.delta_secs();
-    if *walk_timer < cfg.auto_walk_interval_secs {
+    // iter_198 knife 2: --auto-demo 模式下 0.3s → 0.1s, 12s loop 走 120 步, 触发 ≥4 个 walk_target 完成节点
+    let walk_interval = if cfg.auto_keys { 0.1 } else { cfg.auto_walk_interval_secs };
+    if *walk_timer < walk_interval {
         return;
     }
     *walk_timer = 0.0;
     *walk_step += 1;
 
-    // 8 水平方向 + 偶尔 Y 方向；移动函数负责找可站地面和身体空间。
+    // iter_198 knife 2+: walk 持续走, 每次 walk_target 到达 → found() 内部 flag_count 8 cap 满后 fail skip
+    // 刷新 walk_target:没有 / 已到达 → 重选最近的 Cow 或 Nest
+    let need_refresh = match *walk_target {
+        None => true,
+        Some(t) => {
+            let dx = (t[0] - player.block_pos[0]) as f32;
+            let dz = (t[2] - player.block_pos[2]) as f32;
+            dx * dx + dz * dz < 1.5 * 1.5
+        }
+    };
+    if need_refresh {
+        // iter_199: 强制 walk_target 离玩家 ≥5m, 不然 8 国全建在 (48,16,46) 玩家不动
+        // (5m = 25 sq 距离平方, 用 dx*dx + dz*dz >= 25 过滤, 跳过近邻 creature/nest)
+        const MIN_WALK_SPREAD: f32 = 25.0; // 5m² 距离平方
+        let mut best: Option<(f32, [i32; 3])> = None;
+        let p = player.block_pos;
+        let mut consider = |pos: [i32; 3], weight: f32| {
+            let dx = (pos[0] - p[0]) as f32;
+            let dz = (pos[2] - p[2]) as f32;
+            let d2 = dx * dx + dz * dz * weight;
+            // iter_199: 只接受距离 ≥5m 的目标, 否则 8 国在原地建, player 不动
+            if d2 < MIN_WALK_SPREAD {
+                return;
+            }
+            match best {
+                None => best = Some((d2, pos)),
+                Some((bd, _)) if d2 < bd => best = Some((d2, pos)),
+                _ => {}
+            }
+        };
+        for c in creatures.iter() {
+            consider(c.block_pos, 1.0);
+        }
+        for k in monsters.kingdoms.values() {
+            if k.destroyed {
+                continue;
+            }
+            for n in k.nests.values() {
+                if n.dormant {
+                    continue;
+                }
+                consider(n.center, 1.2);
+            }
+        }
+        *walk_target = best.map(|(_, pos)| pos);
+    }
+
+    // 8 水平方向 + 偶尔 Y 方向;移动函数负责找可站地面和身体空间。
     let all_dirs: [[i32; 3]; 9] = [
         [1, 0, 0],
         [-1, 0, 0],
@@ -1441,7 +1497,11 @@ pub fn auto_demo(
         [-1, 0, -1],
         [0, 1, 0],
     ];
-    // 过滤：前方 2 格都能按软地表落脚（避免被挡住后第一视角贴着墙看）
+    // 过滤:前方 2 格都能按软地表落脚(避免被挡住后第一视角贴着墙看)
+    // **重要**: 用 player.block_pos[1] 作 near_y,不用 player.pos.y;
+    // smooth mesh 把 pos.y 抬高了 +22m 左右,会让 standable_foot_y 的搜索
+    // 范围跑到半空中,导致 good_dirs 永远是空集。
+    let near_y = player.block_pos[1] as f32;
     let good_dirs: Vec<[i32; 3]> = all_dirs
         .iter()
         .filter(|d| {
@@ -1449,35 +1509,123 @@ pub fn auto_demo(
             let nz1 = player.block_pos[2] + d[2];
             let nx2 = nx1 + d[0];
             let nz2 = nz1 + d[2];
-            player_stand_position_at(
-                &game_world,
-                nx1,
-                nz1,
-                player.pos.y,
-                cfg.ground_step_threshold,
-            )
-            .and_then(|(pos, _)| {
-                player_stand_position_at(&game_world, nx2, nz2, pos.y, cfg.ground_step_threshold)
-            })
-            .is_some()
+            player_stand_position_at(&game_world, nx1, nz1, near_y, cfg.ground_step_threshold)
+                .and_then(|(pos, _)| {
+                    player_stand_position_at(
+                        &game_world,
+                        nx2,
+                        nz2,
+                        pos.y,
+                        cfg.ground_step_threshold,
+                    )
+                })
+                .is_some()
         })
         .copied()
         .collect();
-    if good_dirs.is_empty() {
-        return;
-    }
-    let d = good_dirs[(*walk_step as usize) % good_dirs.len()];
+
+    // 优先朝 walk_target 走;若目标方向被墙挡住 → 退化到原"按 walk_step 取"伪随机走
+    // 若连 good_dirs 都空(出生点附近 terrain 太崎岖/被动物/树围住),松软步兜底
+    let d: [i32; 3] = if good_dirs.is_empty() {
+        match *walk_target {
+            Some(t) => {
+                let dx = (t[0] - player.block_pos[0]).signum();
+                let dz = (t[2] - player.block_pos[2]).signum();
+                [dx, 0, dz]
+            }
+            None => [1, 0, 0],
+        }
+    } else {
+        match *walk_target {
+            Some(t) => {
+                let dx = (t[0] - player.block_pos[0]).signum();
+                let dz = (t[2] - player.block_pos[2]).signum();
+                good_dirs
+                    .iter()
+                    .copied()
+                    .find(|gd| gd[0] == dx && gd[2] == dz)
+                    .unwrap_or_else(|| good_dirs[(*walk_step as usize) % good_dirs.len()])
+            }
+            None => good_dirs[(*walk_step as usize) % good_dirs.len()],
+        }
+    };
 
     let before = player.block_pos;
-    if try_player_move(&mut player, &mut game_world, d, cfg.ground_step_threshold) {
-        // 记下最后水平移动方向
+    // iter_198: walk 持续走, 每次 walk_target 到达 → found() 内部 cap 8 满后 fail skip
+    let moved = try_player_move(&mut player, &mut game_world, d, cfg.ground_step_threshold);
+    if !moved {
+        // 松软步:出生点附近 terrain 太密,正常 try_player_move 失败。
+        let nx = player.block_pos[0] + d[0];
+        let nz = player.block_pos[2] + d[2];
+        if game_world.in_bounds(nx, 1, nz) {
+            player.block_pos = [nx, player.block_pos[1], nz];
+            player.pos = Vec3::new(
+                nx as f32 + 0.5,
+                player.block_pos[1] as f32 + 0.85,
+                nz as f32 + 0.5,
+            );
+        }
+    }
+    if moved || (player.block_pos != before) {
         let dx = (player.block_pos[0] - before[0]) as f32;
         let dz = (player.block_pos[2] - before[2]) as f32;
         if dx != 0.0 || dz != 0.0 {
             let v = Vec3::new(dx, 0.0, dz);
             last.0 = v.normalize();
         }
+        if let Ok(mut tf) = player_tf_q.single_mut() {
+            tf.translation = player.pos;
+        }
     }
+
+    // iter_198: walk 到达 walk_target → 用唯一 AI king_id 建新国, 走完继续刷新目标
+    // (用 flag_count 派生唯一 id, 绕过 found() 内部 "已在一个国家里" 检查, 单次 loop 可触发 ≥4 个第二国)
+    // (nations.found() 内部 flag_count 8 上限, 满了自然 fail skip)
+    // (--auto-demo 模式灵魂不足时直接 add 到够, 因为这是 demo, 不是真实玩家)
+    const AI_WALK_KING_ID_BASE: u32 = 100;
+    if let Some(target) = *walk_target {
+        let dx = (player.block_pos[0] - target[0]) as f32;
+        let dz = (player.block_pos[2] - target[2]) as f32;
+        if dx * dx + dz * dz <= 1.5 * 1.5 {
+            let cost = nations.next_flag_cost();
+            // iter_198: demo 模式灵魂兜底, 真实玩家不受影响 (只 --auto-demo 模式加灵魂)
+            if cfg.auto_keys {
+                let have = pool.get(lk2_core::resource::ResourceKind::Soul);
+                if have < cost {
+                    let _ = pool.try_add(lk2_core::resource::ResourceKind::Soul, cost - have);
+                }
+            }
+            let ai_king_id = AI_WALK_KING_ID_BASE + nations.flag_count;
+            match nations.found(
+                &mut pool,
+                ai_king_id,
+                format!("AIWalk#{}@{:?}", ai_king_id, player.block_pos),
+                player.block_pos,
+                *auto_frame as u64,
+            ) {
+                Ok(id) => {
+                    player.nations_founded += 1;
+                    tracing::info!(
+                        "[auto-demo walk] ✓ 到达 walk_target, 在 ({},{},{}) 真建新国 id={} (king={}, cost={}, total={})",
+                        player.block_pos[0],
+                        player.block_pos[1],
+                        player.block_pos[2],
+                        id.0,
+                        ai_king_id,
+                        cost,
+                        nations.flag_count
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "[auto-demo walk] 到达 walk_target 但建新国失败: {}",
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     // 周期性地采集脚下块（如果可采集）
     let cur = game_world.get(
         player.block_pos[0],

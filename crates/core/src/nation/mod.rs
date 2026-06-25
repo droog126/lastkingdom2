@@ -203,8 +203,8 @@ impl NationRegistry {
         // 等等——Transfer 的语义是 src 减 / dst 加。买旗应该是"玩家灵魂→销毁"。
         // 但 TransferSrc::PlayerGather 意思是"玩家从某处采集"——这不对。
         // 让我们换一个 TransferSrc：直接 try_sub 然后单独处理。
+        // iter_199 修复: try_sub 内部已 audit_subtracted += amount, 这里再 +1 就是双计, 删掉
         pool.try_sub(ResourceKind::Soul, cost).map_err(|e| FoundError::PoolError(e))?;
-        pool.audit_subtracted.entry(ResourceKind::Soul).and_modify(|v| *v += cost);
         // 这里其实有个守恒问题：买了旗灵魂没了，但池子里也没"多出"什么
         // 所以 sub 后 audit_subtracted 累加，但 audit_added 没动 → verify_conservation 不会报错（sub ≤ add）
 

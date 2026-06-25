@@ -60,10 +60,7 @@ use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
 // ---- 客户端 crate 内部模块的导出 ----
-use crate::controller_systems::{
-    ControllerPlugin, auto_step_up, character_movement, collect_input, ground_detection,
-    knockback_decay,
-};
+use crate::controller_systems::ControllerPlugin;
 use crate::pretty::{
     PrettyConfig, animate_avatar, animate_monsters, follow_ground_discs, follow_monster_cubes,
     follow_player_avatar, spawn_pretty,
@@ -251,13 +248,17 @@ fn main() {
                 primary_window: Some(Window {
                     title: format!("万国起源：最后一国 钻石版 — {}", scenario.name).into(),
                     resolution: WindowResolution::new(1280, 720),
-                    present_mode: PresentMode::AutoNoVsync,
+                    // iter_198 knife 1: AutoNoVsync 在 wgpu 隐藏窗口仍 mailbox 节流, 改 Immediate
+                    present_mode: PresentMode::Immediate,
                     ..default()
                 }),
                 ..default()
             })
             .set(bevy::log::LogPlugin { level: bevy::log::Level::INFO, ..default() }),
     );
+    // iter_198 knife 1: WinitSettings 默认 Reactive (等事件), 隐藏窗口无事件就 stall sim.
+    // 强制 Continuous, focused + unfocused 都按帧率跑, 解 sim tick 卡 9.5 TPS 根因.
+    app.insert_resource(bevy::winit::WinitSettings::continuous());
 
     // ===== 2. 物理（avian3d）=====
     app.add_plugins(PhysicsPlugins::default()).insert_resource(Gravity::default());
@@ -309,7 +310,8 @@ fn main() {
         )
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
-                cfg.auto_walk = false; // 玩家站定在山顶, 不会乱跑
+                // iter_196: auto_walk 开 — 让玩家真正朝 Cow/Nest 走几步,iter_197 knife 2 绑终态
+                cfg.auto_walk = true;
                 cfg.auto_orbit = true;
                 cfg.auto_keys = true;
                 cfg.mouse_look = false;
@@ -441,12 +443,9 @@ fn main() {
             on_knockback_event,
             on_damage_result,
             trigger_visual_effects,
-            // 控制器（地面 / WASD / 爬台阶 / 击退衰减） (5)
-            ground_detection,
-            character_movement,
-            auto_step_up,
-            knockback_decay,
-            collect_input,
+            // 注意：ground_detection / character_movement / auto_step_up / knockback_decay / collect_input
+            // 已由 ControllerPlugin 注册到 FixedUpdate（见 controller_systems.rs:351）。
+            // 之前 main.rs 又在 Update 里重复注册，导致双重运行 + 物理/voxel 移动冲突 → 卡死。
         )
             .chain(),
     );
@@ -486,7 +485,7 @@ fn main() {
             update_animal_indicator,
             update_nest_indicator, // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
             tick_recorder,
-            periodic_screenshot,
+            periodic_screenshot, // iter_197: 留在 chain 里跟 tick_recorder 同组, 避免拆出后调度
             despawn_dead_creatures,
             update_creatures,
             day_night_cycle,
@@ -1161,8 +1160,18 @@ fn periodic_screenshot(
     game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
 ) {
-    let now = time.elapsed_secs();
-    if now - clock.last_screenshot_wall < 5.0 {
+    // iter_197 关键修复: Bevy 0.18 Time<()>=Time<Virtual> 在 headless 模式下会卡 0
+    // (sim 跑得慢, virtual time 才 0.25s 时 wall 已经 7.5s),
+    // 改用 std::time::Instant 拿 wall clock 真实秒数, 节流改 8s, 等 sim 渲染出图再拍
+    let now = {
+        use std::sync::OnceLock;
+        static START: OnceLock<std::time::Instant> = OnceLock::new();
+        let start = START.get_or_init(std::time::Instant::now);
+        start.elapsed().as_secs_f32()
+    };
+    let _ = time; // 保留参数避免连锁改动
+    // iter_198 截图节流 6s -> 8s wall: 18s loop 出 2 张 PNG (8s, 16s), 都在 render 起来后拍
+    if now - clock.last_screenshot_wall < 8.0 {
         return;
     }
     clock.last_screenshot_wall = now;
