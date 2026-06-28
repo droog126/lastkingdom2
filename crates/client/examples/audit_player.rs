@@ -1,4 +1,4 @@
-//! audit_player.rs — 一次性验证 player_avatar.glb 在 Bevy 里的实际 mesh 尺寸.
+
 
 use bevy::prelude::*;
 use bevy::window::PresentMode;
@@ -30,14 +30,14 @@ fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     let scene: Handle<Scene> = asset_server.load("procedural/pretty/player_avatar.glb#Scene0");
     commands.spawn((
         SceneRoot(scene),
-        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)).with_scale(Vec3::splat(20.0)), // 放大 20 倍让它可见
+        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)).with_scale(Vec3::splat(20.0)),
     ));
-    // 摄像机也近
+
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(Vec3::new(3.0, 3.0, 3.0)).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-    // 灯
+
     commands.spawn((
         DirectionalLight::default(),
         Transform::from_translation(Vec3::new(1.0, 2.0, 1.0)).looking_at(Vec3::ZERO, Vec3::Y),

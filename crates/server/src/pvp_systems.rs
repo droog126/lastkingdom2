@@ -1,17 +1,4 @@
-//! PvP 服务端系统（权威判定）
-//!
-//! 本文件是 server crate 的副本 (从 src/pvp/systems_server.rs 迁出)。
-//! 全部 import 走 lk2_core (不再依赖 src/ 里的旧 components / FixedTick)。
-//!
-//! 运行在服务端 FixedUpdate 中，所有伤害 / 击退必须经过这里。
-//!
-//! 执行顺序（已在 crates/server/src/main.rs 中通过 .chain() 保证）：
-//!   1. record_position_history   — 记录玩家位置历史
-//!   2. read_attack_inputs       — 读取客户端 AttackInput
-//!   3. melee_hit_registration    — 权威命中判定
-//!   4. apply_damage_and_knockback — 应用伤害与击退
-//!   5. expire_knockback_immunity — 清除击退免疫
-//!   6. tick_combat_cooldowns    — 冷却衰减
+
 
 use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
@@ -29,22 +16,14 @@ use lightyear::prelude::PeerId;
 
 use std::collections::VecDeque;
 
-// ---------------------------------------------------------------------------
-// 0. ServerPvPPlugin
-// ---------------------------------------------------------------------------
-
 pub struct ServerPvPPlugin;
 
 impl Plugin for ServerPvPPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(FixedUpdate, (record_position_history,));
-        // 其余 4 个 system 由 main.rs 显式 .chain() 注册
+
     }
 }
-
-// ---------------------------------------------------------------------------
-// 1. 记录位置历史（每 FixedUpdate 必跑）
-// ---------------------------------------------------------------------------
 
 pub fn record_position_history(
     tick: Res<FixedTick>,
@@ -64,10 +43,6 @@ pub fn record_position_history(
     }
 }
 
-// ---------------------------------------------------------------------------
-// 2. 读取攻击输入
-// ---------------------------------------------------------------------------
-
 pub fn read_attack_inputs(
     tick: Res<FixedTick>,
     mut events: MessageReader<AttackInput>,
@@ -83,7 +58,7 @@ pub fn read_attack_inputs(
             }
             combat.is_attacking = true;
             combat.last_attack_tick = tick_val;
-            combat.attack_cooldown_timer = 0.625; // 铁剑速度
+            combat.attack_cooldown_timer = 0.625;
             combat.combo_count = input.combo_count;
 
             attack_queue.push_back((
@@ -98,10 +73,6 @@ pub fn read_attack_inputs(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 3. 权威命中判定（核心）
-// ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
 pub fn melee_hit_registration(
@@ -145,21 +116,18 @@ pub fn melee_hit_registration(
                 continue;
             }
 
-            // 延迟补偿
             let Some(victim_snap) = history.query(attack_input.tick) else {
                 continue;
             };
 
             let victim_center = victim_snap.translation + hitbox.offset;
 
-            // Reach 检查
             let dist = eye_pos.distance(victim_center);
             let reach_limit = weapon.reach + hitbox.half_extents.length();
             if dist > reach_limit {
                 continue;
             }
 
-            // 扇形角度检查
             let dir_to_victim = (victim_center - eye_pos).normalize();
             let angle = forward.angle_between(dir_to_victim);
             let half_sweep = weapon.sweep_angle_deg.to_radians() / 2.0;
@@ -167,7 +135,6 @@ pub fn melee_hit_registration(
                 continue;
             }
 
-            // 视线检查
             if !voxel_world.in_bounds(
                 victim_center.x as i32,
                 victim_center.y as i32,
@@ -180,7 +147,6 @@ pub fn melee_hit_registration(
                 continue;
             }
 
-            // 跳劈判定
             let height_diff = attacker_tf.translation.y - victim_snap.translation.y;
             let is_critical = height_diff > 0.5 && attack_input.is_falling;
             let damage = if is_critical {
@@ -189,12 +155,10 @@ pub fn melee_hit_registration(
                 weapon.damage
             };
 
-            // 击退方向
             let kb_dir = (victim_snap.translation - attacker_tf.translation).normalize_or_zero();
             let kb_horizontal = Vec3::new(kb_dir.x, 0.0, kb_dir.z);
             let knockback = kb_horizontal * weapon.knockback + Vec3::Y * 0.4;
 
-            // 写 DamageEvent
             damage_events.write(DamageEvent {
                 attacker: attacker_entity,
                 victim: victim_entity,
@@ -205,7 +169,6 @@ pub fn melee_hit_registration(
                 server_tick: tick_val,
             });
 
-            // 写 HitConfirm (Unreliable, 给 client 看击打特效)
             let victim_client_id =
                 client_id_map.get(&victim_entity).copied().unwrap_or(PeerId::Server);
             hit_confirms.write(HitConfirm {
@@ -216,7 +179,6 @@ pub fn melee_hit_registration(
                 server_tick: tick_val,
             });
 
-            // 写 KnockbackEvent
             knockback_events.write(KnockbackEvent {
                 victim_id: victim_client_id,
                 velocity: knockback,
@@ -225,10 +187,6 @@ pub fn melee_hit_registration(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 4. 应用伤害与击退
-// ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
 pub fn apply_damage_and_knockback(
@@ -271,20 +229,12 @@ pub fn apply_damage_and_knockback(
     }
 }
 
-// ---------------------------------------------------------------------------
-// 5. 击退免疫消退
-// ---------------------------------------------------------------------------
-
 pub fn expire_knockback_immunity(time: Res<Time>, mut kb_immunity: Query<&mut KnockbackImmunity>) {
     let dt = time.delta_secs();
     for mut kbi in kb_immunity.iter_mut() {
         kbi.0 = (kbi.0 - dt).max(0.0);
     }
 }
-
-// ---------------------------------------------------------------------------
-// 6. 冷却衰减
-// ---------------------------------------------------------------------------
 
 pub fn tick_combat_cooldowns(time: Res<Time>, mut combat: Query<&mut CombatState>) {
     let dt = time.delta_secs();

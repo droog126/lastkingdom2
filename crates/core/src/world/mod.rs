@@ -1,15 +1,15 @@
-//! World & blocks
-//!
-//! §三、世界与维度 → 1. 主世界生物群落
-//! §三、世界与维度 → 2. 以太界（demo 略）
-//! §三、世界与维度 → 矿坑生成算法与实现纲要
-//!
-//! Demo 简化：
-//!   * WORLD_SIZE = 32³（缩到 1/1000）
-//!   * 3 群落按 z 轴切三段：北=tundra / 中=jungle / 南=desert
-//!   * 矿脉用 3D simplex noise 模拟（不引外部 noise crate，自己写个快速 hash）
-//!   * 资源点（裸矿）以"簇"形式聚集，cluster 半径 2-4，间距 ≥ 6
-//!   * 块 → 资源映射：挖 block 得 ResourceKind + amount
+
+
+
+
+
+
+
+
+
+
+
+
 
 #![allow(dead_code)]
 
@@ -21,39 +21,39 @@ use crate::constant::*;
 use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
 use crate::world::terrain::TerrainModule;
 
-// ---------------------------------------------------------------------------
-// Biome
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Biome {
-    Desert, // 焦土沙漠 → 阳炎石
-    Tundra, // 冰封苔原 → 霜心晶体
-    Jungle, // 繁盛丛林 → 活根
+    Desert,
+    Tundra,
+    Jungle,
 }
 
 impl Biome {
-    /// 平滑噪声场（用 hash01 模拟 value noise，2 octaves）— 大陆尺度
-    /// 返回 [0, 1) 连续值，永远不会周期重复
+
+
     pub fn noise_field(x: i32, z: i32) -> f32 {
-        // 大尺度（每 64 一格）
+
         let cell = 64_i32;
         let cx = (x as f32 / cell as f32).floor() as i32;
         let cz = (z as f32 / cell as f32).floor() as i32;
         let fx = (x as f32 / cell as f32) - cx as f32;
         let fz = (z as f32 / cell as f32) - cz as f32;
-        // 4 角 value
+
         let v00 = crate::world::terrain::hash01(cx, 0, cz, 0xB10E);
         let v10 = crate::world::terrain::hash01(cx + 1, 0, cz, 0xB10E);
         let v01 = crate::world::terrain::hash01(cx, 0, cz + 1, 0xB10E);
         let v11 = crate::world::terrain::hash01(cx + 1, 0, cz + 1, 0xB10E);
-        // smoothstep
+
         let sx = fx * fx * (3.0 - 2.0 * fx);
         let sz = fz * fz * (3.0 - 2.0 * fz);
         let a = v00 * (1.0 - sx) + v10 * sx;
         let b = v01 * (1.0 - sx) + v11 * sx;
         let big = a * (1.0 - sz) + b * sz;
-        // 细节 (1/8 尺度)
+
         let cell2 = 8_i32;
         let cx2 = (x as f32 / cell2 as f32).floor() as i32;
         let cz2 = (z as f32 / cell2 as f32).floor() as i32;
@@ -61,7 +61,7 @@ impl Biome {
         big * 0.7 + detail * 0.3
     }
 
-    /// 从连续 noise 场分 3 段（沙漠 / 丛林 / 苔原）— 真无限
+
     pub fn from_xz_infinite(x: i32, z: i32) -> Self {
         let n = Self::noise_field(x, z);
         if n < 0.33 {
@@ -73,7 +73,7 @@ impl Biome {
         }
     }
 
-    /// 从 (x, z) 决定 biome（demo 用确定性分区，依赖 WORLD_SIZE）
+
     pub fn from_xz(_x: i32, z: i32) -> Self {
         let n = WORLD_SIZE as i32;
         if z < n / 3 {
@@ -85,7 +85,7 @@ impl Biome {
         }
     }
 
-    /// 这个 biome 的专属矿石（挖出来对应 ResourceKind）
+
     pub fn ore_block(self) -> BlockType {
         match self {
             Biome::Desert => BlockType::SunstoneOre,
@@ -94,7 +94,7 @@ impl Biome {
         }
     }
 
-    /// 这个 biome 的专属矿石对应的资源
+
     pub fn ore_resource(self) -> ResourceKind {
         match self {
             Biome::Desert => ResourceKind::Sunstone,
@@ -112,29 +112,29 @@ impl Biome {
     }
 }
 
-// ---------------------------------------------------------------------------
-// BlockType
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockType {
     Air,
     Dirt,
     Stone,
-    Sand,         // 沙漠地表
-    Snow,         // 苔原地表
-    Leaves,       // 树冠
-    Water,        // 水（半透明，可通行）
-    Wood,         // 树干
-    IronOre,      // 通用
-    SunstoneOre,  // 沙漠专属矿石
-    FrostcoreOre, // 苔原专属矿石
-    LivingRoot,   // 丛林专属矿石
-    BerryThicket, // 可再生（每 30s tick 概率结 1-3 苹果）
+    Sand,
+    Snow,
+    Leaves,
+    Water,
+    Wood,
+    IronOre,
+    SunstoneOre,
+    FrostcoreOre,
+    LivingRoot,
+    BerryThicket,
 }
 
 impl BlockType {
-    /// 是否固体（阻挡玩家 / 战争迷雾）
+
     pub const fn is_solid(self) -> bool {
         !matches!(self, BlockType::Air | BlockType::Water)
     }
@@ -150,17 +150,17 @@ impl BlockType {
         )
     }
 
-    /// 挖掘产出的资源（None = 不可挖 / 空气）
-    /// amount 是 tick 级一次采集的产量
+
+
     pub fn yields(self) -> Option<(ResourceKind, i64)> {
         use BlockType::*;
         use ResourceKind as R;
         match self {
-            Air | Sand | Snow | Leaves | Water => None, // 沙/雪/叶/水 不可采集
-            Dirt => None,                               // 暂不给食物
-            Stone => Some((R::Wood, 0)),                // 占位
-            Wood => Some((R::Wood, 5)),                 // 砍树
-            IronOre => Some((R::Wood, 0)),              // 占位，铁没在 pool 里
+            Air | Sand | Snow | Leaves | Water => None,
+            Dirt => None,
+            Stone => Some((R::Wood, 0)),
+            Wood => Some((R::Wood, 5)),
+            IronOre => Some((R::Wood, 0)),
             SunstoneOre => Some((R::Sunstone, 1)),
             FrostcoreOre => Some((R::Frostcore, 1)),
             LivingRoot => Some((R::LivingRoot, 1)),
@@ -168,17 +168,17 @@ impl BlockType {
         }
     }
 
-    /// 用于 debug 颜色（demo 用，后续接渲染）
+
     pub fn debug_color_rgba(self) -> [f32; 4] {
         use BlockType::*;
         match self {
             Air => [0.0, 0.0, 0.0, 0.0],
             Dirt => [0.55, 0.36, 0.20, 1.0],
             Stone => [0.55, 0.55, 0.55, 1.0],
-            Sand => [0.92, 0.82, 0.55, 1.0],   // 沙黄
-            Snow => [0.95, 0.97, 1.00, 1.0],   // 雪白
-            Leaves => [0.20, 0.55, 0.18, 1.0], // 树冠深绿
-            Water => [0.25, 0.50, 0.85, 1.0],  // 水蓝（render 时改 alpha）
+            Sand => [0.92, 0.82, 0.55, 1.0],
+            Snow => [0.95, 0.97, 1.00, 1.0],
+            Leaves => [0.20, 0.55, 0.18, 1.0],
+            Water => [0.25, 0.50, 0.85, 1.0],
             Wood => [0.40, 0.25, 0.10, 1.0],
             IronOre => [0.80, 0.60, 0.30, 1.0],
             SunstoneOre => [1.00, 0.70, 0.20, 1.0],
@@ -189,28 +189,28 @@ impl BlockType {
     }
 }
 
-// ---------------------------------------------------------------------------
-// World：32³ 块的稠密数组（demo 缩）
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct World {
-    /// 稠密 3D 数组，index = (y * SIZE + z) * SIZE + x。XZ 超出此范围时由 generate_voxel 按需生成
+
     pub blocks: Vec<BlockType>,
     pub size: i32,
-    /// true = 未被显式 set 的块由 pipeline 按需生成；false = 纯空测试世界。
+
     pub procedural: bool,
-    /// 稠密缓存内被玩家或系统明确写过的位置。用于区分"未生成的 Air"和"被挖空的 Air"。
+
     pub edited: HashSet<(i32, i32, i32)>,
-    /// 噪声种子（用于 generate_voxel 按需生成）
+
     pub seed: u64,
-    /// 地形生成 pipeline（可配置地形系统的核心）
+
     pub pipeline: std::sync::Arc<terrain::TerrainPipeline>,
-    /// 动态叠加几何层（按需追加，无需重建世界）。
-    /// scenario JSON 的 `add_geo_primitive` step 会 push 进来。
-    /// 每次 generate_voxel 先用 overlay 生成再 fallback 到 pipeline。
+
+
+
     pub geo_overlay: Vec<terrain::ShapeLayer>,
-    /// overlay 里的 ShapeLayer 名字集合（便于按名移除 / 调试）
+
     pub geo_overlay_names: std::collections::HashSet<String>,
 }
 
@@ -231,8 +231,8 @@ impl World {
         }
     }
 
-    /// 动态 push 一个 ShapeLayer overlay（scenario / 任务 / 玩家放置都能用）
-    /// 同名 layer 会被替换。
+
+
     pub fn push_geo_layer(&mut self, layer: terrain::ShapeLayer) {
         let name = layer.name.clone();
         self.geo_overlay.retain(|l| l.name != name);
@@ -240,7 +240,7 @@ impl World {
         self.geo_overlay_names.insert(name);
     }
 
-    /// 按名字移除 overlay
+
     pub fn remove_geo_layer(&mut self, name: &str) -> bool {
         let before = self.geo_overlay.len();
         self.geo_overlay.retain(|l| l.name != name);
@@ -248,7 +248,7 @@ impl World {
         self.geo_overlay.len() != before
     }
 
-    /// 清空所有 overlay
+
     pub fn clear_geo_overlay(&mut self) {
         self.geo_overlay.clear();
         self.geo_overlay_names.clear();
@@ -268,7 +268,7 @@ impl World {
     }
 
     pub fn get(&self, x: i32, y: i32, z: i32) -> BlockType {
-        // OOB Y 永远是 Air；XZ 超出稠密缓存时，procedural 世界仍可按需生成。
+
         let s = self.size;
         if y < 0 || y >= s {
             return BlockType::Air;
@@ -284,10 +284,10 @@ impl World {
         self.generate_voxel(x, y, z)
     }
 
-    /// 按需生成 voxel — 用配置化 pipeline（XZ 无限，Y 有限）
-    /// 确定性：同样 (x, y, z, pipeline.seed) → 同样结果
+
+
     pub fn generate_voxel(&self, x: i32, y: i32, z: i32) -> BlockType {
-        // 1. overlay (按 weight 降序，第一个 Some 胜出)
+
         let mut sorted: Vec<&terrain::ShapeLayer> = self.geo_overlay.iter().collect();
         sorted.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
         for layer in &sorted {
@@ -295,13 +295,13 @@ impl World {
                 terrain::TerrainContext { x, y, z, seed: self.seed, surface_y: None, biome: None };
             if let Some(b) = layer.decide(&mut ctx) {
                 if let Some(biome) = layer.biome_override {
-                    // biome 不在 voxel 上，但保留给上层读
+
                     let _ = biome;
                 }
                 return b;
             }
         }
-        // 2. pipeline
+
         self.pipeline.generate(x, y, z)
     }
 
@@ -316,11 +316,11 @@ impl World {
     }
 
     pub fn in_bounds(&self, _x: i32, y: i32, _z: i32) -> bool {
-        // XZ 无限，只检查 Y
+
         y >= 0 && y < self.size
     }
 
-    /// 迭代所有实心块
+
     pub fn for_each_solid<F: FnMut(i32, i32, i32, BlockType)>(&self, mut f: F) {
         for y in 0..self.size {
             for z in 0..self.size {
@@ -334,7 +334,7 @@ impl World {
         }
     }
 
-    /// 块数（同 biome）—— 调试 / 测试用
+
     pub fn count_biome_ores(&self, biome: Biome) -> u32 {
         let mut count = 0;
         self.for_each_solid(|_, _, _, b| {
@@ -346,11 +346,11 @@ impl World {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 确定性 hash 噪声（不引外部 crate）
-// ---------------------------------------------------------------------------
 
-/// 32-bit hash → [0, 1) f32
+
+
+
+
 fn hash01(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     let mut h = seed
         ^ (x as u32).wrapping_mul(0x9E3779B1)
@@ -364,12 +364,12 @@ fn hash01(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     (h & 0xFFFF) as f32 / 65536.0
 }
 
-/// 3D 风格化 noise（简单 lerp，够 demo 用）
+
 fn noise3(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     let xi = x as f32;
     let yi = y as f32;
     let zi = z as f32;
-    // 8 corners
+
     let c000 = hash01(x, y, z, seed);
     let c100 = hash01(x + 1, y, z, seed);
     let c010 = hash01(x, y + 1, z, seed);
@@ -378,7 +378,7 @@ fn noise3(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     let c101 = hash01(x + 1, y, z + 1, seed);
     let c011 = hash01(x, y + 1, z + 1, seed);
     let c111 = hash01(x + 1, y + 1, z + 1, seed);
-    // trilinear
+
     let xf = xi.fract();
     let yf = yi.fract();
     let zf = zi.fract();
@@ -394,15 +394,15 @@ fn noise3(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     y0 * (1.0 - w) + y1 * w
 }
 
-// ---------------------------------------------------------------------------
-// WorldGenerator
-// ---------------------------------------------------------------------------
+
+
+
 
 pub struct WorldGenerator {
     pub seed: u32,
-    pub ore_threshold: f32,   // > 此值算矿石
-    pub tree_density: f32,    // 树密度
-    pub thicket_density: f32, // 浆果丛林密度
+    pub ore_threshold: f32,
+    pub tree_density: f32,
+    pub thicket_density: f32,
     pub min_ore_cluster_spacing: i32,
 }
 
@@ -419,51 +419,51 @@ impl Default for WorldGenerator {
 }
 
 impl WorldGenerator {
-    /// 生成 demo 世界。**确定性**：同样 seed + size → 同样世界
+
     pub fn generate(&self, size: i32) -> World {
         let mut w = World::new(size);
         let s = size as i32;
 
-        // ── 1. 地形：heightmap（双八度 noise，振幅 18，能出真山）─────────────
+
         let spawn_x = s / 2;
         let spawn_z = s / 2;
-        let flat_radius: f32 = 10.0; // 比之前大一倍的出生平地
-        // 清空 spawn 周边 3 格：让出生第一眼有干净视野（无树/仙人掌/巨石/浆果）
+        let flat_radius: f32 = 10.0;
+
         let clear_radius: i32 = 3;
         for z in 0..s {
             for x in 0..s {
                 let biome = Biome::from_xz(x, z);
                 let dist_from_spawn = (((x - spawn_x).pow(2) + (z - spawn_z).pow(2)) as f32).sqrt();
 
-                // 主峰（大尺度山脉）+ 细节（小尺度起伏）
-                let h_big = noise3(x / 8, 0, z / 8, self.seed); // 0..1
-                let h_detail = noise3(x, 0, z, self.seed ^ 0xCAFE); // 0..1
+
+                let h_big = noise3(x / 8, 0, z / 8, self.seed);
+                let h_detail = noise3(x, 0, z, self.seed ^ 0xCAFE);
                 let biome_bias: f32 = match biome {
-                    Biome::Desert => -2.0, // 沙漠偏低，多沙丘
-                    Biome::Jungle => 0.0,  // 中位
-                    Biome::Tundra => 3.0,  // 苔原偏高山地
+                    Biome::Desert => -2.0,
+                    Biome::Jungle => 0.0,
+                    Biome::Tundra => 3.0,
                 };
                 let base_h = (h_big * 14.0) + (h_detail * 4.0) + SEA_LEVEL as f32 + biome_bias;
 
                 let h = if dist_from_spawn < flat_radius {
                     SEA_LEVEL + 1
                 } else if dist_from_spawn < flat_radius + 6.0 {
-                    // 缓坡过渡：base_h 但往 SEA_LEVEL+1 插值
+
                     let t = (dist_from_spawn - flat_radius) / 6.0;
                     let flat = (SEA_LEVEL + 1) as f32;
                     (flat * (1.0 - t) + base_h * t) as i32
                 } else {
                     base_h as i32
                 }
-                .clamp(1, s - 4); // 不让 y 顶到天
+                .clamp(1, s - 4);
 
-                // 填柱：底层 stone（厚 3+），表层用 biome 专属
+
                 let surface = match biome {
                     Biome::Desert => BlockType::Sand,
                     Biome::Jungle => BlockType::Dirt,
                     Biome::Tundra => BlockType::Snow,
                 };
-                let sub = BlockType::Dirt; // 表层下 1 层用 dirt
+                let sub = BlockType::Dirt;
                 for y in 0..h {
                     if y == h - 1 {
                         w.set(x, y, z, surface);
@@ -476,7 +476,7 @@ impl WorldGenerator {
             }
         }
 
-        // ── 2. 洞穴：3D noise 在地下挖空 ────────────────────────────────────
+
         for y in 1..(s - 2) {
             for z in 0..s {
                 for x in 0..s {
@@ -492,7 +492,7 @@ impl WorldGenerator {
                         (h_big2 * 14.0 + h_detail2 * 4.0 + SEA_LEVEL as f32 + biome_bias2) as i32;
                     if y >= surface2 - 1 {
                         continue;
-                    } // 表层 1 格不挖
+                    }
                     let cave_n = noise3(x / 4, y / 3, z / 4, self.seed ^ 0xC0CA);
                     if cave_n > 0.65 {
                         w.set(x, y, z, BlockType::Air);
@@ -501,7 +501,7 @@ impl WorldGenerator {
             }
         }
 
-        // ── 2b. 水：海平面以下的空腔填水（湖+河）────────────────────────────
+
         for z in 0..s {
             for x in 0..s {
                 for y in 0..=SEA_LEVEL {
@@ -512,22 +512,22 @@ impl WorldGenerator {
             }
         }
 
-        // ── 3. 矿石：3 群落各自专属，按 cluster 间距撒 ────────────────────────
+
         for biome in [Biome::Desert, Biome::Tundra, Biome::Jungle] {
             self.place_ore_clusters(&mut w, biome);
         }
-        // IronOre 通用
+
         self.place_generic_iron(&mut w);
 
-        // ── 3. 树：树干 + 树冠；不同 biome 长得不一样 ─────────────────────────
-        // 沙漠不种树（沙地没水），改种仙人掌
-        // 丛林：高大阔叶树（5-7 木干 + 3x3x2 树冠）
-        // 苔原：针叶树（4-5 木干 + 2x2x2 树冠）
+
+
+
+
         for z in 0..s {
             for x in 0..s {
                 let biome = Biome::from_xz(x, z);
                 if biome == Biome::Desert {
-                    // 仙人掌：1-3 块 Wood 立柱
+
                     if (x - spawn_x).abs() + (z - spawn_z).abs() >= clear_radius
                         && hash01(x, z, 0, self.seed ^ 0xC4) < 0.015
                     {
@@ -548,22 +548,22 @@ impl WorldGenerator {
                     if let Some(y) = self.find_surface(w.clone(), x, z) {
                         let (trunk_h, canopy) = match biome {
                             Biome::Jungle => (
-                                5 + (hash01(x, z, 8, self.seed) * 3.0) as i32, // 5-7
-                                (3, 2),                                        // 3x3x2 阔叶冠
+                                5 + (hash01(x, z, 8, self.seed) * 3.0) as i32,
+                                (3, 2),
                             ),
                             Biome::Tundra => (
-                                4 + (hash01(x, z, 8, self.seed) * 2.0) as i32, // 4-5
-                                (2, 2),                                        // 2x2x2 针叶冠
+                                4 + (hash01(x, z, 8, self.seed) * 2.0) as i32,
+                                (2, 2),
                             ),
                             Biome::Desert => unreachable!(),
                         };
-                        // 树干
+
                         for up in 1..=trunk_h {
                             if y + up < s {
                                 w.set(x, y + up, z, BlockType::Wood);
                             }
                         }
-                        // 树冠
+
                         let canopy_base = y + trunk_h - 1;
                         for dy in 0..canopy.1 {
                             for dx in -(canopy.0 as i32 / 2)..=(canopy.0 as i32 / 2) {
@@ -574,12 +574,12 @@ impl WorldGenerator {
                                     if w.in_bounds(px, py, pz)
                                         && w.get(px, py, pz) == BlockType::Air
                                     {
-                                        // 边缘稀疏
+
                                         if dx == 0 && dz == 0 && dy < canopy.1 - 1 {
-                                            continue; // 树干穿过处不铺叶
+                                            continue;
                                         }
                                         if (dx.abs() + dz.abs() + dy) > canopy.0 {
-                                            continue; // 角上不铺
+                                            continue;
                                         }
                                         w.set(px, py, pz, BlockType::Leaves);
                                     }
@@ -591,7 +591,7 @@ impl WorldGenerator {
             }
         }
 
-        // ── 4. 浆果丛林（只在 jungle 地表）───────────────────────────────────
+
         for z in 0..s {
             for x in 0..s {
                 if Biome::from_xz(x, z) != Biome::Jungle {
@@ -609,7 +609,7 @@ impl WorldGenerator {
             }
         }
 
-        // ── 5. 苔原巨砾（石头堆点缀）────────────────────────────────────────
+
         for z in 0..s {
             for x in 0..s {
                 if Biome::from_xz(x, z) != Biome::Tundra {
@@ -633,7 +633,7 @@ impl WorldGenerator {
         w
     }
 
-    /// 在指定 biome 范围内撒矿石（cluster 间距约束）
+
     fn place_ore_clusters(&self, w: &mut World, biome: Biome) {
         let s = w.size as i32;
         let mut placed: Vec<(i32, i32)> = Vec::new();
@@ -643,12 +643,12 @@ impl WorldGenerator {
                     continue;
                 }
                 if hash01(x, z, 2, self.seed ^ (biome as u32) * 0x100) < 0.08 {
-                    // candidate
+
                     if placed.iter().all(|(px, pz)| {
                         (x - px).abs() + (z - pz).abs() > self.min_ore_cluster_spacing
                     }) {
                         placed.push((x, z));
-                        let cluster_size = 2 + (hash01(x, z, 3, self.seed) * 3.0) as i32; // 2-4 块
+                        let cluster_size = 2 + (hash01(x, z, 3, self.seed) * 3.0) as i32;
                         for _ in 0..cluster_size {
                             let dx = (hash01(x, z, 4, self.seed) * 5.0) as i32 - 2;
                             let dz = (hash01(x, z, 5, self.seed) * 5.0) as i32 - 2;
@@ -664,14 +664,14 @@ impl WorldGenerator {
         }
     }
 
-    /// 通用 IronOre 散撒（不用 cluster 约束）
+
     fn place_generic_iron(&self, w: &mut World) {
         let s = w.size as i32;
         for z in 0..s {
             for x in 0..s {
                 let h = self.find_surface(w.clone(), x, z);
                 if let Some(surf) = h {
-                    // 表面下方 1-3 块
+
                     let depth = 1 + (hash01(x, z, 7, self.seed) * 3.0) as i32;
                     let y = surf - depth;
                     if y > 0
@@ -685,7 +685,7 @@ impl WorldGenerator {
         }
     }
 
-    /// 找 (x, z) 处的最高实心 y。None = 整列空气
+
     fn find_surface(&self, w: World, x: i32, z: i32) -> Option<i32> {
         for y in (0..w.size).rev() {
             if w.get(x, y, z).is_solid() {
@@ -696,12 +696,12 @@ impl WorldGenerator {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Gathering 动作：把块转成资源
-// ---------------------------------------------------------------------------
 
-/// 玩家挖掘/采集一个块。返回 (产出的资源, 数量)。
-/// 块被设为 Air。资源通过 transfer 进 GlobalResourcePool。
+
+
+
+
+
 pub fn gather_block(
     world: &mut World,
     pool: &mut crate::resource::GlobalResourcePool,
@@ -720,27 +720,27 @@ pub fn gather_block(
     if amount <= 0 {
         return Ok(None);
     }
-    // 资源进池（来源 = 玩家采集）
+
     let t = Transfer {
         kind,
         amount,
         src: TransferSrc::PlayerGather(player_id),
-        dst: TransferDst::PlayerUse(player_id), // 暂时直接进池；后续可改背包
+        dst: TransferDst::PlayerUse(player_id),
     };
     apply_transfer(pool, t).map_err(|e| format!("gather transfer failed: {}", e))?;
-    // 块变空气
+
     world.set(x, y, z, BlockType::Air);
     Ok(Some((kind, amount)))
 }
 
-// ---------------------------------------------------------------------------
-// World 视野：给定玩家位置，返回可见块集合
-// ---------------------------------------------------------------------------
 
-/// 给定玩家位置 + 半径，返回 (x, y, z) 列表（demo：体素视距范围）
-///
-/// demo 简化：直接返回 (px±r) × (py±r) × (pz±r) 的所有方块，含两端。
-/// 后续可加球形过滤、视线追踪、距离衰减。
+
+
+
+
+
+
+
 pub fn visible_blocks(
     world: &World,
     px: i32,
@@ -767,9 +767,9 @@ pub fn visible_blocks(
     out
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -779,12 +779,12 @@ mod tests {
     #[test]
     fn biome_from_xz_3_zones() {
         let n = WORLD_SIZE;
-        // 北 (z < n/3) = Tundra
+
         assert_eq!(Biome::from_xz(0, 0), Biome::Tundra);
-        // 中 (n/3 ≤ z < 2n/3) = Jungle
+
         assert_eq!(Biome::from_xz(0, n / 3), Biome::Jungle);
         assert_eq!(Biome::from_xz(0, 2 * n / 3 - 1), Biome::Jungle);
-        // 南 (z ≥ 2n/3) = Desert
+
         assert_eq!(Biome::from_xz(0, 2 * n / 3), Biome::Desert);
         assert_eq!(Biome::from_xz(0, n - 1), Biome::Desert);
     }
@@ -813,7 +813,7 @@ mod tests {
     fn all_3_biomes_have_ore() {
         let g = WorldGenerator::default();
         let w = g.generate(16);
-        // demo: 不严格保证每个 biome 都有 ore（hash 概率性），只要总 ore > 0
+
         let total_ores = w.count_biome_ores(Biome::Desert)
             + w.count_biome_ores(Biome::Tundra)
             + w.count_biome_ores(Biome::Jungle);
@@ -873,21 +873,21 @@ mod tests {
     fn visible_blocks_in_radius() {
         let w = World::new(16);
         let v = visible_blocks(&w, 8, 8, 8, 3);
-        // 7³ = 343 个块
+
         assert_eq!(v.len(), 7 * 7 * 7);
     }
 
     #[test]
     fn block_yields_match() {
-        // 总纲：挖阳炎石矿 → 阳炎石
+
         assert_eq!(
             BlockType::SunstoneOre.yields(),
             Some((ResourceKind::Sunstone, 1))
         );
-        // 挖苹果树（berry） → 苹果
+
         assert_eq!(
             BlockType::BerryThicket.yields(),
             Some((ResourceKind::Apple, 1))
         );
     }
-}
+}

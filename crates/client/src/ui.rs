@@ -481,4 +481,4 @@ mod tests {
         assert!(s.contains("CO2 0.8"));
         assert!(s.contains("eat/grow 11/12"));
     }
-}
+}

@@ -1,31 +1,31 @@
-//! 目标 / 任务系统（V2 玩法循环核心）
-//!
-//! 来源：《万国余烬_王冠赛季_对战设计案》§5 目标驱动 + 《技术实现 MVP》§2 QuestService
-//!
-//! ## 痛点（2026-06-19 T6 任务前置）
-//!
-//! HUD 上 Goal: 10 wood 是写死的;创完国后没有下一目标;
-//! phase 推进不会触发事件;玩家登录后"玩不到啥"。
-//!
-//! ## 设计
-//!
-//! - `Objective` Resource：当前任务列表 + 每条进度 + 是否完成
-//! - `ObjectiveKind` 枚举：内置 4 种（采集 / 创国 / 杀怪 / 到达位置）
-//! - `ObjectivesPlugin` 注册到 FixedUpdate：
-//!   - `auto_advance_objectives`：自动检查玩家行为 → 推进进度
-//!   - `chain_objectives`：完成当前 → 解锁下一条
-//! - `ObjectiveCompleted` Message：HUD 收到后闪提示 / scenario 收到后推进剧本
-//! - F 键绑定逻辑在 client 层做（避免 core 依赖 input manager）
-//!
-//! ## 内置 Quest Chain（开局）
-//!
-//! 1. `GatherWood(10)` — 砍 10 木
-//! 2. `FoundNation`     — 按 F 创第 1 国
-//! 3. `GatherFood(30)`  — 食物 30（升级人口前置）
-//! 4. `UpgradePop(10)`  — 升级人口到 10
-//! 5. `KillMonsters(5)` — 杀 5 只怪（解锁 Wildland 叙事）
-//!
-//! chain 在 `Objectives::default_chain()` 给 demo 用;正式游戏可由 scenario JSON 注入。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -36,22 +36,22 @@ use crate::nation::NationRegistry;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, ResourceKind};
 
-// ---------------------------------------------------------------------------
-// Objective Kind
-// ---------------------------------------------------------------------------
 
-/// 任务类型（行为 → 进度映射）
+
+
+
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObjectiveKind {
-    /// 采集 N 个某资源。`count` 是目标数量。
+
     GatherResource { kind: ResourceKind, count: i64 },
-    /// 创 1 个国家（任意时刻只有 1 面旗给玩家创）。
+
     FoundNation,
-    /// 升级人口到 target。
+
     UpgradePop { target: u32 },
-    /// 击杀 N 个怪物（任意种类）。
+
     KillMonsters { count: u32 },
-    /// 走到 (x, y, z) 半径 radius 内。
+
     ReachPosition { pos: [i32; 3], radius: i32 },
 }
 
@@ -70,7 +70,7 @@ impl ObjectiveKind {
         }
     }
 
-    /// HUD 进度条描述 "X / Y" 部分
+
     pub fn progress_str(&self, progress: &ObjectiveProgress) -> String {
         match (self, progress) {
             (ObjectiveKind::GatherResource { count, .. }, ObjectiveProgress::Count(p)) => {
@@ -104,23 +104,23 @@ impl ObjectiveKind {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Progress
-// ---------------------------------------------------------------------------
 
-/// 任务进度（与 Kind 一一对应）
+
+
+
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ObjectiveProgress {
     #[default]
     Empty,
-    /// 整数计数（采集 / 杀怪）
+
     Count(i64),
     CountU(u32),
-    /// 升级人口的当前人口上限
+
     Pop(u32),
-    /// 创国标记
+
     Flag(bool),
-    /// 到达位置
+
     AtPosition {
         reached: bool,
     },
@@ -130,7 +130,7 @@ impl ObjectiveProgress {
     pub fn is_done(&self) -> bool {
         match self {
             ObjectiveProgress::Empty => false,
-            ObjectiveProgress::Count(n) => *n > 0, // 0 不算 done;具体 threshold 在完成判定里
+            ObjectiveProgress::Count(n) => *n > 0,
             ObjectiveProgress::CountU(n) => *n > 0,
             ObjectiveProgress::Pop(_) => false,
             ObjectiveProgress::Flag(b) => *b,
@@ -139,14 +139,14 @@ impl ObjectiveProgress {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Objective Entry (单条任务)
-// ---------------------------------------------------------------------------
 
-/// 一条任务（kind + 当前进度 + 完成标记）
+
+
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Objective {
-    pub id: String, // 唯一 id，给 HUD / scenario 引用
+    pub id: String,
     pub kind: ObjectiveKind,
     pub progress: ObjectiveProgress,
     pub done: bool,
@@ -164,7 +164,7 @@ impl Objective {
         Self { id: id.into(), kind, progress, done: false }
     }
 
-    /// 当前进度是否满足 kind 的完成阈值
+
     pub fn check_complete(&self) -> bool {
         match (&self.kind, &self.progress) {
             (ObjectiveKind::GatherResource { count, .. }, ObjectiveProgress::Count(p)) => {
@@ -181,17 +181,17 @@ impl Objective {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Objectives Registry
-// ---------------------------------------------------------------------------
 
-/// 全局任务注册表（Resource）。一个玩家/客户端一份。
-/// server 可读同一份,做权威校验。
+
+
+
+
+
 #[derive(Resource, Debug, Clone, Default)]
 pub struct Objectives {
-    /// 所有任务（按 push 顺序）
+
     pub all: Vec<Objective>,
-    /// 当前激活的（第一条未完成的）
+
     pub current_idx: Option<usize>,
 }
 
@@ -207,7 +207,7 @@ impl Objectives {
         self.all.push(obj);
     }
 
-    /// 取当前激活的 objective
+
     pub fn current(&self) -> Option<&Objective> {
         self.current_idx.and_then(|i| self.all.get(i))
     }
@@ -217,8 +217,8 @@ impl Objectives {
         self.all.get_mut(i)
     }
 
-    /// 标记当前为完成（如果满足），并把 current_idx 推到下一条未完成
-    /// 返回 true 表示这次完成了
+
+
     pub fn try_complete_current(&mut self) -> bool {
         let Some(i) = self.current_idx else {
             return false;
@@ -232,15 +232,15 @@ impl Objectives {
         if !obj.check_complete() {
             return false;
         }
-        // 标完成
+
         self.all[i].done = true;
-        // 推下一条未完成
+
         let next = (i + 1..self.all.len()).find(|&j| !self.all[j].done);
         self.current_idx = next;
         true
     }
 
-    /// demo 用内置 quest chain
+
     pub fn default_chain() -> Self {
         let mut o = Objectives::new();
         o.push(Objective::new(
@@ -271,11 +271,11 @@ impl Objectives {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ObjectiveCompleted Event
-// ---------------------------------------------------------------------------
 
-/// 任务完成事件。HUD 闪提示 / scenario advance / audio cue 都订阅这个。
+
+
+
+
 #[derive(Message, Debug, Clone)]
 pub struct ObjectiveCompleted {
     pub id: String,
@@ -283,12 +283,12 @@ pub struct ObjectiveCompleted {
     pub at_wall_secs: f32,
 }
 
-// ---------------------------------------------------------------------------
-// Auto-advance systems
-// ---------------------------------------------------------------------------
 
-/// 自动把玩家行为推进到当前 objective 的进度。
-/// 每 tick 跑一次,纯函数映射:玩家 state → progress 更新。
+
+
+
+
+
 pub fn auto_advance_objectives(
     mut objectives: ResMut<Objectives>,
     player: Res<PlayerState>,
@@ -298,7 +298,7 @@ pub fn auto_advance_objectives(
     match_clock: Res<MatchClock>,
     mut completed_events: MessageWriter<ObjectiveCompleted>,
 ) {
-    // 防止 chain 推进时本帧 current 还在 old slot 反复发事件
+
     let mut safety = 16;
     while safety > 0 {
         safety -= 1;
@@ -309,7 +309,7 @@ pub fn auto_advance_objectives(
             break;
         }
 
-        // 推进进度
+
         match &obj.kind {
             ObjectiveKind::GatherResource { kind, .. } => {
                 let cur = pool.get(*kind);
@@ -354,7 +354,7 @@ pub fn auto_advance_objectives(
             }
         }
 
-        // 检查完成
+
         if objectives.try_complete_current() {
             let just_done = objectives
                 .all
@@ -380,9 +380,9 @@ pub fn auto_advance_objectives(
     }
 }
 
-/// chain 完成时给 phase 一个 nudge（叙事节奏）。
-/// q5_kill_monsters 完成 → 提前 30s 预告 phase 升级
-/// q6_reach_summit 完成 → 解锁 SovereignReveal 提示
+
+
+
 pub fn objective_phase_hints(
     mut completed_events: MessageReader<ObjectiveCompleted>,
     match_clock: Res<MatchClock>,
@@ -407,11 +407,11 @@ pub fn objective_phase_hints(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Plugin
-// ---------------------------------------------------------------------------
 
-/// 注册 Objectives + 自动推进 + 完成事件
+
+
+
+
 pub struct ObjectivesPlugin;
 
 impl Plugin for ObjectivesPlugin {
@@ -423,13 +423,13 @@ impl Plugin for ObjectivesPlugin {
     }
 }
 
-/// 启动时塞入默认 quest chain（demo 用）
+
 pub fn setup_default_objectives(mut commands: Commands) {
     commands.insert_resource(Objectives::default_chain());
 }
 
-/// AshOpening → Wildland 阶段切换时,把所有未完成 objective 的 progress 推到当前 best
-/// （已经在 auto_advance 里做了 — 这里只是给一个明确 hook 标记）
+
+
 pub fn on_phase_change_emit_summary(
     mut phase_events: MessageReader<crate::match_state::MatchPhaseChanged>,
     objectives: Res<Objectives>,
@@ -447,9 +447,9 @@ pub fn on_phase_change_emit_summary(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -479,18 +479,18 @@ mod tests {
         let mut c = Objectives::default_chain();
         let mut pool = fresh_pool();
         add(&mut pool, ResourceKind::Wood, 5);
-        // 用一个 fake PlayerState + pool 跑 auto_advance
-        // 直接手动模拟一下:
+
+
         let mut player = PlayerState::default();
         player.nation_id = None;
         player.monsters_killed = 0;
         player.block_pos = [0, 0, 0];
-        // 第一次:5 木 → 不完成
+
         if let Some(cur) = c.current_mut() {
             cur.progress = ObjectiveProgress::Count(pool.get(ResourceKind::Wood));
         }
         assert!(!c.current().unwrap().check_complete());
-        // 第二次:10 木 → 完成
+
         add(&mut pool, ResourceKind::Wood, 5);
         if let Some(cur) = c.current_mut() {
             cur.progress = ObjectiveProgress::Count(pool.get(ResourceKind::Wood));
@@ -504,17 +504,17 @@ mod tests {
     #[test]
     fn q2_found_nation_completes_when_player_has_nation_id() {
         let mut c = Objectives::default_chain();
-        // 跳到 q2: 标记 q1 done
+
         c.all[0].done = true;
         c.current_idx = Some(1);
         let mut player = PlayerState::default();
         player.nation_id = None;
-        // 没 nation → 不完成
+
         if let Some(cur) = c.current_mut() {
             cur.progress = ObjectiveProgress::Flag(player.nation_id.is_some());
         }
         assert!(!c.current().unwrap().check_complete());
-        // 创国 → nation_id = Some
+
         use crate::nation::NationId;
         player.nation_id = Some(NationId(1));
         if let Some(cur) = c.current_mut() {
@@ -532,7 +532,7 @@ mod tests {
             c.all[i].done = true;
         }
         c.current_idx = Some(3);
-        // target = 10, pop = 5 → 不完成
+
         if let Some(cur) = c.current_mut() {
             cur.progress = ObjectiveProgress::Pop(5);
         }
@@ -567,7 +567,7 @@ mod tests {
             c.all[i].done = true;
         }
         c.current_idx = Some(5);
-        // 玩家在 (50, 30, 50) 目标 (48, 30, 48) radius=5 → |2|+|0|+|2|=4 ≤ 5 → 到达
+
         let mut player = PlayerState::default();
         player.block_pos = [50, 30, 50];
         let reached = {
@@ -588,18 +588,18 @@ mod tests {
     fn current_idx_advances_on_completion() {
         let mut c = Objectives::default_chain();
         assert_eq!(c.current_idx, Some(0));
-        // q1 进度 0 → 不完成
+
         if let Some(cur) = c.current_mut() {
             cur.progress = ObjectiveProgress::Count(0);
         }
         assert!(!c.try_complete_current());
-        // 进度满 → 完成 → 推 q2
+
         if let Some(cur) = c.current_mut() {
             cur.progress = ObjectiveProgress::Count(10);
         }
         assert!(c.try_complete_current());
         assert_eq!(c.current_idx, Some(1));
-        // q2 创国 → 完成 → 推 q3
+
         c.all[1].progress = ObjectiveProgress::Flag(true);
         assert!(c.try_complete_current());
         assert_eq!(c.current_idx, Some(2));
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn completed_event_payload() {
-        // 验证 ObjectiveCompleted 的 kind/id 字段语义
+
         let ev = ObjectiveCompleted {
             id: "q1".into(),
             kind: ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 },
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn objectives_plugin_can_be_added_without_panic() {
-        // 不真起 Bevy,只验证 Plugin trait impl 不报错
+
         fn _assert_plugin<P: Plugin>(_: &P) {}
         let p = ObjectivesPlugin;
         _assert_plugin(&p);
@@ -643,4 +643,4 @@ mod tests {
         assert_eq!(c.current_idx, None);
         assert!(!c.try_complete_current());
     }
-}
+}

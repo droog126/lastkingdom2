@@ -1,31 +1,21 @@
-//! 体素世界的视线检测（DDA 算法）
-//!
-//! Digital Differential Analyzer — 从体素世界中的 A 点向 B 点发射射线，
-//! 步进到每个体素格，判断是否有 solid 方块阻挡视线。
-//!
-//! 用于 PvP 命中判定中的"隔着墙不能打"逻辑。
-//!
-//! 本文件是 server crate 的副本 (从 src/pvp/los.rs 迁出)。
-//! import 已经走 lk2_core, 直接复用。
+
 
 use bevy::prelude::*;
 use lk2_core::world::BlockType;
 use lk2_core::world::World as GameWorld;
 
-/// 视线检测结果
 #[derive(Clone, Debug)]
 pub struct LosResult {
-    /// 是否被阻挡
+
     pub blocked: bool,
-    /// 如果 blocked=true，阻挡点的 voxel 坐标
+
     pub block_pos: Option<[i32; 3]>,
-    /// 射线总长度（格）
+
     pub total_dist: f32,
-    /// 实际到达的距离（格）
+
     pub travel_dist: f32,
 }
 
-/// 从 from 到 to 做体素视线检测
 pub fn line_of_sight(world: &GameWorld, from: Vec3, to: Vec3, step_size: f32) -> LosResult {
     let dir = to - from;
     let total_dist = dir.length();
@@ -61,7 +51,6 @@ pub fn line_of_sight(world: &GameWorld, from: Vec3, to: Vec3, step_size: f32) ->
     LosResult { blocked: false, block_pos: None, total_dist, travel_dist: total_dist }
 }
 
-/// 从眼睛位置（player_eye + height）朝向 forward 做扇形命中检测
 pub fn sector_voxels(
     eye: Vec3,
     forward: Vec3,

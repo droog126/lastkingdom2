@@ -1,9 +1,8 @@
-"""verify_poly_budget.py — 面数审计 (v5-cute 5000 面预算)."""
+
 import struct
 import sys
 import json
 from pathlib import Path
-
 
 def triangle_count(glb_path: Path) -> tuple[int, int]:
     d = glb_path.read_bytes()
@@ -21,11 +20,10 @@ def triangle_count(glb_path: Path) -> tuple[int, int]:
                 v += g['accessors'][p['attributes']['POSITION']]['count']
     return t, v
 
-
 def main() -> int:
     out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else
                    r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
-    budget = 5000  # v5-cute 允许更多面
+    budget = 5000
     worst = 0
     fails = []
     print(f"v5-cute 预算: {budget} 面/模型")
@@ -45,7 +43,6 @@ def main() -> int:
         return 1
     print("PASS — all within budget")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

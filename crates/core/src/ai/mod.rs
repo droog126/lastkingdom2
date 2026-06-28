@@ -1,27 +1,4 @@
-//! Tick-level AI closed-loop Debug System
-//!
-//! 用户特别要求："自己写 tick 级别 AI 闭环的 debug 系统"
-//!
-//! 设计目标：
-//!   1. **每 tick 快照**（TickSnapshot）—— 全局状态完整序列化
-//!   2. **AI 决策日志**（AiDecision）—— 决策 + 上下文 + 结果
-//!   3. **不变量断言**（Invariant）—— 资源守恒 / 个体计数 / 国旗数 等
-//!   4. **重放**（Replay）—— 从快照恢复，可重跑 AI 路径
-//!   5. **异常检测**（Anomaly）—— tick 时长 / 死循环 / 决策反转 / 反复横跳
-//!
-//! 闭环：tick → 记录 → 断言 → 发现违例 → 输出 → 修复代码 → 回到 tick
-//!
-//! 用法（demo）：
-//! ```ignore
-//!   let mut obs = TickObserver::new();
-//!   for tick in 0..1000 {
-//!     let snap = obs.begin_tick(tick);
-//!     game.tick();
-//!     obs.observe_ai_decision(&ai.last_decision);
-//!     obs.end_tick(&game)?;  // 自动跑所有 invariants
-//!   }
-//!   obs.report();  // 输出报告
-//! ```
+
 
 #![allow(dead_code)]
 
@@ -34,22 +11,18 @@ use crate::nation::NationRegistry;
 use crate::resource::GlobalResourcePool;
 use crate::world::World;
 
-// ---------------------------------------------------------------------------
-// TickSnapshot：某一 tick 的完整状态（轻量版）
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct TickSnapshot {
     pub tick: u64,
-    /// 全局资源池的 (kind, amount) 列表（避免依赖 ResourceKind 的 Display 顺序）
+
     pub pool_totals: Vec<(String, i64)>,
-    /// 国旗数
+
     pub flag_count: u32,
-    /// 怪物个体数
+
     pub monster_count: u32,
-    /// 玩家位置（demo 只一个玩家）
+
     pub player_pos: Option<[i32; 3]>,
-    /// 时间戳（用于异常检测）
+
     pub wall_time: Instant,
 }
 
@@ -62,7 +35,7 @@ impl TickSnapshot {
         monsters: &MonsterEcosystem,
         player_pos: Option<[i32; 3]>,
     ) -> Self {
-        // 把 pool 全部资源（不管 0 不 0）都列出来，方便比对
+
         use crate::resource::ResourceKind;
         let mut pool_totals = Vec::new();
         for k in ResourceKind::ALL {
@@ -79,7 +52,6 @@ impl TickSnapshot {
         }
     }
 
-    /// 用于"对比两次快照是否一致"的 hash
     pub fn digest(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -99,44 +71,40 @@ impl TickSnapshot {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AiDecision：AI 决策日志
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct AiDecision {
     pub tick: u64,
-    /// 哪个 AI 做了决定（id，比如怪物个体 id 或者怪物群 id）
+
     pub agent_id: u32,
-    /// 决策类型
+
     pub kind: AiDecisionKind,
-    /// 上下文：决定时看到的快照 digest（用来回放）
+
     pub context_digest: u64,
-    /// 决策导致的结果（action description）
+
     pub result: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AiDecisionKind {
-    /// 怪物觅食：决定朝某个方向移动
+
     MonsterMove,
-    /// 怪物进入休眠
+
     NestDormancy,
-    /// 怪物衰亡
+
     NestDecay,
-    /// 怪物被击杀
+
     MonsterKilled,
-    /// 玩家做出决定
+
     PlayerInput,
-    /// 国家成立
+
     NationFounded,
-    /// 国家解散
+
     NationDissolved,
-    /// 玩家采集
+
     PlayerGather,
-    /// 资源再生
+
     ResourceRegen,
-    /// 视野更新
+
     VisionUpdate,
 }
 
@@ -157,10 +125,6 @@ impl AiDecisionKind {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Invariant：在每个 tick 结束时断言
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct Invariant {
     pub name: String,
@@ -171,15 +135,15 @@ pub struct Invariant {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InvariantKind {
-    /// 全局资源守恒：current ≤ max & audit 守恒
+
     ResourceConservation,
-    /// 怪物个体计数 = 所有 nests 之和
+
     MonsterCountConsistency,
-    /// 国旗数 ≤ 8
+
     FlagCountCap,
-    /// 玩家位置在世界内
+
     PlayerInBounds,
-    /// Tick 时长 < 50ms（防卡死 / 死循环）
+
     TickDurationBounded,
 }
 
@@ -195,10 +159,6 @@ impl InvariantKind {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Anomaly：自动检测到的异常（不需要 invariants 跑才发现）
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct Anomaly {
     pub tick: u64,
@@ -208,15 +168,15 @@ pub struct Anomaly {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnomalyKind {
-    /// 同一 AI 在 N tick 内反复做相同决定（无进展）
+
     Oscillation,
-    /// Tick 耗时突然飙升
+
     TickSpike,
-    /// 资源在两个连续 tick 间出现"凭空生成/消失"（不通过 Sub/Add/Regen）
+
     ResourceJump,
-    /// 怪物王国 / 小巢 数量在不该变时变了
+
     StructuralChange,
-    /// 国旗数突然变 0（所有国家被瞬间拆）
+
     MassDissolution,
 }
 
@@ -232,10 +192,6 @@ impl AnomalyKind {
     }
 }
 
-// ---------------------------------------------------------------------------
-// TickObserver：主类
-// ---------------------------------------------------------------------------
-
 #[derive(Resource)]
 pub struct TickObserver {
     pub snapshots: Vec<TickSnapshot>,
@@ -243,19 +199,16 @@ pub struct TickObserver {
     pub invariants: HashMap<InvariantKind, Invariant>,
     pub anomalies: Vec<Anomaly>,
 
-    /// 每 N tick 保留一个快照（demo 保留全部，limit 之后可以加）
     max_snapshots: usize,
 
-    /// tick 开始时刻
     tick_start: Option<Instant>,
-    /// 上次 tick 结束时刻
+
     last_tick_end: Option<Instant>,
-    /// tick 耗时历史
+
     tick_durations: Vec<Duration>,
 
-    /// 每个 agent 的最近 N 个决定（用于检测 Oscillation）
     agent_decision_history: HashMap<u32, Vec<(u64, AiDecisionKind)>>,
-    /// 上次 tick 的快照 digest（用于检测 ResourceJump）
+
     last_snapshot_digest: Option<u64>,
 }
 
@@ -281,20 +234,18 @@ impl TickObserver {
         Self::default()
     }
 
-    /// tick 开始时调用
     pub fn begin_tick(&mut self) {
         self.tick_start = Some(Instant::now());
     }
 
-    /// 记录一个 AI 决策
     pub fn observe_ai_decision(&mut self, dec: AiDecision) {
-        // 振荡检测：同 agent 连续 N 次同决定
+
         let history = self.agent_decision_history.entry(dec.agent_id).or_insert_with(Vec::new);
         history.push((dec.tick, dec.kind));
         if history.len() > 10 {
             history.remove(0);
         }
-        // 同 tick 连续 5 次同决定 = 振荡
+
         if history.len() >= 5 {
             let last5: Vec<_> = history[history.len() - 5..].iter().map(|(_, k)| *k).collect();
             if last5.iter().all(|k| *k == dec.kind) {
@@ -312,7 +263,6 @@ impl TickObserver {
         self.decisions.push(dec);
     }
 
-    /// tick 结束时调用，跑所有 invariants + 异常检测
     pub fn end_tick(
         &mut self,
         tick: u64,
@@ -322,7 +272,7 @@ impl TickObserver {
         monsters: &MonsterEcosystem,
         player_pos: Option<[i32; 3]>,
     ) -> Result<(), Vec<String>> {
-        // 记录耗时
+
         let dur = self.tick_start.map(|s| s.elapsed()).unwrap_or_default();
         self.tick_durations.push(dur);
         if self.tick_durations.len() > 100 {
@@ -331,15 +281,12 @@ impl TickObserver {
         self.tick_start = None;
         self.last_tick_end = Some(Instant::now());
 
-        // 拍快照
         let snap = TickSnapshot::from_world(tick, world, pool, nations, monsters, player_pos);
-        // 资源跳变检测
+
         let new_digest = snap.digest();
         if let Some(prev) = self.last_snapshot_digest {
             if new_digest != prev {
-                // 资源池 / 国旗数 / 怪物数 / 玩家位置 至少一项变了
-                // 这是正常的变化，但要排除"凭空出现"
-                // 简化：只标记，跳过误报
+
             }
         }
         self.last_snapshot_digest = Some(new_digest);
@@ -347,7 +294,6 @@ impl TickObserver {
             self.snapshots.push(snap);
         }
 
-        // 跑所有 invariants
         let mut errors: Vec<String> = Vec::new();
         self.check_resource_conservation(pool, tick, &mut errors);
         self.check_monster_count(monsters, tick, &mut errors);
@@ -361,8 +307,6 @@ impl TickObserver {
             Err(errors)
         }
     }
-
-    // ---- Invariant checks ------------------------------------------------
 
     fn get_or_register(&mut self, kind: InvariantKind) -> &mut Invariant {
         self.invariants.entry(kind).or_insert_with(|| Invariant {
@@ -453,9 +397,6 @@ impl TickObserver {
         }
     }
 
-    // ---- 报告 ------------------------------------------------------------
-
-    /// 输出最终报告
     pub fn report(&self) -> String {
         let mut s = String::new();
         s.push_str("=== TickObserver 报告 ===\n");
@@ -478,7 +419,7 @@ impl TickObserver {
         if self.anomalies.is_empty() {
             s.push_str("  (无)\n");
         } else {
-            // 只列前 20
+
             for a in self.anomalies.iter().take(20) {
                 s.push_str(&format!(
                     "  tick {} [{}] {}\n",
@@ -505,24 +446,16 @@ impl TickObserver {
         s
     }
 
-    // ---- 重放 ------------------------------------------------------------
-
-    /// 从某个 tick 拿到快照（用于重放）
     pub fn snapshot_at(&self, tick: u64) -> Option<&TickSnapshot> {
         self.snapshots.iter().find(|s| s.tick == tick)
     }
 
-    /// 重放期间所有 AI 决策的脚本（按 tick 排序）
     pub fn replay_script(&self) -> Vec<&AiDecision> {
         let mut v: Vec<&AiDecision> = self.decisions.iter().collect();
         v.sort_by_key(|d| d.tick);
         v
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -565,7 +498,7 @@ mod tests {
         let mut obs = TickObserver::new();
         for tick in 0..10 {
             obs.begin_tick();
-            // 跑 1 个 tick
+
             monsters.tick(&mut pool);
             obs.end_tick(tick, &world, &pool, &nations, &monsters, Some([8, 8, 8]))
                 .expect("clean state should not violate invariants");
@@ -575,11 +508,10 @@ mod tests {
     #[test]
     fn end_tick_detects_overdrawn_pool() {
         let (world, mut pool, nations, monsters) = fresh_world();
-        // 强制让池子出 bug：add 后没 audit
+
         pool.force_add(ResourceKind::Wood, 1000);
         pool.try_sub(ResourceKind::Wood, 100).unwrap();
-        // 现在 audit_added=1000, audit_subtracted=100, 但这是合法的（sub ≤ add）
-        // 真正要触发审计失败：sub 比 add 多
+
         pool.audit_added.insert(ResourceKind::Wood, 100);
         pool.audit_subtracted.insert(ResourceKind::Wood, 200);
 
@@ -596,7 +528,7 @@ mod tests {
     #[test]
     fn end_tick_detects_flag_cap_violation() {
         let (world, pool, mut nations, monsters) = fresh_world();
-        // 强制超 8 面
+
         nations.flag_count = crate::constant::MAX_NATIONAL_FLAGS + 1;
         let mut obs = TickObserver::new();
         obs.begin_tick();
@@ -616,7 +548,7 @@ mod tests {
                 &pool,
                 &nations,
                 &monsters,
-                Some([100, 100, 100]), // 超出 16³
+                Some([100, 100, 100]),
             )
             .unwrap_err();
         assert!(err.iter().any(|e| e.contains("玩家出界")));
@@ -625,7 +557,7 @@ mod tests {
     #[test]
     fn end_tick_detects_monster_count_mismatch() {
         let (world, pool, nations, mut monsters) = fresh_world();
-        monsters.current_individuals += 10; // 强制不一致
+        monsters.current_individuals += 10;
         let mut obs = TickObserver::new();
         obs.begin_tick();
         let err = obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap_err();
@@ -681,7 +613,7 @@ mod tests {
         obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap();
         obs.begin_tick();
         obs.end_tick(1, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap();
-        // 注入一个违例
+
         nations.flag_count = 99;
         obs.begin_tick();
         let _ = obs.end_tick(2, &world, &pool, &nations, &monsters, Some([8, 8, 8]));

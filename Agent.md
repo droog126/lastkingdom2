@@ -148,7 +148,7 @@ python tools\verify_poly_budget.py
 .\tdd.ps1 -Scope audit
 ```
 
-TDD backlog 和测试分层见 `document/tdd.md`。
+TDD backlog 和测试分层见 `docs/notes/tdd.md`。
 
 纯 core 改动：
 
@@ -200,14 +200,16 @@ $env:RUST_LOG="info"
 - `screenshots/iter_NN/final_state.json`
 - `screenshots/iter_NN/diff.json`
 - `screenshots/iter_NN/decision.md`
+- `screenshots/iter_NN/health.json` —— AI 必须先读这个
 
 观察顺序：
 
-1. 看最新截图
-2. 看上一轮截图对比
-3. 看 `final_state.json`
-4. 看 `diff.json`
-5. 写 `decision.md`
+1. **先读 `health.json`**（~330 B 一行 JSON verdict：PNG luma + sim tick）—— 通常足以判断 PASS/PARTIAL/FAIL
+2. 只有 `health.json` 报 PARTIAL/FAIL 时，才去读 `final_state.json` + `diff.json`
+3. 只有 `health.json` 报 FAIL 且 reason 涉及视觉时，才去读 PNG（节省 token）
+4. 写 `decision.md`
+
+`health.json` 体积比 PNG 小 ~2000 倍。AI 不应每轮都解码 600KB 的 PNG —— **先读 health.json，按需深挖**。
 
 没有 `decision.md` 的闭环等于没有复盘。
 
@@ -281,7 +283,7 @@ next:
 - `scenarios/`：场景脚本
 - `screenshots/`：闭环输出
 - `loop.ps1`：构建、运行、截图、状态导出
-- `run_scenario.ps1`：scenario 验证
+- `scripts/loop/run_scenario.ps1`：scenario 验证
 
 ---
 

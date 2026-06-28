@@ -1,7 +1,7 @@
-//! 动物 / 被动生物：猪 / 羊 / 鸡
-//!
-//! 行为：闲逛（每 1.5-3s 选个随机方向走 1 格），遇到障碍就停；头顶晃一晃。
-//! 纯客户端渲染（不参与 sim/economy），但提供"活物感"。
+
+
+
+
 
 use bevy::prelude::*;
 use rand::prelude::*;
@@ -15,16 +15,16 @@ use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
 
-// ---------------------------------------------------------------------------
-// 物种
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CreatureKind {
-    Pig,     // 粉红
-    Sheep,   // 白色
-    Cow,     // 棕白
-    Chicken, // 黄色
+    Pig,
+    Sheep,
+    Cow,
+    Chicken,
 }
 
 impl CreatureKind {
@@ -84,9 +84,9 @@ pub fn award_creature_drop(
     Ok(drop)
 }
 
-// ---------------------------------------------------------------------------
-// 组件
-// ---------------------------------------------------------------------------
+
+
+
 
 pub const CREATURE_TRAINING_ATTACK_RANGE_SQ: f32 = 25.0;
 
@@ -112,16 +112,16 @@ pub struct CreatureAI {
     pub bob_phase: f32,
 }
 
-// ---------------------------------------------------------------------------
-// 资源：一次性 spawn 标记
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Resource, Default)]
 pub struct CreatureSpawnerDone(pub bool);
 
-// ---------------------------------------------------------------------------
-// Spawn：在世界里撒 30 只动物，避开出生点
-// ---------------------------------------------------------------------------
+
+
+
 
 pub fn spawn_creatures(
     mut commands: Commands,
@@ -168,8 +168,8 @@ pub fn spawn_creatures(
     ) {
         placed += 1;
     }
-    // 先 spawn 一个"起始牧场"：出生点周围 5-9 格的空地上 spawn 12 只
-    // （加密，确保 auto-walk 时玩家总能看到动物）
+
+
     let mut starter_attempts = 0;
     while placed < 12 && starter_attempts < 400 {
         starter_attempts += 1;
@@ -191,13 +191,13 @@ pub fn spawn_creatures(
     }
     info!("🐄 起始牧场 spawn {} 只", placed);
 
-    // 然后再 spawn 散落的 count 只
+
     let target = count;
     while placed < target && attempts < count * 20 {
         attempts += 1;
         let x = rng.random_range(2..(s - 2));
         let z = rng.random_range(2..(s - 2));
-        // 离出生点 8 格以外（避免覆盖起始牧场）
+
         if (x - spawn_cx).abs() + (z - spawn_cz).abs() < 8 {
             continue;
         }
@@ -218,7 +218,7 @@ pub fn spawn_creatures(
     info!("🐄 总共 spawn {} 只动物 (尝试 {} 次)", placed, attempts);
 }
 
-/// 工具：尝试在 (x, z) spawn 一只动物，失败返回 false
+
 fn try_spawn_training_creature_near_spawn(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -327,7 +327,7 @@ fn try_spawn_creature(
     if x < 2 || x >= s - 2 || z < 2 || z >= s - 2 {
         return false;
     }
-    // 找地表
+
     let mut surface_y = None;
     for y in (1..s).rev() {
         if world.get(x, y, z).is_solid() {
@@ -341,7 +341,7 @@ fn try_spawn_creature(
     if !world.get(x, y, z).is_surface() {
         return false;
     }
-    let y = y + 1; // 站在地表上一格
+    let y = y + 1;
 
     let kind = fixed_kind.unwrap_or_else(|| kinds[rng.random_range(0..kinds.len())]);
 
@@ -377,8 +377,8 @@ pub fn despawn_dead_creatures(
     }
 }
 
-/// 玩家攻击：K 键一刀秒半径 1.5 格内最近的动物
-/// 死亡后掉落食物到 pool，creature entity 移除
+
+
 pub fn player_attack_creatures(
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<PlayerState>,
@@ -389,7 +389,7 @@ pub fn player_attack_creatures(
     if !keys.just_pressed(KeyCode::KeyK) {
         return;
     }
-    // 找最近的
+
     let mut best: Option<(Entity, f32, CreatureKind)> = None;
     for (e, c, _) in q.iter() {
         let d2 = creature_attack_distance_sq(player.block_pos, c.block_pos);
@@ -398,7 +398,7 @@ pub fn player_attack_creatures(
         }
     }
     if let Some((e, _d, kind)) = best {
-        // 掉落物：每种动物各产一种食物
+
         match award_creature_drop(&mut pool, &mut player, kind) {
             Ok(drop) => {
                 info!("⚔ 你杀了一只{}（+3 {:?}）", kind.label_zh(), drop);
@@ -416,9 +416,9 @@ pub fn player_attack_creatures(
     }
 }
 
-// ---------------------------------------------------------------------------
-// 每帧 update：闲逛 + 头顶晃
-// ---------------------------------------------------------------------------
+
+
+
 
 pub fn update_creatures(
     time: Res<Time>,
@@ -439,7 +439,7 @@ pub fn update_creatures(
         ai.wander_timer = 0.0;
         ai.next_wander_secs = rng.random_range(1.5..3.0);
 
-        // 选个方向：4 水平 + 偶尔原地转身
+
         let dirs: [[i32; 3]; 4] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
         let d = dirs[rng.random_range(0..dirs.len())];
         let nx = creature.block_pos[0] + d[0];
@@ -448,14 +448,14 @@ pub fn update_creatures(
         if !world.in_bounds(nx, ny, nz) {
             continue;
         }
-        // 目标格必须空（Air），下方必须是实心
+
         if world.get(nx, ny, nz) != BlockType::Air {
             continue;
         }
         if !world.get(nx, ny - 1, nz).is_solid() {
             continue;
         }
-        // 转向（用 y 旋转）
+
         let yaw = match (d[0], d[2]) {
             (1, 0) => std::f32::consts::FRAC_PI_2,
             (-1, 0) => -std::f32::consts::FRAC_PI_2,
@@ -555,4 +555,4 @@ mod tests {
         let health = CombatHealth { current: 0.0, max: 12.0, invuln_until_tick: 0 };
         assert!(health.is_dead());
     }
-}
+}

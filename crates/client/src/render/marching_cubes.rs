@@ -1,22 +1,6 @@
-//! Marching Cubes：从 f32 标量场抽 iso=0.5 等值面 → triangle mesh
-//!
-//! 算法：经典 MC（Lorensen-Cline 1987）+ Paul Bourke 的 256 entry tables。
-//! 每个 cell 看 8 角点 density vs iso 的相对关系，case 0..255 → 三角形列表 → 沿 edge 线性插值。
-//!
-//! 关键设计：
-//!  - 角点共享（cell 边界处的角点被 8 个 cell 共享）→ **天然跨 cell 无缝**
-//!  - iso=0.5 → 表面在"solid 占比 50%"的位置
-//!  - 沿 edge 5 个采样点的 density 值（cell 角点 + edge 插值点）→ 视觉上等价"曲线函数连接"
-//!
-//! 输出：Vec<McVertex> + Vec<u32> indices（Bevy Mesh 友好）
+
 
 use super::scalar_field::ScalarField;
-
-// ============================================================================
-// 标准 MC tables (Paul Bourke, 1987)
-// edge_table[case] = 12 bit mask，bit i = 1 表示 edge i 与 iso 表面相交
-// tri_table[case] = [-1 终止的 16 长度数组]，是 edge index 序列（每 3 个一组组成 1 个三角形）
-// ============================================================================
 
 const EDGE_TABLE: [u16; 256] = [
     0x0, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c, 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03,
@@ -43,12 +27,8 @@ const EDGE_TABLE: [u16; 256] = [
 
 const TRI_TABLE: [[i8; 16]; 256] = build_tri_table();
 
-/// 256 × 16 的 tri table（-1 终止）
-/// 这是 Paul Bourke 的标准表。这里手抄：
 const fn build_tri_table() -> [[i8; 16]; 256] {
-    // 复制 MC 标准 tri table - 数据为 256 个 16 元素数组
-    // 实际生成：硬编码（这块就是 ~4KB 常量，编译期展开）
-    // 下面是完整 256 行，每行 16 个 i8（-1 终止）
+
     let t: [[i8; 16]; 256] = [
         [
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -314,18 +294,12 @@ const fn build_tri_table() -> [[i8; 16]; 256] {
     t
 }
 
-/// MC 输出顶点
 #[derive(Debug, Clone, Copy)]
 pub struct McVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
 }
 
-/// 从 ScalarField 抽 mesh
-///
-/// `iso` 通常 0.5（sdf 一半位置）  
-/// `corner_origin` = 角点 (0,0,0) 对应的世界坐标  
-/// `cell_size` = 每 cell 1m（默认 1.0）
 pub fn build_mesh(
     field: &ScalarField,
     iso: f32,
@@ -338,7 +312,7 @@ pub fn build_mesh(
     let sx = field.shape[0];
     let sy = field.shape[1];
     let sz = field.shape[2];
-    // cell 数 = 角点数 - 1
+
     if sx < 2 || sy < 2 || sz < 2 {
         return (vertices, indices);
     }
@@ -346,16 +320,14 @@ pub fn build_mesh(
     let ny = sy - 1;
     let nz = sz - 1;
 
-    // 角点 lookup: idx = (sy * sz + z) * sx + x
     let _idx = |x: usize, y: usize, z: usize| -> usize { (y * sz + z) * sx + x };
 
-    // 临时缓存：12 edge 的交点（每个 cell 重用一次）
     let mut vert_list: [[f32; 3]; 12] = [[0.0; 3]; 12];
 
     for z in 0..nz {
         for y in 0..ny {
             for x in 0..nx {
-                // 8 角点 density
+
                 let d = [
                     field.get(x, y, z),
                     field.get(x + 1, y, z),
@@ -367,7 +339,6 @@ pub fn build_mesh(
                     field.get(x, y + 1, z + 1),
                 ];
 
-                // case index
                 let mut case: usize = 0;
                 if d[0] < iso {
                     case |= 1;
@@ -395,10 +366,9 @@ pub fn build_mesh(
                 }
 
                 if case == 0 || case == 255 {
-                    continue; // 全空或全实 → 无交点
+                    continue;
                 }
 
-                // 8 角点的世界坐标
                 let p = |lx: usize, ly: usize, lz: usize| -> [f32; 3] {
                     [
                         corner_origin[0] + (x + lx) as f32 * cell_size[0],
@@ -415,7 +385,6 @@ pub fn build_mesh(
                 let p6 = p(1, 1, 1);
                 let p7 = p(0, 1, 1);
 
-                // 12 edge 的端点对（按 MC 标准 edge order）
                 let edge_ends: [[usize; 2]; 12] = [
                     [0, 1],
                     [1, 2],
@@ -432,7 +401,6 @@ pub fn build_mesh(
                 ];
                 let edge_pts: [[f32; 3]; 8] = [p0, p1, p2, p3, p4, p5, p6, p7];
 
-                // 计算此 cell 用到的 edge 交点
                 let edge_mask = EDGE_TABLE[case];
                 for i in 0..12 {
                     if (edge_mask & (1 << i)) == 0 {
@@ -443,7 +411,7 @@ pub fn build_mesh(
                     let pb = edge_pts[b];
                     let da = d[a];
                     let db = d[b];
-                    // 沿 edge 线性插值求 iso 交点
+
                     let t = if (da - db).abs() < 1e-6 {
                         0.5
                     } else {
@@ -458,7 +426,6 @@ pub fn build_mesh(
                     vert_list[i] = pt;
                 }
 
-                // 按 tri_table 写入三角形
                 let tri_row = &TRI_TABLE[case];
                 let mut k = 0;
                 while k < 16 && tri_row[k] != -1 {
@@ -466,9 +433,9 @@ pub fn build_mesh(
                     let e0 = tri_row[k] as usize;
                     let e1 = tri_row[k + 1] as usize;
                     let e2 = tri_row[k + 2] as usize;
-                    // 三个 edge 交点 → 三个顶点
+
                     let pts = [vert_list[e0], vert_list[e1], vert_list[e2]];
-                    // 法线 = 三角形右手叉积
+
                     let e1v = [
                         pts[1][0] - pts[0][0],
                         pts[1][1] - pts[0][1],
@@ -492,10 +459,6 @@ pub fn build_mesh(
             }
         }
     }
-
-    // 法线平滑：把每个顶点的法线改成"邻接三角形法线平均"（共享顶点天然共享法线）
-    // 当前每个顶点都是独立的，没共享，所以需要做合并
-    // 简化：第一版跳过这个；如果要法线平滑，后续做一个 hash 合并阶段
 
     (vertices, indices)
 }
@@ -531,12 +494,12 @@ mod tests {
 
     #[test]
     fn case_0_and_255_empty() {
-        // 全 0 case → 无三角形
+
         let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2], origin: [0, 0, 0] };
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         assert!(v.is_empty());
         assert!(i.is_empty());
-        // 全 1 case → 无三角形（被 cell 包围）
+
         field.data = vec![1.0; 8];
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         assert!(v.is_empty());
@@ -545,10 +508,9 @@ mod tests {
 
     #[test]
     fn case_1_one_triangle() {
-        // case 1: 角点 0 实，其余空 → 1 三角形（3 顶点, 3 indices）
+
         let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2], origin: [0, 0, 0] };
-        // 角点顺序 (按代码): 0=(0,0,0) 1=(1,0,0) 2=(1,0,1) 3=(0,0,1)
-        //                  4=(0,1,0) 5=(1,1,0) 6=(1,1,1) 7=(0,1,1)
+
         field.data[0] = 1.0;
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         assert_eq!(v.len(), 3);

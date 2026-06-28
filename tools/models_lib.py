@@ -1,13 +1,4 @@
-"""低多边形风格化资产构建工具库.
 
-所有 pretty/ 下的 .glb 都通过这里生成. 风格统一: flat shading, ≤ 800 面/模型,
-Bevy Y-up (Blender 默认 Z-up, glTF 导出时 Bevy 会自动转).
-
-设计原则:
-- 每个模型 1 个或几个 mesh, 不做复杂骨骼 (动画交给 Rust 侧)
-- 坐标系: Blender 默认 Z-up, 导出 glTF 后 Bevy 端视作 Y-up
-- 材质全部 bake 进 .glb (Principled BSDF + export_materials=EXPORT)
-"""
 
 from __future__ import annotations
 
@@ -17,19 +8,15 @@ from typing import Tuple
 
 import bpy
 
-
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "assets" / "procedural" / "pretty"
-
 
 RGBA = Tuple[float, float, float, float]
 RGB = Tuple[float, float, float]
 
-
 def clear_scene() -> None:
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
-
 
 def mat(
     name: str,
@@ -68,13 +55,11 @@ def mat(
         bsdf.inputs["Emission Strength"].default_value = 1.0
     return material
 
-
 def shade_flat(obj: bpy.types.Object) -> None:
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.shade_flat()
     obj.select_set(False)
-
 
 def shade_smooth(obj: bpy.types.Object) -> None:
     bpy.context.view_layer.objects.active = obj
@@ -82,11 +67,9 @@ def shade_smooth(obj: bpy.types.Object) -> None:
     bpy.ops.object.shade_smooth()
     obj.select_set(False)
 
-
 def _set_mat(obj: bpy.types.Object, material: bpy.types.Material) -> None:
     obj.data.materials.clear()
     obj.data.materials.append(material)
-
 
 def cube(
     name: str,
@@ -101,7 +84,6 @@ def cube(
     _set_mat(obj, material)
     shade_flat(obj)
     return obj
-
 
 def uv_sphere(
     name: str,
@@ -123,7 +105,6 @@ def uv_sphere(
     _set_mat(obj, material)
     shade_smooth(obj)
     return obj
-
 
 def cone(
     name: str,
@@ -147,7 +128,6 @@ def cone(
     shade_flat(obj)
     return obj
 
-
 def cylinder(
     name: str,
     loc: Tuple[float, float, float],
@@ -168,7 +148,6 @@ def cylinder(
     shade_flat(obj)
     return obj
 
-
 def ico_sphere(
     name: str,
     loc: Tuple[float, float, float],
@@ -188,9 +167,8 @@ def ico_sphere(
     shade_flat(obj)
     return obj
 
-
 def merge_into(obj: bpy.types.Object, target_name: str) -> bpy.types.Object:
-    """把所有 mesh 合并到 obj, 返回合并后的对象 (用于控制面数 ≤ 800)."""
+    
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
@@ -201,7 +179,6 @@ def merge_into(obj: bpy.types.Object, target_name: str) -> bpy.types.Object:
     out = bpy.context.object
     out.name = target_name
     return out
-
 
 def export_glb(name: str) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)

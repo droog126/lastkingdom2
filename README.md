@@ -39,10 +39,11 @@ Useful validation entry points:
 - `tools/` - Python scripts for Blender model generation and asset validation
 - `scenarios/` - scenario JSON scripts
 - `screenshots/` - closed-loop output, ignored by Git except archived material
-- `docs/` and `document/` - design notes and architecture plans
+- `docs/` - design notes, architecture plans, gameplay design, and archived imports
 - `loop.ps1` - build/run/capture closed-loop driver
 - `tdd.ps1` - validation command wrapper
 - `Agent.md` - AI-agent operating manual
+- `docs/architecture/engineering-baseline.md` - current engineering boundaries, audit gates, and refactor order
 
 ## Closed-Loop Output
 

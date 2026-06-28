@@ -1,28 +1,28 @@
-//! 万国起源：最后一国 钻石版 — 服务端 binary
-//!
-//! 启动一个 Bevy MinimalPlugins headless 服务器（无窗口/无渲染/无输入），
-//! 加载 lk2-core 提供的 sim / 协议，监听 UDP 等待客户端接入。
-//!
-//! ## 运行模式
-//!
-//! - 默认：监听 UDP 0.0.0.0:5000 (端口可通过 `LK2_PORT` 环境变量覆盖)。
-//!   启动后跑 100 个 headless tick 做 self_check, 通过后进入正式 sim。
-//! - 单机会话测试：`cargo run -p lk2-client -- --offline` 走客户端内置的 in-process
-//!   sim, 不需要 server。本 binary 仅供多客户端联机时使用。
-//!
-//! ## 依赖关系
-//!
-//! ```text
-//! lk2-server (MinimalPlugins + 权威 sim + 物理 + 接收 client 输入)
-//!     ├── lk2-core (sim 逻辑 / 协议 / 数据结构)
-//!     │       └── bevy 0.18 + leafwing + lightyear 0.26
-//!     ├── bevy 0.18 (MinimalPlugins: ECS + Time + ScheduleRunner, 无 wgpu/winit)
-//!     ├── avian3d 0.6 (物理确定性 step)
-//!     ├── lightyear 0.26 (ServerPlugins: NetcodeServer / Replication 权威)
-//!     └── leafwing-input-manager (服务端解析 client 上行的 PlayerAction)
-//! ```
-//!
-//! 详细设计见 `docs/plans/client-server-split.md` §4 + §9 步骤 4。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -32,46 +32,46 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use lightyear::prelude::LocalAddr;
 use lightyear::prelude::server::ServerUdpIo;
-// 用 leafwing ActionState 读 client 上行的 PlayerAction (lightyear 0.26
-// InputPlugin::finish() 在 server 端自动加 InputManagerPlugin::<A>::server()
-// + 初始化 ActionState<PlayerAction> resource, 我们直接 Res<ActionState<...>> 读就行)
+
+
+
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
 };
-// lightyear 0.26.4 bug 绕开: `ServerMultiMessageSender` (lightyear_messages
-// server.rs:33 `metadata: Res<'w, PeerMetadata>`) 依赖 `Res<PeerMetadata>`,而
-// `PeerMetadata` 只在 `lightyear_connection::client::ConnectionPlugin::build`
-// (lightyear_connection-0.26.4/src/client.rs:184) 里 init_resource。
-// 但 server binary 只 enable 'server' feature, **不**加 `client::ConnectionPlugin`,
-// 所以 `PeerMetadata` 永远不存在 → 启 server 后 system `receive_input_message`
-// 第一次跑立刻 panic "Parameter ServerMultiMessageSender::metadata failed
-// validation: Resource does not exist"。
-//
-// 修法: server main.rs 手动 init `PeerMetadata` 资源,跟 client::ConnectionPlugin
-// 行为对齐。`PeerMetadata` 通过 `lightyear-0.26.4/src/lib.rs:326
-// 'pub use lightyear_connection::*;'` 在 `lightyear::prelude::` 顶层 re-export,
-// 路径是 `lightyear::prelude::PeerMetadata`(不是 `prelude::client::PeerMetadata`)。
+
+
+
+
+
+
+
+
+
+
+
+
+
 use lightyear::prelude::PeerMetadata;
-// lightyear 0.26.4 文档 (lightyear-0.26.4/src/lib.rs:133):
-// "You can trigger LinkStart to start the link" — 必须手动 trigger,
-// 否则 ServerUdpIo 不会 bind socket
+
+
+
 use lightyear::prelude::LinkStart;
-// 绕开 avian3d 0.6.1 + MinimalPlugins: avian3d::init_collider_constructor_hierarchies
-// 读 `Res<SceneSpawner>`, MinimalPlugins 没 ScenePlugin 不会 init 它。
-// 手动 init 一个空 SceneSpawner — server 不加载任何 .scn / .gltf 资产, 这个
-// resource 永远空着不影响行为。
+
+
+
+
 use bevy::scene::SceneSpawner;
 
 use std::time::Duration;
 
-// ---- 服务端 crate 内部模块（迁自 src/pvp/） ----
+
 mod los;
 mod pvp_systems;
 
-// ---- lk2-core 共享 sim 逻辑 ----
+
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
@@ -87,7 +87,7 @@ use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
-// ---- 服务端 crate 内部模块的导出 ----
+
 use crate::pvp_systems::{
     ServerPvPPlugin, apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
     read_attack_inputs, record_position_history, tick_combat_cooldowns,
@@ -113,16 +113,16 @@ impl Default for LastVoxelDeltaState {
     }
 }
 
-// ============================================================================
-// SimClock (备用，self_check / tick_recorder 用)
-// ============================================================================
-//
-// SimClock 已经从 src/main.rs 迁到 lk2_core::clock::SimClock（task-1 干的）。
-// 这里直接 use, 不重新定义。
 
-// ============================================================================
-// TimeOfDay
-// ============================================================================
+
+
+
+
+
+
+
+
+
 
 #[derive(Resource)]
 pub struct TimeOfDay(pub f32);
@@ -130,16 +130,16 @@ pub struct TimeOfDay(pub f32);
 impl Default for TimeOfDay {
     fn default() -> Self {
         Self(0.5)
-    } // 正午
+    }
 }
 
-// ============================================================================
-// main
-// ============================================================================
+
+
+
 
 fn main() {
-    // init tracing subscriber (info 级别). server main.rs 之前没初始化,
-    // info!() 调用全被吞掉, 看 server_run.out.txt 是空文件。
+
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -147,11 +147,11 @@ fn main() {
         )
         .init();
 
-    // 监听端口 (env LK2_PORT 覆盖, 默认 5000)
+
     let port: u16 = std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000);
     info!("[server] listening on UDP 0.0.0.0:{}", port);
 
-    // 读取 scenario
+
     let args: Vec<String> = std::env::args().collect();
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
     let scenario = if auto_demo_mode {
@@ -173,38 +173,38 @@ fn main() {
     let _ = std::fs::create_dir_all("screenshots");
 
     App::new()
-        // ====== Plugins ======
-        // MinimalPlugins: ECS + Time + ScheduleRunner, 无 winit/wgpu/asset/audio/ui
+
+
         .add_plugins(MinimalPlugins)
-        // 物理确定性 (server 跑 step, 不插值)
+
         .add_plugins(PhysicsPlugins::default())
-        // 兼容补丁: avian3d 0.6.1 的 ColliderCachePlugin 默认包含在
-        // PhysicsPlugins 里, 它在 PreUpdate 跑 clear_unused_colliders 读
-        // `MessageReader<AssetEvent<Mesh>>`。MinimalPlugins 没启 AssetPlugin,
-        // 这个 message buffer 没初始化 → panic "Message not initialized"。
-        // 修复: 显式 `init_asset` + `add_message::<AssetEvent<Mesh>>` 注册。
-        // server 完全不用 mesh asset, 只是为了让 system 找到 buffer 不 panic。
+
+
+
+
+
+
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<bevy::prelude::Mesh>()
         .add_message::<bevy::asset::AssetEvent<bevy::prelude::Mesh>>()
-        // 兼容补丁: avian3d 0.6.1 `init_collider_constructor_hierarchies` 系统
-        // (avian3d-0.6.1/src/collision/collider/backend.rs:324-329) 需要
-        // `Res<SceneSpawner>` (在 bevy_scene feature 编译进来后)。MinimalPlugins
-        // 不含 ScenePlugin, SceneSpawner resource 没被 init →
-        // panic "Resource does not exist: SceneSpawner"。修复: 显式
-        // `init_resource::<SceneSpawner>()` 注一个空的(用 bevy_scene::SceneSpawner::default())。
-        // server 完全不实际 spawn scene, 仅为让 system 找到 resource 不 panic。
+
+
+
+
+
+
+
         .init_resource::<bevy::scene::SceneSpawner>()
-        // lightyear 0.26 服务端权威
-        // ⚠️ 顺序 (lightyear-0.26.4/src/lib.rs:96 强制约束):
-        //   1) ServerPlugins 先 (装 netcode / link / sync / replication 系统)
-        //   2) ProtocolPlugin 后 (register_message / register_component / InputPlugin)
-        //   3) 之后才 spawn Server entity (后续 wire-network-and-loop task 做)
-        // 缺步骤 1 时, 编译能过 (register_message lazy init MessageRegistry),
-        // 但运行时 server 缺 link/sync/netcode, netcode 起不来。
+
+
+
+
+
+
+
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
-        // V2 quick win: 注册 MatchState + Protection + SovereignSpark + MiningSite(服务端权威)
+
         .add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
@@ -213,20 +213,20 @@ fn main() {
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(ServerPvPPlugin)
-        // wire-network-and-loop 任务（2026-06-10）补: bevy 0.18 的 Message
-        // 总线（本地 event，区别于 lightyear register 的网络 message）需要
-        // 显式 add_message，read_attack_inputs 读 MessageReader<AttackInput>。
+
+
+
         .add_message::<lk2_core::protocol::messages::AttackInput>()
         .add_message::<lk2_core::protocol::messages::HitConfirm>()
         .add_message::<lk2_core::protocol::messages::KnockbackEvent>()
         .add_message::<lk2_core::protocol::messages::DamageResult>()
         .add_message::<lk2_core::pvp::DamageEvent>()
         .add_message::<lk2_core::pvp::VisualEffectEvent>()
-        // ====== Resources ======
-        // 绕开 lightyear 0.26.4 bug: PeerMetadata 必须 init,否则 receive_input_message panic
+
+
         .init_resource::<PeerMetadata>()
-        // 绕开 avian3d 0.6.1 + MinimalPlugins: SceneSpawner 必须存在,
-        // 否则 init_collider_constructor_hierarchies panic
+
+
         .init_resource::<SceneSpawner>()
         .init_resource::<SimClock>()
         .init_resource::<TimeOfDay>()
@@ -242,7 +242,7 @@ fn main() {
         .init_resource::<FixedTick>()
         .init_resource::<ServerTickCounter>()
         .insert_resource(scenario_state)
-        // ====== Startup ======
+
         .add_systems(
             Startup,
             (
@@ -254,17 +254,17 @@ fn main() {
             )
                 .chain(),
         )
-        // 备选: 监听 client connect (On<Add, Connected>) 时再 spawn,
-        // 但启动就 spawn 也行 (server-side 复制的 entity 会在 client connect
-        // 时被自动 broadcast)。当前走 Startup 启动即 spawn 路径, 简单点。
-        // wire-network-and-loop (2026-06-11): 改用 On<Add, ClientOf> observer
-        // 在 client 真连上后才挂 Replicate, 触发 lightyear 0.26 复制。
-        // (原因: Replicate on_insert 钩子只对 connect 之后才注册的 client 生效,
-        //  在 connect 前挂 Replicate 会被漏掉, client 收不到初始复制)。
+
+
+
+
+
+
+
         .add_observer(replicate_player_for_connected)
-        // ====== Update (presentation-free helpers) ======
+
         .add_systems(Update, update_creatures)
-        // ====== FixedUpdate (authority sim) ======
+
         .configure_sets(
             FixedUpdate,
             (SimSet::Interaction, SimSet::ScoreAndAudit, SimSet::Snapshot).chain(),
@@ -277,13 +277,13 @@ fn main() {
                 tick_recorder.in_set(SimSet::Snapshot),
             ),
         )
-        // ====== FixedUpdate (server PvP) ======
+
         .add_systems(
             FixedUpdate,
             (
-                // record_position_history 已在 ServerPvPPlugin 内
+
                 apply_input_to_player,
-                broadcast_player_pos, // 应用层 PlayerPos sync (绕开 lightyear 0.26 Replicate 卡 1%)
+                broadcast_player_pos,
                 read_attack_inputs,
                 melee_hit_registration,
                 apply_damage_and_knockback,
@@ -295,9 +295,9 @@ fn main() {
         .run();
 }
 
-// ============================================================================
-// dump_world_resources — debug: 确认 PeerMetadata 在 world 里
-// ============================================================================
+
+
+
 fn dump_world_resources(world: &bevy::prelude::World) {
     let has_peer_metadata = world.get_resource::<PeerMetadata>().is_some();
     info!("[debug] PeerMetadata in world? {}", has_peer_metadata);
@@ -305,19 +305,19 @@ fn dump_world_resources(world: &bevy::prelude::World) {
     info!("[debug] SceneSpawner in world? {}", has_scene_spawner);
 }
 
-// ============================================================================
-// spawn_server — wire lightyear UDP transport (subtask 1 of wire-network-and-loop)
-// ============================================================================
-//
-// lightyear 0.26 用 reactive 模式启 transport: 不是 add_plugins 启,而是 spawn
-// 一个 entity 挂 `ServerUdpIo` + `LocalAddr(server_addr)`,然后
-// `LinkStart` observer 触发,系统自动 `UdpSocket::bind(local_addr)`。
-//
-// 参考:
-// - lightyear_udp-0.26.4/src/server.rs:30-50 (`ServerUdpIo` 定义 + `#[require(Server)]`)
-// - lightyear_udp-0.26.4/src/server.rs:71-95 (LinkStart observer 真正 bind socket 的 system)
-//
-// ServerUdpIo 的 `#[require(Server)]` 会自动加 Server marker, 所以不用手写。
+
+
+
+
+
+
+
+
+
+
+
+
+
 fn spawn_server(mut commands: Commands) {
     use lightyear::prelude::server::Start;
     use lightyear_netcode::server_plugin::{NetcodeConfig, NetcodeServer};
@@ -328,19 +328,19 @@ fn spawn_server(mut commands: Commands) {
         server_addr
     );
 
-    // 构造 NetcodeServer: 这是 lightyear 0.26 server 端接 client UDP connect
-    // request 的核心组件, NetcodeServerPlugin 的 start observer 跑时
-    // `Query<(), With<NetcodeServer>>` 必须能 match 到, 否则 Started marker
-    // 不会 insert, client connect 永远停在 Connecting。
-    // private_key + protocol_id 必须跟 client 端的 NetcodeClient 一致:
-    // - 同一对 server/client 通信: shared private_key (从固定文件读 / 启动时
-    //   随机生成并写文件) + 同一 protocol_id
-    // - dev 模式: 启动时 generate_key() 并写 .lk2_server_key, client 端从
-    //   --server-arg 读。这里先简化为固定 32 字节全 0xAA 占位 (注意: 必须跟
-    //   client 端 用的 key 一致, 后续再调成从文件读)。
-    // - protocol_id 0x4C4B3256_4E455457 = "LK2VNETW" dev id
-    //   (lightyear netcode 要求两端的 protocol_id 完全相同, 校验失败 server
-    //    直接 reject client 的 connect token)
+
+
+
+
+
+
+
+
+
+
+
+
+
     let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
     let protocol_id: u64 = 0x4C4B3256_4E455457;
     let netcode_server = NetcodeServer::new(
@@ -359,37 +359,37 @@ fn spawn_server(mut commands: Commands) {
             netcode_server,
         ))
         .id();
-    // 手动 trigger LinkStart: lightyear 0.26.4 文档明示
-    // "You can trigger LinkStart to start the link"
-    // (lightyear-0.26.4/src/lib.rs:133)。不 trigger 的话 ServerUdpIo 的
-    // LinkStart observer 永远不跑, UDP socket 永远不 bind, server 等于
-    // 没 listen。
+
+
+
+
+
     info!(
         "[net] triggering LinkStart on server entity {:?}",
         server_id
     );
     commands.trigger(LinkStart { entity: server_id });
-    // 手动 trigger Start: lightyear_netcode 0.26 NetcodeServerPlugin
-    // 加了 On<Start> observer (lightyear_netcode-0.26.4/src/server_plugin.rs:295),
-    // 不 trigger 的话 Started marker 不会 insert, server-side netcode 不真
-    // 接受 client connect request。Start 来自 lightyear_connection::server::Start。
+
+
+
+
     info!("[net] triggering Start on server entity {:?}", server_id);
     commands.trigger(Start { entity: server_id });
 
-    // 保险: 手动 insert `Started` marker 到 server entity。
-    // lightyear_netcode 0.26 `NetcodeServer` plugin 的 `On<Start>` observer
-    // (lightyear_netcode-0.26.4/src/server_plugin.rs:295-299) 理论上会
-    // `commands.entity(trigger.entity).insert(Started)`, 但我们 server log
-    // 没看到 `Started added: removing Starting/Stopped` trace
-    // (lightyear_connection-0.26.4/src/server.rs:61) —— 可能是 observer 时机
-    // 问题, 也可能是我们 trigger `Start` 太快 (<- commands buffer 还没把
-    // NetcodeServer component apply 到 server entity) 导致 query 不 match。
-    // 手动 add_observer 保险: 一旦 `NetcodeServer` add 到 server entity
-    // (那条 add 在 lightyear 0.26 server spawn 时已经同步 apply), 立即
-    // 补一个 `Started` marker, 不管 lightyear_netcode 的 observer 跑没跑。
-    // 这是 fix "Replicate::on_insert 在 SingleServer mode 下 server 找不到
-    // `&Server, With<Started>` → silent return → UpdatesMessage 永远不发"
-    // 1% 卡点的硬保险。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     info!(
         "[net] manually inserting Started marker to server entity {:?}",
         server_id
@@ -397,24 +397,24 @@ fn spawn_server(mut commands: Commands) {
     commands.entity(server_id).insert(lightyear_connection::server::Started);
 }
 
-// ============================================================================
-// spawn_player — authoritative player entity, 挂 PlayerPos (无 Replicate)
-//
-// wire-network-and-loop 任务 (2026-06-11): B 粒度闭环补完。
-// server 启动即 spawn 一个 authoritative sim player entity, **不挂** Replicate。
-// Replicate 组件由 `replicate_player_for_connected` observer 在
-// 每个 client `ClientOf` 实体 spawn (On<Add, ClientOf>) 时**动态插入**到
-// 这个 player entity 上 —— 原因: lightyear 0.26 Replicate on_insert 钩子
-// 解析 `NetworkTarget` 的时候,只对**当前已经 connect 的** client peer
-// 注册 sender;在 client connect 之前挂 Replicate, 那个 client 就收不到
-// 这个 entity 的初始复制 (lightyear 不会"补发"已经存在的 Replicate entity)。
-// observer 方案保证 Replicate 在 client 真连上之后才挂, 复制准时发到
-// client 端 (lightyear-0.26.4/src/lib.rs:195 "To replicate an entity from
-// the local world to the remote world, you can just add the Replicate
-// component to the entity")。
-//
-// 简化: 只支持 1 个 client (单进程 demo)。后面做 per-client player 实体
-// 再细化。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 fn spawn_player(mut commands: Commands) {
     let spawn = bevy::math::Vec3::new(
         constant::WORLD_SIZE as f32 / 2.0 + 0.5,
@@ -432,25 +432,25 @@ fn spawn_player(mut commands: Commands) {
     ));
 }
 
-// client 连上后, 找本地 sim 的 player entity 挂 Replicate, 触发 lightyear
-// 复制。client 端 `apply_networked_position` system 这时 query 才不为空。
-//
-// 注意: `On<Add, ClientOf>` 是 server 端观测 client 连上事件的标准入口
-// (lightyear_connection-0.26.4/src/server.rs + lightyear_replication plugin
-// 都靠 ClientOf marker 区分每个 client 的 LinkOf entity)。这里只对第一个
-// player entity 挂 Replicate (单 client 简化版);生产环境要 per-client
-// spawn 一个 mirror entity。
-//
-// 关键步骤:
-//  1. 给 ClientOf entity 挂 `ReplicationSender::default()` — lightyear 0.26
-//     不会自动挂这个 (Replicate::on_insert 在 components.rs:481 用
-//     `query_filtered::<Has<HostClient>, (With<ClientOf>, Or<(With<ReplicationSender>, With<HostClient>)>)>`
-//     找每个 ClientOf 对应的 sender),没有 ReplicationSender 的 ClientOf
-//     会被 "ClientOf not found or does not have ReplicationSender" error 跳过
-//     (lightyear_replication-0.26.4/src/send/components.rs:911)。
-//  2. 找名为 "Player" 的 sim entity 挂 `Replicate::to_clients(All)` —
-//     on_insert 钩子在 server.collection() 现在有 ClientOf 的情况下,能
-//     resolve 出具体 sender (即 client_of_entity) 注册到 ReplicationTarget。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 fn replicate_player_for_connected(
     trigger: On<Add, lightyear_connection::client_of::ClientOf>,
     mut commands: Commands,
@@ -462,39 +462,39 @@ fn replicate_player_for_connected(
         client_of_entity
     );
 
-    // 1) 给 ClientOf entity 挂 ReplicationSender (lightyear 0.26 不会自动加)
+
     commands.entity(client_of_entity).insert(lightyear::prelude::ReplicationSender::default());
     info!(
         "[net] ReplicationSender attached to ClientOf entity {:?} — now this client can receive replicated entities",
         client_of_entity
     );
 
-    // 2) 找名为 "Player" 的第一个 entity, 给它挂 `Replicate::manual(vec![client_of_entity])`
-    //    ——**不**用 `to_clients(NetworkTarget::All)`, 因为 lightyear 0.26 的
-    //    `SingleServer` mode 在 Replicate on_insert 钩子里用 `server.collection()`
-    //    拿所有 client peer entities, 但我们的 server 端没显式让 ClientOf entity
-    //    变成 Server 的 child (lightyear_udp server 在 spawn LinkOf entity 时
-    //    自动 add `LinkOf<Server>` relationship, server 端 collection 应该在 client
-    //    connect 后自动包含 ClientOf entity, 但 `to_clients(All)` 似乎有时序问题
-    //    或 server 端 collection() 内部拿不全),导致 `apply_targets` 不给任何 sender
-    //    注册 per_sender_state, lightyear 复制数据塞进 buffer 但没 sender 收
-    //    ⇒ UpdatesMessage 永远不发。`manual(vec![client_of_entity])` 直接指定
-    //    sender 列表, 走 `SingleServer(Sender(client))` mode 而不是
-    //    `SingleServer(All)`, 跳过 NetworkTarget resolution 整条路径。
-    //
-    // 3) **同时**给 sim player 挂 `ControlledBy { owner: client_of_entity, lifetime: Persistent }` —
-    //    关键: lightyear 0.26 在 server 端发送 entity spawn 时 (buffer.rs:537) 检查
-    //    `controlled_by.owner == sender_entity`, 如果命中就 `prepare_typed_component_insert(Controlled)`
-    //    把 `Controlled` marker 推给 client 端。client 端 receive 镜像 entity 时
-    //    自动 attach `Controlled` → client 端 `InputPlugin` 的 input_buffer_query
-    //    (client.rs:530) 命中 → 把 ActionState 序列化成 InputMessage 发给 server
-    //    → server 端 `ServerInputPlugin::receive_input_message` 收到 → 写 sim player
-    //    InputBuffer + ActionState (line 261) → `update_action_state` 更新 → 我
-    //    们的 `apply_input_to_player` 读 ActionState 推 sim player Transform。
-    //    **没这一步** → client 端 input_buffer_query 不命中 → client 不发 input
-    //    → server 端 receive_input_message 收不到 → sim player 不动。
-    //    `lifetime: Persistent` 因为 disconnect 时不要 despawn sim player (server 端权威)。
-    for entity in player_q.iter() {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    if let Some(entity) = player_q.iter().next() {
         commands.entity(entity).insert((
             lightyear::prelude::Replicate::manual(vec![client_of_entity]),
             lightyear::prelude::ControlledBy {
@@ -506,26 +506,25 @@ fn replicate_player_for_connected(
             "[net] Replicate + ControlledBy attached to Player entity {:?} — owner={:?}, senders=[{:?}]",
             entity, client_of_entity, client_of_entity
         );
-        break;
     }
 }
 
-// 备选 observer 版本 (没启,见 Startup chain 注释)
-// fn spawn_player_for_connected(...)
 
-// ============================================================================
-// apply_input_to_player — server 端读 client ActionState, 改 Player Transform
-// ============================================================================
-//
-// 读 `Res<ActionState<PlayerAction>>` (lightyear_inputs_leafwing 的
-// InputManagerPlugin::server() 自动 init, 通过 Res 拿全局 input) 算 Vec2
-// 方向, 应用到玩家 entity 的 Transform.translation, 同时写回 PlayerPos
-// (lightyear 复制的是 PlayerPos), 然后 lightyear 自动把 PlayerPos 同步给 client。
-//
-// 这是 authoritative server sim 的最小闭环: client 按 W → server
-// 收到 ActionState.pressed(MoveForward)=true → 玩家 entity 向 +Z 移动
-// → PlayerPos 复制 → client apply_networked_position 更新本机
-// Transform。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 fn apply_input_to_player(
     mut q: Query<
         (
@@ -537,8 +536,8 @@ fn apply_input_to_player(
     >,
 ) {
     let mut dir = bevy::math::Vec2::ZERO;
-    let speed = 4.0; // m/s, 跟 client 的 PvPController 默认 speed 对齐
-    let dt = 1.0 / 30.0; // 30 TPS fixed update
+    let speed = 4.0;
+    let dt = 1.0 / 30.0;
     let mut applied_count = 0;
     for (actions, mut transform, mut player_pos) in q.iter_mut() {
         let mut local_dir = bevy::math::Vec2::ZERO;
@@ -559,7 +558,7 @@ fn apply_input_to_player(
         }
         let delta = bevy::math::Vec3::new(local_dir.x, 0.0, -local_dir.y) * speed * dt;
         transform.translation += delta;
-        // 同步 PlayerPos: 应用层 ServerPosUpdate 推的就是 PlayerPos
+
         player_pos.0 = transform.translation;
         if local_dir.length() > 0.01 {
             dir = local_dir;
@@ -574,30 +573,30 @@ fn apply_input_to_player(
     }
 }
 
-// ============================================================================
-// broadcast_player_pos — 应用层 PlayerPos sync (绕开 lightyear 0.26 自动
-// replication 卡 1%)
-//
-// lightyear 0.26 自动 Replicate (`Replicate::manual(vec![client_of_entity])`)
-// 在我们这套用法下 server 端 serialize 跟 send packet 链路都跑 (`Starting
-// buffer replication for sender 143v0` + `lightyear_transport::send packet
-// channel_id=0` 在 trace log 看得清清楚楚), 但 client 端 receive 链
-// 始终不处理 UpdatesMessage — 怀疑是 lightyear 0.26 ClientPlugins 跟
-// register_message::<UpdatesMessage> 时机问题, 继续挖就是 lightyear 0.26
-// internals。
-//
-// 这里**绕开**那条路径: server 端每 2 tick (15Hz) 用 MessageSender
-// 推一个 `ServerPosUpdate` (12 bytes + 4 bytes tick = 16 bytes / packet),
-// 走 UnorderedReliable channel (默认 register_message 给 ServerToClient
-// 走的) — 实际 lightyear 0.26 `register_message` 不指定 channel, 走默认
-// 哪条由 protocol 决定, 这里没显式指定 → 应该走 `MetadataChannel`
-// (UnorderedReliable 双向, channel_id=0)。 可丢包但 server 推频高, client
-// 端 reader 一直读最新 pos 写到 `PlayerNetPos` resource, client apply
-// system 写本地 Transform。
-//
-// 后续: 真做 client 端预测时, 这条 ServerPosUpdate 改名为
-// AuthorityFrame, 走插值 timeline, 历史几个 tick 都存。
-// ============================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ServerTickCounter(pub u32);
 
@@ -608,21 +607,21 @@ fn broadcast_player_pos(
     mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
 ) {
     tick.0 = tick.0.wrapping_add(1);
-    // 每 2 tick 推一次 = 15Hz (server 30 TPS)
+
     if tick.0 % 2 != 0 {
         return;
     }
     let Ok(server) = server_q.single() else {
         return;
     };
-    // 推所有带 PlayerPos 的 entity 的位置 (单 client demo 简化, 1 个)
+
     for transform in q.iter() {
         let msg = lk2_core::protocol::messages::ServerPosUpdate {
             server_tick: tick.0,
             pos: transform.translation,
         };
-        // 用 lightyear::prelude::MetadataChannel (UnorderedReliable) — 1 byte
-        // 包小, 1 frame 几包, 可靠 + 不乱序, 客户端 100% 收到
+
+
         let _ = sender.send::<_, lightyear::prelude::MetadataChannel>(
             &msg,
             server,
@@ -631,9 +630,9 @@ fn broadcast_player_pos(
     }
 }
 
-// ============================================================================
-// Setup
-// ============================================================================
+
+
+
 
 fn setup_world(
     _commands: Commands,
@@ -642,7 +641,7 @@ fn setup_world(
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
 ) {
-    // 默认 preset (跟原来一致)
+
     let pipeline = lk2_core::world::terrain::presets::by_name("default");
     *game_world = GameWorld::with_pipeline(constant::WORLD_SIZE, pipeline);
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
@@ -706,9 +705,9 @@ fn port_from_env() -> u16 {
     std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000)
 }
 
-// ============================================================================
-// Simulation
-// ============================================================================
+
+
+
 
 fn simulation_tick(
     fixed_time: Res<Time<Fixed>>,
@@ -752,9 +751,9 @@ fn end_tick_system(
     }
 }
 
-// ============================================================================
-// Tick 录制（每 5 tick dump 一次 state JSON, 跟原 src/main.rs::tick_recorder 一致）
-// ============================================================================
+
+
+
 
 #[derive(Resource, Default)]
 pub struct TickRecorder {
@@ -795,4 +794,4 @@ fn tick_recorder(
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
     }
-}
+}

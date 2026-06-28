@@ -1,4 +1,4 @@
-"""check_orientation.py — 看 .glb 内部坐标范围, 判断 Blender 导出朝向."""
+
 import pygltflib
 
 NAMES = [

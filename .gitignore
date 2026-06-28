@@ -8,6 +8,7 @@
 # Build / check / run logs
 *.log
 *.err
+/run-logs/
 /log/
 stdout.txt
 stderr.txt
@@ -53,8 +54,8 @@ screenshots/
 !screenshots/_archive/
 
 # Obsidian configurations
-docs/笔记/.obsidian/
-document/笔记/.obsidian/
+docs/**/*.obsidian/
+document/**/*.obsidian/
 
 # Python / Blender script caches
 __pycache__/

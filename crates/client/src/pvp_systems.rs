@@ -1,13 +1,4 @@
-//! PvP 客户端系统（本地预测 + 视觉反馈）
-//!
-//! 运行在客户端 Update 中：
-//!   1. collect_local_input    — 采集本地按键，生成 AttackInput 发送给服务端
-//!   2. client_attack_predict  — 本地预测攻击动画和冷却（不等服务端）
-//!   3. on_hit_confirm         — 收到 HitConfirm → 播放命中粒子 / 音效
-//!   4. on_knockback_event     — 收到 KnockbackEvent → 应用击退
-//!   5. on_damage_result       — 收到 DamageResult → 更新血量 UI
-//!   6. apply_local_knockback  — 对本地 predicted entity 应用击退
-//!   7. trigger_visual_effects — 播放挥剑 / 命中 / 屏幕震动
+
 
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
@@ -20,13 +11,9 @@ use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, Knockb
 use lk2_core::pvp::FixedTick;
 use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
 
-// ---------------------------------------------------------------------------
-// 1. 采集本地输入 → 发送 AttackInput
-// ---------------------------------------------------------------------------
-
 pub fn collect_local_input(
     tick: Res<FixedTick>,
-    // 兜底：demo 里没人插 PlayerAction 的 InputMap，没资源时静默 no-op
+
     input_manager: Option<ResMut<ActionState<PlayerAction>>>,
     player_transform: Query<&Transform, With<Camera>>,
     mut writer: MessageWriter<AttackInput>,
@@ -36,10 +23,9 @@ pub fn collect_local_input(
     let Some(input_manager) = input_manager else {
         return;
     };
-    // 检测 Attack 按钮（鼠标左键）
+
     let attack_pressed = input_manager.just_pressed(&PlayerAction::Attack);
 
-    // 只有在冷却结束且刚按下时才能发送攻击
     if !attack_pressed {
         *last_attack_was_sent = false;
         return;
@@ -51,12 +37,9 @@ pub fn collect_local_input(
         return;
     }
 
-    // 从相机朝向获取攻击方向
-    // bevy 0.18: `Transform::forward()` 返回 `Dir3`（方向向量包装），不是 `Vec3`
     let forward: Vec3 = player_transform.iter().next().map(|t| *t.forward()).unwrap_or(Vec3::Z);
 
-    // is_falling = 没有在地上（简化：用 Velocity.y 判断）
-    let is_falling = true; // TODO: 接入 LinearVelocity.y
+    let is_falling = true;
 
     let tick_val = tick.0;
     let combo_count = combat.map(|c| c.combo_count + 1).unwrap_or(0) as u8;
@@ -65,10 +48,6 @@ pub fn collect_local_input(
 
     *last_attack_was_sent = true;
 }
-
-// ---------------------------------------------------------------------------
-// 2. 本地攻击预测（客户端立即响应，不等服务端）
-// ---------------------------------------------------------------------------
 
 pub fn client_attack_predict(
     mut local_attacks: MessageReader<AttackInput>,
@@ -81,28 +60,22 @@ pub fn client_attack_predict(
                 continue;
             }
 
-            // 立刻重置冷却（本地预测）
             combat.attack_cooldown_timer = 0.625;
             combat.is_attacking = true;
             combat.last_attack_tick = input.tick;
             combat.combo_count = input.combo_count;
 
-            // 立刻播放挥剑动画（零延迟手感）
             effect_writer.write(VisualEffectEvent::SwingSword);
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 3. 收到命中确认
-// ---------------------------------------------------------------------------
 
 pub fn on_hit_confirm(
     mut confirms: MessageReader<HitConfirm>,
     mut effect_writer: MessageWriter<VisualEffectEvent>,
 ) {
     for confirm in confirms.read() {
-        // PeerId → Entity 转换（PeerId 的 bits 编码成 Entity 标识；不是真实 entity，仅作占位）
+
         let target =
             Entity::from_raw_u32(confirm.victim_id.to_bits() as u32).unwrap_or(Entity::PLACEHOLDER);
         if confirm.is_critical {
@@ -120,14 +93,9 @@ pub fn on_hit_confirm(
             });
         }
 
-        // 命中时屏幕轻微震动
         effect_writer.write(VisualEffectEvent::ScreenShake);
     }
 }
-
-// ---------------------------------------------------------------------------
-// 4. 收到击退事件（对 interpolated 实体立即应用）
-// ---------------------------------------------------------------------------
 
 pub fn on_knockback_event(
     mut knockbacks: MessageReader<KnockbackEvent>,
@@ -138,16 +106,12 @@ pub fn on_knockback_event(
         let target =
             Entity::from_raw_u32(kb.victim_id.to_bits() as u32).unwrap_or(Entity::PLACEHOLDER);
         if let Ok((_, mut vel)) = velocities.get_mut(target) {
-            // 服务端已算过，这里直接覆盖（客户端相信服务端）
+
             vel.0 = kb.velocity;
         }
         effect_writer.write(VisualEffectEvent::KnockbackApplied { target, velocity: kb.velocity });
     }
 }
-
-// ---------------------------------------------------------------------------
-// 5. 收到伤害结果（可靠，更新血量 UI）
-// ---------------------------------------------------------------------------
 
 pub fn on_damage_result(
     mut results: MessageReader<DamageResult>,
@@ -155,12 +119,11 @@ pub fn on_damage_result(
     mut hud_text: Query<&mut Text, With<super::HealthHudMarker>>,
 ) {
     for result in results.read() {
-        // 更新本地 predicted 血量
+
         if let Ok(mut health) = healths.single_mut() {
             health.0 = result.new_health;
         }
 
-        // 更新 HUD
         if let Ok(mut text) = hud_text.single_mut() {
             let hp_str = if result.is_dead {
                 "☠ DEAD".to_string()
@@ -172,11 +135,6 @@ pub fn on_damage_result(
     }
 }
 
-// ---------------------------------------------------------------------------
-// 6. 视觉特效播放系统
-// ---------------------------------------------------------------------------
-
-/// HUD 血量文字 marker
 #[derive(Component)]
 pub struct HealthHudMarker;
 
@@ -190,11 +148,9 @@ pub fn trigger_visual_effects(
     for effect in effects.read() {
         match effect {
             VisualEffectEvent::SwingSword => {
-                // TODO: 播放挥剑动画 entity（剑模型旋转）
                 info!("⚔ 挥剑动画");
             }
             VisualEffectEvent::Hit { target, hit_pos, .. } => {
-                // TODO: spawn 命中粒子（红色方块，0.3s 后自动 despawn）
                 info!("💥 命中 at {:?}", hit_pos);
                 if let Ok(tf) = transforms.get(*target) {
                     spawn_hit_particle(
@@ -229,15 +185,12 @@ pub fn trigger_visual_effects(
                 info!("↔ 击退 applied to {:?}: {:?}", target, velocity);
             }
             VisualEffectEvent::ScreenShake => {
-                // 屏幕震动：bevy 0.18 严格 ParamSet 检查导致 Query<&mut Transform, With<Camera>>
-                // 跟 Without<Camera> 在同一系统里冲突。先禁掉以防 panic，后续再独立 system 处理。
-                // 视觉损失：挥剑屏幕不抖
+
             }
         }
     }
 }
 
-/// Spawn 一个命中粒子方块（红/金色，0.3s 后消失）
 fn spawn_hit_particle(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -245,7 +198,7 @@ fn spawn_hit_particle(
     pos: Vec3,
     color: Color,
 ) {
-    // Color 自身不实现 Mul<f32>；先把通道算好再转 LinearRgba
+
     let linear = color.to_linear();
     let emissive = bevy::color::LinearRgba::new(
         linear.red * 0.5,
@@ -262,16 +215,6 @@ fn spawn_hit_particle(
         Transform::from_translation(pos),
     ));
 }
-
-// ---------------------------------------------------------------------------
-// 离线模式本地战斗输入 → 直接 push 到 InputBuffer (P4 闭环)
-// ---------------------------------------------------------------------------
-//
-// 不通过 lightyear ActionState / 网络层, 离线 demo 直接把按键映射成
-// CombatIntent, push 进玩家的 combat::InputBuffer。
-//
-// 服务端 / 在线模式走 `send_online_gameplay_commands` (K → KillNearestCreature),
-// 这里只跑 Offline, 不冲突。
 
 use crate::render::Player;
 use crate::ui::ClientRunMode;
@@ -290,42 +233,35 @@ pub fn collect_combat_input_offline(
     };
     let tick = tick.0;
 
-    // I = 轻击 (与 HUD 提示一致)
     if keys.just_pressed(KeyCode::KeyI) {
         buf.push(CombatIntent::Attack(AttackType::Light), tick);
     }
-    // O = 重击
+
     if keys.just_pressed(KeyCode::KeyO) {
         buf.push(CombatIntent::Attack(AttackType::Heavy), tick);
     }
-    // L = 突刺
+
     if keys.just_pressed(KeyCode::KeyL) {
         buf.push(CombatIntent::Attack(AttackType::Thrust), tick);
     }
-    // U (按住) = 开始格挡
+
     if keys.just_pressed(KeyCode::KeyU) {
         buf.push(CombatIntent::BlockStart, tick);
     }
     if keys.just_released(KeyCode::KeyU) {
         buf.push(CombatIntent::BlockEnd, tick);
     }
-    // Y (tap) = 招架尝试
+
     if keys.just_pressed(KeyCode::KeyY) {
         buf.push(CombatIntent::ParryAttempt, tick);
     }
 }
-
-// ---------------------------------------------------------------------------
-// T6 玩法循环：offline F 键 = 创国（与 objective q2_found_nation 联动）
-// ---------------------------------------------------------------------------
 
 use lk2_core::nation::{NationId, NationRegistry};
 use lk2_core::objectives::{ObjectiveKind, Objectives};
 use lk2_core::player::PlayerState;
 use lk2_core::resource::GlobalResourcePool;
 
-/// offline 模式按 F 创国：仅当 current objective 是 FoundNation 且未完成时才生效
-/// （避免任意时刻按 F 都能创,跟 objective chain 解耦）
 pub fn offline_found_nation_input(
     keys: Res<ButtonInput<KeyCode>>,
     run_mode: Res<ClientRunMode>,
@@ -340,7 +276,7 @@ pub fn offline_found_nation_input(
     if !keys.just_pressed(KeyCode::KeyF) {
         return;
     }
-    // 只在当前 objective 期望创国时才响应
+
     let wants_found = objectives
         .current()
         .map(|o| matches!(o.kind, ObjectiveKind::FoundNation) && !o.done)
@@ -349,7 +285,7 @@ pub fn offline_found_nation_input(
         return;
     }
     if player.nation_id.is_some() {
-        return; // 已经有国,忽略
+        return;
     }
     if !nations.can_found_new() {
         info!("[F] 国旗已满 8,无法再创国");

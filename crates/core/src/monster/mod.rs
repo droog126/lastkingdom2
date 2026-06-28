@@ -1,13 +1,13 @@
-//! Monster Ecosystem
-//!
-//! §三、怪物王国与小巢生态
-//!
-//! Demo 简化（缩到 1 王国 + 3 小巢 = 60-80 个体；100 人局才到 5+80 = 1500 上限）
-//!   * MonsterKingdom: 1 个，初始 80 个体
-//!   * MonsterNest: 3 个，初始各 20 个体
-//!   * MonsterIndividual: 总和 < 80（demo 上限）
-//!   * 死亡转化：食物 25% → 灵魂（守恒）
-//!   * tick 行为：觅食 → 体力 → 衰减 → 死亡 → 守恒释放
+
+
+
+
+
+
+
+
+
+
 
 #![allow(dead_code)]
 
@@ -23,28 +23,28 @@ use crate::resource::{
 };
 use crate::world::Biome;
 
-// ---------------------------------------------------------------------------
-// MonsterKind
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MonsterKind {
-    Snake,        // 基础蛇
-    FrostElf,     // 苔原精英
-    SandWurm,     // 沙漠精英
-    Treant,       // 丛林守护
-    AetherWraith, // 以太界（demo 不用）
+    Snake,
+    FrostElf,
+    SandWurm,
+    Treant,
+    AetherWraith,
 }
 
 impl MonsterKind {
-    /// 归属 biome
+
     pub fn biome(self) -> Biome {
         match self {
             MonsterKind::Snake => Biome::Jungle,
             MonsterKind::FrostElf => Biome::Tundra,
             MonsterKind::SandWurm => Biome::Desert,
             MonsterKind::Treant => Biome::Jungle,
-            MonsterKind::AetherWraith => Biome::Jungle, // demo 占位
+            MonsterKind::AetherWraith => Biome::Jungle,
         }
     }
 
@@ -58,7 +58,7 @@ impl MonsterKind {
         }
     }
 
-    /// 死亡掉什么（守恒：sub from pool → drop to player; 但 demo 简化：直接归还池子）
+
     pub fn food_on_death(self) -> i64 {
         match self {
             MonsterKind::Snake => 5,
@@ -70,21 +70,21 @@ impl MonsterKind {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MonsterIndividual
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone)]
 pub struct MonsterIndividual {
     pub id: u32,
     pub kind: MonsterKind,
-    pub nest_id: u32,    // 0 = 顶级（不在任何 nest），>0 = 隶属小巢
-    pub kingdom_id: u32, // 所属王国
+    pub nest_id: u32,
+    pub kingdom_id: u32,
     pub hp: i32,
     pub max_hp: i32,
-    pub food: i64,             // 体内食物（死亡时 25% 转化为灵魂）
-    pub last_active_tick: u64, // 巢穴用
-    pub position: [i32; 3],    // 简单位置
+    pub food: i64,
+    pub last_active_tick: u64,
+    pub position: [i32; 3],
 }
 
 impl MonsterIndividual {
@@ -109,25 +109,25 @@ impl MonsterIndividual {
         }
     }
 
-    /// 死亡 → 食物 25% 转化为灵魂归还池子
+
     pub fn die(&self, pool: &mut GlobalResourcePool) {
         let soul = (self.food as f64 * 0.25) as i64;
         if soul > 0 {
-            // 通过 regen 路径（force_add）归还灵魂
+
             let t = Transfer {
                 kind: ResourceKind::Soul,
                 amount: soul,
-                src: TransferSrc::Regen,  // 守恒审计上算"再生"而非"加"
-                dst: TransferDst::Wasted, //  无所谓
+                src: TransferSrc::Regen,
+                dst: TransferDst::Wasted,
             };
             let _ = apply_transfer(pool, t);
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// MonsterNest
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone)]
 pub struct MonsterNest {
@@ -135,7 +135,7 @@ pub struct MonsterNest {
     pub kingdom_id: u32,
     pub biome: Biome,
     pub center: [i32; 3],
-    pub individuals: HashMap<u32, MonsterIndividual>, // id -> individual
+    pub individuals: HashMap<u32, MonsterIndividual>,
     pub last_activity_tick: u64,
     pub dormant: bool,
 }
@@ -144,7 +144,7 @@ impl MonsterNest {
     pub fn new(id: u32, kingdom_id: u32, biome: Biome, center: [i32; 3], n: u32) -> Self {
         let mut individuals = HashMap::new();
         for i in 0..n {
-            let mid = id * 1000 + i + 1; // 全局唯一 mid
+            let mid = id * 1000 + i + 1;
             let kind = match biome {
                 Biome::Desert => MonsterKind::SandWurm,
                 Biome::Tundra => MonsterKind::FrostElf,
@@ -162,7 +162,7 @@ impl MonsterNest {
         self.individuals.len() as u32
     }
 
-    /// 5 分钟无活动 → 进入休眠
+
     pub fn check_dormancy(&mut self, current_tick: u64) {
         if !self.dormant
             && current_tick.saturating_sub(self.last_activity_tick) > NEST_DORMANCY_SECS as u64
@@ -171,18 +171,18 @@ impl MonsterNest {
         }
     }
 
-    /// 休眠后每 tick 25% 几率衰亡
+
     pub fn tick_decay(&mut self, rng: &mut StdRng) -> bool {
         if !self.dormant {
             return false;
         }
-        rng.next_u32() % 4 == 0 // 25%
+        rng.next_u32() % 4 == 0
     }
 }
 
-// ---------------------------------------------------------------------------
-// MonsterKingdom
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone)]
 pub struct MonsterKingdom {
@@ -213,24 +213,24 @@ impl MonsterKingdom {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MonsterEcosystem Registry
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Resource, Debug)]
 pub struct MonsterEcosystem {
     pub kingdoms: HashMap<u32, MonsterKingdom>,
-    pub max_individuals: u32, // 全局上限
+    pub max_individuals: u32,
     pub current_individuals: u32,
     pub rng: StdRng,
     pub current_tick: u64,
     next_kingdom_id: u32,
-    /// 累计死亡转化给池子的灵魂（守恒审计）
+
     pub soul_yielded: i64,
 }
 
-// 手动 Clone：rand 0.10 的 StdRng 不再 impl Clone（避免泄漏加密 RNG 状态）
-// clone 时给一个新的 RNG（用同样的 seed），对 demo 够用
+
+
 impl Clone for MonsterEcosystem {
     fn clone(&self) -> Self {
         Self {
@@ -249,7 +249,7 @@ impl Default for MonsterEcosystem {
     fn default() -> Self {
         Self {
             kingdoms: HashMap::new(),
-            max_individuals: 80, // demo 缩
+            max_individuals: 80,
             current_individuals: 0,
             rng: StdRng::seed_from_u64(0xDEAD_BEEF),
             current_tick: 0,
@@ -277,7 +277,7 @@ impl MonsterEcosystem {
         }
     }
 
-    /// demo 初始化：1 个王国（jungle）+ 3 个小巢各 20 = 60 个体
+
     pub fn demo_init(&mut self, world_center: [i32; 3]) {
         self.spawn_kingdom(
             Biome::Jungle,
@@ -296,11 +296,11 @@ impl MonsterEcosystem {
         id
     }
 
-    /// tick：每个小巢检查 dormancy + decay；dead kingdom 不再处理
+
     pub fn tick(&mut self, _pool: &mut GlobalResourcePool) {
         self.current_tick += 1;
         let current = self.current_tick;
-        // rand 0.10: StdRng::from_rng 是 infallible，返回 Self（直接拿）
+
         let mut rng = StdRng::from_rng(&mut self.rng);
         let mut to_remove: Vec<u32> = Vec::new();
         for (_kid, k) in self.kingdoms.iter_mut() {
@@ -310,13 +310,13 @@ impl MonsterEcosystem {
             for (_nid, n) in k.nests.iter_mut() {
                 n.check_dormancy(current);
                 if n.tick_decay(&mut rng) {
-                    // 衰亡 → 释放个体配额
+
                     self.current_individuals = self.current_individuals.saturating_sub(n.size());
                     to_remove.push(n.id);
                 }
             }
         }
-        // 移除衰亡小巢
+
         for (_kid, k) in self.kingdoms.iter_mut() {
             for nid in &to_remove {
                 k.nests.remove(nid);
@@ -325,8 +325,8 @@ impl MonsterEcosystem {
         self.rng = rng;
     }
 
-    /// 怪物死亡入口（从外部调用，比如玩家攻击）
-    /// 返回 true = 个体被移除
+
+
     pub fn kill_individual(
         &mut self,
         kingdom_id: u32,
@@ -348,8 +348,8 @@ impl MonsterEcosystem {
         false
     }
 
-    /// 摧毁一个王国（V1.0 简化：直接移除整个王国 + 释放个体）
-    /// 总纲：散落为 3-6 个小巢（demo 略，直接清空）
+
+
     pub fn destroy_kingdom(&mut self, kingdom_id: u32) {
         if let Some(k) = self.kingdoms.get_mut(&kingdom_id) {
             let count = k.total_individuals();
@@ -360,7 +360,7 @@ impl MonsterEcosystem {
         }
     }
 
-    /// 守恒校验：current_individuals 应该 = 所有 nests 的个体数之和
+
     pub fn verify_individual_count(&self) -> bool {
         let sum: u32 =
             self.kingdoms.values().filter(|k| !k.destroyed).map(|k| k.total_individuals()).sum();
@@ -368,9 +368,9 @@ impl MonsterEcosystem {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -417,7 +417,7 @@ mod tests {
     fn tick_with_decay_progresses() {
         let mut eco = MonsterEcosystem::new();
         eco.demo_init([16, 8, 16]);
-        // 强制一个小巢进入 dormancy
+
         let kid = *eco.kingdoms.keys().next().unwrap();
         let nid = {
             let k = eco.kingdoms.get_mut(&kid).unwrap();
@@ -427,7 +427,7 @@ mod tests {
             n.dormant = true;
             nid
         };
-        // 跑几次 tick，衰亡概率会扣 current_individuals
+
         for _ in 0..50 {
             let mut pool = GlobalResourcePool::new();
             eco.tick(&mut pool);
@@ -435,7 +435,7 @@ mod tests {
                 break;
             }
         }
-        // 不严格断言是否衰亡（25% 概率），但 verify_count 必须守恒
+
         assert!(eco.verify_individual_count());
     }
 
@@ -458,4 +458,4 @@ mod tests {
         eco.kill_individual(kid, nid, mid, &mut pool);
         assert!(eco.verify_individual_count());
     }
-}
+}

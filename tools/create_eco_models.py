@@ -3,15 +3,12 @@ from pathlib import Path
 
 import bpy
 
-
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "assets" / "procedural" / "eco"
-
 
 def clear_scene():
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
-
 
 def mat(name, color, roughness=0.8, alpha=1.0):
     material = bpy.data.materials.new(name)
@@ -30,20 +27,17 @@ def mat(name, color, roughness=0.8, alpha=1.0):
         material.use_screen_refraction = True
     return material
 
-
 def shade_flat(obj):
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.shade_flat()
     obj.select_set(False)
 
-
 def shade_smooth(obj):
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.shade_smooth()
     obj.select_set(False)
-
 
 def cube(name, loc, scale, material):
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=loc)
@@ -54,7 +48,6 @@ def cube(name, loc, scale, material):
     shade_flat(obj)
     return obj
 
-
 def uv_sphere(name, loc, scale, material, segments=16, rings=8):
     bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, radius=1.0, location=loc)
     obj = bpy.context.object
@@ -63,7 +56,6 @@ def uv_sphere(name, loc, scale, material, segments=16, rings=8):
     obj.data.materials.append(material)
     shade_smooth(obj)
     return obj
-
 
 def cone(name, loc, radius1, radius2, depth, material, vertices=8):
     bpy.ops.mesh.primitive_cone_add(
@@ -79,7 +71,6 @@ def cone(name, loc, radius1, radius2, depth, material, vertices=8):
     shade_flat(obj)
     return obj
 
-
 def export_glb(name):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.glb"
@@ -93,7 +84,6 @@ def export_glb(name):
     )
     print(f"exported {path}")
 
-
 def make_rabbit():
     clear_scene()
     fur = mat("warm_tan_fur", (0.72, 0.58, 0.42), 0.9)
@@ -105,7 +95,6 @@ def make_rabbit():
     nose = mat("rose_nose", (0.8, 0.25, 0.32), 0.7)
     whisker = mat("dark_whisker", (0.10, 0.08, 0.06), 0.75)
 
-    # Blender is Z-up. Bevy converts GLTF Z-up into Bevy Y-up on load.
     uv_sphere("body", (0.0, 0.02, 0.42), (0.50, 0.70, 0.36), fur, 32, 16)
     uv_sphere("belly_patch", (0.0, -0.48, 0.43), (0.34, 0.12, 0.26), belly, 24, 12)
     uv_sphere("head", (0.0, -0.66, 0.82), (0.38, 0.34, 0.32), fur, 32, 16)
@@ -187,7 +176,6 @@ def make_rabbit():
     uv_sphere("nose", (0.0, -1.03, 0.78), (0.070, 0.040, 0.045), nose, 16, 8)
     export_glb("rabbit")
 
-
 def make_berry_bush():
     clear_scene()
     leaf = mat("leaf_green", (0.10, 0.48, 0.18), 0.95)
@@ -233,7 +221,6 @@ def make_berry_bush():
         )
     export_glb("berry_bush")
 
-
 def make_berry_fruit():
     clear_scene()
     fruit = mat("ripe_red", (0.88, 0.06, 0.08), 0.65)
@@ -244,7 +231,6 @@ def make_berry_fruit():
     cone("stem", (0.0, 0.0, 0.38), 0.020, 0.008, 0.18, leaf, 6)
     export_glb("berry_fruit")
 
-
 def make_co2_bubble():
     clear_scene()
     bubble = mat("co2_translucent_blue", (0.35, 0.78, 1.0), 0.2, alpha=0.35)
@@ -254,7 +240,6 @@ def make_co2_bubble():
     uv_sphere("co2_bubble_small", (-0.22, 0.08, 0.38), (0.13, 0.13, 0.13), bubble, 18, 9)
     uv_sphere("co2_highlight", (-0.09, -0.18, 0.14), (0.045, 0.035, 0.035), rim, 10, 5)
     export_glb("co2_bubble")
-
 
 if __name__ == "__main__":
     make_rabbit()

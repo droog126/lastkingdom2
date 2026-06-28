@@ -64,13 +64,6 @@ pub fn advance_demo_tick(
     true
 }
 
-/// Advance the authoritative fixed-step demo clock once.
-///
-/// This is the bridge while the V2 systems are being moved out of the old
-/// `Update` demo loop. Every `FixedUpdate` increments the authoritative tick,
-/// but the legacy ecosystem/resource demo work remains a slow 1-second step.
-/// That keeps render frame rate independent from gameplay ticks without making
-/// food/apple regeneration 30x faster.
 pub fn advance_fixed_authority_tick(
     delta_secs: f32,
     clock: &mut SimClock,

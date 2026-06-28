@@ -1,7 +1,7 @@
-//! 体素渲染：把 World 的方块转成 PBR cube
-//!
-//! 策略：玩家周围 R 半径内的 solid 块 → spawn 一个 Mesh3d+MeshMaterial3d entity
-//! 性能：3D scene 持 ~2000 个 entity 没问题；超过会卡
+
+
+
+
 
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
@@ -25,12 +25,12 @@ mod marching_cubes;
 pub mod scalar_field;
 mod smooth_mesh;
 
-/// 体素渲染配置
+
 #[derive(Resource, Debug, Clone)]
 pub struct RenderConfig {
-    pub radius: i32,       // 渲染半径（玩家 ±R）
-    pub max_blocks: usize, // 一次性最多 spawn 多少个
-    pub y_offset: f32,     // 玩家脚下贴图偏移（让 y=0 在地面）
+    pub radius: i32,
+    pub max_blocks: usize,
+    pub y_offset: f32,
     pub sky_color: Color,
     pub fog_color: Color,
     pub fog_start: f32,
@@ -40,61 +40,61 @@ pub struct RenderConfig {
     pub auto_orbit_distance: f32,
     pub auto_walk: bool,
     pub auto_walk_interval_secs: f32,
-    pub auto_keys: bool,      // --auto-demo 时自动按 F/J 测功能（不靠人按键）
-    pub mouse_look: bool,     // 默认开：鼠标转视角；--auto-demo 关：用动物自动跟随
-    pub smooth_terrain: bool, // 默认 true：标量场 + Marching Cubes 平滑地形（解决 cube 边角卡脚）
-    pub smooth_passes: u32,   // Laplacian 平滑次数（0..=3），默认 0
-    pub ground_step_threshold: f32, // 玩家移动"被卡"的软地表高度差阈值（默认 0.85）
+    pub auto_keys: bool,
+    pub mouse_look: bool,
+    pub smooth_terrain: bool,
+    pub smooth_passes: u32,
+    pub ground_step_threshold: f32,
 }
 
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
-            radius: 36, // 16→20→36: 视野越拉越远才能看见"世界"而不是脚下 20 方块
+            radius: 36,
             max_blocks: 3000,
             y_offset: 0.0,
-            sky_color: Color::srgb(0.45, 0.65, 0.95), // 亮天蓝
-            fog_color: Color::srgb(0.78, 0.85, 0.95), // 中亮蓝灰
-            fog_start: 130.0, // 50→80→130: 让 50m 内完全清晰, fog 退后让地形颜色显出来
-            fog_end: 360.0,   // 200→320→360: 远景还能看清
-            auto_orbit: true, // 改默认=true: dev 模式也开 auto-orbit 俯瞰，让玩家能看见自己+周围
-            // (不是 FirstPerson 贴脸后看见蓝天+cube 不知道在哪)
-            auto_orbit_speed: 0.30, // 0.22 太慢看不清全貌，0.30 12s 内能转接近半圈
-            // 22m 水平 + 14m 高: 让 20m 圆周的树/石头/花都进视野，28m 远景山丘也看得到
-            // (之前 16.5+10.5 太近, 20m 树顶超出 FOV 上半, 山丘完全看不到)
+            sky_color: Color::srgb(0.45, 0.65, 0.95),
+            fog_color: Color::srgb(0.78, 0.85, 0.95),
+            fog_start: 130.0,
+            fog_end: 360.0,
+            auto_orbit: true,
+
+            auto_orbit_speed: 0.30,
+
+
             auto_orbit_distance: 22.0,
-            auto_walk: false,       // 默认玩家控制；--auto-demo 开启
-            auto_walk_interval_secs: 3.0, // 1.2 太频繁,玩家乱跑相机跟不住;3.0 让玩家多站一会儿
-            auto_keys: false,       // --auto-demo 开启：自动按 F/J 验证
-            mouse_look: false,      // 改默认=false: auto_orbit 时不要鼠标转视角破坏俯瞰
-            // --first-person 启动会打开
-            smooth_terrain: true,        // 默认开：scalar field + MC
-            smooth_passes: 2, // 0→2: 让 smooth mesh 出 vertex color 立体感（iter_1070 平的山）
-            ground_step_threshold: 0.85, // 低矮起伏直接走，高墙才挡
+            auto_walk: false,
+            auto_walk_interval_secs: 3.0,
+            auto_keys: false,
+            mouse_look: false,
+
+            smooth_terrain: true,
+            smooth_passes: 2,
+            ground_step_threshold: 0.85,
         }
     }
 }
 
-/// 相机朝向（鼠标累积的 yaw + pitch）。mouse_look 系统读，first_person_camera 用
+
 #[derive(Resource)]
 pub struct CameraAngles {
-    pub yaw: f32,   // 绕 +Y 轴，0 = 相机看 -Z；右转为负
-    pub pitch: f32, // 绕相机右轴，0 = 水平；上视为正
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
 impl Default for CameraAngles {
     fn default() -> Self {
-        // 出生时明显俯视（约 -35°），让玩家第一眼看到脚下 + 远处地形
+
         Self { yaw: 0.0, pitch: -1.2 }
     }
 }
 
-/// 相机视角模式：C 键切换
+
 #[derive(Resource, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum CameraMode {
-    /// 第一人称：相机在玩家眼睛位置
+
     FirstPerson,
-    /// 第三人称：相机在玩家身后 3m，俯视玩家
+
     ThirdPerson,
 }
 
@@ -104,22 +104,22 @@ impl Default for CameraMode {
     }
 }
 
-/// 第三人称：相机到玩家的水平距离（m）+ 垂直抬高
+
 const TP_DISTANCE: f32 = 6.0;
 const TP_HEIGHT: f32 = 4.0;
 const MANUAL_MOVE_SPEED: f32 = 4.5;
 
-/// 自由视角模式（F3 切换）：灵魂出窍，无视玩家位置和物理，自由飞
+
 #[derive(Resource)]
 pub struct FreeFlyState {
     pub enabled: bool,
-    /// 世界坐标下的相机位置（独立于 PlayerState）
+
     pub position: Vec3,
-    /// WASD 速度向量（用于平滑加减速）
+
     pub velocity: Vec3,
-    /// 进入 freefly 时存的玩家格子位置，退出时还原。
+
     pub saved_player_pos: Option<[i32; 3]>,
-    /// 进入 freefly 时存的玩家连续位置，退出时还原。
+
     pub saved_player_world_pos: Option<Vec3>,
 }
 
@@ -127,7 +127,7 @@ impl Default for FreeFlyState {
     fn default() -> Self {
         Self {
             enabled: false,
-            position: Vec3::new(48.5, 18.0, 48.5), // 默认从玩家出生点上方起
+            position: Vec3::new(48.5, 18.0, 48.5),
             velocity: Vec3::ZERO,
             saved_player_pos: None,
             saved_player_world_pos: None,
@@ -135,37 +135,37 @@ impl Default for FreeFlyState {
     }
 }
 
-/// 自由视角移动速度（m/s）— 比步行快 20x，方便快速遍历
+
 const FREEFLY_SPEED: f32 = 30.0;
-/// Shift 加速倍率
+
 const FREEFLY_BOOST: f32 = 3.0;
 
-const MOUSE_SENS: f32 = 0.0022; // 弧度/像素（≈ 0.13°/像素）
-const PITCH_LIMIT: f32 = 1.483; // ≈ 85°（防止翻转）
-const YAW_QE_STEP: f32 = 22.5_f32.to_radians(); // Q/E 步进 22.5°（备胎）
+const MOUSE_SENS: f32 = 0.0022;
+const PITCH_LIMIT: f32 = 1.483;
+const YAW_QE_STEP: f32 = 22.5_f32.to_radians();
 
-/// 已 spawn 的 terrain entity 列表（用于 despawn 重生）
-/// 视觉 + 碰撞 分开存：视觉走 greedy mesh 出 mesh3d 实体，碰撞走 trimesh 实体
+
+
 #[derive(Resource, Default)]
 pub struct SpawnedBlocks {
     pub visual_entities: Vec<Entity>,
     pub collider_entities: Vec<Entity>,
-    /// 上次 spawn 时用的玩家位置（玩家移动 > 1 格才重新 spawn）
+
     pub last_player_block: [i32; 3],
 }
 
-/// 玩家 + 相机 marker
+
 #[derive(Component)]
 pub struct PlayerCube;
 
-/// 启动时 spawn 玩家周围方块（Greedy Mesh + Trimesh 碰撞版）
-///
-/// 每个 renderable block type → 1 个 Mesh3d 实体（视觉）+ 1 个 Trimesh 实体（碰撞）。
-/// 之前 naive 做法每方块一个 entity（3000+）→ 现在 ~12 个。
-///
-/// `cfg.smooth_terrain` = true 时走 scalar_field + Marching Cubes 路径：
-///  - 一个 mesh + vertex color（grass/dirt/stone 分层）
-///  - 解决 cube 边角卡脚问题
+
+
+
+
+
+
+
+
 pub fn spawn_terrain_around_player(
     mut commands: Commands,
     game_world: Res<GameWorld>,
@@ -175,25 +175,25 @@ pub fn spawn_terrain_around_player(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
-    // 限流：同一次刷屏只 warn 一次（1 秒间隔，按真实时间）
+
     _last_warn_time: Local<f32>,
-    // 节流：最近一次 re-mesh 用了多少 ms。60fps + Greedy Mesh ≈ 600-1200ms 一次，
-    // 所以按帧调会被卡成 1fps。用真实时间节流，0.5s 内不重复 re-mesh。
+
+
     mut last_mesh_wall: Local<f32>,
 ) {
-    // 1) 玩家没动 + 上次有 mesh → skip
-    // 2) 玩家动了 + 距离上次 re-mesh < 0.5s → skip（防 auto-walk 每步卡顿）
-    // 3) 否则 re-mesh
+
+
+
     let now = time.elapsed_secs();
     let moved = spawned.last_player_block != player.block_pos;
     if !moved && !spawned.visual_entities.is_empty() {
         return;
     }
     if moved && now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
-        return; // 0.5s → 1.5s 留时间给更大的 40³ re-mesh (12 type * 40³)
+        return;
     }
 
-    // 清掉上一次的（视觉 + 碰撞）
+
     for e in spawned.visual_entities.drain(..) {
         commands.entity(e).despawn();
     }
@@ -201,8 +201,8 @@ pub fn spawn_terrain_around_player(
         commands.entity(e).despawn();
     }
 
-    // AABB 范围（统一：玩家周围 ±R，Y clamp 到 world 范围）
-    // Y 范围给到 ±40，确保山顶 / 山谷 / cave 都能进 scalar field，Marching Cubes 出来才有地形起伏
+
+
     let r = cfg.radius as i32;
     let py = player.block_pos[1];
     let y_min = (py - 40).max(0);
@@ -210,20 +210,20 @@ pub fn spawn_terrain_around_player(
     let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
     let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
 
-    // ─────────── 走 smooth path（默认）───────────
+
     if cfg.smooth_terrain {
         let started = time.elapsed_secs();
         let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
-            // 顶点色模式：base_color WHITE 让 mesh 顶点色直接显色。
-            // smooth_mesh::build_smooth_mesh 输出带 vertex color 的三角形 (smooth_mesh.rs:80-95)
+
+
             let mat = materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-                // 弱 emissive 让顶点色在阴影里也能透出来, 避免灯光把整片"洗蓝"
+
                 emissive: Color::srgb(0.10, 0.12, 0.08).into(),
-                // Marching Cubes normals are still rough; unlit keeps vertex colors stable
-                // and prevents bad normals from producing black triangle speckles.
+
+
                 unlit: true,
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
@@ -240,7 +240,7 @@ pub fn spawn_terrain_around_player(
                 ))
                 .id();
             spawned.visual_entities.push(visual);
-            // 碰撞：Trimesh（avian3d 0.6 要 Vec<Vec3> + Vec<[u32; 3]>）
+
             let collider_verts: Vec<Vec3> =
                 sm.collider_trimesh.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
             let collider_indices: Vec<[u32; 3]> = sm
@@ -270,7 +270,7 @@ pub fn spawn_terrain_around_player(
                 player.block_pos
             );
         } else {
-            // 标量场全空（cave 都没有）→ 不 spawn 任何东西
+
             debug!("🌊 smooth mesh: 标量场全空（无 solid 在 AABB 内）");
             spawned.last_player_block = player.block_pos;
         }
@@ -278,8 +278,8 @@ pub fn spawn_terrain_around_player(
         return;
     }
 
-    // ─────────── 走 legacy greedy path（--legacy-voxel 启用）───────────
-    // 1. 准备 12 种 BlockType 对应的材质（共享，减少 GPU 状态切换）
+
+
     let mut mats: HashMap<BlockType, Handle<StandardMaterial>> = HashMap::new();
     for bt in [
         BlockType::Dirt,
@@ -301,7 +301,7 @@ pub fn spawn_terrain_around_player(
         } else {
             Color::BLACK
         };
-        // Water: 半透明 + 蓝绿色 alpha blend
+
         let is_water = matches!(bt, BlockType::Water);
         let material = if is_water {
             StandardMaterial {
@@ -324,29 +324,29 @@ pub fn spawn_terrain_around_player(
         mats.insert(bt, materials.add(material));
     }
 
-    // 2. Greedy Mesh：每个 block type 一个 mesh（玩家周围 AABB，41³ = ~70KB）
+
     let started = time.elapsed_secs();
     let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
     let mesh_count = block_meshes.len();
     let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
     let mesh_secs = time.elapsed_secs() - started;
 
-    // 3. Spawn 每个 mesh（视觉 + 碰撞）
+
     for bm in block_meshes {
         let mat = mats[&bm.block_type].clone();
         let bevy_mesh = bm.to_bevy_mesh();
 
-        // 碰撞：跳过 water（玩家应该能穿过水；且 Trimesh 不适合双面薄面）
+
         let collider_opt = if matches!(bm.block_type, BlockType::Water) {
             None
         } else {
             Collider::trimesh_from_mesh(&bevy_mesh)
         };
 
-        // 把 mesh 加进 assets（视觉用 handle；碰撞用 mesh 引用）
+
         let mesh_handle = meshes.add(bevy_mesh);
 
-        // 视觉：Mesh3d + MeshMaterial3d，identity transform
+
         let visual = commands
             .spawn((
                 Mesh3d(mesh_handle),
@@ -381,11 +381,11 @@ pub fn spawn_terrain_around_player(
     *last_mesh_wall = time.elapsed_secs();
 }
 
-/// Terrain chunk marker（greedy mesh 出的视觉/碰撞实体）
+
 #[derive(Component)]
 pub struct TerrainChunk;
 
-/// 天空颜色 + 雾 + 武器 spawn（spawn 时把剑挂到相机子节点上，跟着相机走）
+
 pub fn setup_atmosphere(
     mut commands: Commands,
     cfg: Res<RenderConfig>,
@@ -393,12 +393,12 @@ pub fn setup_atmosphere(
     _materials: ResMut<Assets<StandardMaterial>>,
     camera: Query<Entity, With<Camera3d>>,
 ) {
-    // 雾
-    // bevy 0.18: DistanceFog 组件挂在 camera 上
+
+
     use bevy::pbr::DistanceFog;
     commands.insert_resource(ClearColor(Color::srgb(0.20, 0.45, 0.78)));
 
-    // 雾挂到主相机 (auto_orbit 也需要 fog)
+
     if let Ok(cam_entity) = camera.single() {
         commands.entity(cam_entity).insert(DistanceFog {
             color: cfg.fog_color,
@@ -409,8 +409,8 @@ pub fn setup_atmosphere(
     }
 }
 
-/// 兜底盖板：玩家脚下 5m 一个 100×100 plane，从不漏（marching_cubes 缝 B 修复）
-/// 玩家每帧移动，盖板跟到 (player.x, player.y - 5, player.z)
+
+
 #[derive(Component)]
 pub struct TerrainUnderlay;
 
@@ -419,21 +419,21 @@ pub fn setup_terrain_underlay(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // 100×100 plane，水平 y=0
+
     let plane_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
-    // 深棕灰，emissive 微亮防纯黑；从下方看时也可见（双面）
+
     let mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.32, 0.30, 0.26),
         emissive: Color::srgb(0.08, 0.07, 0.05).into(),
         perceptual_roughness: 0.95,
         metallic: 0.0,
-        cull_mode: None, // 双面都画 — 玩家从下面/上面看都盖住
+        cull_mode: None,
         ..default()
     });
     commands.spawn((
         Mesh3d(plane_mesh),
         MeshMaterial3d(mat),
-        Transform::from_translation(Vec3::new(0.0, -100.0, 0.0)), // 放地底，看不见
+        Transform::from_translation(Vec3::new(0.0, -100.0, 0.0)),
         TerrainUnderlay,
     ));
     info!("🟫 兜底盖板 100x100 plane 已 spawn（player 脚下 -5m 跟随）");
@@ -443,95 +443,95 @@ pub fn underlay_follow_player(
     mut q: Query<&mut Transform, With<TerrainUnderlay>>,
     player: Res<PlayerState>,
 ) {
-    // plane 跟玩家，但放玩家脚下 100m — 远超视野，绝不会看见
+
     let Ok(mut tf) = q.single_mut() else {
         return;
     };
     tf.translation = Vec3::new(player.pos.x, -100.0, player.pos.z);
 }
 
-/// 武器 marker：被 held_weapon_follow 系统认领
+
 #[derive(Component)]
 pub struct HeldWeaponPart;
 
-/// 挥剑动画状态：K 按下时 trigger=true，180ms 内绕 X 轴从 0 转到 90° 再回 0
+
 #[derive(Resource, Default)]
 pub struct SwordSwing {
     pub start_t: f32,
     pub swinging: bool,
 }
 
-const SWING_DURATION: f32 = 0.18; // 一次挥砍 180ms（足够快，~5 frames @ 30fps）
+const SWING_DURATION: f32 = 0.18;
 
-/// 把剑贴在相机右前方，跟随相机 transform
-/// 现在剑是相机的子节点，bevy 自动处理 transform 跟随。
-/// K 键触发挥剑：剑绕 X 轴 0 → 90° → 0（180ms）
+
+
+
 pub fn held_weapon_follow(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mut swing: ResMut<SwordSwing>,
     mut q: Query<&mut Transform, With<HeldWeaponPart>>,
 ) {
-    // 1) K 按下 → 启动挥砍（如果没在挥）
+
     if keys.just_pressed(KeyCode::KeyK) && !swing.swinging {
         swing.swinging = true;
         swing.start_t = time.elapsed_secs();
     }
-    // 2) 没在挥 → 保持原位（tilt 15°）
+
     if !swing.swinging {
         return;
     }
-    // 3) 在挥：算 progress 0..1，超时结束
+
     let elapsed = time.elapsed_secs() - swing.start_t;
     if elapsed >= SWING_DURATION {
         swing.swinging = false;
-        // 复位
+
         for mut tf in &mut q {
             tf.rotation = Quat::from_rotation_z(15_f32.to_radians());
         }
         return;
     }
-    let t = elapsed / SWING_DURATION; // 0..1
-    // 半正弦曲线：0 → 1 → 0
-    let swing_phase = (t * std::f32::consts::PI).sin(); // 0..1..0
-    // 把 swing_phase 映射到 0..90° 加在基础 15° tilt 上
+    let t = elapsed / SWING_DURATION;
+
+    let swing_phase = (t * std::f32::consts::PI).sin();
+
     let total_pitch = 15_f32.to_radians() + swing_phase * 90_f32.to_radians();
     for mut tf in &mut q {
-        // 用 euler (X, Y, Z) 重置回原姿态 + 叠加 pitch
-        // 基础：绕 Z 倾斜 15°（Z 旋转不动），叠加 X pitch
+
+
         tf.rotation = Quat::from_euler(
             EulerRot::XYZ,
-            total_pitch,         // X 轴 pitch（向前挥）
-            0.0,                 // Y 轴 yaw（不动）
-            15_f32.to_radians(), // Z 轴 tilt 15°（基础斜角保持）
+            total_pitch,
+            0.0,
+            15_f32.to_radians(),
         );
     }
 }
 
-/// 鼠标视角系统：读 AccumulatedMouseMotion 资源（bevy 0.18 每帧自动累加并清零）→ 累积到 CameraAngles
+
 pub fn mouse_look_system(
     motion: Res<AccumulatedMouseMotion>,
     mut angles: ResMut<CameraAngles>,
     cfg: Res<RenderConfig>,
     freefly: Res<FreeFlyState>,
 ) {
-    // 自由视角下强制开（脱离玩家也想用鼠标看）
+
     if !cfg.mouse_look && !freefly.enabled {
         return;
     }
     if motion.delta == Vec2::ZERO {
         return;
     }
-    // FPS 标准：鼠标右滑 → 视角右转（yaw+）；鼠标上滑 → 抬头（pitch+）
+
     angles.yaw += motion.delta.x * MOUSE_SENS;
     angles.pitch -= motion.delta.y * MOUSE_SENS;
     angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
 }
 
-/// F3 切换自由视角（灵魂出窍）。切换时把相机放到玩家头顶上方 18m
-///
-/// 重要：进入时**快照玩家位置**到 freefly.saved_player_pos，scenario / 玩家输入
-/// 等其他系统继续运行可能挪动玩家；退出时**还原**到快照，保证身体没漂。
+
+
+
+
 pub fn freefly_toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut freefly: ResMut<FreeFlyState>,
@@ -542,7 +542,7 @@ pub fn freefly_toggle(
     }
     freefly.enabled = !freefly.enabled;
     if freefly.enabled {
-        // 进入：快照玩家位置，相机从玩家头顶 18m 起飞
+
         freefly.saved_player_pos = Some(player.block_pos);
         freefly.saved_player_world_pos = Some(player.pos);
         freefly.position = player.pos + Vec3::Y * 18.0;
@@ -552,7 +552,7 @@ pub fn freefly_toggle(
             player.block_pos
         );
     } else {
-        // 退出：还原玩家位置（block_pos 和 pos 同步）
+
         if let Some(saved) = freefly.saved_player_pos.take() {
             let saved_pos = freefly.saved_player_world_pos.take().unwrap_or(Vec3::new(
                 saved[0] as f32 + 0.5,
@@ -571,13 +571,13 @@ pub fn freefly_toggle(
     }
 }
 
-/// C 键切换 1st / 3rd person 视角
+
 pub fn camera_mode_toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<CameraMode>,
     freefly: Res<FreeFlyState>,
 ) {
-    // FreeFly 模式下禁用 C 切换（避免模式冲突）
+
     if freefly.enabled {
         return;
     }
@@ -596,7 +596,7 @@ pub fn camera_mode_toggle(
     };
 }
 
-/// F5 紧急传送：把玩家传回出生点的可站地面（卡在山里/找不到自己时救命用）
+
 pub fn emergency_teleport(
     keys: Res<ButtonInput<KeyCode>>,
     game_world: Res<GameWorld>,
@@ -615,7 +615,7 @@ pub fn emergency_teleport(
     set_player_position(&mut player, pos, block_pos);
 }
 
-/// F8 循环切换地形 preset
+
 pub fn cycle_terrain_preset(keys: Res<ButtonInput<KeyCode>>, mut game_world: ResMut<GameWorld>) {
     if !keys.just_pressed(KeyCode::F8) {
         return;
@@ -631,7 +631,7 @@ pub fn cycle_terrain_preset(keys: Res<ButtonInput<KeyCode>>, mut game_world: Res
     info!("🌍 F8 切 preset: {} -> {}", current, new_name);
 }
 
-/// 自由视角下的移动：WASD + Space/Shift，按住持续移动（不像 player_input 那种按一下走一格）
+
 pub fn freefly_movement(
     keys: Res<ButtonInput<KeyCode>>,
     mut freefly: ResMut<FreeFlyState>,
@@ -642,16 +642,16 @@ pub fn freefly_movement(
         return;
     }
 
-    // 视野方向（完整 3D，包括 pitch — freefly 应该能飞高飞低）
+
     let (sy, cy) = angles.yaw.sin_cos();
     let (sp, cp) = angles.pitch.sin_cos();
     let forward = Vec3::new(sy * cp, sp, -cy * cp);
-    // right = forward × Y（Y 是世界 up，freefly 也遵守世界 up 不翻滚）
+
     let right = forward.cross(Vec3::Y);
-    // up = Y（不要 roll）
+
     let up = Vec3::Y;
 
-    // 累加意图（按住 = 持续）
+
     let mut wish = Vec3::ZERO;
     if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
         wish += forward;
@@ -671,28 +671,28 @@ pub fn freefly_movement(
     if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
         wish -= up;
     }
-    // Q/E = 加速
+
     let speed = if keys.pressed(KeyCode::KeyQ) || keys.pressed(KeyCode::KeyE) {
         FREEFLY_SPEED * FREEFLY_BOOST
     } else {
         FREEFLY_SPEED
     };
 
-    // 平滑加减速：往 wish 方向 lerp
+
     let target = if wish.length() > 0.01 {
         wish.normalize() * speed
     } else {
         Vec3::ZERO
     };
     let dt = time.delta_secs();
-    // 简化：直接 = target（无 lerp，避免复杂；玩家想要"立刻响应"）
+
     let v = target;
     freefly.velocity = v;
     let pos = freefly.position + v * dt;
     freefly.position = pos;
 }
 
-/// 锁光标到窗口中央 + 隐藏（FPS 标准）。mouse_look 关时不锁
+
 pub fn setup_cursor_grab(
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     cfg: Res<RenderConfig>,
@@ -706,8 +706,8 @@ pub fn setup_cursor_grab(
     }
 }
 
-/// ESC 切换：抓住光标 ↔ 释放。玩家在释放后可以用鼠标点 UI；按 ESC 再抓回。
-/// 同时暂停 mouse_look（避免窗口外移动导致 yaw/pitch 暴冲）。
+
+
 pub fn toggle_cursor_grab_on_esc(
     keys: Res<ButtonInput<KeyCode>>,
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
@@ -722,7 +722,7 @@ pub fn toggle_cursor_grab_on_esc(
     let Ok(mut cursor) = cursors.single_mut() else {
         return;
     };
-    // 当前是 Locked → 释放；当前是 None → 抓回
+
     let is_locked = matches!(cursor.grab_mode, CursorGrabMode::Locked);
     if is_locked {
         cursor.grab_mode = CursorGrabMode::None;
@@ -731,18 +731,18 @@ pub fn toggle_cursor_grab_on_esc(
     } else {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
-        // 重抓时把鼠标累加清零（防下一帧 yaw/pitch 暴冲）
-        // AccumulatedMouseMotion 不可 ResMut（bevy 0.18），下一帧自然衰减
+
+
         info!("🖱 ESC：抓回光标");
     }
 }
 
-/// 动物方向指示器 marker（被 `update_animal_indicator` 系统刷新）
-/// 原来在 `src/main.rs` 里定义，迁到 render 模块更近
+
+
 #[derive(Component)]
 pub struct AnimalIndicatorText;
 
-/// 动物方向指示器系统：每帧找最近的动物 + 算相对相机的屏幕方向 → 更新顶部 HUD 文字
+
 pub fn update_animal_indicator(
     mut q_text: Query<&mut Text, With<AnimalIndicatorText>>,
     player: Res<PlayerState>,
@@ -755,7 +755,7 @@ pub fn update_animal_indicator(
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
 
-    // 找最近的动物（水平距离，限 30 格）
+
     let mut best: Option<(&Creature, f32)> = None;
     for c in creatures.iter() {
         let dx = c.block_pos[0] as f32 + 0.5 - px;
@@ -780,7 +780,7 @@ pub fn update_animal_indicator(
         return;
     }
 
-    // 算相对相机的方向（→ 屏幕箭头）
+
     let arrow = if let Ok(tf) = camera.single() {
         let f = tf.forward();
         let cam = Vec2::new(f.x, f.z);
@@ -791,7 +791,7 @@ pub fn update_animal_indicator(
         };
         let dot = animal_v.dot(cam_n);
         let cross = animal_v.x * cam_n.y - animal_v.y * cam_n.x;
-        // cross < 0 = 动物在右；angle 量化到 8 方向
+
         let angle = cross.atan2(dot);
         let oct = ((-angle).to_degrees() / 45.0).round() as i32;
         match oct.rem_euclid(8) {
@@ -809,7 +809,7 @@ pub fn update_animal_indicator(
         "·"
     };
 
-    // 用英文标签（默认字体没 CJK，全显示成 ↑ 难看）
+
     let label = match c.kind {
         lk2_core::creature::CreatureKind::Pig => "Pig",
         lk2_core::creature::CreatureKind::Sheep => "Sheep",
@@ -819,43 +819,43 @@ pub fn update_animal_indicator(
     text.0 = format!("{}  {}  {:.1}m", arrow, label, dist);
 }
 
-// ---------------------------------------------------------------------------
-// MonsterNest 3D 标记 + 屏幕方向指示器
-// ---------------------------------------------------------------------------
-//
-// 任务 nest-marker (2026-06-13): 把 sim 里的 MonsterNest 变成可发现的视觉信号。
-//   - 启动时 spawn 一根"旗杆"在每个 nest 中心上方 5m（细长方块 0.4×4.0×0.4）
-//   - 按 biome 配色：Desert 黄沙 / Jungle 丛林绿 / Tundra 冰蓝
-//   - emissive RedStrong 让人眼远距离能看见
-//   - mesh 永远跟随玩家 XZ 偏移：player's block_pos.x/z + (offset_x, 5, offset_z)
-//     这样玩家在 ±100 范围内一定有标志（不随玩家远离而消失）
-//   - 屏幕方向指示器（NestIndicatorText）：每帧算最近 nest（30 格内）→
-//     输出 "↗ Nest 12m / 8 怪" 这种格式到顶部 HUD
-//   - offline / online 通用（不依赖 mode）
-//
-// 实现参考 update_animal_indicator 模式（顶部居中 HUD + 8 方向箭头 + 30 格范围）。
 
-/// 3D 旗杆 mesh（细长方块 0.4×4.0×0.4）
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const NEST_MARKER_SIZE: (f32, f32, f32) = (0.4, 4.0, 0.4);
 
-/// nest 旗杆 marker（持 nest.id + kingdom.id 让 update 系统能映射）
+
 #[derive(Component)]
 pub struct NestMarker {
     pub nest_id: u32,
     pub kingdom_id: u32,
-    /// nest 中心相对玩家的 XZ 偏移（生成时记下，每帧 player.pos.xz + offset）
+
     pub offset_x: f32,
     pub offset_z: f32,
 }
 
-/// nest 旗杆总数（debug 读）
+
 #[derive(Resource, Default)]
 pub struct NestMarkerCount(pub u32);
 
-/// 启动时 spawn 全部 nest 旗杆（每 nest 一根，center 5m 上方）
-///
-/// 注意：不在这里硬编码 nest 个数；遍历 sim 里的 MonsterEcosystem.kingdoms[*].nests
-/// 拿到 (id, kingdom_id, center, biome, individuals) 然后 spawn。
+
+
+
+
 pub fn spawn_nest_markers(
     mut commands: Commands,
     monsters: Res<MonsterEcosystem>,
@@ -873,27 +873,27 @@ pub fn spawn_nest_markers(
             continue;
         }
         for (nid, nest) in kingdom.nests.iter() {
-            // biome 配色 + RedStrong emissive 远距离可见
+
             let (base_r, base_g, base_b) = match nest.biome {
-                Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32), // 黄沙
-                Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),  // 丛林绿
-                Biome::Tundra => (0.7_f32, 0.85_f32, 1.0_f32), // 冰蓝
+                Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32),
+                Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),
+                Biome::Tundra => (0.7_f32, 0.85_f32, 1.0_f32),
             };
             let mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(base_r, base_g, base_b),
-                emissive: Color::srgb(1.0, 0.25, 0.15).into(), // RedStrong
+                emissive: Color::srgb(1.0, 0.25, 0.15).into(),
                 perceptual_roughness: 0.7,
                 metallic: 0.0,
                 ..default()
             });
-            // 共享 mesh（所有 nest 旗杆同尺寸）
+
             let mesh = meshes.add(Cuboid::new(
                 NEST_MARKER_SIZE.0,
                 NEST_MARKER_SIZE.1,
                 NEST_MARKER_SIZE.2,
             ));
 
-            // 旗杆放在 (player + offset), Y 抬高 5m。offset 是 nest 相对玩家的 XZ 偏移。
+
             let nx = nest.center[0] as f32 + 0.5;
             let nz = nest.center[2] as f32 + 0.5;
             let ny = nest.center[1] as f32 + 5.0;
@@ -917,31 +917,31 @@ pub fn spawn_nest_markers(
     );
 }
 
-/// 每帧更新 nest 旗杆位置：player.pos.xz + (offset_x, 5, offset_z)
+
 pub fn update_nest_marker_positions(
     mut q: Query<(&NestMarker, &mut Transform)>,
     player: Res<PlayerState>,
 ) {
-    // 用 player.pos（更平滑）而不是 block_pos（每格才动一次）
+
     let px = player.pos.x;
     let pz = player.pos.z;
     for (m, mut tf) in q.iter_mut() {
-        // Y 用 nest 原始 center.y + 5m，XZ 永远跟玩家
-        // 注：这里没存原始 Y，所以用 tf.translation.y 保持不变（启动时已设到 5m + nest.y）
+
+
         tf.translation.x = px + m.offset_x;
         tf.translation.z = pz + m.offset_z;
-        // Y 不动（启动时已 spawn 在 nest.center.y + 5，nest 是固定不动的）
+
     }
 }
 
-/// nest 屏幕方向指示器 marker（被 `update_nest_indicator` 系统刷新）
+
 #[derive(Component)]
 pub struct NestIndicatorText;
 
-/// nest 屏幕方向指示器系统：每帧找最近 nest（30 格内）→ 更新顶部 HUD
-///
-/// 格式：`↗ Nest 12m / 8 怪` （8 怪 = nest.individuals.len()）
-/// 没有 nest 时显示 "🔍 附近无巢穴（>30 格）"
+
+
+
+
 pub fn update_nest_indicator(
     mut q_text: Query<&mut Text, With<NestIndicatorText>>,
     player: Res<PlayerState>,
@@ -954,8 +954,8 @@ pub fn update_nest_indicator(
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
 
-    // 收集所有 active nest（kingdom 没摧毁的）
-    let mut best: Option<([i32; 3], u32, f32)> = None; // (center, individuals, dist2)
+
+    let mut best: Option<([i32; 3], u32, f32)> = None;
     for (_kid, k) in monsters.kingdoms.iter() {
         if k.destroyed {
             continue;
@@ -981,7 +981,7 @@ pub fn update_nest_indicator(
         return;
     }
 
-    // 算相对相机的方向（→ 屏幕箭头，复用 animal_indicator 公式）
+
     let arrow = if let Ok(tf) = camera.single() {
         let f = tf.forward();
         let cam = Vec2::new(f.x, f.z);
@@ -992,7 +992,7 @@ pub fn update_nest_indicator(
         };
         let dot = nest_v.dot(cam_n);
         let cross = nest_v.x * cam_n.y - nest_v.y * cam_n.x;
-        // cross < 0 = nest 在右；angle 量化到 8 方向
+
         let angle = cross.atan2(dot);
         let oct = ((-angle).to_degrees() / 45.0).round() as i32;
         match oct.rem_euclid(8) {
@@ -1013,11 +1013,11 @@ pub fn update_nest_indicator(
     text.0 = format!("{} Nest {:.0}m / {} mobs", arrow, dist, count);
 }
 
-/// 玩家最后移动的方向（用于第一人称相机看向方向）
+
 #[derive(Resource, Default)]
 pub struct LastMoveDirection(pub Vec3);
 
-/// 玩家键盘输入：WASD 移动（相对相机方向）/ Space 跳 / Shift 下降 / Q E 转向 / G 采集 / K 杀动物 / F 造国 / J 杀怪 / Esc 退出
+
 pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<PlayerState>,
@@ -1031,15 +1031,15 @@ pub fn player_input(
     freefly: Res<FreeFlyState>,
     cfg: Res<RenderConfig>,
 ) {
-    // FreeFly 模式下，WASD/Space/Shift/QE 全部交给 freefly_movement
-    // 这里只保留鼠标视角外的「功能键」（G/F/J/K）
+
+
     let freefly_active = freefly.enabled;
 
-    // 读相机当前朝向 → 算 forward / right（水平）
-    // 读相机当前朝向 → 算 forward / right（水平）
+
+
     let cam_tf = camera.single().ok();
     let (forward, right) = if let Some(tf) = cam_tf {
-        // bevy 0.18: Transform::forward() 返回 local -Z 在 world 中的方向（相机看哪里）
+
         let f = tf.forward();
         let f_h = Vec3::new(f.x, 0.0, f.z);
         let f_n = if f_h.length() > 0.01 {
@@ -1047,15 +1047,15 @@ pub fn player_input(
         } else {
             Vec3::new(1.0, 0.0, 0.0)
         };
-        // right = fwd × Y：看着 -Z 时 right = +X（D 往右移，符合 FPS 习惯）
+
         let r = f_n.cross(Vec3::Y);
         (f_n, r)
     } else {
         (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0))
     };
 
-    // 移动：W = +forward, S = -forward, A = -right, D = +right；相对相机方向
-    // FreeFly 模式下 WASD/Space/Shift/QE 全部跳过（由 freefly_movement 处理）
+
+
     let mut d = Vec3::ZERO;
     if !freefly_active {
         if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
@@ -1078,8 +1078,8 @@ pub fn player_input(
         }
     }
 
-    // 转向：Q 左转 22.5°，E 右转 22.5°（改 CameraAngles.yaw，相机跟）
-    // FreeFly 下 Q/E 是加速键（见 freefly_movement），跳过这里
+
+
     if !freefly_active {
         if keys.just_pressed(KeyCode::KeyQ) {
             angles.yaw -= YAW_QE_STEP;
@@ -1088,7 +1088,7 @@ pub fn player_input(
         }
     }
 
-    // 把 d 量化成 [i32; 3] 1-格移动（选主轴）
+
     if d.length() > 0.01 {
         if d.y.abs() > 0.01 && d.x.abs() < 0.01 && d.z.abs() < 0.01 {
             try_player_move(
@@ -1112,10 +1112,10 @@ pub fn player_input(
                 cfg.ground_step_threshold,
             );
         }
-        // 玩家输入不再改 LastMoveDirection（让相机自动转动物 / Q E 改朝向）
+
     }
 
-    // 采集：G 键 = 挖当前脚下方块
+
     if keys.just_pressed(KeyCode::KeyG) {
         let (x, y, z) = (
             player.block_pos[0],
@@ -1142,10 +1142,10 @@ pub fn player_input(
         }
     }
 
-    // 杀动物：K 键（creature 系统自己处理）
-    // （不在这写 — 由 creature::player_attack_creatures 系统响应）
 
-    // 造国：F 键 = 在当前坐标立旗
+
+
+
     if keys.just_pressed(KeyCode::KeyF) {
         if player.nation_id.is_some() {
             info!("🚩 你已经是一个国家的王了，不能再立旗");
@@ -1154,7 +1154,7 @@ pub fn player_input(
             let cost = nations.next_flag_cost();
             match nations.found(
                 &mut pool,
-                0u32, // single-player：玩家固定 id=0
+                0u32,
                 format!("玩家之国@{:?}", player.block_pos),
                 player.block_pos,
                 tick_now,
@@ -1171,10 +1171,10 @@ pub fn player_input(
         }
     }
 
-    // 杀怪：J 键 = 攻击 2 格内最近怪物个体
+
     if keys.just_pressed(KeyCode::KeyJ) {
         let p = player.block_pos;
-        let mut best: Option<(f32, u32, u32, u32)> = None; // (dist, kid, nid, iid)
+        let mut best: Option<(f32, u32, u32, u32)> = None;
         for (kid, k) in monsters.kingdoms.iter() {
             for (nid, n) in k.nests.iter() {
                 for (iid, ind) in n.individuals.iter() {
@@ -1262,7 +1262,7 @@ pub fn player_stand_position_at(
 
 pub fn player_spawn_position_at(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
     let foot_y = standable_foot_y_any_height(world, x, z)?;
-    // Keep the avatar just above ground; the orbit camera supplies the overview.
+
     let sky_y = foot_y + 2;
     Some((
         Vec3::new(x as f32 + 0.5, sky_y as f32, z as f32 + 0.5),
@@ -1275,10 +1275,10 @@ fn set_player_position(player: &mut PlayerState, pos: Vec3, block_pos: [i32; 3])
     player.block_pos = block_pos;
 }
 
-/// 玩家移动：水平移动按软地表找落脚点，竖直移动只检查身体空间。
-///
-/// 这不是完整刚体物理；`PlayerState` 仍是 demo 的权威位置。关键是移动判定不再把
-/// “目标脚下格是 solid” 当成卡住，而是找目标 XZ 附近可站的地面，所以方块边缘不会卡脚。
+
+
+
+
 fn try_player_move(
     player: &mut PlayerState,
     game_world: &mut GameWorld,
@@ -1318,11 +1318,11 @@ fn try_player_move(
     true
 }
 
-// ---------------------------------------------------------------------------
-// 相机：auto_orbit 时绕玩家慢转；玩家控制时停在固定俯瞰角跟随玩家
-// ---------------------------------------------------------------------------
 
-/// 玩家 entity 的标记 component（和 PlayerState Resource 配合用）
+
+
+
+
 fn try_player_move_continuous(
     player: &mut PlayerState,
     game_world: &GameWorld,
@@ -1355,8 +1355,8 @@ fn try_player_move_continuous(
 #[derive(Component)]
 pub struct Player;
 
-/// 自动 demo 模式：每 N 秒随机移动玩家，让相机跟着转。
-/// 移动沿用手动输入的软地表落脚逻辑，避免演示路径贴墙或卡边。
+
+
 pub fn auto_demo(
     time: Res<Time>,
     mut player: ResMut<PlayerState>,
@@ -1369,25 +1369,25 @@ pub fn auto_demo(
     mut walk_timer: Local<f32>,
     mut walk_step: Local<u32>,
     mut auto_frame: Local<u32>,
-    // 目标点(WorldBlock 坐标);若 Some 且未到达,走这个方向;否则走随机方向
+
     mut walk_target: Local<Option<[i32; 3]>>,
     mut player_tf_q: Query<&mut Transform, With<Player>>,
     creatures: Query<&lk2_core::creature::Creature>,
     monsters: Res<lk2_core::monster::MonsterEcosystem>,
 ) {
-    // ── auto-demo 自动测试 F / J（不靠人按键，loop 也能验证）────────────
-    // 注意：放在 auto_walk 检查之前 — auto-demo 模式下 auto_walk=false，
-    // 但我们仍想跑 keypress 模拟来验证造国/杀怪逻辑。
+
+
+
     if cfg.auto_keys {
         *auto_frame += 1;
-        // t=1.0s: 按 F（第一次造国，应成功 +20 souls）
+
         if *auto_frame == 60 {
             keys.press(KeyCode::KeyF);
         }
         if *auto_frame == 62 {
             keys.release(KeyCode::KeyF);
         }
-        // t=4.0s: 按 J（杀怪 — 玩家身边可能没怪，info 一下即可）
+
         if *auto_frame == 240 {
             keys.press(KeyCode::KeyJ);
         }
@@ -1406,7 +1406,7 @@ pub fn auto_demo(
         if *auto_frame == 362 {
             keys.release(KeyCode::KeyK);
         }
-        // t=8.0s: 再按 F（应失败：已有国家）
+
         if *auto_frame == 480 {
             keys.press(KeyCode::KeyF);
         }
@@ -1419,7 +1419,7 @@ pub fn auto_demo(
         return;
     }
 
-    // 玩家按了任何移动键 → 让位给真实输入
+
     if keys.pressed(KeyCode::KeyW)
         || keys.pressed(KeyCode::KeyA)
         || keys.pressed(KeyCode::KeyS)
@@ -1430,7 +1430,7 @@ pub fn auto_demo(
         return;
     }
     *walk_timer += time.delta_secs();
-    // iter_198 knife 2: --auto-demo 模式下 0.3s → 0.1s, 12s loop 走 120 步, 触发 ≥4 个 walk_target 完成节点
+
     let walk_interval = if cfg.auto_keys { 0.1 } else { cfg.auto_walk_interval_secs };
     if *walk_timer < walk_interval {
         return;
@@ -1438,8 +1438,8 @@ pub fn auto_demo(
     *walk_timer = 0.0;
     *walk_step += 1;
 
-    // iter_198 knife 2+: walk 持续走, 每次 walk_target 到达 → found() 内部 flag_count 8 cap 满后 fail skip
-    // 刷新 walk_target:没有 / 已到达 → 重选最近的 Cow 或 Nest
+
+
     let need_refresh = match *walk_target {
         None => true,
         Some(t) => {
@@ -1449,16 +1449,16 @@ pub fn auto_demo(
         }
     };
     if need_refresh {
-        // iter_199: 强制 walk_target 离玩家 ≥5m, 不然 8 国全建在 (48,16,46) 玩家不动
-        // (5m = 25 sq 距离平方, 用 dx*dx + dz*dz >= 25 过滤, 跳过近邻 creature/nest)
-        const MIN_WALK_SPREAD: f32 = 25.0; // 5m² 距离平方
+
+
+        const MIN_WALK_SPREAD: f32 = 25.0;
         let mut best: Option<(f32, [i32; 3])> = None;
         let p = player.block_pos;
         let mut consider = |pos: [i32; 3], weight: f32| {
             let dx = (pos[0] - p[0]) as f32;
             let dz = (pos[2] - p[2]) as f32;
             let d2 = dx * dx + dz * dz * weight;
-            // iter_199: 只接受距离 ≥5m 的目标, 否则 8 国在原地建, player 不动
+
             if d2 < MIN_WALK_SPREAD {
                 return;
             }
@@ -1485,7 +1485,7 @@ pub fn auto_demo(
         *walk_target = best.map(|(_, pos)| pos);
     }
 
-    // 8 水平方向 + 偶尔 Y 方向;移动函数负责找可站地面和身体空间。
+
     let all_dirs: [[i32; 3]; 9] = [
         [1, 0, 0],
         [-1, 0, 0],
@@ -1497,10 +1497,10 @@ pub fn auto_demo(
         [-1, 0, -1],
         [0, 1, 0],
     ];
-    // 过滤:前方 2 格都能按软地表落脚(避免被挡住后第一视角贴着墙看)
-    // **重要**: 用 player.block_pos[1] 作 near_y,不用 player.pos.y;
-    // smooth mesh 把 pos.y 抬高了 +22m 左右,会让 standable_foot_y 的搜索
-    // 范围跑到半空中,导致 good_dirs 永远是空集。
+
+
+
+
     let near_y = player.block_pos[1] as f32;
     let good_dirs: Vec<[i32; 3]> = all_dirs
         .iter()
@@ -1524,8 +1524,8 @@ pub fn auto_demo(
         .copied()
         .collect();
 
-    // 优先朝 walk_target 走;若目标方向被墙挡住 → 退化到原"按 walk_step 取"伪随机走
-    // 若连 good_dirs 都空(出生点附近 terrain 太崎岖/被动物/树围住),松软步兜底
+
+
     let d: [i32; 3] = if good_dirs.is_empty() {
         match *walk_target {
             Some(t) => {
@@ -1551,10 +1551,10 @@ pub fn auto_demo(
     };
 
     let before = player.block_pos;
-    // iter_198: walk 持续走, 每次 walk_target 到达 → found() 内部 cap 8 满后 fail skip
+
     let moved = try_player_move(&mut player, &mut game_world, d, cfg.ground_step_threshold);
     if !moved {
-        // 松软步:出生点附近 terrain 太密,正常 try_player_move 失败。
+
         let nx = player.block_pos[0] + d[0];
         let nz = player.block_pos[2] + d[2];
         if game_world.in_bounds(nx, 1, nz) {
@@ -1578,17 +1578,17 @@ pub fn auto_demo(
         }
     }
 
-    // iter_198: walk 到达 walk_target → 用唯一 AI king_id 建新国, 走完继续刷新目标
-    // (用 flag_count 派生唯一 id, 绕过 found() 内部 "已在一个国家里" 检查, 单次 loop 可触发 ≥4 个第二国)
-    // (nations.found() 内部 flag_count 8 上限, 满了自然 fail skip)
-    // (--auto-demo 模式灵魂不足时直接 add 到够, 因为这是 demo, 不是真实玩家)
+
+
+
+
     const AI_WALK_KING_ID_BASE: u32 = 100;
     if let Some(target) = *walk_target {
         let dx = (player.block_pos[0] - target[0]) as f32;
         let dz = (player.block_pos[2] - target[2]) as f32;
         if dx * dx + dz * dz <= 1.5 * 1.5 {
             let cost = nations.next_flag_cost();
-            // iter_198: demo 模式灵魂兜底, 真实玩家不受影响 (只 --auto-demo 模式加灵魂)
+
             if cfg.auto_keys {
                 let have = pool.get(lk2_core::resource::ResourceKind::Soul);
                 if have < cost {
@@ -1604,7 +1604,6 @@ pub fn auto_demo(
                 *auto_frame as u64,
             ) {
                 Ok(id) => {
-                    player.nations_founded += 1;
                     tracing::info!(
                         "[auto-demo walk] ✓ 到达 walk_target, 在 ({},{},{}) 真建新国 id={} (king={}, cost={}, total={})",
                         player.block_pos[0],
@@ -1626,7 +1625,7 @@ pub fn auto_demo(
         }
     }
 
-    // 周期性地采集脚下块（如果可采集）
+
     let cur = game_world.get(
         player.block_pos[0],
         player.block_pos[1] - 1,
@@ -1646,9 +1645,9 @@ pub fn auto_demo(
     }
 }
 
-/// 第一人称相机：
-/// - mouse_look=true  → 用 CameraAngles（鼠标控制 yaw/pitch）
-/// - mouse_look=false → 自动跟最近的可见动物（auto-demo 模式）
+
+
+
 pub fn first_person_camera(
     mut q: Query<&mut Transform, With<Camera3d>>,
     time: Res<Time>,
@@ -1666,7 +1665,7 @@ pub fn first_person_camera(
         return;
     };
 
-    // F3 自由視点：相机从 freefly.position 起飞，完全脱离玩家
+
     if freefly.enabled {
         let (sy, cy) = angles.yaw.sin_cos();
         let (sp, cp) = angles.pitch.sin_cos();
@@ -1677,10 +1676,10 @@ pub fn first_person_camera(
         return;
     }
 
-    // auto-demo + auto-orbit：俯瞰 orbit 模式（之前这个分支不存在，玩家被第一人称贴脸，
-    // 根本看不到自己的 avatar，所以 iter_85/90/96 的 player 维度都只拿 2-3 分）
-    // 相机绕玩家在水平面上慢转，水平 22m + 抬高 14m 俯视
-    // (22+14 是 2026-06-21 实测 iter_1450 看不到 20m 树/28m 山丘 → 拉远修复)
+
+
+
+
     if cfg.auto_orbit && !cfg.mouse_look {
         *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
         let a = *orbit_angle;
@@ -1688,7 +1687,7 @@ pub fn first_person_camera(
         let cam_pos = target
             + Vec3::new(
                 a.cos() * cfg.auto_orbit_distance,
-                14.0, // 抬高让 20m 圆周树顶 (ground_y+5) 进入 FOV
+                14.0,
                 a.sin() * cfg.auto_orbit_distance,
             );
         tf.translation = cam_pos;
@@ -1696,10 +1695,10 @@ pub fn first_person_camera(
         return;
     }
 
-    // C 切 3rd person：相机放玩家身后 4m + 高 2m，俯视玩家
+
     if *mode == CameraMode::ThirdPerson {
         let (sy, cy) = angles.yaw.sin_cos();
-        // yaw 对应水平 forward = (sy, 0, -cy)；相机在玩家身后 = -forward
+
         let back = Vec3::new(-sy, 0.0, cy);
         let target = player.pos + Vec3::Y * 1.4;
         let cam_pos = target + back * TP_DISTANCE + Vec3::new(0.0, TP_HEIGHT, 0.0);
@@ -1711,12 +1710,12 @@ pub fn first_person_camera(
     let eye = player.pos + Vec3::Y * 1.7;
 
     let dir = if cfg.mouse_look {
-        // 鼠标视角：forward = (sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch))
+
         let (sy, cy) = angles.yaw.sin_cos();
         let (sp, cp) = angles.pitch.sin_cos();
         Vec3::new(sy * cp, sp, -cy * cp)
     } else {
-        // 自动跟动物（auto-demo 模式）：找最近可见动物
+
         let mut candidates: Vec<(f32, [i32; 3])> = Vec::new();
         for c in creatures.iter() {
             let dx = (c.block_pos[0] as f32 + 0.5) - eye.x;
@@ -1769,4 +1768,4 @@ pub fn first_person_camera(
     let look_target = eye + dir * 5.0 - Vec3::new(0.0, 1.0, 0.0);
     tf.translation = eye;
     tf.look_at(look_target, Vec3::Y);
-}
+}

@@ -1,8 +1,4 @@
-"""validate_pretty_glbs.py — 用 pygltflib 验证所有 pretty .glb 结构合法.
 
-跑通 = glTF 2.0 spec 合法, mesh/material/accessor 引用都解析得到.
-这是 Rust 端 asset_server.load() 能成功的必要条件 (不充分 — 还要 Bevy 接受).
-"""
 from __future__ import annotations
 
 import sys
@@ -11,13 +7,12 @@ from pathlib import Path
 import pygltflib
 from pygltflib import GLTF2
 
-
 def validate(path: Path) -> tuple[bool, str]:
     try:
         glb = GLTF2.load(str(path))
     except Exception as e:
         return False, f"GLTF2.load failed: {e}"
-    # 必填字段
+
     if not glb.meshes:
         return False, "no meshes"
     for i, mesh in enumerate(glb.meshes):
@@ -37,13 +32,12 @@ def validate(path: Path) -> tuple[bool, str]:
             idx_acc = glb.accessors[prim.indices]
             if idx_acc.type != "SCALAR":
                 return False, f"mesh[{i}].prim[{j}] indices not SCALAR"
-            # 5. POSITION accessor 的 min/max 应有
+
             if pos_acc.min is None or pos_acc.max is None:
                 return False, f"mesh[{i}].prim[{j}] POSITION missing min/max"
-    # 材质 (Bevy 用 PBR; 我们导出的是 PBR, 应有 pbrMetallicRoughness)
+
     has_materials = bool(glb.materials)
     return True, f"ok, {len(glb.meshes)} meshes, {len(glb.nodes) if glb.nodes else 0} nodes, materials={has_materials}"
-
 
 def main() -> int:
     out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else
@@ -60,7 +54,6 @@ def main() -> int:
         return 1
     print(f"\nPASS: all {len(list(out_dir.glob('*.glb')))} glbs structurally valid")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

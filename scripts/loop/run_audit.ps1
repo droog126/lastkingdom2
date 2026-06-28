@@ -1,16 +1,22 @@
-# run_audit.ps1 - 启动 audit client (audit-pretty-models feature), 跑 N 秒后 kill
-# 输出: screenshots/iter_*.png, screenshots/state_*.json
+
+
 param(
     [int]$Seconds = 13
 )
 
-$ProjectRoot = "F:\rustProject\lastkingdom2"
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $ProjectRoot
 
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
 $env:RUST_LOG = "info"
 
-# 1. 确保 hashed bevy_dylib 拷贝到 binary 目录
+$RunLogsDir = Join-Path $ProjectRoot "run-logs"
+if (-not (Test-Path $RunLogsDir)) {
+    New-Item -ItemType Directory -Path $RunLogsDir -Force | Out-Null
+}
+$AuditOutLog = Join-Path $RunLogsDir "audit_run.out"
+$AuditErrLog = Join-Path $RunLogsDir "audit_run.err"
+
 $depsDir = Join-Path $ProjectRoot "target\debug\deps"
 $debugDir = Join-Path $ProjectRoot "target\debug"
 $latestHashed = Get-ChildItem "$depsDir\bevy_dylib-*.dll" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -22,13 +28,12 @@ if ($latestHashed) {
     }
 }
 
-# 2. 启 client
 Write-Host ">>> starting lk2-client with audit-pretty-models feature for $Seconds s ..." -ForegroundColor Green
 $proc = Start-Process -FilePath "cmd.exe" `
     -ArgumentList @("/c","cargo","run","-p","lk2-client","--features=dev-dynamic-linking,audit-pretty-models","--","--offline","--auto-demo") `
     -PassThru -NoNewWindow `
-    -RedirectStandardOutput "screenshots\audit_run.out" `
-    -RedirectStandardError "screenshots\audit_run.err" `
+    -RedirectStandardOutput $AuditOutLog `
+    -RedirectStandardError $AuditErrLog `
     -WorkingDirectory $ProjectRoot
 Write-Host ">>> PID=$($proc.Id)"
 
@@ -37,7 +42,7 @@ Start-Sleep -Seconds $Seconds
 $alive = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
 if ($alive) {
     Write-Host ">>> killing after $Seconds s" -ForegroundColor Yellow
-    # kill cargo + 它的子进程 lk2-client
+
     Get-Process -Name "lk2-client" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     $proc | Stop-Process -Force -ErrorAction SilentlyContinue
 } else {

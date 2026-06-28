@@ -1,15 +1,8 @@
-//! [dev-only] pretty/ 资产可视化审计.
-//!
-//! 仅当 crate feature `audit-pretty-models` 开启时编译. 把所有 23 个
-//! assets/procedural/pretty/*.glb 摆成两圈, 用来在不动原 pretty/mod.rs
-//! 代码的前提下, 验证 Blender 资产在 Bevy 里能正常渲染 + 看大致外观.
-//!
-//! 跑法: cargo run -p lk2-client --features audit-pretty-models -- --offline
+
 
 use bevy::prelude::*;
 use lk2_core::world::World as GameWorld;
 
-/// 一圈 23 个 .glb — 顺序与 tools/build_all_models.py 输出一致.
 const RING_PATHS: &[(&str, &str)] = &[
     ("player_avatar", "procedural/pretty/player_avatar.glb"),
     ("monster_snake", "procedural/pretty/monster_snake.glb"),
@@ -54,8 +47,6 @@ const RING_PATHS: &[(&str, &str)] = &[
 #[derive(Component)]
 pub struct AuditPrettyMarker;
 
-/// 在 player 周围排成 2 圈: 内圈 r=8m (玩家 avatar / 怪物), 外圈 r=16m
-/// (环境资产). 高度按"脚下"基准 — 大部分模型 y=0 是脚, 直接放 ground_y.
 pub fn spawn_audit_ring(
     commands: &mut Commands,
     _meshes: &mut ResMut<Assets<Mesh>>,
@@ -97,9 +88,6 @@ pub fn spawn_audit_ring(
         RING_PATHS.len()
     );
 
-    // 内圈 r=5m y=+0m (脚底贴地, 玩家 avatar 锚点 = 脚底)
-    // 外圈 r=12m y=+0m (环境资产贴地, 大部分锚点 = 脚底)
-    // 云朵单独抬到 y=+6m 高空, 跟玩家错开
     spawn_ring(
         commands,
         &asset_server,
@@ -118,7 +106,7 @@ pub fn spawn_audit_ring(
         12.0,
         0.0,
     );
-    // 云朵 (边缘, 远离玩家, 不要挡视线)
+
     spawn_single(
         commands,
         &asset_server,

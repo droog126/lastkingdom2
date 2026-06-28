@@ -1,26 +1,26 @@
-//! Scenario Harness — 玩家模拟 + 录制系统
-//!
-//! 用法：写一个 JSON 剧本（player actions sequence），传给 binary，
-//! harness 会按剧本执行，并在指定 tick 窗口录制 state 到 JSON。
-//!
-//! 剧本格式 (scenario.json)：
-//! ```json
-//! {
-//!   "name": "iter07_flat_test",
-//!   "record_window": [0, 100],   // tick 0..100 录制
-//!   "steps": [
-//!     { "type": "move_to", "pos": [20, 14, 20] },
-//!     { "type": "record_begin" },
-//!     { "type": "gather", "count": 3 },
-//!     { "type": "wait_ticks", "ticks": 30 },
-//!     { "type": "found_nation" },
-//!     { "type": "screenshot", "name": "after_founding" },
-//!     { "type": "record_end" }
-//!   ]
-//! }
-//! ```
-//!
-//! 启动方式：binary 第一个参数 = 剧本路径
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -35,9 +35,9 @@ use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
 
-// ---------------------------------------------------------------------------
-// Scenario 定义
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Scenario {
@@ -50,59 +50,59 @@ pub struct Scenario {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type")]
 pub enum ScenarioStep {
-    /// 玩家走到指定坐标（3D A* 简单 BFS）
+
     #[serde(rename = "move_to")]
     MoveTo { pos: [i32; 3] },
-    /// 玩家向上/下/北/南/东/西移动一格
+
     #[serde(rename = "step")]
     Step { dir: [i32; 3] },
-    /// 采集当前方块 N 次
+
     #[serde(rename = "gather")]
     Gather { count: u32 },
-    /// 攻击最近的怪物
+
     #[serde(rename = "attack")]
     Attack,
-    /// 创国
+
     #[serde(rename = "found_nation")]
     FoundNation,
-    /// 升级人口
+
     #[serde(rename = "upgrade_pop")]
     UpgradePop { target: u32 },
-    /// 等待 N tick
+
     #[serde(rename = "wait_ticks")]
     WaitTicks { ticks: u64 },
-    /// 截屏（保存到 screenshots/<name>.png）
+
     #[serde(rename = "screenshot")]
     Screenshot { name: String },
-    /// 开始录制（之后每 tick 写 state 到 record log）
+
     #[serde(rename = "record_begin")]
     RecordBegin,
-    /// 结束录制
+
     #[serde(rename = "record_end")]
     RecordEnd,
-    /// 打印一行日志
+
     #[serde(rename = "log")]
     Log { msg: String },
-    /// 退出
+
     #[serde(rename = "quit")]
     Quit,
-    /// 动态往 world.geo_overlay 推一个 ShapeLayer（不影响 base pipeline）
-    /// JSON 直接展开 ShapeLayer 字段，外加 `name` / `weight` / `fill` / `shapes` / `biome_override` / `enabled`
+
+
     #[serde(rename = "add_geo_layer")]
     AddGeoLayer {
         layer: crate::world::terrain::ShapeLayer,
     },
-    /// 按名字移除之前 add_geo_layer 推入的 overlay
+
     #[serde(rename = "remove_geo_layer")]
     RemoveGeoLayer { name: String },
-    /// 清空所有 overlay
+
     #[serde(rename = "clear_geo_overlay")]
     ClearGeoOverlay,
 }
 
-// ---------------------------------------------------------------------------
-// Scenario State
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Resource, Default)]
 pub struct ScenarioState {
@@ -117,7 +117,7 @@ pub struct ScenarioState {
     pub pending_target: Option<[i32; 3]>,
     pub pending_gather_left: u32,
     pub end_requested: bool,
-    /// MoveTo step 开始时的 tick；用于超时强制 advance（避免 fallback 死循环）
+
     pub move_to_started_at_tick: Option<u64>,
 }
 
@@ -176,12 +176,12 @@ pub fn award_gathered_resource(
     Ok(new_value)
 }
 
-// ---------------------------------------------------------------------------
-// 加载：要么从 CLI 参数，要么从 scenarios/default.json
-// ---------------------------------------------------------------------------
+
+
+
 
 pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
-    // 第一个非 cargo 参数是剧本路径
+
     let path = args.iter().skip(1).find(|a| !a.starts_with("--") && a.ends_with(".json")).cloned();
 
     if let Some(p) = path {
@@ -199,7 +199,7 @@ pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
         }
     }
 
-    // 默认剧本：spawn 中心 + wander + record
+
     Scenario {
         name: "default".into(),
         record_window: Some((0, 60)),
@@ -223,9 +223,9 @@ pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 剧本执行 system
-// ---------------------------------------------------------------------------
+
+
+
 
 pub fn scenario_runner(
     time: Res<Time>,
@@ -239,7 +239,7 @@ pub fn scenario_runner(
     };
 
     if state.end_requested {
-        // 等几 tick 让 screenshot 完成
+
         if clock.tick > state.last_step_done_tick + 3 {
             std::process::exit(0);
         }
@@ -247,11 +247,11 @@ pub fn scenario_runner(
     }
 
     if state.step_in_progress {
-        return; // 当前 step 还在跑
+        return;
     }
 
     if state.current_step >= scenario.steps.len() {
-        // 跑完了，退出
+
         if clock.tick > state.last_step_done_tick + 3 {
             std::process::exit(0);
         }
@@ -267,16 +267,16 @@ pub fn scenario_runner(
             advance_step(&mut state);
         }
         ScenarioStep::WaitTicks { ticks } => {
-            // 在 wait_ticks tick 之后推进
+
             if clock.tick >= state.last_step_done_tick + ticks {
                 advance_step(&mut state);
             } else {
-                state.step_in_progress = false; // 每 tick 重试
+                state.step_in_progress = false;
             }
         }
         ScenarioStep::RecordBegin => {
-            // 修泄漏 (Sprint 1): 默认 scenario 不录 — 它会跨会话累积成几十 MB。
-            // 真实剧本（user-supplied *.json）才需要录制。
+
+
             if scenario.name == "default" || scenario.name == "idle" {
                 state.recording = false;
                 state.record_buffer.clear();
@@ -290,7 +290,7 @@ pub fn scenario_runner(
             state.recording = true;
             state.record_buffer.clear();
             let path = format!("screenshots/record_{}.jsonl", scenario.name);
-            // 1MB 安全网: 若文件已超 1MB, 用 ts 后缀轮转, 避免老剧本反复跑累积。
+
             if let Ok(meta) = std::fs::metadata(&path) {
                 if meta.len() > 1_048_576 {
                     let ts = std::time::SystemTime::now()
@@ -308,9 +308,9 @@ pub fn scenario_runner(
         }
         ScenarioStep::RecordEnd => {
             state.recording = false;
-            // 默认 scenario 没在录, buffer 应该是空的
+
             if !state.record_path.as_os_str().is_empty() {
-                // dump record_buffer 到文件
+
                 let jsonl: Vec<String> = state
                     .record_buffer
                     .iter()
@@ -330,7 +330,7 @@ pub fn scenario_runner(
             let path = format!("screenshots/{}_{}.png", scenario.name, name);
             info!("📸 截图 → {}", path);
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
-            // 等 1 tick 让 screenshot 完成
+
             if clock.tick > state.last_step_done_tick {
                 advance_step(&mut state);
             } else {
@@ -338,15 +338,15 @@ pub fn scenario_runner(
             }
         }
         ScenarioStep::MoveTo { pos } => {
-            // 之前这里写 step_in_progress = false，导致 scenario_runner 下一帧又跑
-            // 同一行 MoveTo handler → log "🚶 走向" 几百次（见 baseline_check.log 之前的 spam）
-            // 改成：保持 step_in_progress=true，由 simulate_player_actions 到达时 advance
+
+
+
             state.pending_target = Some(*pos);
             state.move_to_started_at_tick = Some(clock.tick);
             info!("🚶 走向 {:?}（tick {}）", pos, clock.tick);
         }
         ScenarioStep::Step { dir } => {
-            // 立即生效，advance
+
             state.current_dir = *dir;
             info!("👣 步 {:?}", dir);
             advance_step(&mut state);
@@ -399,7 +399,7 @@ pub fn scenario_runner(
             advance_step(&mut state);
         }
     }
-    let _ = time; // silence
+    let _ = time;
 }
 
 fn advance_step(state: &mut ScenarioState) {
@@ -407,9 +407,9 @@ fn advance_step(state: &mut ScenarioState) {
     state.step_in_progress = false;
 }
 
-// ---------------------------------------------------------------------------
-// 玩家模拟：完成 pending target / gather
-// ---------------------------------------------------------------------------
+
+
+
 
 pub fn simulate_player_actions(
     mut player: ResMut<PlayerState>,
@@ -420,11 +420,11 @@ pub fn simulate_player_actions(
     mut state: ResMut<ScenarioState>,
     clock: Res<SimClock>,
 ) {
-    // 1. 走 target
+
     if let Some(target) = state.pending_target {
         let cur = player.block_pos;
-        // 超时：MoveTo 跑了 >200 tick 还没到 → 强制 advance（避免 fallback 卡死）
-        // 1 tick ≈ 1s（sim 60s 现实 1 tick），200 tick = 200 sim 秒 = 真实 12 秒
+
+
         if let Some(start) = state.move_to_started_at_tick {
             if clock.tick.saturating_sub(start) > 200 {
                 warn!(
@@ -443,7 +443,7 @@ pub fn simulate_player_actions(
             (target[1] - cur[1]).signum(),
             (target[2] - cur[2]).signum(),
         ];
-        // 优先 XZ，再 Y
+
         let dir = if d[0] != 0 {
             [d[0], 0, 0]
         } else if d[2] != 0 {
@@ -455,17 +455,17 @@ pub fn simulate_player_actions(
         };
 
         if dir == [0, 0, 0] {
-            // 到达
+
             state.pending_target = None;
             state.move_to_started_at_tick = None;
             info!("✓ 到达 {:?}", target);
-            advance_step(&mut state); // 同时清 step_in_progress=false + current_step+=1
+            advance_step(&mut state);
         } else {
-            // 走 preferred 方向；OOB/被挡时回退 6 cardinal（修死循环）
+
             try_move_with_fallback(&mut player, &mut game_world, dir, target);
         }
     }
-    // 2. 采掘
+
     else if state.pending_gather_left > 0 {
         let (x, y, z) = (
             player.block_pos[0],
@@ -492,7 +492,7 @@ pub fn simulate_player_actions(
                 }
             } else {
                 info!("方块不可采掘，找下一个");
-                // 走一格再试（先过滤掉 OOB，避免再触发 OUT OF BOUNDS 日志）
+
                 let dirs: [[i32; 3]; 6] = [
                     [1, 0, 0],
                     [-1, 0, 0],
@@ -518,7 +518,7 @@ pub fn simulate_player_actions(
             }
         } else {
             info!("当前位置无可采掘物，找下一个");
-            // 走一格再试（先过滤掉 OOB，避免再触发 OUT OF BOUNDS 日志）
+
             let dirs: [[i32; 3]; 6] = [
                 [1, 0, 0],
                 [-1, 0, 0],
@@ -541,15 +541,15 @@ pub fn simulate_player_actions(
                     break;
                 }
             }
-            state.pending_gather_left -= 1; // skip
+            state.pending_gather_left -= 1;
         }
         if state.pending_gather_left == 0 {
             state.current_step += 1;
         }
     }
-    // 3. 攻击
+
     else if let Some(_s) = step_active(&state, ScenarioStepKind::Attack) {
-        // 找最近
+
         let mut best: Option<(u32, u32, u32, f32)> = None;
         for (kid, k) in monsters.kingdoms.iter() {
             if k.destroyed {
@@ -578,7 +578,7 @@ pub fn simulate_player_actions(
         }
         state.current_step += 1;
     }
-    // 4. 创国
+
     else if let Some(_s) = step_active(&state, ScenarioStepKind::FoundNation) {
         if nations.can_found_new() {
             let cost = nations.next_flag_cost() as u64;
@@ -599,7 +599,7 @@ pub fn simulate_player_actions(
         }
         state.current_step += 1;
     }
-    // 5. 升级人口
+
     else if let Some(target) = step_active(&state, ScenarioStepKind::UpgradePop) {
         if let Some(my_id) = player.nation_id {
             if let Some(n) = nations.nations.get_mut(&my_id) {
@@ -685,8 +685,8 @@ fn step_active(state: &ScenarioState, kind: ScenarioStepKind) -> Option<u32> {
     }
 }
 
-/// 走 preferred 方向；失败（OOB / 被挡）就回退到 6 个 cardinal 方向，
-/// 挑 in-bounds 且到 target 曼哈顿距离最近的那个。彻底解决 MoveTo 死循环。
+
+
 fn try_move_with_fallback(
     player: &mut PlayerState,
     game_world: &mut GameWorld,
@@ -738,7 +738,7 @@ fn attempt_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3
     }
     let b = game_world.get(new_pos[0], new_pos[1], new_pos[2]);
     if b.is_solid() {
-        // 找上方的空位
+
         for up in 1..=4 {
             let try_pos = [new_pos[0], new_pos[1] + up, new_pos[2]];
             if game_world.in_bounds(try_pos[0], try_pos[1], try_pos[2])
@@ -770,9 +770,9 @@ fn attempt_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3
     true
 }
 
-// ---------------------------------------------------------------------------
-// Tick 录制：scenario 开启录制时，每 tick 写一行 JSONL
-// ---------------------------------------------------------------------------
+
+
+
 
 pub fn scenario_tick_recorder(
     clock: Res<SimClock>,
@@ -807,7 +807,7 @@ pub fn scenario_tick_recorder(
         monsters_killed: player.monsters_killed,
         step_label,
     };
-    // 写到独立行（追加）
+
     if let Ok(line) = serde_json::to_string(&rec) {
         use std::io::Write;
         if let Ok(mut f) =
@@ -910,17 +910,17 @@ mod tests {
         };
         w.push_geo_layer(layer.clone());
         assert_eq!(w.geo_overlay.len(), 1);
-        // push 同名 = 替换
+
         let mut layer2 = layer.clone();
         layer2.weight = 9.0;
         w.push_geo_layer(layer2);
         assert_eq!(w.geo_overlay.len(), 1);
         assert_eq!(w.geo_overlay[0].weight, 9.0);
-        // 移除
+
         assert!(w.remove_geo_layer("a"));
         assert_eq!(w.geo_overlay.len(), 0);
         assert!(!w.remove_geo_layer("a"));
-        // clear
+
         w.push_geo_layer(layer);
         w.clear_geo_overlay();
         assert_eq!(w.geo_overlay.len(), 0);
@@ -929,14 +929,14 @@ mod tests {
     #[test]
     fn world_generate_voxel_uses_overlay_first() {
         use crate::world::{BlockType, World};
-        // procedural world with default pipeline
+
         let mut w = World::new(8);
         w.procedural = true;
-        // 在 (50, 10, 50) 不在 default pipeline 的中心
-        // 默认 pipeline 在 (0,0,0) 中心, 但 world 大小 8 → 0..8 范围
-        // 测 (3, 1, 3) 默认应该是 stone
+
+
+
         let baseline = w.generate_voxel(3, 1, 3);
-        // push 一个 BoxShape 覆盖 (3, 1, 3) → Wood
+
         let layer = ShapeLayer {
             name: "override".into(),
             weight: 99.0,
@@ -956,7 +956,7 @@ mod tests {
             BlockType::Wood,
             "overlay 应该覆盖 default pipeline"
         );
-        // overlay 外 (10, 1, 10) 仍走 pipeline
-        let _ = baseline; // 仅供参考
+
+        let _ = baseline;
     }
-}
+}

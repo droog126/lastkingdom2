@@ -29,9 +29,13 @@ Get-ChildItem screenshots\iter_*\iter_*.png | Sort LastWriteTime -Descending | S
 - `crates/core/src/` — shared sim/data/protocol modules (`world`, `ai`, `scenario`, `monster`, `nation`, `resource`, ...)
 - `scenarios/` — scenario JSON files (test scripts)
 - `screenshots/` — output of `loop.ps1` (PNG + state JSON)
-- `document/` — design notes (Blender export workflow, etc.)
+- `docs/` — design notes, architecture plans, gameplay design, and archived imports
 - `assets/` — art / 3D models
-- `loop.ps1`, `run_scenario.ps1` — closed-loop drivers
+- `loop.ps1`, `tdd.ps1` — root compatibility wrappers for daily development
+- `scripts/loop/` — closed-loop drivers and health checks
+- `scripts/dev/` — developer command wrappers
+- `scripts/ci/` — test and architecture audits
+- `scripts/maintenance/` — one-off repo maintenance helpers
 - `Agent.md` — the project's AI-agent operations manual (read this first)
 
 Legacy note: the old root `minecraft_bevy` package and `launchers/` wrappers were removed. Do not route new work through them.

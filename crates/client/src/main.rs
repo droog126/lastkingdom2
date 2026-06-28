@@ -1,28 +1,28 @@
-//! 万国起源：最后一国 钻石版 — 客户端 binary
-//!
-//! 启动一个 Bevy 窗口（DefaultPlugins），加载 lk2-core 提供的 sim / 协议，
-//! 运行渲染 / 输入 / HUD / 客户端 PvP 预测 / 怪物同步 等**只**在客户端跑的逻辑。
-//!
-//! ## 运行模式
-//!
-//! - 默认：尝试连接一个已启动的 lk2-server（UDP 5000）。当前任务（build-client）
-//!   还没接 UDP 传输，所以默认启动会 hang（待 wire-network-and-loop task 修）。
-//! - `--offline`：客户端启动一个**进程内**的 in-process sim（无 transport、无
-//!   server），行为与原先的单 binary demo 完全一致。loop.ps1 默认走 `--offline`。
-//!
-//! ## 依赖关系
-//!
-//! ```text
-//! lk2-client (DefaultPlugins + 渲染 + 输入 + 客户端 PvP)
-//!     ├── lk2-core (sim 逻辑 / 协议 / 数据结构)
-//!     │       └── bevy 0.18 + leafwing + lightyear 0.26
-//!     ├── bevy 0.18 (DefaultPlugins: winit / wgpu / window / ...)
-//!     ├── avian3d 0.6 (物理 — 客户端视觉插值用)
-//!     ├── lightyear 0.26 (ClientPlugins: NetworkMessages / Replication 资源)
-//!     └── ...
-//! ```
-//!
-//! 详细设计见 `docs/plans/client-server-split.md` §5 + §9 步骤 5。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -34,14 +34,14 @@ use std::path::PathBuf;
 
 use avian3d::prelude::{Collider, Gravity, LinearVelocity, PhysicsPlugins, RigidBody};
 
-// ---- 客户端 crate 内部模块（迁自 src/） ----
+
 mod controller_systems;
 mod pretty;
 mod pvp_systems;
 mod render;
 mod ui;
 
-// ---- lk2-core 共享 sim 逻辑 ----
+
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
@@ -59,7 +59,7 @@ use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
-// ---- 客户端 crate 内部模块的导出 ----
+
 use crate::controller_systems::ControllerPlugin;
 use crate::pretty::{
     PrettyConfig, animate_avatar, animate_monsters, follow_ground_discs, follow_monster_cubes,
@@ -82,8 +82,9 @@ use crate::render::{
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
 
-// ---- 重新导出 lk2-core PvP 数据（main.rs 里要直接用） ----
+
 const AUTO_DEMO_WAIT_TICKS: u64 = 1_800;
+const FIRST_SCREENSHOT_MIN_TICK: u64 = 90;
 
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
@@ -141,28 +142,28 @@ impl Default for NetworkSmoothingState {
 const ONLINE_INTERP_SPEED: f32 = 14.0;
 const ONLINE_SNAP_DISTANCE: f32 = 8.0;
 
-// ---------------------------------------------------------------------------
-// CLI 解析
-// ---------------------------------------------------------------------------
 
-/// 启动时解析的 preset 名
+
+
+
+
 static PRESET_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 fn preset_name_static() -> &'static str {
     PRESET_NAME.get().map(|s| s.as_str()).unwrap_or("default")
 }
 
-/// --walk=x,z 解析的 spawn 位置
+
 static WALK_OVERRIDE: std::sync::OnceLock<Option<(i32, i32)>> = std::sync::OnceLock::new();
 fn walk_override_static() -> Option<(i32, i32)> {
     WALK_OVERRIDE.get().copied().flatten()
 }
 
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
+
+
+
 
 fn main() {
-    // init tracing subscriber, 跟 server 一样让 info/warn 能看到
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -175,8 +176,8 @@ fn main() {
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
     let first_person_mode = args.iter().any(|a| a == "--first-person");
 
-    // 解析 --connect=<ip:port>（wire-network-and-loop 任务, 2026-06-10）
-    // --offline 时强制 offline 模式（即使用户写了 --connect）
+
+
     let connect_addr = lk2_core::transport::parse_connect_arg(&args);
     let network_mode = connect_addr.is_some() && !offline_mode;
     if network_mode {
@@ -191,7 +192,7 @@ fn main() {
         );
     }
 
-    // 解析 --preset
+
     let preset_name = args
         .iter()
         .find(|a| a.starts_with("--preset="))
@@ -200,11 +201,11 @@ fn main() {
     let _ = PRESET_NAME.set(preset_name.clone());
     println!("[terrain] preset = {}", preset_name);
 
-    // --smooth-terrain / --legacy-voxel
+
     let smooth_terrain = !args.iter().any(|a| a == "--legacy-voxel");
     println!("[render] smooth_terrain = {}", smooth_terrain);
 
-    // --walk=x,z
+
     let walk_pos = args
         .iter()
         .find(|a| a.starts_with("--walk="))
@@ -219,7 +220,7 @@ fn main() {
         }
     }
 
-    // 加载 scenario
+
     let scenario = if auto_demo_mode {
         Scenario {
             name: "idle".into(),
@@ -240,7 +241,7 @@ fn main() {
 
     let mut app = App::new();
 
-    // ===== 1. DefaultPlugins（含 winit / wgpu / WindowPlugin）=====
+
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin { file_path: "../../assets".into(), ..default() })
@@ -248,7 +249,7 @@ fn main() {
                 primary_window: Some(Window {
                     title: format!("万国起源：最后一国 钻石版 — {}", scenario.name).into(),
                     resolution: WindowResolution::new(1280, 720),
-                    // iter_198 knife 1: AutoNoVsync 在 wgpu 隐藏窗口仍 mailbox 节流, 改 Immediate
+
                     present_mode: PresentMode::Immediate,
                     ..default()
                 }),
@@ -256,31 +257,31 @@ fn main() {
             })
             .set(bevy::log::LogPlugin { level: bevy::log::Level::INFO, ..default() }),
     );
-    // iter_198 knife 1: WinitSettings 默认 Reactive (等事件), 隐藏窗口无事件就 stall sim.
-    // 强制 Continuous, focused + unfocused 都按帧率跑, 解 sim tick 卡 9.5 TPS 根因.
+
+
     app.insert_resource(bevy::winit::WinitSettings::continuous());
 
-    // ===== 2. 物理（avian3d）=====
+
     app.add_plugins(PhysicsPlugins::default()).insert_resource(Gravity::default());
 
-    // Always add ClientPlugins; offline mode simply skips spawning the network client entity.
+
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
 
-    // Required by lightyear 0.26 + workspace feature unification; without these,
-    // client startup can panic in network mode.
+
+
     app.init_resource::<lightyear::prelude::PeerMetadata>()
         .init_resource::<lk2_core::pvp::FixedTick>()
         .init_resource::<TimeOfDay>();
-    // Local Bevy message bus used by send_online_gameplay_commands before
-    // Lightyear forwards GameplayCommand to the server.
+
+
     app.add_message::<GameplayCommand>();
 
     if network_mode {
         let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
         app.add_systems(Startup, move |commands: Commands| {
-            // client_id 用启动时 unix timestamp ms 末 16 位, dev 模式不需要
-            // 全局唯一, 1 个 client 就够。如果同机起多个 client 再用 counter。
+
+
             let client_id_seed: u64 = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64 & 0xFFFF_FFFF_FFFF_FFFF)
@@ -289,12 +290,12 @@ fn main() {
         });
     }
 
-    // ===== 4. 资源初始化 =====
+
     app.init_resource::<RenderConfig>()
         .init_resource::<CameraAngles>()
         .init_resource::<SwordSwing>()
         .insert_resource(CameraMode::default())
-        // --first-person 必须先于 auto-demo 的 RenderConfig Startup 设置，否则会被覆盖
+
         .add_systems(
             Startup,
             move |mut mode: ResMut<CameraMode>, mut cfg: ResMut<RenderConfig>| {
@@ -303,14 +304,14 @@ fn main() {
                     cfg.auto_orbit = false;
                     cfg.auto_walk = false;
                     cfg.auto_keys = false;
-                    cfg.mouse_look = true; // FP 必须能转视角才像样
+                    cfg.mouse_look = true;
                     tracing::info!("📷 --first-person: CameraMode=FirstPerson, mouse_look=true");
                 }
             },
         )
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
-                // iter_196: auto_walk 开 — 让玩家真正朝 Cow/Nest 走几步,iter_197 knife 2 绑终态
+
                 cfg.auto_walk = true;
                 cfg.auto_orbit = true;
                 cfg.auto_keys = true;
@@ -331,8 +332,8 @@ fn main() {
         .init_resource::<TickRecorder>()
         .init_resource::<LastMoveDirection>()
         .init_resource::<FreeFlyState>()
-        // NOTE: CameraMode 已通过上面 insert_resource(CameraMode::default()) 注册；
-        // 后续的 --first-person Startup system 会在最后覆盖成 FirstPerson。不要在这里 init_resource 重置。
+
+
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
@@ -345,8 +346,8 @@ fn main() {
         })
         .insert_resource(scenario_state);
 
-    // ===== 5. PvP / 控制器 plugins（合并 lk2-core 的协议 + 客户端实现）=====
-    // V2 quick win: 注册 MatchState + Protection + SovereignSpark + MiningSite(本机可见但不写权威)
+
+
     app.add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
@@ -354,11 +355,11 @@ fn main() {
         .add_plugins(lk2_core::terrain_overlay::TerrainOverlayPlugin)
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
-        .add_plugins(lk2_core::objectives::ObjectivesPlugin) // T6 quest chain: q1 砍 10 木 / q2 创国 / q3 食物 / q4 人口 / q5 杀怪 / q6 到山顶
+        .add_plugins(lk2_core::objectives::ObjectivesPlugin)
         .add_plugins(ClientPvPPlugin)
         .add_plugins(ControllerPlugin);
 
-    // ===== 6. 启动系统（一次性 setup）=====
+
     app.add_systems(
         Startup,
         (
@@ -368,47 +369,46 @@ fn main() {
             setup_atmosphere,
             setup_cursor_grab,
             setup_world,
-            spawn_nest_markers, // ← nest-marker 任务: 在 setup_world 之后跑，monsters.demo_init 才有 nests
+            spawn_nest_markers,
             spawn_pretty,
             spawn_creatures,
             setup_hud,
             self_check,
             setup_player_pvp,
-            lk2_core::objectives::setup_default_objectives, // T6: 启动时塞默认 quest chain
-            lk2_core::objectives::setup_default_objectives, // ← T6 quest chain: 塞 default_chain (q1..q6)
+            lk2_core::objectives::setup_default_objectives,
         )
             .chain(),
     );
 
-    // ===== 7. 每帧 Update 系统（核心循环）=====
-    //
-    // 注意: bevy 0.18 的 `IntoScheduleConfigs` tuple impl 只到 20 元 (见
-    // bevy_ecs-0.18.1/src/schedule/config.rs:613 `all_tuples!(..., 1, 20, ...)`),
-    // 且 `.chain()` 不能在 tuple 里混 `.before(X)` (产生 boxed ScheduleConfigs,
-    // 不是 tuple 形式)。所以分多块 add_systems, 每块 tuple ≤ 20。
-    // 22 systems 拆 2 块: 第一块 scenario + network, 第二块 input/camera/HUD。
+
+
+
+
+
+
+
     app.add_systems(
         Update,
         (
-            // scenario / sim (3)
+
             lk2_core::scenario::scenario_runner,
             lk2_core::scenario::simulate_player_actions,
             lk2_core::scenario::scenario_tick_recorder,
-            // network mode (1): apply server-replicated PlayerPos to PlayerState
-            // (offline 模式下 PlayerPos 没注册组件, 这个系统是 no-op)
+
+
             apply_networked_position,
-            // 应用层 PlayerPos sync 接收 (走 ServerPosUpdate message, 绕开 lightyear
-            // 0.26 自动 UpdatesMessage 那 1%)
+
+
             apply_server_pos_update,
             debug_dump_replicated_entities,
             apply_authoritative_snapshot,
             apply_voxel_delta,
             send_online_gameplay_commands,
-            // 键盘 → leafwing ActionState(lightyear 会自动 serialize 上行)
-            // client 端必须用 ActionState 标记 pressed, lightyear_inputs_leafwing
-            // 的 ClientInputPlugin 才会把它打包成 InputMessage 发到 server。
+
+
+
             collect_keys_to_action_state,
-            // 客户端独有 (8) — split 一部分到第二个 chain 避免 tuple 超 20
+
             auto_demo,
             mouse_look_system,
             first_person_camera,
@@ -418,14 +418,14 @@ fn main() {
             offline_player_attack_creatures,
             animate_avatar,
             spawn_terrain_around_player,
-            toggle_cursor_grab_on_esc, // ← ESC 抓/放光标
+            toggle_cursor_grab_on_esc,
         )
             .chain(),
     );
     app.add_systems(
         Update,
         (
-            // F3 自由视角 / C 切 3rd person / F5 传送 / F8 切 preset (4)
+
             freefly_toggle,
             camera_mode_toggle,
             emergency_teleport,
@@ -436,25 +436,25 @@ fn main() {
     app.add_systems(
         Update,
         (
-            // PvP 客户端 (6)
+
             collect_local_input,
             client_attack_predict,
             on_hit_confirm,
             on_knockback_event,
             on_damage_result,
             trigger_visual_effects,
-            // 注意：ground_detection / character_movement / auto_step_up / knockback_decay / collect_input
-            // 已由 ControllerPlugin 注册到 FixedUpdate（见 controller_systems.rs:351）。
-            // 之前 main.rs 又在 Update 里重复注册，导致双重运行 + 物理/voxel 移动冲突 → 卡死。
+
+
+
         )
             .chain(),
     );
-    // freefly_movement 必须先于 first_person_camera (否则镜头不动)
+
     app.add_systems(Update, freefly_movement.before(first_person_camera));
-    // nest-marker 任务: 旗杆位置每帧跟玩家 XZ 偏移 (从 chain 拆出来避免 tuple > 20)
+
     app.add_systems(Update, update_nest_marker_positions);
-    // avatar / monster cube 跟随玩家位置（之前 follow_player_avatar 没注册，所有
-    // avatar 都堆叠在 startup 时的位置，导致 camera 看不到移动后的 avatar）
+
+
     app.add_systems(
         Update,
         (
@@ -465,27 +465,27 @@ fn main() {
         )
             .chain(),
     );
-    // 离线模式本地战斗输入 (P4 闭环: I/O/L = Attack, U = Block, Y = Parry)
-    app.add_systems(Update, collect_combat_input_offline);
-    // 离线模式 F 键 = 创国（仅当当前 objective 是 FoundNation 时生效,T6 quest chain)
-    app.add_systems(Update, offline_found_nation_input);
-    // interpolate_online_player / apply_authoritative_snapshot 之前被加
-    // 但函数没定义(都是 baseline 不稳定)。apply_networked_position
-    // 已经够用 (server 复制 PlayerPos → 写本机玩家 Transform)。
-    // 留着 hook 注释以备后续 per-client prediction / interpolation 加进来。
 
-    // ===== 8. 辅助系统（截图 / HUD / 退出 / tick 录制）=====
+    app.add_systems(Update, collect_combat_input_offline);
+
+    app.add_systems(Update, offline_found_nation_input);
+
+
+
+
+
+
     app.add_systems(
         Update,
         (
             simulation_tick,
             end_tick_system,
             update_hud,
-            update_tutorial_overlay, // ← 5s 倒计时 + 1s 淡出, 然后 despawn
+            update_tutorial_overlay,
             update_animal_indicator,
-            update_nest_indicator, // ← nest-marker 任务: 跟动物指示器同链, 已晚于 first_person_camera
+            update_nest_indicator,
             tick_recorder,
-            periodic_screenshot, // iter_197: 留在 chain 里跟 tick_recorder 同组, 避免拆出后调度
+            periodic_screenshot,
             despawn_dead_creatures,
             update_creatures,
             day_night_cycle,
@@ -494,11 +494,11 @@ fn main() {
             .chain(),
     );
 
-    // ===== 9. 启动！ =====
+
     app.run();
 }
 
-// Spawn the lightyear UDP client link in online mode.
+
 fn spawn_networked_client(
     mut commands: Commands,
     server_addr: std::net::SocketAddr,
@@ -516,17 +516,17 @@ fn spawn_networked_client(
         "[net] spawning client entity with UdpIo + LocalAddr(0.0.0.0:0) + PeerAddr({})",
         server_addr
     );
-    // 构造 NetcodeClient: 这是 lightyear 0.26 client 端的 "连接凭证" 组件,
-    // NetcodeClientPlugin::connect observer (`On<Connect>` at
-    // lightyear_netcode-0.26.4/src/client_plugin.rs:193) 跑时
-    // `Query<&mut NetcodeClient, Without<Connected>>` 必须能 match 到这个组件,
-    // 否则 `client.inner.connect()` 永远不调用。Authentication::Manual 是
-    // 开发模式 (生产环境应该走 backend HTTPS 拿 ConnectToken, 但本地单局域网
-    // 联机不需要这层安全, dev 模式直接 Manual 配 private_key 即可)。
-    // dev 模式: 跟 server 端 spawn_server 一致用固定 0xAA key + 固定 protocol_id。
-    // (生产环境应该 server 把 key 写 .lk2_server_key, client 从 argv / env 读)
+
+
+
+
+
+
+
+
+
     let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
-    let protocol_id: u64 = 0x4C4B3256_4E455457; // "LK2VNETW" → dev protocol id
+    let protocol_id: u64 = 0x4C4B3256_4E455457;
     let netcode_client = NetcodeClient::new(
         Authentication::Manual { server_addr, client_id: client_id_seed, private_key, protocol_id },
         NetcodeConfig::default(),
@@ -544,39 +544,39 @@ fn spawn_networked_client(
             LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
             PeerAddr(server_addr),
             netcode_client,
-            // 应用层 PlayerPos sync — client 端 receiver buffer (绕开 lightyear 0.26
-            // 自动 UpdatesMessage 那条 1% 卡死的路径, server 用 ServerMultiMessageSender
-            // 推 ServerPosUpdate, 走 MetadataChannel, 100% 可靠 + 不乱序)
+
+
+
             MessageReceiver::<ServerPosUpdate>::default(),
         ))
         .id();
-    // 手动 trigger LinkStart, 跟 server 端同理 (lightyear 0.26 文档明示
-    // "You can trigger LinkStart to start the link" — lightyear-0.26.4/src/lib.rs:133)。
-    // 不 trigger 的话 UdpIo 的 LinkStart observer 永远不跑, UDP socket 永远不 bind。
+
+
+
     info!(
         "[net] triggering LinkStart on client entity {:?}",
         client_id
     );
     commands.trigger(LinkStart { entity: client_id });
-    // 手动 trigger Connect: lightyear_netcode 0.26 NetcodeClientPlugin
-    // 加了 On<Connect> observer (lightyear_netcode-0.26.4/src/client_plugin.rs:193),
-    // 不 trigger 的话 client.inner.connect() 永远不跑, UDP 不真发 connect
-    // request 到 server, server 永远不会收到 client。必须 LinkStart 之后
-    // 立刻 trigger Connect (同 frame / 同 command batch)。
+
+
+
+
+
     info!("[net] triggering Connect on client entity {:?}", client_id);
     commands.trigger(Connect { entity: client_id });
 }
 
-// Mirror replicated server position onto PlayerState resource.
-// All client systems (terrain, avatar, camera) already read PlayerState, so this
-// is the only bridge needed between network and rendering.
+
+
+
 fn apply_networked_position(
     mut q: Query<(&mut Transform, &lk2_core::protocol::components::PlayerPos)>,
 ) {
-    // 注: 不带 With<Player> filter — server 端 spawn 的 authoritative player
-    // entity 复制到 client 时, 不会带 client 本地 crate::render::Player marker
-    // (server 端没有这个 type), 只有一个 Name("Player") 跟 Replicate 组件。
-    // 所以 query 不加 With<Player> filter, 不管哪个 entity 复制了 PlayerPos 都 apply。
+
+
+
+
     let mut count = 0;
     let mut first_pos = bevy::math::Vec3::ZERO;
     for (mut tf, pos) in q.iter_mut() {
@@ -585,8 +585,8 @@ fn apply_networked_position(
         count += 1;
     }
     if count > 0 {
-        // 复制确实到了:本地玩家 entity 上有 PlayerPos 组件
-        // (offline 模式没 server 复制 → count = 0, 不 log 噪音)
+
+
         tracing::info!(
             "[net] applied PlayerPos to {} player entity, pos={:?}",
             count,
@@ -595,11 +595,11 @@ fn apply_networked_position(
     }
 }
 
-// Debug: 5 秒一次 dump client world 里所有 entity 的 component name + lightyear
-// 关键 marker (Replicate / Linked / ClientOf / Connect token) 是否出现。
-// 给 wire-network-and-loop 任务排查 PlayerPos 复制是否真到 client world 用。
-// (Query<EntityRef> + TypedReflect / TypeRegistry 在 bevy 0.18 的接口
-//  仍不稳定, 走简化的 Query<Option<&Name>> + 多个 marker Query 计数)
+
+
+
+
+
 fn debug_dump_replicated_entities(
     run_mode: Res<ClientRunMode>,
     time: Res<Time>,
@@ -625,7 +625,7 @@ fn debug_dump_replicated_entities(
     let co = clientof_count.iter().count();
     let ln = linked_count.iter().count();
     let pp = playerpos_count.iter().count();
-    // 列出所有带 Name 的 entity + component 概要
+
     let mut sample: Vec<String> = Vec::new();
     for (e, name) in names.iter().take(8) {
         let n = name.map(|n| n.as_str()).unwrap_or("?");
@@ -643,23 +643,23 @@ fn debug_dump_replicated_entities(
     );
 }
 
-// ============================================================================
-// apply_server_pos_update — 应用层 PlayerPos sync 接收 (绕开 lightyear 0.26
-// 自动 UpdatesMessage 那 1%)
-//
-// server 端用 ServerMultiMessageSender 每 2 tick 推一个 ServerPosUpdate
-// (走 MetadataChannel, UnorderedReliable), client 端的 MessageReceiver buffer
-// 自动接收 (on_add hook 注册到 MessageManager.receive_messages, 跟新 protocol
-// `ServerPosUpdate` type bind 起来)。这里 drain 出来写 PlayerState.pos, 本机
-// render 系统的所有 reader 都会用新 pos。
-//
-// 注意: server 端推的是 server 端 sim player entity 的位置, client 端没有
-// "replicated server player entity" (因为 lightyear 0.26 UpdatesMessage 不来),
-// 所以这里**直接拿最新 ServerPosUpdate.pos 写 PlayerState.pos**, 反正
-// 单 client demo 我们就是要把 server 推过来的权威位置渲染到本机玩家身上。
-//
-// offline 模式不跑 (run_mode != Online, 走 early return)。
-// ============================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 fn apply_server_pos_update(
     run_mode: Res<ClientRunMode>,
     mut receiver_q: Query<
@@ -667,10 +667,10 @@ fn apply_server_pos_update(
     >,
     mut player: ResMut<PlayerState>,
 ) {
-    // 临时禁掉: server sim player 没动 → 推初始 pos 把 client 拉回原点, 玩家没法自由探索山。
-    // 联网 sim 链路修好后再恢复 (要让 client 端 visible 跟随 server-side authoritative pos)。
+
+
     if true {
-        // drain receiver (避免 buffer 涨爆)
+
         for mut receiver in receiver_q.iter_mut() {
             for _msg in receiver.receive() {}
         }
@@ -833,7 +833,7 @@ fn send_online_gameplay_commands(
     }
 }
 
-// Map local keyboard state into the replicated ActionState used by lightyear.
+
 fn collect_keys_to_action_state(
     cfg: Res<RenderConfig>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -844,18 +844,18 @@ fn collect_keys_to_action_state(
     let mut action_state = match q.single_mut() {
         Ok(s) => s,
         Err(_) => {
-            // 玩家 entity 不存在 (offline 模式 client 端没 replicated player, 没 Controlled)
-            // 或还没连上 server
+
+
             return;
         }
     };
 
     let w_pressed = keys.pressed(KeyCode::KeyW);
-    // auto-demo 模式强制按 W (推 input 上行, 让 server 端 sim player 移动, 验证
-    // closed-loop: input → server sim → server 推 pos → client visual)
+
+
     let w_active = w_pressed || cfg.auto_walk;
 
-    // Rebuild the action state each tick to avoid stale presses.
+
     *action_state = ActionState::<PlayerAction>::default();
 
     if w_active {
@@ -878,16 +878,16 @@ fn collect_keys_to_action_state(
     }
 }
 
-// ---------------------------------------------------------------------------
-// ClientPvPPlugin — 客户端 PvP 系统打包
-// ---------------------------------------------------------------------------
-//
-// 原 umbrella 的 `src/pvp/mod.rs::PvPPlugin` 同时 add 了 server 系统和 client
-// 系统。本 crate 是客户端，所以只 add client 那批。
-//
-// `FixedTick` / `DamageEvent` / `VisualEffectEvent` 是 message，必须显式
-// `add_message`（`register_message` 是给网络用的，message 总线是 bevy 自己
-// 的 `add_message`）。
+
+
+
+
+
+
+
+
+
+
 
 pub struct ClientPvPPlugin;
 
@@ -906,15 +906,15 @@ impl Plugin for ClientPvPPlugin {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 客户端独有：场景光、HUD、字体、相机
-// ---------------------------------------------------------------------------
 
-/// 太阳 marker
+
+
+
+
 #[derive(Component)]
 pub struct Sun;
 
-/// 昼夜循环用的时间（0..1）
+
 #[derive(Resource)]
 pub struct TimeOfDay(pub f32);
 impl Default for TimeOfDay {
@@ -931,7 +931,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn setup_light(mut commands: Commands) {
-    // 主光 (Sun) — 启用阴影投射，给场景立体感
+
     commands.spawn((
         DirectionalLight {
             illuminance: 22000.0,
@@ -942,25 +942,25 @@ fn setup_light(mut commands: Commands) {
         Transform::from_xyz(40.0, 80.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
         Sun,
     ));
-    // 副光 (fill) — 冷色环境补光，无阴影
+
     commands.spawn((
         DirectionalLight {
             illuminance: 6000.0,
             shadows_enabled: false,
-            color: Color::srgb(0.85, 0.88, 0.95), // 中性蓝白, 不偏冷
+            color: Color::srgb(0.85, 0.88, 0.95),
             ..default()
         },
         Transform::from_xyz(-40.0, 50.0, -25.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-    // 环境光适度降低，让阴影区域更明显
+
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.92, 0.90, 0.85), // 暖白, 不偏冷紫
+        color: Color::srgb(0.92, 0.90, 0.85),
         brightness: 0.6,
         affects_lightmapped_meshes: true,
     });
 }
 
-/// 昼夜循环：60 真实秒 = 1 游戏日（0..1）
+
 pub fn day_night_cycle(
     time: Res<Time>,
     mut tod: ResMut<TimeOfDay>,
@@ -987,13 +987,13 @@ pub fn day_night_cycle(
     if let Ok(mut l) = fill.single_mut() {
         l.illuminance = 3000.0 * dayness + 150.0;
     }
-    // 白天浅蓝 → 黄昏橙 → 深夜深蓝: 强制 dayness=1 时纯 sky_color, 避免偏紫
-    let day = (0.55, 0.78, 0.98); // 调亮, 避免 dayness=0.5 跟 night blend 出深蓝紫
+
+    let day = (0.55, 0.78, 0.98);
     let dusk = (0.95, 0.55, 0.30);
-    let night = (0.18, 0.25, 0.45); // 调淡 (从 0.05/0.07/0.18), 深夜也带点蓝
-    // 单段 lerp: 白天 → 黄昏 (sunset_glow 高时) → 夜晚 (dayness 低时)
-    // 默认 t=0.5 (正午) 时 w_dusk=1.0 → 整个画面都是橙色, 太丑
-    // 改成: w_dusk *= 0.35 让默认偏白天, 只在 t~0.4/0.6 时才明显橙
+    let night = (0.18, 0.25, 0.45);
+
+
+
     let w_dusk = sunset_glow * 0.35;
     let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);
     let w_day = 1.0 - w_dusk - w_night;
@@ -1004,9 +1004,9 @@ pub fn day_night_cycle(
     );
 }
 
-// ---------------------------------------------------------------------------
-// 客户端世界初始化：地形 + 玩家 + 资源 + 怪物
-// ---------------------------------------------------------------------------
+
+
+
 
 #[allow(clippy::too_many_arguments)]
 fn setup_world(
@@ -1039,7 +1039,7 @@ fn setup_world(
     ));
     player.block_pos = spawn;
     player.pos = spawn_pos;
-    // auto_demo: 锁死出生地中心 (48.5, 16, 48.5) — 不管 spawn 算法算哪, demo 必须从这里开始看
+
     if std::env::args().any(|a| a == "--auto-demo") {
         player.block_pos = [48, 16, 48];
         player.pos = Vec3::new(48.5, 16.0, 48.5);
@@ -1066,7 +1066,7 @@ fn sync_player_combat_anchor(mut q: Query<&mut Transform, With<Player>>, player:
     }
 }
 
-/// 启动自检：跑 100 tick headless sim invariants
+
 fn self_check(
     game_world: Res<GameWorld>,
     pool: Res<GlobalResourcePool>,
@@ -1099,7 +1099,7 @@ fn self_check(
     info!("{}", obs.report());
 }
 
-// In offline mode the client advances the shared sim locally for demo/self-loop use.
+
 
 fn simulation_tick(
     fixed_time: Res<Time<Fixed>>,
@@ -1143,9 +1143,9 @@ fn end_tick_system(
     }
 }
 
-// ---------------------------------------------------------------------------
-// 截图：每 5 秒一张（loop.ps1 用）
-// ---------------------------------------------------------------------------
+
+
+
 
 fn periodic_screenshot(
     time: Res<Time>,
@@ -1160,17 +1160,23 @@ fn periodic_screenshot(
     game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
 ) {
-    // iter_197 关键修复: Bevy 0.18 Time<()>=Time<Virtual> 在 headless 模式下会卡 0
-    // (sim 跑得慢, virtual time 才 0.25s 时 wall 已经 7.5s),
-    // 改用 std::time::Instant 拿 wall clock 真实秒数, 节流改 8s, 等 sim 渲染出图再拍
+
+
+
     let now = {
         use std::sync::OnceLock;
         static START: OnceLock<std::time::Instant> = OnceLock::new();
         let start = START.get_or_init(std::time::Instant::now);
         start.elapsed().as_secs_f32()
     };
-    let _ = time; // 保留参数避免连锁改动
-    // iter_198 截图节流 6s -> 8s wall: 18s loop 出 2 张 PNG (8s, 16s), 都在 render 起来后拍
+    let _ = time;
+
+
+
+    if clock.tick < FIRST_SCREENSHOT_MIN_TICK {
+        return;
+    }
+
     if now - clock.last_screenshot_wall < 8.0 {
         return;
     }
@@ -1215,9 +1221,9 @@ fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// PvP 初始化：给玩家 entity 挂上战斗组件
-// ---------------------------------------------------------------------------
+
+
+
 
 fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>) {
     use lk2_core::combat::{
@@ -1229,7 +1235,7 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
     let iron = WeaponId::IronSword.stats();
     for entity in player.iter() {
         let mut cmd = commands.entity(entity);
-        // 第 1 批:物理 + 角色控制 + V1 PvP (≤15 个)
+
         cmd.insert((
             RigidBody::Kinematic,
             Collider::capsule(0.3, 0.9),
@@ -1240,7 +1246,7 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
                 .with_knockback_resistance(0.1),
             lk2_core::controller::PlayerCollider::default(),
             CombatState::default(),
-            // Online mode reads and replicates input from this component.
+
             ActionState::<PlayerAction>::default(),
             WeaponStats {
                 reach: iron.reach,
@@ -1253,20 +1259,20 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
             Hitbox::default(),
             lk2_core::pvp::Ping(0.0),
             PositionHistory::new(60),
-            Health(100.0), // protocol Health 同步给其他客户端
+            Health(100.0),
         ));
-        // 第 2 批:V2 战斗组件 (HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer)
-        // 表格包 §19.1 hp_max=100, §19.2 STA max=100
+
+
         cmd.insert((
-            CombatHealth::default(),      // HP 100/100, 6 tick 无敌帧
-            CombatStamina::default(),     // STA 100, 18/s 恢复
-            CombatBlockState::default(),  // 格挡 45% 减伤, 6/s 持续扣, 4/次冲击
-            CombatParryWindow::default(), // 招架 0.16s 窗口, 0.40s 反击窗口
+            CombatHealth::default(),
+            CombatStamina::default(),
+            CombatBlockState::default(),
+            CombatParryWindow::default(),
             CombatStunState::default(),
             CombatKnockback::default(),
             CombatAttackState::default(),
-            CombatDowned::default(),          // 8s 倒地, 复活到 50% HP
-            CombatInputBuffer::new(0.16, 30), // 0.16s 输入缓冲 (~5 tick)
+            CombatDowned::default(),
+            CombatInputBuffer::new(0.16, 30),
         ));
         info!(
             "⚔ PvP 组件已挂载（铁剑 reach={}, dmg={}）+ V2 战斗组件（HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer）",
@@ -1275,9 +1281,9 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tick-level 录制
-// ---------------------------------------------------------------------------
+
+
+
 
 #[derive(Resource, Default)]
 pub struct TickRecorder {
@@ -1322,7 +1328,7 @@ fn tick_recorder(
     }
 }
 
-/// 构造完整 sim state JSON
+
 fn build_state_json(
     time: &Time,
     clock: &SimClock,
@@ -1458,5 +1464,10 @@ mod tests {
     #[test]
     fn auto_demo_waits_long_enough_for_first_screenshot() {
         assert!(AUTO_DEMO_WAIT_TICKS >= 1_500);
+    }
+
+    #[test]
+    fn first_screenshot_waits_for_meaningful_sim_progress() {
+        assert!(FIRST_SCREENSHOT_MIN_TICK >= 30);
     }
 }
