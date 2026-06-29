@@ -84,7 +84,7 @@ use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutori
 
 
 const AUTO_DEMO_WAIT_TICKS: u64 = 1_800;
-const FIRST_SCREENSHOT_MIN_TICK: u64 = 90;
+const FIRST_SCREENSHOT_MIN_TICK: u64 = 500;
 
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
@@ -1177,7 +1177,7 @@ fn periodic_screenshot(
         return;
     }
 
-    if now - clock.last_screenshot_wall < 8.0 {
+    if now - clock.last_screenshot_wall < 4.0 {
         return;
     }
     clock.last_screenshot_wall = now;
@@ -1188,6 +1188,7 @@ fn periodic_screenshot(
     let _ = std::fs::create_dir_all(&iter_dir);
     let png_path: PathBuf = format!("{}/iter_{:02}.png", iter_dir, iter_id).into();
     let state_path = format!("{}/final_state.json", iter_dir);
+    let diff_path = format!("{}/diff.json", iter_dir);
 
     info!("📸 截图 #{} → {}", iter_id, png_path.display());
     commands
@@ -1211,6 +1212,15 @@ fn periodic_screenshot(
             warn!("写 final_state.json 失败: {}", e);
         } else {
             info!("📝 final_state dumped → {}", state_path);
+        }
+    }
+    if let Some(diff) = build_state_diff_for_iter(iter_id, &state) {
+        if let Ok(s) = serde_json::to_string_pretty(&diff) {
+            if let Err(e) = std::fs::write(&diff_path, s) {
+                warn!("write diff.json failed: {}", e);
+            } else {
+                info!("diff.json dumped -> {}", diff_path);
+            }
         }
     }
 }
@@ -1468,6 +1478,119 @@ mod tests {
 
     #[test]
     fn first_screenshot_waits_for_meaningful_sim_progress() {
-        assert!(FIRST_SCREENSHOT_MIN_TICK >= 30);
+        assert!(FIRST_SCREENSHOT_MIN_TICK >= 500);
+    }
+
+    #[test]
+    fn state_diff_reports_sorted_numeric_deltas() {
+        let prev = serde_json::json!({
+            "tick": 100,
+            "player": {
+                "monsters_killed": 1,
+                "blocks_gathered": 4,
+                "nations_founded": 1
+            },
+            "pool": {
+                "wood": 50,
+                "food": 90,
+                "apple": 70,
+                "soul": 60
+            },
+            "nations": {
+                "flag_count": 7,
+                "total_nations": 7
+            },
+            "monsters": {
+                "current": 60,
+                "kingdoms": 1,
+                "nests": 3
+            },
+            "creatures": {
+                "passive_current": 5
+            },
+            "eco_cycle": {
+                "rabbits": 5,
+                "berry_bushes": 10,
+                "fruit": 1,
+                "fruit_eaten": 20,
+                "fruit_grown": 11
+            },
+            "observer": {
+                "anomalies": 0,
+                "invariant_violations": 0
+            }
+        });
+        let current = serde_json::json!({
+            "tick": 125,
+            "player": {
+                "monsters_killed": 2,
+                "blocks_gathered": 6,
+                "nations_founded": 1
+            },
+            "pool": {
+                "wood": 45,
+                "food": 93,
+                "apple": 70,
+                "soul": 60
+            },
+            "nations": {
+                "flag_count": 8,
+                "total_nations": 8
+            },
+            "monsters": {
+                "current": 58,
+                "kingdoms": 1,
+                "nests": 3
+            },
+            "creatures": {
+                "passive_current": 4
+            },
+            "eco_cycle": {
+                "rabbits": 5,
+                "berry_bushes": 10,
+                "fruit": 0,
+                "fruit_eaten": 23,
+                "fruit_grown": 13
+            },
+            "observer": {
+                "anomalies": 0,
+                "invariant_violations": 0
+            }
+        });
+
+        let diff = build_state_diff(&prev, &current);
+        assert_eq!(diff["prev_tick"], 100);
+        assert_eq!(diff["tick"], 125);
+
+        let deltas = diff["resource_deltas"].as_array().unwrap();
+        let paths = deltas
+            .iter()
+            .map(|delta| delta["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            vec![
+                "tick",
+                "pool.wood",
+                "eco_cycle.fruit_eaten",
+                "pool.food",
+                "eco_cycle.fruit_grown",
+                "monsters.current",
+                "player.blocks_gathered",
+                "creatures.passive_current",
+                "eco_cycle.fruit",
+                "nations.flag_count",
+                "nations.total_nations",
+                "player.monsters_killed"
+            ]
+        );
+
+        let wood = deltas
+            .iter()
+            .find(|delta| delta["path"] == "pool.wood")
+            .unwrap();
+        assert_eq!(wood["previous"], 50.0);
+        assert_eq!(wood["current"], 45.0);
+        assert_eq!(wood["delta"], -5.0);
     }
 }

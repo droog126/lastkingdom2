@@ -14,6 +14,7 @@ param(
 
 
     [int]$Seconds = 60,
+    [int]$MaxExtraWait = 60,
     [string]$RUST_LOG = $(if ($env:RUST_LOG) { $env:RUST_LOG } else { "info,lightyear_replication=debug,lightyear_connection=debug,lightyear_send=debug,lightyear_receive=debug" }),
 
 
@@ -87,7 +88,7 @@ Start-Sleep -Seconds 1
 
 
 
-$featureArgs = if ($Dynamic) { "--features dev-dynamic-linking,lk2-core/dev-dynamic-linking" } else { ""
+$featureArgs = if ($Dynamic) { "--features dev-dynamic-linking,lk2-core/dev-dynamic-linking,audit-pretty-models" } else { "--features audit-pretty-models"
 
 }
 if ($Dynamic) { Write-Host ">>> dynamic linking ON <<<" -ForegroundColor Cyan }
@@ -133,6 +134,13 @@ if (-not (Test-Path $clientExePath)) {
 $serverProc = $null
 $serverLog = Join-Path $ProjectRoot "screenshots\loop_server.log"
 $clientLog = Join-Path $ProjectRoot "screenshots\loop_run.log"
+$latestIterBeforeNumber = 0
+$latestIterBefore = Get-ChildItem "$ProjectRoot\screenshots\iter_*" -Directory -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+if ($latestIterBefore -and $latestIterBefore.Name -match '^iter_(\d+)$') {
+    $latestIterBeforeNumber = [int]$Matches[1]
+}
 $mode = "online"
 if ($UseOffline) {
     $mode = "offline"
@@ -194,7 +202,53 @@ if ($candidateDlls.Count -gt 0) {
 $clientProc = Start-Process -FilePath $clientExePath -ArgumentList $clientArgs -PassThru -NoNewWindow `
     -RedirectStandardOutput $clientLog -RedirectStandardError "$clientLog.err" `
     -WorkingDirectory $ProjectRoot
-Start-Sleep -Seconds $Seconds
+$startedAt = Get-Date
+$minStopAt = $startedAt.AddSeconds($Seconds)
+$maxStopAt = $minStopAt.AddSeconds($MaxExtraWait)
+$readyIter = $null
+do {
+    Start-Sleep -Seconds 1
+    if ($clientProc.HasExited) {
+        break
+    }
+
+    $now = Get-Date
+    if ($now -lt $minStopAt) {
+        continue
+    }
+
+    $candidate = Get-ChildItem "$ProjectRoot\screenshots\iter_*" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^iter_(\d+)$' -and [int]$Matches[1] -gt $latestIterBeforeNumber } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $candidate) {
+        continue
+    }
+
+    $statePath = Join-Path $candidate.FullName "final_state.json"
+    $png = Get-ChildItem (Join-Path $candidate.FullName "iter_*.png") -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not (Test-Path $statePath) -or -not $png -or $png.Length -lt 30KB) {
+        continue
+    }
+
+    try {
+        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+        if ([int64]$state.tick -ge 500) {
+            $readyIter = $candidate
+            break
+        }
+    } catch {
+        continue
+    }
+} while ((Get-Date) -lt $maxStopAt)
+
+if ($readyIter) {
+    Write-Host ">>> Loop capture ready: $($readyIter.Name)" -ForegroundColor Green
+} else {
+    Write-Host ">>> Loop capture did not reach ready state before timeout; stopping for health check" -ForegroundColor Yellow
+}
 $clientProc | Stop-Process -Force -ErrorAction SilentlyContinue
 if ($serverProc) {
     $serverProc | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -272,7 +326,7 @@ if ($mode -in @("online","noserver")) {
 }
 
 Write-Host ""
-Write-Host ">>> Done. AI: read latest screenshot + state JSON, decide next round" -ForegroundColor Magenta
+Write-Host ">>> Done. AI: read latest health.json first; if PARTIAL/FAIL, read assertions.json before PNG/state." -ForegroundColor Magenta
 
 
 $latestIterDir = $null

@@ -1,6 +1,6 @@
 {
-  "version": 5,
-  "spec": "v5-cute 梦幻可爱 Q 版 (糖果色 + 强 emissive + 大眼睛 + smooth 球形 + y ≤ 0.8m 贴地)",
+  "version": 6,
+  "spec": "v5-cute 梦幻可爱 Q 版 (糖果色 + 强 emissive + 大眼睛 + smooth 球形 + y ≤ 0.8m 贴地) + v6 terrain/buildings (cute 风格扩展地形与建筑)",
   "format": "glb",
   "assets": {
     "eco": [
@@ -33,6 +33,27 @@
       "poi_pillar_gold",
       "ground_disc_outer",
       "ground_disc_inner"
+    ],
+    "terrain": [
+      "mountain_snow",
+      "volcano",
+      "desert_dune",
+      "lake",
+      "swamp",
+      "cliff",
+      "cave_entrance",
+      "beach"
+    ],
+    "buildings": [
+      "house_small",
+      "watchtower",
+      "windmill",
+      "bridge_stone",
+      "well",
+      "barn",
+      "fence",
+      "shrine",
+      "lighthouse"
     ]
   }
 }

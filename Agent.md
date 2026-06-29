@@ -199,15 +199,19 @@ $env:RUST_LOG="info"
 - `screenshots/iter_NN/iter_NN.png`
 - `screenshots/iter_NN/final_state.json`
 - `screenshots/iter_NN/diff.json`
+- `screenshots/iter_NN/assertions.json`
 - `screenshots/iter_NN/decision.md`
 - `screenshots/iter_NN/health.json` —— AI 必须先读这个
 
 观察顺序：
 
-1. **先读 `health.json`**（~330 B 一行 JSON verdict：PNG luma + sim tick）—— 通常足以判断 PASS/PARTIAL/FAIL
-2. 只有 `health.json` 报 PARTIAL/FAIL 时，才去读 `final_state.json` + `diff.json`
-3. 只有 `health.json` 报 FAIL 且 reason 涉及视觉时，才去读 PNG（节省 token）
-4. 写 `decision.md`
+1. **先读 `health.json`**（一行 JSON verdict：截图 + sim tick + 断言摘要）—— 通常足以判断 PASS/PARTIAL/FAIL
+2. 只要 `health.json` 报 PARTIAL/FAIL，先读 `assertions.json`，按失败断言定位问题
+3. 再按需读 `final_state.json` + `diff.json`
+4. 只有 `health.json` 报 FAIL 且 reason 涉及视觉时，才去读 PNG（节省 token）
+5. 写 `decision.md`
+
+`PASS` 表示截图可读、final_state 可解析、tick 达到闭环完成阈值、observer 没有异常/不变量失败、自动 demo 有基本进展。`PARTIAL` 表示程序活着但没达到完整闭环契约，例如 tick 不够或玩法进展不足。`FAIL` 表示黑屏/坏图、状态缺失、observer 异常、玩家越界等硬失败。
 
 `health.json` 体积比 PNG 小 ~2000 倍。AI 不应每轮都解码 600KB 的 PNG —— **先读 health.json，按需深挖**。
 

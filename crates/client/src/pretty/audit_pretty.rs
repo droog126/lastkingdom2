@@ -42,6 +42,23 @@ const RING_PATHS: &[(&str, &str)] = &[
         "ground_disc_inner",
         "procedural/pretty/ground_disc_inner.glb",
     ),
+    ("mountain_snow", "procedural/pretty/mountain_snow.glb"),
+    ("volcano", "procedural/pretty/volcano.glb"),
+    ("desert_dune", "procedural/pretty/desert_dune.glb"),
+    ("lake", "procedural/pretty/lake.glb"),
+    ("swamp", "procedural/pretty/swamp.glb"),
+    ("cliff", "procedural/pretty/cliff.glb"),
+    ("cave_entrance", "procedural/pretty/cave_entrance.glb"),
+    ("beach", "procedural/pretty/beach.glb"),
+    ("house_small", "procedural/pretty/house_small.glb"),
+    ("watchtower", "procedural/pretty/watchtower.glb"),
+    ("windmill", "procedural/pretty/windmill.glb"),
+    ("bridge_stone", "procedural/pretty/bridge_stone.glb"),
+    ("well", "procedural/pretty/well.glb"),
+    ("barn", "procedural/pretty/barn.glb"),
+    ("fence", "procedural/pretty/fence.glb"),
+    ("shrine", "procedural/pretty/shrine.glb"),
+    ("lighthouse", "procedural/pretty/lighthouse.glb"),
 ];
 
 #[derive(Component)]
@@ -82,6 +99,27 @@ pub fn spawn_audit_ring(
         "poi_pillar_gold",
         "ground_disc_outer",
     ];
+    let terrain_names = [
+        "mountain_snow",
+        "volcano",
+        "desert_dune",
+        "lake",
+        "swamp",
+        "cliff",
+        "cave_entrance",
+        "beach",
+    ];
+    let buildings_names = [
+        "house_small",
+        "watchtower",
+        "windmill",
+        "bridge_stone",
+        "well",
+        "barn",
+        "fence",
+        "shrine",
+        "lighthouse",
+    ];
 
     info!(
         "[audit-pretty-models] spawning audit ring ({} assets)",
@@ -104,6 +142,24 @@ pub fn spawn_audit_ring(
         player_pos,
         ground_y,
         12.0,
+        0.0,
+    );
+    spawn_ring(
+        commands,
+        &asset_server,
+        &terrain_names,
+        player_pos,
+        ground_y,
+        9.0,
+        0.0,
+    );
+    spawn_ring(
+        commands,
+        &asset_server,
+        &buildings_names,
+        player_pos,
+        ground_y,
+        15.0,
         0.0,
     );
 

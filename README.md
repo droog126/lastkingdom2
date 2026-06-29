@@ -51,10 +51,15 @@ Each loop writes an iteration directory like:
 
 - `screenshots/iter_NN/iter_NN.png`
 - `screenshots/iter_NN/final_state.json`
+- `screenshots/iter_NN/diff.json`
+- `screenshots/iter_NN/health.json`
+- `screenshots/iter_NN/assertions.json`
 - `screenshots/iter_NN/decision.template.md`
 - `screenshots/iter_NN/decision.md` after AI review
 
-The next iteration should not proceed without a completed `decision.md`.
+Read `health.json` first. If the result is `PARTIAL` or `FAIL`, read `assertions.json`
+next for the machine-readable failure reasons before opening the PNG. The next iteration
+should not proceed without a completed `decision.md`.
 
 ## Modeling Workflow
 

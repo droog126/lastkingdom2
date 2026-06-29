@@ -82,7 +82,9 @@ pub struct AvatarPart {
     pub offset: Vec3,
 }
 
-const AVATAR_VISUAL_SCALE: f32 = 0.55;
+const AVATAR_VISUAL_SCALE: f32 = 0.95;
+const PLAYER_DISC_OUTER_RADIUS: f32 = 1.35;
+const PLAYER_DISC_INNER_RADIUS: f32 = 0.55;
 
 fn avatar_offset(offset: Vec3) -> Vec3 {
     offset * AVATAR_VISUAL_SCALE
@@ -107,6 +109,7 @@ pub struct CloudPuff {
 pub struct V2WorldMarker;
 
 
+#[allow(unreachable_code)]
 pub fn spawn_pretty(
     mut commands: Commands,
     game_world: Res<GameWorld>,
@@ -116,10 +119,21 @@ pub fn spawn_pretty(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-
-
-
-
+    #[cfg(feature = "audit-pretty-models")]
+    #[allow(unused_variables, unreachable_code)]
+    {
+        let _ = &cfg;
+        let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+        audit_pretty::spawn_audit_ring(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            _asset_server,
+            player.pos,
+            ground_top,
+        );
+        return;
+    }
 
     if cfg.show_water {
 
@@ -157,10 +171,10 @@ pub fn spawn_pretty(
     {
 
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.8, 0.05))),
+            Mesh3d(meshes.add(Cylinder::new(PLAYER_DISC_OUTER_RADIUS, 0.05))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.32, 0.48, 0.20, 0.65),
-                emissive: Color::srgb(0.20, 0.40, 0.10).into(),
+                base_color: Color::srgba(0.24, 0.62, 0.28, 0.75),
+                emissive: Color::srgb(0.22, 0.70, 0.20).into(),
                 perceptual_roughness: 0.95,
                 metallic: 0.0,
                 alpha_mode: AlphaMode::Blend,
@@ -172,10 +186,10 @@ pub fn spawn_pretty(
 
 
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.3, 0.05))),
+            Mesh3d(meshes.add(Cylinder::new(PLAYER_DISC_INNER_RADIUS, 0.05))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.55, 0.75, 0.30, 0.85),
-                emissive: Color::srgb(0.30, 0.50, 0.15).into(),
+                base_color: Color::srgba(0.82, 1.0, 0.32, 0.92),
+                emissive: Color::srgb(0.65, 0.90, 0.18).into(),
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
                 alpha_mode: AlphaMode::Blend,

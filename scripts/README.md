@@ -36,4 +36,6 @@ powershell -File scripts\maintenance\check_lock.ps1
 - Scripts must locate the repo root relative to `$PSScriptRoot`; no local absolute paths.
 - Runtime logs go to `run-logs/`.
 - Closed-loop visual output goes to `screenshots/`.
+- Closed-loop diagnosis starts at `screenshots/iter_NN/health.json`; use
+  `assertions.json` for exact PASS/PARTIAL/FAIL reasons.
 - Root scripts should remain thin compatibility wrappers.

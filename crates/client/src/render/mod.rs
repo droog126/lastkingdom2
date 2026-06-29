@@ -63,8 +63,8 @@ impl Default for RenderConfig {
 
 
             auto_orbit_distance: 22.0,
-            auto_walk: false,
-            auto_walk_interval_secs: 3.0,
+auto_walk: false,
+            auto_walk_interval_secs: 0.1,
             auto_keys: false,
             mouse_look: false,
 
