@@ -82,9 +82,7 @@ pub struct AvatarPart {
     pub offset: Vec3,
 }
 
-const AVATAR_VISUAL_SCALE: f32 = 0.95;
-const PLAYER_DISC_OUTER_RADIUS: f32 = 1.35;
-const PLAYER_DISC_INNER_RADIUS: f32 = 0.55;
+const AVATAR_VISUAL_SCALE: f32 = 0.55;
 
 fn avatar_offset(offset: Vec3) -> Vec3 {
     offset * AVATAR_VISUAL_SCALE
@@ -171,10 +169,10 @@ pub fn spawn_pretty(
     {
 
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(PLAYER_DISC_OUTER_RADIUS, 0.05))),
+            Mesh3d(meshes.add(Cylinder::new(0.8, 0.05))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.24, 0.62, 0.28, 0.75),
-                emissive: Color::srgb(0.22, 0.70, 0.20).into(),
+                base_color: Color::srgba(0.32, 0.48, 0.20, 0.65),
+                emissive: Color::srgb(0.20, 0.40, 0.10).into(),
                 perceptual_roughness: 0.95,
                 metallic: 0.0,
                 alpha_mode: AlphaMode::Blend,
@@ -186,10 +184,10 @@ pub fn spawn_pretty(
 
 
         commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(PLAYER_DISC_INNER_RADIUS, 0.05))),
+            Mesh3d(meshes.add(Cylinder::new(0.3, 0.05))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.82, 1.0, 0.32, 0.92),
-                emissive: Color::srgb(0.65, 0.90, 0.18).into(),
+                base_color: Color::srgba(0.55, 0.75, 0.30, 0.85),
+                emissive: Color::srgb(0.30, 0.50, 0.15).into(),
                 perceptual_roughness: 0.92,
                 metallic: 0.0,
                 alpha_mode: AlphaMode::Blend,
