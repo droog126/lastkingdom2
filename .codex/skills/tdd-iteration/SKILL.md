@@ -42,17 +42,17 @@ Even for visual tasks, test any pure function, state transition, or data selecti
 
 Choose by changed surface:
 
-```powershell
-.\tdd.ps1 -Scope core
-.\tdd.ps1 -Scope client
-.\tdd.ps1 -Scope server
-.\tdd.ps1 -Scope changed
-.\tdd.ps1 -Scope workspace
-.\tdd.ps1 -Scope audit
-.\tdd.ps1 -Scope fmt
+```sh
+just test-core
+just test-client
+just test-server
+just test-changed
+just test
+just audit-tdd
+just fmt
 ```
 
-Use `.\tdd.ps1 -Scope core` for pure core changes, `client` for client-only changes, `server` for server-only changes, and `workspace` for cross-crate or public API changes.
+Use `just test-core` for pure core changes, `just test-client` for client-only changes, `just test-server` for server-only changes, and `just test` for cross-crate or public API changes.
 
 If the whole repo already has formatting drift, format only files touched in the current task and report the remaining `cargo fmt --check` issue.
 

@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 use lk2_core::player::PlayerState;
 use lk2_core::world::World as GameWorld;
@@ -62,6 +60,69 @@ const RING_PATHS: &[(&str, &str)] = &[
     ("fence", "procedural/pretty/fence.glb"),
     ("shrine", "procedural/pretty/shrine.glb"),
     ("lighthouse", "procedural/pretty/lighthouse.glb"),
+];
+
+const KENNEY_RING_PATHS: &[(&str, &str, f32)] = &[
+    (
+        "kenney_bunny",
+        "kenney_cube-pets_1.0/Models/GLB format/animal-bunny.glb",
+        1.0,
+    ),
+    (
+        "kenney_deer",
+        "kenney_cube-pets_1.0/Models/GLB format/animal-deer.glb",
+        1.0,
+    ),
+    (
+        "kenney_cow",
+        "kenney_cube-pets_1.0/Models/GLB format/animal-cow.glb",
+        1.0,
+    ),
+    (
+        "kenney_villager_male_a",
+        "kenney_mini-characters/Models/GLB format/character-male-a.glb",
+        1.0,
+    ),
+    (
+        "kenney_villager_female_a",
+        "kenney_mini-characters/Models/GLB format/character-female-a.glb",
+        1.0,
+    ),
+    (
+        "kenney_campfire_pit",
+        "kenney_survival-kit/Models/GLB format/campfire-pit.glb",
+        1.0,
+    ),
+    (
+        "kenney_tent",
+        "kenney_survival-kit/Models/GLB format/tent.glb",
+        1.0,
+    ),
+    (
+        "kenney_workbench",
+        "kenney_survival-kit/Models/GLB format/workbench.glb",
+        1.0,
+    ),
+    (
+        "kenney_row_boat_small",
+        "kenney_pirate-kit/Models/GLB format/boat-row-small.glb",
+        1.0,
+    ),
+    (
+        "kenney_pirate_flag",
+        "kenney_pirate-kit/Models/GLB format/flag-pirate.glb",
+        1.0,
+    ),
+    (
+        "kenney_coin_gold",
+        "kenney_platformer-kit/Models/GLB format/coin-gold.glb",
+        1.0,
+    ),
+    (
+        "kenney_heart",
+        "kenney_platformer-kit/Models/GLB format/heart.glb",
+        1.0,
+    ),
 ];
 
 #[derive(Component)]
@@ -130,8 +191,9 @@ pub fn spawn_audit_ring(
     ];
 
     info!(
-        "[audit-pretty-models] spawning audit ring ({} assets)",
-        RING_PATHS.len()
+        "[audit-pretty-models] spawning audit ring ({} procedural, {} kenney assets)",
+        RING_PATHS.len(),
+        KENNEY_RING_PATHS.len()
     );
 
     spawn_ring(
@@ -170,6 +232,7 @@ pub fn spawn_audit_ring(
         15.0,
         0.0,
     );
+    spawn_kenney_ring(commands, &asset_server, player_pos, ground_y);
 
     spawn_single(
         commands,
@@ -187,6 +250,34 @@ pub fn spawn_audit_ring(
         player_pos,
         ground_y,
     );
+}
+
+fn spawn_kenney_ring(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    player_pos: Vec3,
+    ground_y: f32,
+) {
+    let radius = 20.0;
+    let n = KENNEY_RING_PATHS.len();
+    for (i, (name, path, scale)) in KENNEY_RING_PATHS.iter().enumerate() {
+        let angle = (i as f32) / (n as f32) * std::f32::consts::TAU;
+        let x = player_pos.x + angle.cos() * radius;
+        let z = player_pos.z + angle.sin() * radius;
+        let world_y = ground_y - 0.5;
+        let rel = Vec3::new(x - player_pos.x, world_y - ground_y, z - player_pos.z);
+        let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
+        commands.spawn((
+            SceneRoot(scene),
+            Transform::from_translation(Vec3::new(x, world_y, z)).with_scale(Vec3::splat(*scale)),
+            AuditPrettyMarker,
+            AuditRingOffset { rel },
+        ));
+        info!(
+            "[audit-pretty-models]   kenney [{}] {} at ({:.1}, {:.1})",
+            i, name, x, z
+        );
+    }
 }
 
 fn spawn_ring(

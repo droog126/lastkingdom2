@@ -1,5 +1,3 @@
-
-
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
@@ -16,7 +14,6 @@ pub fn ground_detection(
     let now = time.elapsed_secs();
 
     for (transform, collider, mut controller) in controllers.iter_mut() {
-
         let foot_pos = transform.translation - Vec3::Y * collider.half_height;
 
         let ray_dir = Dir3::NEG_Y;
@@ -32,13 +29,10 @@ pub fn ground_detection(
         );
 
         if let Some(hit_result) = hit {
-
             controller.is_grounded = true;
             controller.last_grounded_time = now;
             controller.ground_normal = Some(hit_result.normal);
-
         } else {
-
             if now - controller.last_grounded_time > 0.1 {
                 controller.is_grounded = false;
                 controller.ground_normal = None;
@@ -53,7 +47,6 @@ pub fn character_movement(
     input: Res<ButtonInput<KeyCode>>,
     _time: Res<Time>,
 ) {
-
     let cam_tf = camera.single().ok();
     let (forward, right) = if let Some(tf) = cam_tf {
         let f = tf.forward();
@@ -92,7 +85,6 @@ pub fn character_movement(
     let jump_requested = input.just_pressed(KeyCode::Space);
 
     for (mut velocity, mut controller, _transform) in controllers.iter_mut() {
-
         controller.move_input = Vec2::new(move_dir.x, move_dir.z);
         controller.jump_requested = jump_requested;
         controller.is_sprinting = sprinting;
@@ -108,7 +100,6 @@ pub fn character_movement(
         let target_vel = move_dir * speed * input_mult;
 
         if controller.is_grounded {
-
             velocity.x = target_vel.x;
             velocity.z = target_vel.z;
 
@@ -117,7 +108,6 @@ pub fn character_movement(
                 controller.is_grounded = false;
             }
         } else {
-
             let lerp_factor = controller.air_control;
             velocity.x = velocity.x.lerp(target_vel.x, lerp_factor);
             velocity.z = velocity.z.lerp(target_vel.z, lerp_factor);
@@ -139,7 +129,6 @@ pub fn auto_step_up(
     _voxel_colliders: Query<Entity, (With<Collider>, Without<PvPController>)>,
 ) {
     for (mut velocity, controller, transform, collider) in controllers.iter_mut() {
-
         if !controller.is_grounded || controller.move_input.length() < 0.01 {
             continue;
         }
@@ -162,7 +151,6 @@ pub fn auto_step_up(
         );
 
         if let Some(hit) = forward_hit {
-
             let hit_point = foot_pos + move_dir * hit.distance;
 
             let step_check_pos = hit_point + Vec3::Y * controller.step_height;
@@ -175,13 +163,10 @@ pub fn auto_step_up(
             );
 
             if let Some(above) = above_hit {
-
                 let step_height_actual = above.distance;
 
                 if step_height_actual <= controller.step_height {
-
                     velocity.y = controller.step_speed;
-
                 }
             }
         }
@@ -192,7 +177,6 @@ pub fn knockback_decay(time: Res<Time>, mut controllers: Query<&mut PvPControlle
     let dt = time.delta_secs();
 
     for mut controller in controllers.iter_mut() {
-
         controller.knockback_velocity *= 0.5_f32.powf(dt);
 
         controller.knockback_stun = (controller.knockback_stun - dt).max(0.0);
@@ -205,7 +189,6 @@ pub fn knockback_decay(time: Res<Time>, mut controllers: Query<&mut PvPControlle
 
 pub fn collect_input(keys: Res<ButtonInput<KeyCode>>, mut controllers: Query<&mut PvPController>) {
     for mut controller in controllers.iter_mut() {
-
         let mut input = Vec2::ZERO;
         if keys.pressed(KeyCode::KeyW) {
             input.y += 1.0;
@@ -237,7 +220,6 @@ pub fn spawn_voxel_colliders(
     _player: Query<&Transform, With<PvPController>>,
     _existing_colliders: Query<&Transform, (With<Collider>, Without<PvPController>)>,
 ) {
-
 }
 
 pub struct ControllerPlugin;

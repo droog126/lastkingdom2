@@ -1,6 +1,6 @@
 ---
 name: closed-loop-ai-dev
-description: Closed-loop AI iteration workflow for lastkingdom2. Use when tasks affect visuals, gameplay feel, client experience, offline auto-demo behavior, screenshots, scenario progression, observer health, loop.ps1, scripts/loop, or when the user asks for AI self-iteration, observe-decide-act, loop runs, screenshot review, health.json analysis, or decision.md.
+description: Closed-loop AI iteration workflow for lastkingdom2. Use when tasks affect visuals, gameplay feel, client experience, offline auto-demo behavior, screenshots, scenario progression, observer health, xtask loop, or when the user asks for AI self-iteration, observe-decide-act, loop runs, screenshot review, health.json analysis, or decision.md.
 ---
 
 # Closed Loop AI Dev
@@ -13,16 +13,14 @@ Use this skill for visual, gameplay, client UX, offline demo, scenario, screensh
 
 ## Run
 
-```powershell
-$env:BEVY_DISABLE_ACCESSIBILITY="1"
-$env:RUST_LOG="info"
-.\loop.ps1
+```sh
+just loop
 ```
 
 Quickly find latest iterations:
 
-```powershell
-Get-ChildItem screenshots\iter_* -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 3
+```sh
+cargo run -q -p xtask -- health
 ```
 
 ## Artifact Order

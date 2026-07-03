@@ -1,14 +1,6 @@
-
-
-
-
-
-
-
-
-
 use bevy::prelude::*;
 use lk2_core::controller::components::PvPController;
+use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::player::PlayerState;
 use lk2_core::world::{Biome, World as GameWorld};
 
@@ -17,7 +9,6 @@ use crate::render::CameraAngles;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
-
 
 #[derive(Resource, Debug, Clone)]
 pub struct PrettyConfig {
@@ -32,23 +23,14 @@ impl Default for PrettyConfig {
     }
 }
 
-
 #[derive(Component)]
 pub struct WaterMarker;
-
 
 #[derive(Component)]
 pub struct GroundDiscOuter;
 
-
 #[derive(Component)]
 pub struct GroundDiscInner;
-
-
-
-
-
-
 
 pub fn follow_ground_discs(
     player: Res<PlayerState>,
@@ -65,19 +47,13 @@ pub fn follow_ground_discs(
     }
 }
 
-
-
-
-
 pub fn follow_water(player: Res<PlayerState>, mut q: Query<&mut Transform, With<WaterMarker>>) {
     let Ok(mut tf) = q.single_mut() else {
         return;
     };
     tf.translation.x = player.pos.x;
     tf.translation.z = player.pos.z;
-
 }
-
 
 #[derive(Component)]
 pub struct AvatarPart {
@@ -203,12 +179,33 @@ fn spawn_avatar_part(
     ));
 }
 
-
 #[derive(Component)]
 pub struct MonsterCube {
     pub base: Vec3,
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EcoVisual {
+    Rabbit { id: u32, part: RabbitVisualPart },
+    BerryBush { id: u32 },
+    BerryFruit { id: u32, index: u32 },
+    Co2Bubble { index: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RabbitVisualPart {
+    Body,
+    Head,
+    EarLeft,
+    EarRight,
+    Tail,
+}
+
+pub fn eco_fruit_marker_count(fruit: u32) -> u32 {
+    fruit.min(3)
+}
+
+const ECO_CO2_BUBBLE_COUNT: u32 = 6;
 
 #[derive(Resource, Default)]
 pub struct PlayerAnimState {
@@ -218,7 +215,6 @@ pub struct PlayerAnimState {
     pub last_pos_y: f32,
     pub vertical_vel: f32,
     pub initialized: bool,
-    pub frame_count: u64,
 }
 
 pub fn update_player_anim_state(
@@ -228,10 +224,6 @@ pub fn update_player_anim_state(
     camera_angles: Res<CameraAngles>,
     mut state: ResMut<PlayerAnimState>,
 ) {
-    state.frame_count += 1;
-    if state.frame_count % 30 == 0 || state.frame_count < 5 {
-        info!("[anim] frame_count={} step_phase={:.2}", state.frame_count, state.step_phase);
-    }
     let dt = time.delta_secs().max(0.0001);
     let Ok(ctrl) = ctrl.single() else {
         return;
@@ -263,10 +255,8 @@ pub fn update_player_anim_state(
     state.last_pos_y = player.pos.y;
 }
 
-
 #[derive(Component)]
 pub struct CloudPuff {
-
     pub base: Vec3,
 
     pub phase: f32,
@@ -275,6 +265,8 @@ pub struct CloudPuff {
 #[derive(Component)]
 pub struct V2WorldMarker;
 
+#[derive(Component)]
+pub struct KenneyLandmark;
 
 #[allow(unreachable_code)]
 pub fn spawn_pretty(
@@ -282,7 +274,7 @@ pub fn spawn_pretty(
     game_world: Res<GameWorld>,
     player: Res<PlayerState>,
     cfg: Res<PrettyConfig>,
-    _asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -290,25 +282,24 @@ pub fn spawn_pretty(
     #[allow(unused_variables, unreachable_code)]
     {
         let _ = &cfg;
-        let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+        let ground_top =
+            effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
         audit_pretty::spawn_audit_ring(
             &mut commands,
             &mut meshes,
             &mut materials,
-            _asset_server,
+            asset_server,
             player.pos,
             ground_top,
         );
         return;
     }
 
+    let kenney_enabled = std::env::var("LK2_DISABLE_KENNEY")
+        .map(|value| !matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(true);
+
     if cfg.show_water {
-
-
-
-
-
-
         let s = 14.0_f32;
         let water_y = lk2_core::constant::WATER_Y - 1.5;
         let cx = player.pos.x;
@@ -332,11 +323,7 @@ pub fn spawn_pretty(
         );
     }
 
-
-
-
     {
-
         commands.spawn((
             Mesh3d(meshes.add(Cylinder::new(0.8, 0.05))),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -350,7 +337,6 @@ pub fn spawn_pretty(
             Transform::from_translation(Vec3::new(player.pos.x, player.pos.y - 0.05, player.pos.z)),
             GroundDiscOuter,
         ));
-
 
         commands.spawn((
             Mesh3d(meshes.add(Cylinder::new(0.3, 0.05))),
@@ -371,9 +357,7 @@ pub fn spawn_pretty(
         ));
     }
 
-
-
-if cfg.show_player_avatar {
+    if cfg.show_player_avatar {
         let base = player.pos;
 
         // i=0 head
@@ -624,8 +608,6 @@ if cfg.show_player_avatar {
         );
     }
 
-
-
     if cfg.show_monster_cubes {
         let monster_kinds = [
             (Color::srgb(0.5, 0.85, 0.2), "Snake"),
@@ -659,12 +641,7 @@ if cfg.show_player_avatar {
         info!("👹 5 个怪物球体已 spawn (7.5-14.7m 圆周, 半径 1.3m, 朝 player 走)");
     }
 
-
-
-
-
     let cloud_layouts: [(f32, f32, f32, f32, f32); 4] = [
-
         (0.7, 22.0, 18.0, 1.0, 0.7),
         (2.1, 18.0, 20.0, 0.8, 1.0),
         (3.8, 25.0, 22.0, 1.2, 0.8),
@@ -720,11 +697,7 @@ if cfg.show_player_avatar {
         ));
     }
 
-
-
-
     let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-
 
     for i in 0..8 {
         let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
@@ -755,9 +728,6 @@ if cfg.show_player_avatar {
         }
     }
 
-
-
-
     let rock_positions: [(f32, f32, f32); 10] = [
         (3.0, 3.0, 1.2),
         (-3.5, 3.2, 0.95),
@@ -771,7 +741,6 @@ if cfg.show_player_avatar {
         (-1.0, -4.8, 0.85),
     ];
     for (i, (rx, rz, scale)) in rock_positions.iter().enumerate() {
-
         let rock_color = match i % 3 {
             0 => Color::srgb(0.42, 0.42, 0.45),
             1 => Color::srgb(0.58, 0.55, 0.50),
@@ -788,9 +757,6 @@ if cfg.show_player_avatar {
             rock_color,
         );
     }
-
-
-
 
     let flower_positions: [(f32, f32); 10] = [
         (1.8, 1.8),
@@ -825,11 +791,6 @@ if cfg.show_player_avatar {
         );
     }
 
-
-
-
-
-
     let hill_distance = 28.0;
     let hill_offsets: [(f32, f32); 4] = [
         (hill_distance, hill_distance),
@@ -860,20 +821,80 @@ if cfg.show_player_avatar {
         player.pos,
         ground_y,
     );
-
-
-
-
+    if kenney_enabled {
+        spawn_kenney_landmarks(&mut commands, &asset_server, player.pos, ground_y);
+    }
 
     #[cfg(feature = "audit-pretty-models")]
     audit_pretty::spawn_audit_ring(
         &mut commands,
         &mut meshes,
         &mut materials,
-        _asset_server,
+        asset_server,
         player.pos,
         ground_y,
     );
+}
+
+fn spawn_kenney_landmarks(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    player_pos: Vec3,
+    ground_y: f32,
+) {
+    const LANDMARKS: &[(&str, &str, Vec3, f32)] = &[
+        (
+            "kenney_campfire_pit",
+            "kenney_survival-kit/Models/GLB format/campfire-pit.glb",
+            Vec3::new(4.8, -0.45, -3.2),
+            1.0,
+        ),
+        (
+            "kenney_tent",
+            "kenney_survival-kit/Models/GLB format/tent.glb",
+            Vec3::new(6.4, -0.45, -4.0),
+            1.0,
+        ),
+        (
+            "kenney_workbench",
+            "kenney_survival-kit/Models/GLB format/workbench.glb",
+            Vec3::new(3.3, -0.45, -5.0),
+            1.0,
+        ),
+        (
+            "kenney_row_boat_small",
+            "kenney_pirate-kit/Models/GLB format/boat-row-small.glb",
+            Vec3::new(-6.0, -0.45, 5.0),
+            1.0,
+        ),
+        (
+            "kenney_coin_gold",
+            "kenney_platformer-kit/Models/GLB format/coin-gold.glb",
+            Vec3::new(-2.7, 0.15, -3.2),
+            1.0,
+        ),
+        (
+            "kenney_heart",
+            "kenney_platformer-kit/Models/GLB format/heart.glb",
+            Vec3::new(-3.7, 0.25, -2.2),
+            1.0,
+        ),
+    ];
+
+    for (name, path, offset, scale) in LANDMARKS {
+        let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
+        let pos = Vec3::new(
+            player_pos.x + offset.x,
+            ground_y + offset.y,
+            player_pos.z + offset.z,
+        );
+        commands.spawn((
+            SceneRoot(scene),
+            Transform::from_translation(pos).with_scale(Vec3::splat(*scale)),
+            KenneyLandmark,
+        ));
+        info!("[kenney] spawned landmark {} at {:?}", name, pos);
+    }
 }
 
 fn spawn_v2_crown_season_markers(
@@ -892,10 +913,6 @@ fn spawn_v2_crown_season_markers(
         Color::srgb(0.28, 0.34, 0.24),
         Color::srgb(0.16, 0.26, 0.12),
     );
-
-
-
-
 
     let pois = [
         (
@@ -1006,8 +1023,258 @@ fn spawn_cube(
         .id()
 }
 
+pub fn spawn_eco_visuals(
+    mut commands: Commands,
+    eco: Res<EcoCycle>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let rabbit_body_mesh = meshes.add(Sphere::new(0.5));
+    let rabbit_head_mesh = meshes.add(Sphere::new(0.5));
+    let rabbit_ear_mesh = meshes.add(Cuboid::new(0.12, 0.48, 0.08));
+    let rabbit_tail_mesh = meshes.add(Sphere::new(0.5));
+    let bush_mesh = meshes.add(Sphere::new(0.5));
+    let fruit_mesh = meshes.add(Sphere::new(0.5));
+    let bubble_mesh = meshes.add(Sphere::new(0.5));
 
+    let rabbit_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.92, 0.82),
+        emissive: Color::srgb(0.35, 0.25, 0.20).into(),
+        perceptual_roughness: 0.72,
+        metallic: 0.0,
+        ..default()
+    });
+    let rabbit_inner_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.55, 0.68),
+        emissive: Color::srgb(0.35, 0.10, 0.16).into(),
+        perceptual_roughness: 0.72,
+        metallic: 0.0,
+        ..default()
+    });
+    let bush_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.22, 0.58, 0.20),
+        emissive: Color::srgb(0.04, 0.20, 0.03).into(),
+        perceptual_roughness: 0.88,
+        metallic: 0.0,
+        ..default()
+    });
+    let fruit_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.95, 0.14, 0.28),
+        emissive: Color::srgb(0.80, 0.05, 0.15).into(),
+        perceptual_roughness: 0.42,
+        metallic: 0.0,
+        ..default()
+    });
+    let bubble_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.45, 0.88, 1.0, 0.48),
+        emissive: Color::srgb(0.18, 0.55, 0.85).into(),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.18,
+        metallic: 0.0,
+        ..default()
+    });
 
+    for rabbit in &eco.rabbits {
+        spawn_eco_visual_part(
+            &mut commands,
+            rabbit_body_mesh.clone(),
+            rabbit_mat.clone(),
+            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::Body },
+            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
+            Vec3::new(0.70, 0.42, 0.95),
+        );
+        spawn_eco_visual_part(
+            &mut commands,
+            rabbit_head_mesh.clone(),
+            rabbit_mat.clone(),
+            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::Head },
+            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
+            Vec3::new(0.42, 0.38, 0.42),
+        );
+        spawn_eco_visual_part(
+            &mut commands,
+            rabbit_ear_mesh.clone(),
+            rabbit_inner_mat.clone(),
+            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::EarLeft },
+            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
+            Vec3::ONE,
+        );
+        spawn_eco_visual_part(
+            &mut commands,
+            rabbit_ear_mesh.clone(),
+            rabbit_inner_mat.clone(),
+            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::EarRight },
+            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
+            Vec3::ONE,
+        );
+        spawn_eco_visual_part(
+            &mut commands,
+            rabbit_tail_mesh.clone(),
+            rabbit_mat.clone(),
+            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::Tail },
+            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
+            Vec3::splat(0.26),
+        );
+    }
+
+    for berry in &eco.berries {
+        spawn_eco_visual_part(
+            &mut commands,
+            bush_mesh.clone(),
+            bush_mat.clone(),
+            EcoVisual::BerryBush { id: berry.id },
+            Vec3::new(berry.pos.x, 0.0, berry.pos.y),
+            Vec3::new(0.95, 0.58, 0.95),
+        );
+        for index in 0..3 {
+            spawn_eco_visual_part(
+                &mut commands,
+                fruit_mesh.clone(),
+                fruit_mat.clone(),
+                EcoVisual::BerryFruit { id: berry.id, index },
+                Vec3::new(berry.pos.x, 0.0, berry.pos.y),
+                Vec3::splat(0.18),
+            );
+        }
+    }
+
+    for index in 0..ECO_CO2_BUBBLE_COUNT {
+        spawn_eco_visual_part(
+            &mut commands,
+            bubble_mesh.clone(),
+            bubble_mat.clone(),
+            EcoVisual::Co2Bubble { index },
+            Vec3::ZERO,
+            Vec3::splat(0.28),
+        );
+    }
+
+    info!(
+        "Eco visuals spawned: {} rabbits, {} berry bushes, {} CO2 bubbles",
+        eco.rabbits.len(),
+        eco.berries.len(),
+        ECO_CO2_BUBBLE_COUNT
+    );
+}
+
+fn spawn_eco_visual_part(
+    commands: &mut Commands,
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    visual: EcoVisual,
+    pos: Vec3,
+    scale: Vec3,
+) {
+    commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(pos).with_scale(scale),
+        visual,
+    ));
+}
+
+pub fn update_eco_visuals(
+    time: Res<Time>,
+    eco: Res<EcoCycle>,
+    game_world: Res<GameWorld>,
+    mut q: Query<(&EcoVisual, &mut Transform)>,
+) {
+    let t = time.elapsed_secs();
+    for (visual, mut transform) in &mut q {
+        match *visual {
+            EcoVisual::Rabbit { id, part } => {
+                let Some(rabbit) = eco.rabbits.iter().find(|rabbit| rabbit.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                let x = rabbit.pos.x;
+                let z = rabbit.pos.y;
+                let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+                let phase = t * 5.0 + id as f32 * 0.9;
+                let hop = phase.sin().max(0.0) * 0.14;
+                let breath = (t * 2.2 + id as f32).sin() * 0.025;
+                let (offset, scale) = rabbit_part_pose(part, breath);
+                transform.translation = Vec3::new(x, ground_y, z) + offset + Vec3::Y * hop;
+                transform.scale = scale;
+                transform.rotation = Quat::from_rotation_y((t * 0.4 + id as f32).sin() * 0.35);
+            }
+            EcoVisual::BerryBush { id } => {
+                let Some(berry) = eco.berries.iter().find(|berry| berry.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                let x = berry.pos.x;
+                let z = berry.pos.y;
+                let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+                let sway = (t * 1.4 + id as f32).sin() * 0.035;
+                transform.translation = Vec3::new(x, ground_y + 0.36 + sway, z);
+                transform.scale = Vec3::new(0.95, 0.58 + sway.abs(), 0.95);
+            }
+            EcoVisual::BerryFruit { id, index } => {
+                let Some(berry) = eco.berries.iter().find(|berry| berry.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                if index >= eco_fruit_marker_count(berry.fruit) {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                }
+                let x = berry.pos.x;
+                let z = berry.pos.y;
+                let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+                let angle = index as f32 * std::f32::consts::TAU / 3.0 + id as f32 * 0.35;
+                let bob = (t * 3.0 + index as f32).sin() * 0.035;
+                transform.translation = Vec3::new(
+                    x + angle.cos() * 0.35,
+                    ground_y + 0.68 + bob,
+                    z + angle.sin() * 0.35,
+                );
+                transform.scale = Vec3::splat(0.18);
+            }
+            EcoVisual::Co2Bubble { index } => {
+                if eco.rabbits.is_empty() {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                }
+                let rabbit = &eco.rabbits[index as usize % eco.rabbits.len()];
+                let x = rabbit.pos.x;
+                let z = rabbit.pos.y;
+                let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+                let phase = t * 1.8 + index as f32 * 1.13;
+                let radius = 0.35 + index as f32 * 0.08;
+                let alpha_scale = (eco.co2 / 2.0).clamp(0.35, 1.35);
+                transform.translation = Vec3::new(
+                    x + phase.cos() * radius,
+                    ground_y + 0.95 + phase.sin().abs() * 0.75,
+                    z + phase.sin() * radius,
+                );
+                transform.scale = Vec3::splat((0.18 + index as f32 * 0.025) * alpha_scale);
+            }
+        }
+    }
+}
+
+fn rabbit_part_pose(part: RabbitVisualPart, breath: f32) -> (Vec3, Vec3) {
+    match part {
+        RabbitVisualPart::Body => (
+            Vec3::new(0.0, 0.34 + breath, 0.0),
+            Vec3::new(0.70, 0.42, 0.95),
+        ),
+        RabbitVisualPart::Head => (
+            Vec3::new(0.0, 0.58 + breath, -0.42),
+            Vec3::new(0.42, 0.38, 0.42),
+        ),
+        RabbitVisualPart::EarLeft => (
+            Vec3::new(-0.13, 0.95 + breath, -0.47),
+            Vec3::new(1.0, 1.0, 1.0),
+        ),
+        RabbitVisualPart::EarRight => (
+            Vec3::new(0.13, 0.95 + breath, -0.47),
+            Vec3::new(1.0, 1.0, 1.0),
+        ),
+        RabbitVisualPart::Tail => (Vec3::new(0.0, 0.43 + breath, 0.48), Vec3::splat(0.26)),
+    }
+}
 
 pub fn animate_avatar(
     mut q: Query<(&mut Transform, &AvatarPart)>,
@@ -1064,10 +1331,6 @@ pub fn animate_avatar(
     }
 }
 
-
-
-
-
 pub fn follow_monster_cubes(
     mut q: Query<(&mut Transform, &mut MonsterCube)>,
     game_world: Res<GameWorld>,
@@ -1076,7 +1339,6 @@ pub fn follow_monster_cubes(
 ) {
     let dt = time.delta_secs();
     for (mut t, mut mc) in q.iter_mut() {
-
         let to_player = player.pos - mc.base;
         let dist = (to_player.x * to_player.x + to_player.z * to_player.z).sqrt();
         let dir = if dist > 0.1 {
@@ -1096,7 +1358,6 @@ pub fn follow_monster_cubes(
     }
 }
 
-
 pub fn animate_monsters(time: Res<Time>, mut q: Query<(&mut Transform, &MonsterCube)>) {
     let t = time.elapsed_secs();
     for (i, (mut transform, monster)) in q.iter_mut().enumerate() {
@@ -1109,7 +1370,6 @@ pub fn animate_monsters(time: Res<Time>, mut q: Query<(&mut Transform, &MonsterC
     }
 }
 
-
 pub fn animate_cloud_puffs(time: Res<Time>, mut q: Query<(&mut Transform, &CloudPuff)>) {
     let t = time.elapsed_secs();
     for (mut tf, puff) in q.iter_mut() {
@@ -1118,9 +1378,15 @@ pub fn animate_cloud_puffs(time: Res<Time>, mut q: Query<(&mut Transform, &Cloud
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-
-
-
-
-
+    #[test]
+    fn eco_fruit_marker_count_is_capped_for_readability() {
+        assert_eq!(eco_fruit_marker_count(0), 0);
+        assert_eq!(eco_fruit_marker_count(1), 1);
+        assert_eq!(eco_fruit_marker_count(3), 3);
+        assert_eq!(eco_fruit_marker_count(9), 3);
+    }
+}

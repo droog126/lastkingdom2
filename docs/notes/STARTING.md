@@ -68,7 +68,7 @@ HUD 直接显示在截图上（左上角）：tick、玩家坐标、4 个资源�
 
 ```powershell
 cd F:\rustProject\lastkingdom2
-.\loop.ps1
+just loop
 ```
 
 等价于：按需 build `lk2-client`/`lk2-server` + 跑 12 秒 + 杀进程 + 准备下一轮。AI agent 读最新截图 → 决定改什么 → 改代码 → 再跑。

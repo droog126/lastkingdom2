@@ -24,35 +24,45 @@ description: Local development workflow for the lastkingdom2 Rust/Bevy workspace
 - `screenshots/`: closed-loop output.
 - `docs/`: design notes and plans.
 - `assets/`: art and 3D models.
-- `loop.ps1`, `tdd.ps1`: root compatibility wrappers.
-- `scripts/loop/`, `scripts/dev/`, `scripts/ci/`, `scripts/maintenance/`: project scripts.
+- `xtask/`: Rust task runner for loop, health, TDD scopes, scenarios, and audits.
+- `justfile`: short cross-platform aliases for the Rust task runner.
 
 Legacy note: do not route work through removed `minecraft_bevy` or `launchers/` paths.
+
+## Tooling Choices
+
+Prefer durable automation in this order:
+
+1. Rust `xtask`: use for core closed-loop orchestration, test runners, state files, JSON contracts, cross-platform command logic, and robust error handling.
+2. Python: use for Blender, asset generation, and focused one-off analysis. Do not add Python as the loop workflow runtime.
+3. `justfile`: use only for short command aliases. Do not put complex branching, state files, retries, or loop control in `justfile`.
+
+Do not add PowerShell workflow wrappers. Durable workflow logic belongs in Rust `xtask`.
 
 ## Commands
 
 Install/build:
 
-```powershell
+```sh
 cargo build --workspace
 ```
 
 Start offline client:
 
-```powershell
-$env:BEVY_DISABLE_ACCESSIBILITY="1"
-$env:RUST_LOG="info"
+```sh
+export BEVY_DISABLE_ACCESSIBILITY=1
+export RUST_LOG=info
 cargo run -p lk2-client -- --offline
 ```
 
 Common validation entry points:
 
-```powershell
-.\tdd.ps1 -Scope changed
-.\tdd.ps1 -Scope workspace
-.\tdd.ps1 -Scope audit
-cargo fmt
-cargo clippy --workspace
+```sh
+just test-changed
+just test
+just audit-tdd
+just fmt
+just clippy
 ```
 
 Use dev dynamic linking only for local client/server development when the repo scripts expect it. Do not use it for release or CI validation.

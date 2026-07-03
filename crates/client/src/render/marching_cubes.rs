@@ -1,5 +1,3 @@
-
-
 use super::scalar_field::ScalarField;
 
 const EDGE_TABLE: [u16; 256] = [
@@ -28,7 +26,6 @@ const EDGE_TABLE: [u16; 256] = [
 const TRI_TABLE: [[i8; 16]; 256] = build_tri_table();
 
 const fn build_tri_table() -> [[i8; 16]; 256] {
-
     let t: [[i8; 16]; 256] = [
         [
             -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -327,7 +324,6 @@ pub fn build_mesh(
     for z in 0..nz {
         for y in 0..ny {
             for x in 0..nx {
-
                 let d = [
                     field.get(x, y, z),
                     field.get(x + 1, y, z),
@@ -494,7 +490,6 @@ mod tests {
 
     #[test]
     fn case_0_and_255_empty() {
-
         let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2], origin: [0, 0, 0] };
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         assert!(v.is_empty());
@@ -508,7 +503,6 @@ mod tests {
 
     #[test]
     fn case_1_one_triangle() {
-
         let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2], origin: [0, 0, 0] };
 
         field.data[0] = 1.0;

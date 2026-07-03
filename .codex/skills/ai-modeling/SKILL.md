@@ -11,13 +11,13 @@ Create and modify 3D models through reproducible scripts under `tools/`. Do not 
 
 ## Blender
 
-Launcher:
+Cross-platform command shape:
 
-```powershell
-& "F:\BLENDER\blender-launcher.exe" --background --python tools\build_all_models.py
+```sh
+blender --background --python tools/build_all_models.py
 ```
 
-Use the same command shape for project-specific generators such as `tools\build_models_v4.py`, `tools\build_animals_blender.py`, or a new focused script.
+On this Windows workstation, Blender is available as `F:\BLENDER\blender-launcher.exe`; use it as a local substitute for `blender` when needed. Use the same command shape for project-specific generators such as `tools/build_models_v4.py`, `tools/build_animals_blender.py`, or a new focused script.
 
 ## Asset Placement
 
@@ -39,9 +39,9 @@ Use the same command shape for project-specific generators such as `tools\build_
 
 Run these after generation when they apply:
 
-```powershell
-python tools\validate_pretty_glbs.py
-python tools\verify_poly_budget.py
+```sh
+python tools/validate_pretty_glbs.py
+python tools/verify_poly_budget.py
 ```
 
 For visual/model placement changes, also use `$closed-loop-ai-dev`.

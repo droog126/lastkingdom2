@@ -9,6 +9,13 @@ description: Bevy 0.18.1 gameplay, client, server, render, HUD, simulation, netw
 
 Use this skill for gameplay-facing and engine-facing changes. Combine it with `$tdd-iteration` for testable rules and `$closed-loop-ai-dev` for visual, auto-demo, or player-experience changes.
 
+## Game Direction
+
+- Build on Bevy 0.18.1.
+- Aim for Sokpop-style presentation: small readable scenes, bright but restrained color, simple toy-like geometry, clear silhouettes, immediate state readability, and charming low-poly/voxel economy.
+- Prefer clarity over density. A screenshot should quickly show player, terrain, important props/actors, and HUD state.
+- Avoid noisy realism, over-detailed assets, huge dark scenes, and visual clutter that makes loop scoring ambiguous.
+
 ## Bevy 0.18.1 Rules
 
 - Use `Mesh3d` and `MeshMaterial3d`; do not add deprecated `PbrBundle` or `MaterialMeshBundle`.

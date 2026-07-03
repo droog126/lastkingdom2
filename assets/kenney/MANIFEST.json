@@ -1,0 +1,195 @@
+{
+  "schema": "lk2.kenney.assets.v1",
+  "license": {
+    "name": "Creative Commons Zero (CC0)",
+    "source_files": [
+      "kenney_cube-pets_1.0/License.txt",
+      "kenney_mini-characters/License.txt",
+      "kenney_pirate-kit/License.txt",
+      "kenney_platformer-kit/License.txt",
+      "kenney_survival-kit/License.txt"
+    ],
+    "credit": "Kenney / www.kenney.nl credit is appreciated but not required."
+  },
+  "source_packs": {
+    "cube_pets": {
+      "root": "kenney_cube-pets_1.0",
+      "glb_count": 24,
+      "role": "passive animals, biome wildlife, friendly critters"
+    },
+    "mini_characters": {
+      "root": "kenney_mini-characters",
+      "glb_count": 26,
+      "role": "villagers, NPC variants, player avatar replacements"
+    },
+    "pirate_kit": {
+      "root": "kenney_pirate-kit",
+      "glb_count": 72,
+      "role": "coastal POIs, docks, boats, pirate camps, props"
+    },
+    "platformer_kit": {
+      "root": "kenney_platformer-kit",
+      "glb_count": 153,
+      "role": "terrain chunks, bridges, fences, pickups, doors, platform props"
+    },
+    "survival_kit": {
+      "root": "kenney_survival-kit",
+      "glb_count": 80,
+      "role": "resource props, camps, tools, crates, tents, workstations"
+    }
+  },
+  "curated": {
+    "animals": [
+      {
+        "id": "kenney_bunny",
+        "path": "kenney_cube-pets_1.0/Models/GLB format/animal-bunny.glb",
+        "use": "replace or supplement procedural rabbit"
+      },
+      {
+        "id": "kenney_deer",
+        "path": "kenney_cube-pets_1.0/Models/GLB format/animal-deer.glb",
+        "use": "forest passive animal"
+      },
+      {
+        "id": "kenney_cow",
+        "path": "kenney_cube-pets_1.0/Models/GLB format/animal-cow.glb",
+        "use": "plains livestock"
+      },
+      {
+        "id": "kenney_fox",
+        "path": "kenney_cube-pets_1.0/Models/GLB format/animal-fox.glb",
+        "use": "small hostile or neutral forest creature"
+      },
+      {
+        "id": "kenney_bear",
+        "path": "kenney_cube-pets_1.0/Models/GLB format/animal-polar.glb",
+        "use": "large cold-biome creature placeholder"
+      }
+    ],
+    "characters": [
+      {
+        "id": "kenney_villager_female_a",
+        "path": "kenney_mini-characters/Models/GLB format/character-female-a.glb",
+        "use": "villager variant"
+      },
+      {
+        "id": "kenney_villager_male_a",
+        "path": "kenney_mini-characters/Models/GLB format/character-male-a.glb",
+        "use": "villager variant"
+      },
+      {
+        "id": "kenney_player_female_b",
+        "path": "kenney_mini-characters/Models/GLB format/character-female-b.glb",
+        "use": "player avatar experiment"
+      },
+      {
+        "id": "kenney_player_male_b",
+        "path": "kenney_mini-characters/Models/GLB format/character-male-b.glb",
+        "use": "player avatar experiment"
+      }
+    ],
+    "coastal_and_pirate": [
+      {
+        "id": "kenney_row_boat_small",
+        "path": "kenney_pirate-kit/Models/GLB format/boat-row-small.glb",
+        "use": "water or beach decoration"
+      },
+      {
+        "id": "kenney_ship_wreck",
+        "path": "kenney_pirate-kit/Models/GLB format/ship-wreck.glb",
+        "use": "coastal POI"
+      },
+      {
+        "id": "kenney_pirate_flag",
+        "path": "kenney_pirate-kit/Models/GLB format/flag-pirate.glb",
+        "use": "pirate camp marker"
+      },
+      {
+        "id": "kenney_cannon",
+        "path": "kenney_pirate-kit/Models/GLB format/cannon.glb",
+        "use": "pirate camp prop"
+      },
+      {
+        "id": "kenney_palm_straight",
+        "path": "kenney_pirate-kit/Models/GLB format/palm-straight.glb",
+        "use": "beach biome tree"
+      },
+      {
+        "id": "kenney_dock_platform",
+        "path": "kenney_pirate-kit/Models/GLB format/structure-platform-dock.glb",
+        "use": "dock POI"
+      }
+    ],
+    "survival_props": [
+      {
+        "id": "kenney_campfire_pit",
+        "path": "kenney_survival-kit/Models/GLB format/campfire-pit.glb",
+        "use": "camp POI"
+      },
+      {
+        "id": "kenney_tent",
+        "path": "kenney_survival-kit/Models/GLB format/tent.glb",
+        "use": "camp POI"
+      },
+      {
+        "id": "kenney_workbench",
+        "path": "kenney_survival-kit/Models/GLB format/workbench.glb",
+        "use": "crafting station visual"
+      },
+      {
+        "id": "kenney_resource_wood",
+        "path": "kenney_survival-kit/Models/GLB format/resource-wood.glb",
+        "use": "wood resource drop"
+      },
+      {
+        "id": "kenney_resource_stone",
+        "path": "kenney_survival-kit/Models/GLB format/resource-stone.glb",
+        "use": "stone resource drop"
+      },
+      {
+        "id": "kenney_tool_axe",
+        "path": "kenney_survival-kit/Models/GLB format/tool-axe.glb",
+        "use": "equipment or pickup visual"
+      },
+      {
+        "id": "kenney_tool_pickaxe",
+        "path": "kenney_survival-kit/Models/GLB format/tool-pickaxe.glb",
+        "use": "equipment or pickup visual"
+      }
+    ],
+    "terrain_and_pickups": [
+      {
+        "id": "kenney_block_grass_large",
+        "path": "kenney_platformer-kit/Models/GLB format/block-grass-large.glb",
+        "use": "terrain POI chunk experiment"
+      },
+      {
+        "id": "kenney_block_snow_large",
+        "path": "kenney_platformer-kit/Models/GLB format/block-snow-large.glb",
+        "use": "snow biome POI chunk experiment"
+      },
+      {
+        "id": "kenney_coin_gold",
+        "path": "kenney_platformer-kit/Models/GLB format/coin-gold.glb",
+        "use": "reward pickup"
+      },
+      {
+        "id": "kenney_heart",
+        "path": "kenney_platformer-kit/Models/GLB format/heart.glb",
+        "use": "health pickup"
+      },
+      {
+        "id": "kenney_door_open",
+        "path": "kenney_platformer-kit/Models/GLB format/door-open.glb",
+        "use": "dungeon or settlement doorway"
+      }
+    ]
+  },
+  "bevy_load_example": "asset_server.load(\"kenney_cube-pets_1.0/Models/GLB format/animal-bunny.glb#Scene0\")",
+  "notes": [
+    "Keep source pack directories intact.",
+    "Prefer GLB format for Bevy; FBX/OBJ/MTL are redundant for runtime.",
+    "Paths are repo-relative to assets/ and intentionally avoid local absolute paths.",
+    "Do not wire all 355 GLBs at once; start with curated IDs and closed-loop screenshots."
+  ]
+}

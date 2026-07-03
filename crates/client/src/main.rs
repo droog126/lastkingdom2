@@ -1,29 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -34,13 +8,11 @@ use std::path::PathBuf;
 
 use avian3d::prelude::{Collider, Gravity, LinearVelocity, PhysicsPlugins, RigidBody};
 
-
 mod controller_systems;
 mod pretty;
 mod pvp_systems;
 mod render;
 mod ui;
-
 
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
@@ -59,11 +31,11 @@ use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::world::{World as GameWorld, WorldGenerator};
 
-
 use crate::controller_systems::ControllerPlugin;
 use crate::pretty::{
-    PrettyConfig, PlayerAnimState, animate_avatar, animate_monsters, follow_ground_discs,
-    follow_monster_cubes, spawn_pretty, update_player_anim_state,
+    PlayerAnimState, PrettyConfig, animate_avatar, animate_monsters, follow_ground_discs,
+    follow_monster_cubes, spawn_eco_visuals, spawn_pretty, update_eco_visuals,
+    update_player_anim_state,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -82,9 +54,8 @@ use crate::render::{
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
 
-
-const AUTO_DEMO_WAIT_TICKS: u64 = 1_800;
-const FIRST_SCREENSHOT_MIN_TICK: u64 = 100;
+const AUTO_DEMO_WAIT_TICKS: u64 = 7_800;
+const FIRST_SCREENSHOT_MIN_TICK: u64 = 500;
 
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
@@ -142,28 +113,17 @@ impl Default for NetworkSmoothingState {
 const ONLINE_INTERP_SPEED: f32 = 14.0;
 const ONLINE_SNAP_DISTANCE: f32 = 8.0;
 
-
-
-
-
-
 static PRESET_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 fn preset_name_static() -> &'static str {
     PRESET_NAME.get().map(|s| s.as_str()).unwrap_or("default")
 }
-
 
 static WALK_OVERRIDE: std::sync::OnceLock<Option<(i32, i32)>> = std::sync::OnceLock::new();
 fn walk_override_static() -> Option<(i32, i32)> {
     WALK_OVERRIDE.get().copied().flatten()
 }
 
-
-
-
-
 fn main() {
-
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -175,8 +135,6 @@ fn main() {
     let offline_mode = args.iter().any(|a| a == "--offline");
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
     let first_person_mode = args.iter().any(|a| a == "--first-person");
-
-
 
     let connect_addr = lk2_core::transport::parse_connect_arg(&args);
     let network_mode = connect_addr.is_some() && !offline_mode;
@@ -192,7 +150,6 @@ fn main() {
         );
     }
 
-
     let preset_name = args
         .iter()
         .find(|a| a.starts_with("--preset="))
@@ -201,10 +158,8 @@ fn main() {
     let _ = PRESET_NAME.set(preset_name.clone());
     println!("[terrain] preset = {}", preset_name);
 
-
     let smooth_terrain = !args.iter().any(|a| a == "--legacy-voxel");
     println!("[render] smooth_terrain = {}", smooth_terrain);
-
 
     let walk_pos = args
         .iter()
@@ -219,7 +174,6 @@ fn main() {
             }
         }
     }
-
 
     let scenario = if auto_demo_mode {
         Scenario {
@@ -241,10 +195,9 @@ fn main() {
 
     let mut app = App::new();
 
-
     app.add_plugins(
         DefaultPlugins
-            .set(AssetPlugin { file_path: "../../assets".into(), ..default() })
+            .set(AssetPlugin { file_path: "assets".into(), ..default() })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: format!("万国起源：最后一国 钻石版 — {}", scenario.name).into(),
@@ -258,30 +211,22 @@ fn main() {
             .set(bevy::log::LogPlugin { level: bevy::log::Level::INFO, ..default() }),
     );
 
-
     app.insert_resource(bevy::winit::WinitSettings::continuous());
 
-
     app.add_plugins(PhysicsPlugins::default()).insert_resource(Gravity::default());
-
 
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
 
-
-
     app.init_resource::<lightyear::prelude::PeerMetadata>()
         .init_resource::<lk2_core::pvp::FixedTick>()
         .init_resource::<TimeOfDay>();
-
 
     app.add_message::<GameplayCommand>();
 
     if network_mode {
         let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
         app.add_systems(Startup, move |commands: Commands| {
-
-
             let client_id_seed: u64 = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64 & 0xFFFF_FFFF_FFFF_FFFF)
@@ -290,12 +235,10 @@ fn main() {
         });
     }
 
-
     app.init_resource::<RenderConfig>()
         .init_resource::<CameraAngles>()
         .init_resource::<SwordSwing>()
         .insert_resource(CameraMode::default())
-
         .add_systems(
             Startup,
             move |mut mode: ResMut<CameraMode>, mut cfg: ResMut<RenderConfig>| {
@@ -311,7 +254,6 @@ fn main() {
         )
         .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
             if auto_demo_mode {
-
                 cfg.auto_walk = true;
                 cfg.auto_keys = true;
                 cfg.mouse_look = false;
@@ -331,8 +273,6 @@ fn main() {
         .init_resource::<TickRecorder>()
         .init_resource::<LastMoveDirection>()
         .init_resource::<FreeFlyState>()
-
-
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
@@ -346,8 +286,6 @@ fn main() {
         })
         .insert_resource(scenario_state);
 
-
-
     app.add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
@@ -358,7 +296,6 @@ fn main() {
         .add_plugins(lk2_core::objectives::ObjectivesPlugin)
         .add_plugins(ClientPvPPlugin)
         .add_plugins(ControllerPlugin);
-
 
     app.add_systems(
         Startup,
@@ -371,6 +308,7 @@ fn main() {
             setup_world,
             spawn_nest_markers,
             spawn_pretty,
+            spawn_eco_visuals,
             spawn_creatures,
             setup_hud,
             self_check,
@@ -380,35 +318,19 @@ fn main() {
             .chain(),
     );
 
-
-
-
-
-
-
-
     app.add_systems(
         Update,
         (
-
-            // lk2_core::scenario::scenario_runner,
-            // lk2_core::scenario::simulate_player_actions,
-            // lk2_core::scenario::scenario_tick_recorder,
-
-
+            lk2_core::scenario::scenario_runner,
+            lk2_core::scenario::simulate_player_actions,
+            lk2_core::scenario::scenario_tick_recorder,
             apply_networked_position,
-
-
             apply_server_pos_update,
             debug_dump_replicated_entities,
             apply_authoritative_snapshot,
             apply_voxel_delta,
             send_online_gameplay_commands,
-
-
-
             collect_keys_to_action_state,
-
             auto_demo,
             mouse_look_system,
             first_person_camera,
@@ -427,7 +349,6 @@ fn main() {
     app.add_systems(
         Update,
         (
-
             freefly_toggle,
             camera_mode_toggle,
             emergency_teleport,
@@ -438,16 +359,12 @@ fn main() {
     app.add_systems(
         Update,
         (
-
             collect_local_input,
             client_attack_predict,
             on_hit_confirm,
             on_knockback_event,
             on_damage_result,
             trigger_visual_effects,
-
-
-
         )
             .chain(),
     );
@@ -456,30 +373,20 @@ fn main() {
 
     app.add_systems(Update, update_nest_marker_positions);
 
-
     app.add_systems(
         Update,
-        (
-            follow_ground_discs,
-            follow_monster_cubes,
-            animate_monsters,
-        )
-            .chain(),
+        (follow_ground_discs, follow_monster_cubes, animate_monsters).chain(),
     );
 
     app.add_systems(Update, collect_combat_input_offline);
 
     app.add_systems(Update, offline_found_nation_input);
 
-
-
-
-
-
     app.add_systems(
         Update,
         (
             simulation_tick,
+            update_eco_visuals,
             end_tick_system,
             update_hud,
             update_tutorial_overlay,
@@ -495,10 +402,8 @@ fn main() {
             .chain(),
     );
 
-
     app.run();
 }
-
 
 fn spawn_networked_client(
     mut commands: Commands,
@@ -517,14 +422,6 @@ fn spawn_networked_client(
         "[net] spawning client entity with UdpIo + LocalAddr(0.0.0.0:0) + PeerAddr({})",
         server_addr
     );
-
-
-
-
-
-
-
-
 
     let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
     let protocol_id: u64 = 0x4C4B3256_4E455457;
@@ -545,14 +442,9 @@ fn spawn_networked_client(
             LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
             PeerAddr(server_addr),
             netcode_client,
-
-
-
             MessageReceiver::<ServerPosUpdate>::default(),
         ))
         .id();
-
-
 
     info!(
         "[net] triggering LinkStart on client entity {:?}",
@@ -560,24 +452,13 @@ fn spawn_networked_client(
     );
     commands.trigger(LinkStart { entity: client_id });
 
-
-
-
-
     info!("[net] triggering Connect on client entity {:?}", client_id);
     commands.trigger(Connect { entity: client_id });
 }
 
-
-
-
 fn apply_networked_position(
     mut q: Query<(&mut Transform, &lk2_core::protocol::components::PlayerPos)>,
 ) {
-
-
-
-
     let mut count = 0;
     let mut first_pos = bevy::math::Vec3::ZERO;
     for (mut tf, pos) in q.iter_mut() {
@@ -586,8 +467,6 @@ fn apply_networked_position(
         count += 1;
     }
     if count > 0 {
-
-
         tracing::info!(
             "[net] applied PlayerPos to {} player entity, pos={:?}",
             count,
@@ -595,11 +474,6 @@ fn apply_networked_position(
         );
     }
 }
-
-
-
-
-
 
 fn debug_dump_replicated_entities(
     run_mode: Res<ClientRunMode>,
@@ -644,23 +518,6 @@ fn debug_dump_replicated_entities(
     );
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 fn apply_server_pos_update(
     run_mode: Res<ClientRunMode>,
     mut receiver_q: Query<
@@ -668,10 +525,7 @@ fn apply_server_pos_update(
     >,
     mut player: ResMut<PlayerState>,
 ) {
-
-
     if true {
-
         for mut receiver in receiver_q.iter_mut() {
             for _msg in receiver.receive() {}
         }
@@ -834,7 +688,6 @@ fn send_online_gameplay_commands(
     }
 }
 
-
 fn collect_keys_to_action_state(
     cfg: Res<RenderConfig>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -845,17 +698,13 @@ fn collect_keys_to_action_state(
     let mut action_state = match q.single_mut() {
         Ok(s) => s,
         Err(_) => {
-
-
             return;
         }
     };
 
     let w_pressed = keys.pressed(KeyCode::KeyW);
 
-
     let w_active = w_pressed || cfg.auto_walk;
-
 
     *action_state = ActionState::<PlayerAction>::default();
 
@@ -879,17 +728,6 @@ fn collect_keys_to_action_state(
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
 pub struct ClientPvPPlugin;
 
 impl Plugin for ClientPvPPlugin {
@@ -907,14 +745,8 @@ impl Plugin for ClientPvPPlugin {
     }
 }
 
-
-
-
-
-
 #[derive(Component)]
 pub struct Sun;
-
 
 #[derive(Resource)]
 pub struct TimeOfDay(pub f32);
@@ -932,7 +764,6 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn setup_light(mut commands: Commands) {
-
     commands.spawn((
         DirectionalLight {
             illuminance: 22000.0,
@@ -960,7 +791,6 @@ fn setup_light(mut commands: Commands) {
         affects_lightmapped_meshes: true,
     });
 }
-
 
 pub fn day_night_cycle(
     time: Res<Time>,
@@ -993,8 +823,6 @@ pub fn day_night_cycle(
     let dusk = (0.95, 0.55, 0.30);
     let night = (0.18, 0.25, 0.45);
 
-
-
     let w_dusk = sunset_glow * 0.35;
     let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);
     let w_day = 1.0 - w_dusk - w_night;
@@ -1004,10 +832,6 @@ pub fn day_night_cycle(
         day.2 * w_day + dusk.2 * w_dusk + night.2 * w_night,
     );
 }
-
-
-
-
 
 #[allow(clippy::too_many_arguments)]
 fn setup_world(
@@ -1067,7 +891,6 @@ fn sync_player_combat_anchor(mut q: Query<&mut Transform, With<Player>>, player:
     }
 }
 
-
 fn self_check(
     game_world: Res<GameWorld>,
     pool: Res<GlobalResourcePool>,
@@ -1100,8 +923,6 @@ fn self_check(
     info!("{}", obs.report());
 }
 
-
-
 fn simulation_tick(
     fixed_time: Res<Time<Fixed>>,
     mut clock: ResMut<SimClock>,
@@ -1110,7 +931,6 @@ fn simulation_tick(
     mut eco: ResMut<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
-    let prev = clock.tick;
     let _ = advance_fixed_authority_tick(
         fixed_time.delta_secs(),
         &mut clock,
@@ -1120,9 +940,6 @@ fn simulation_tick(
         &mut obs,
         SimRole::ClientOffline,
     );
-    if clock.tick != prev && clock.tick % 100 == 0 {
-        info!("[sim] tick={} prev={}", clock.tick, prev);
-    }
 }
 
 fn end_tick_system(
@@ -1148,10 +965,6 @@ fn end_tick_system(
     }
 }
 
-
-
-
-
 fn periodic_screenshot(
     time: Res<Time>,
     mut clock: ResMut<SimClock>,
@@ -1162,13 +975,9 @@ fn periodic_screenshot(
     monsters: Res<MonsterEcosystem>,
     eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
-game_world: Res<GameWorld>,
+    game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
 ) {
-
-
-
-
     let now = {
         use std::sync::OnceLock;
         static START: OnceLock<std::time::Instant> = OnceLock::new();
@@ -1177,8 +986,16 @@ game_world: Res<GameWorld>,
     };
     let _ = time;
 
+    if clock.tick >= FIRST_SCREENSHOT_MIN_TICK && now - clock.last_screenshot_wall >= 4.0 {
+        eprintln!(
+            "[shot] fire tick={} wall={:.1} last={:.1}",
+            clock.tick, now, clock.last_screenshot_wall
+        );
+    }
 
-    eprintln!("[shot] poll tick={} wall={:.1} last={:.1}", clock.tick, now, clock.last_screenshot_wall);
+    if clock.tick < FIRST_SCREENSHOT_MIN_TICK {
+        return;
+    }
 
     let interval = std::env::var("LK2_SCREENSHOT_INTERVAL")
         .ok()
@@ -1233,15 +1050,9 @@ game_world: Res<GameWorld>,
 
 fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
     if keys.just_pressed(KeyCode::Escape) {
-        info!("[exit_on_esc] ESC pressed — would exit");
-        // TEMP: disabled to debug schedule survival
-        // std::process::exit(0);
+        std::process::exit(0);
     }
 }
-
-
-
-
 
 fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>) {
     use lk2_core::combat::{
@@ -1264,7 +1075,6 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
                 .with_knockback_resistance(0.1),
             lk2_core::controller::PlayerCollider::default(),
             CombatState::default(),
-
             ActionState::<PlayerAction>::default(),
             WeaponStats {
                 reach: iron.reach,
@@ -1279,7 +1089,6 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
             PositionHistory::new(60),
             Health(100.0),
         ));
-
 
         cmd.insert((
             CombatHealth::default(),
@@ -1298,10 +1107,6 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
         );
     }
 }
-
-
-
-
 
 #[derive(Resource, Default)]
 pub struct TickRecorder {
@@ -1345,7 +1150,6 @@ fn tick_recorder(
         info!("📝 tick state dumped → {}", path);
     }
 }
-
 
 fn build_state_json(
     time: &Time,
@@ -1571,10 +1375,7 @@ mod tests {
         assert_eq!(diff["tick"], 125);
 
         let deltas = diff["resource_deltas"].as_array().unwrap();
-        let paths = deltas
-            .iter()
-            .map(|delta| delta["path"].as_str().unwrap())
-            .collect::<Vec<_>>();
+        let paths = deltas.iter().map(|delta| delta["path"].as_str().unwrap()).collect::<Vec<_>>();
         assert_eq!(
             paths,
             vec![
@@ -1593,10 +1394,7 @@ mod tests {
             ]
         );
 
-        let wood = deltas
-            .iter()
-            .find(|delta| delta["path"] == "pool.wood")
-            .unwrap();
+        let wood = deltas.iter().find(|delta| delta["path"] == "pool.wood").unwrap();
         assert_eq!(wood["previous"], 50.0);
         assert_eq!(wood["current"], 45.0);
         assert_eq!(wood["delta"], -5.0);

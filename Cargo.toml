@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "xtask"]
+exclude = ["crates/xtask"]
 
 # 共享依赖版本 — 所有 crate 从这里拉，方便对齐
 # 用法: `bevy.workspace = true`

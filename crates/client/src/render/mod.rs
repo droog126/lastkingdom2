@@ -1,8 +1,3 @@
-
-
-
-
-
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -25,7 +20,6 @@ use greedy_mesh::build_all_terrain_meshes_aabb;
 mod marching_cubes;
 pub mod scalar_field;
 mod smooth_mesh;
-
 
 #[derive(Resource, Debug, Clone)]
 pub struct RenderConfig {
@@ -50,7 +44,7 @@ pub struct RenderConfig {
 
 impl Default for RenderConfig {
     fn default() -> Self {
-Self {
+        Self {
             radius: 48,
             max_blocks: 5000,
             y_offset: 0.0,
@@ -58,24 +52,22 @@ Self {
             fog_color: Color::srgb(0.78, 0.85, 0.95),
             fog_start: 130.0,
             fog_end: 360.0,
-auto_orbit: false,
+            auto_orbit: true,
 
             auto_orbit_speed: 0.30,
 
-
             auto_orbit_distance: 22.0,
-auto_walk: false,
+            auto_walk: false,
             auto_walk_interval_secs: 0.1,
             auto_keys: false,
             mouse_look: false,
 
-smooth_terrain: true,
+            smooth_terrain: true,
             smooth_passes: 4,
             ground_step_threshold: 0.85,
         }
     }
 }
-
 
 #[derive(Resource)]
 pub struct CameraAngles {
@@ -85,15 +77,12 @@ pub struct CameraAngles {
 
 impl Default for CameraAngles {
     fn default() -> Self {
-
         Self { yaw: 0.0, pitch: -1.2 }
     }
 }
 
-
 #[derive(Resource, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum CameraMode {
-
     FirstPerson,
 
     ThirdPerson,
@@ -105,11 +94,9 @@ impl Default for CameraMode {
     }
 }
 
-
 const TP_DISTANCE: f32 = 6.0;
 const TP_HEIGHT: f32 = 4.0;
 const MANUAL_MOVE_SPEED: f32 = 4.5;
-
 
 #[derive(Resource)]
 pub struct FreeFlyState {
@@ -136,7 +123,6 @@ impl Default for FreeFlyState {
     }
 }
 
-
 const FREEFLY_SPEED: f32 = 30.0;
 
 const FREEFLY_BOOST: f32 = 3.0;
@@ -144,8 +130,6 @@ const FREEFLY_BOOST: f32 = 3.0;
 const MOUSE_SENS: f32 = 0.0022;
 const PITCH_LIMIT: f32 = 1.483;
 const YAW_QE_STEP: f32 = 22.5_f32.to_radians();
-
-
 
 #[derive(Resource, Default)]
 pub struct SpawnedBlocks {
@@ -156,17 +140,8 @@ pub struct SpawnedBlocks {
     pub last_mesh_center: Option<Vec3>,
 }
 
-
 #[derive(Component)]
 pub struct PlayerCube;
-
-
-
-
-
-
-
-
 
 pub fn spawn_terrain_around_player(
     mut commands: Commands,
@@ -180,13 +155,9 @@ pub fn spawn_terrain_around_player(
 
     _last_warn_time: Local<f32>,
 
-
     mut last_mesh_wall: Local<f32>,
 ) {
-
-
-
-let now = time.elapsed_secs();
+    let now = time.elapsed_secs();
     let moved = spawned.last_player_block != player.block_pos;
     let moved_far = if let Some(last) = spawned.last_mesh_center {
         last.distance(Vec3::new(
@@ -204,15 +175,12 @@ let now = time.elapsed_secs();
         return;
     }
 
-
     for e in spawned.visual_entities.drain(..) {
         commands.entity(e).despawn();
     }
     for e in spawned.collider_entities.drain(..) {
         commands.entity(e).despawn();
     }
-
-
 
     let r = cfg.radius as i32;
     let py = player.block_pos[1];
@@ -221,14 +189,13 @@ let now = time.elapsed_secs();
     let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
     let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
 
-
     if cfg.smooth_terrain {
         let started = time.elapsed_secs();
         let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
 
-let mat = materials.add(StandardMaterial {
+            let mat = materials.add(StandardMaterial {
                 base_color: Color::WHITE,
                 emissive: Color::srgb(0.04, 0.05, 0.03).into(),
                 unlit: false,
@@ -283,15 +250,12 @@ let mat = materials.add(StandardMaterial {
                 player.block_pos
             );
         } else {
-
             debug!("🌊 smooth mesh: 标量场全空（无 solid 在 AABB 内）");
             spawned.last_player_block = player.block_pos;
         }
         *last_mesh_wall = time.elapsed_secs();
         return;
     }
-
-
 
     let mut mats: HashMap<BlockType, Handle<StandardMaterial>> = HashMap::new();
     for bt in [
@@ -337,18 +301,15 @@ let mat = materials.add(StandardMaterial {
         mats.insert(bt, materials.add(material));
     }
 
-
     let started = time.elapsed_secs();
     let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
     let mesh_count = block_meshes.len();
     let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
     let mesh_secs = time.elapsed_secs() - started;
 
-
     for bm in block_meshes {
         let mat = mats[&bm.block_type].clone();
         let bevy_mesh = bm.to_bevy_mesh();
-
 
         let collider_opt = if matches!(bm.block_type, BlockType::Water) {
             None
@@ -356,9 +317,7 @@ let mat = materials.add(StandardMaterial {
             Collider::trimesh_from_mesh(&bevy_mesh)
         };
 
-
         let mesh_handle = meshes.add(bevy_mesh);
-
 
         let visual = commands
             .spawn((
@@ -394,10 +353,8 @@ let mat = materials.add(StandardMaterial {
     *last_mesh_wall = time.elapsed_secs();
 }
 
-
 #[derive(Component)]
 pub struct TerrainChunk;
-
 
 pub fn setup_atmosphere(
     mut commands: Commands,
@@ -406,11 +363,8 @@ pub fn setup_atmosphere(
     _materials: ResMut<Assets<StandardMaterial>>,
     camera: Query<Entity, With<Camera3d>>,
 ) {
-
-
     use bevy::pbr::DistanceFog;
     commands.insert_resource(ClearColor(Color::srgb(0.20, 0.45, 0.78)));
-
 
     if let Ok(cam_entity) = camera.single() {
         commands.entity(cam_entity).insert(DistanceFog {
@@ -422,8 +376,6 @@ pub fn setup_atmosphere(
     }
 }
 
-
-
 #[derive(Component)]
 pub struct TerrainUnderlay;
 
@@ -432,7 +384,6 @@ pub fn setup_terrain_underlay(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-
     let plane_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
 
     let mat = materials.add(StandardMaterial {
@@ -456,17 +407,14 @@ pub fn underlay_follow_player(
     mut q: Query<&mut Transform, With<TerrainUnderlay>>,
     player: Res<PlayerState>,
 ) {
-
     let Ok(mut tf) = q.single_mut() else {
         return;
     };
     tf.translation = Vec3::new(player.pos.x, -100.0, player.pos.z);
 }
 
-
 #[derive(Component)]
 pub struct HeldWeaponPart;
-
 
 #[derive(Resource, Default)]
 pub struct SwordSwing {
@@ -476,16 +424,12 @@ pub struct SwordSwing {
 
 const SWING_DURATION: f32 = 0.18;
 
-
-
-
 pub fn held_weapon_follow(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mut swing: ResMut<SwordSwing>,
     mut q: Query<&mut Transform, With<HeldWeaponPart>>,
 ) {
-
     if keys.just_pressed(KeyCode::KeyK) && !swing.swinging {
         swing.swinging = true;
         swing.start_t = time.elapsed_secs();
@@ -510,17 +454,9 @@ pub fn held_weapon_follow(
 
     let total_pitch = 15_f32.to_radians() + swing_phase * 90_f32.to_radians();
     for mut tf in &mut q {
-
-
-        tf.rotation = Quat::from_euler(
-            EulerRot::XYZ,
-            total_pitch,
-            0.0,
-            15_f32.to_radians(),
-        );
+        tf.rotation = Quat::from_euler(EulerRot::XYZ, total_pitch, 0.0, 15_f32.to_radians());
     }
 }
-
 
 pub fn mouse_look_system(
     motion: Res<AccumulatedMouseMotion>,
@@ -528,7 +464,6 @@ pub fn mouse_look_system(
     cfg: Res<RenderConfig>,
     freefly: Res<FreeFlyState>,
 ) {
-
     if !cfg.mouse_look && !freefly.enabled {
         return;
     }
@@ -541,10 +476,6 @@ pub fn mouse_look_system(
     angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
 }
 
-
-
-
-
 pub fn freefly_toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut freefly: ResMut<FreeFlyState>,
@@ -555,7 +486,6 @@ pub fn freefly_toggle(
     }
     freefly.enabled = !freefly.enabled;
     if freefly.enabled {
-
         freefly.saved_player_pos = Some(player.block_pos);
         freefly.saved_player_world_pos = Some(player.pos);
         freefly.position = player.pos + Vec3::Y * 18.0;
@@ -565,7 +495,6 @@ pub fn freefly_toggle(
             player.block_pos
         );
     } else {
-
         if let Some(saved) = freefly.saved_player_pos.take() {
             let saved_pos = freefly.saved_player_world_pos.take().unwrap_or(Vec3::new(
                 saved[0] as f32 + 0.5,
@@ -584,13 +513,11 @@ pub fn freefly_toggle(
     }
 }
 
-
 pub fn camera_mode_toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<CameraMode>,
     freefly: Res<FreeFlyState>,
 ) {
-
     if freefly.enabled {
         return;
     }
@@ -608,7 +535,6 @@ pub fn camera_mode_toggle(
         }
     };
 }
-
 
 pub fn emergency_teleport(
     keys: Res<ButtonInput<KeyCode>>,
@@ -628,7 +554,6 @@ pub fn emergency_teleport(
     set_player_position(&mut player, pos, block_pos);
 }
 
-
 pub fn cycle_terrain_preset(keys: Res<ButtonInput<KeyCode>>, mut game_world: ResMut<GameWorld>) {
     if !keys.just_pressed(KeyCode::F8) {
         return;
@@ -644,7 +569,6 @@ pub fn cycle_terrain_preset(keys: Res<ButtonInput<KeyCode>>, mut game_world: Res
     info!("🌍 F8 切 preset: {} -> {}", current, new_name);
 }
 
-
 pub fn freefly_movement(
     keys: Res<ButtonInput<KeyCode>>,
     mut freefly: ResMut<FreeFlyState>,
@@ -655,7 +579,6 @@ pub fn freefly_movement(
         return;
     }
 
-
     let (sy, cy) = angles.yaw.sin_cos();
     let (sp, cp) = angles.pitch.sin_cos();
     let forward = Vec3::new(sy * cp, sp, -cy * cp);
@@ -663,7 +586,6 @@ pub fn freefly_movement(
     let right = forward.cross(Vec3::Y);
 
     let up = Vec3::Y;
-
 
     let mut wish = Vec3::ZERO;
     if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
@@ -691,7 +613,6 @@ pub fn freefly_movement(
         FREEFLY_SPEED
     };
 
-
     let target = if wish.length() > 0.01 {
         wish.normalize() * speed
     } else {
@@ -705,7 +626,6 @@ pub fn freefly_movement(
     freefly.position = pos;
 }
 
-
 pub fn setup_cursor_grab(
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     cfg: Res<RenderConfig>,
@@ -718,8 +638,6 @@ pub fn setup_cursor_grab(
         cursor.visible = false;
     }
 }
-
-
 
 pub fn toggle_cursor_grab_on_esc(
     keys: Res<ButtonInput<KeyCode>>,
@@ -745,16 +663,12 @@ pub fn toggle_cursor_grab_on_esc(
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
 
-
         info!("🖱 ESC：抓回光标");
     }
 }
 
-
-
 #[derive(Component)]
 pub struct AnimalIndicatorText;
-
 
 pub fn update_animal_indicator(
     mut q_text: Query<&mut Text, With<AnimalIndicatorText>>,
@@ -767,7 +681,6 @@ pub fn update_animal_indicator(
     };
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
-
 
     let mut best: Option<(&Creature, f32)> = None;
     for c in creatures.iter() {
@@ -792,7 +705,6 @@ pub fn update_animal_indicator(
         text.0 = format!("* {} underfoot", c.kind.label_zh());
         return;
     }
-
 
     let arrow = if let Ok(tf) = camera.single() {
         let f = tf.forward();
@@ -822,7 +734,6 @@ pub fn update_animal_indicator(
         "·"
     };
 
-
     let label = match c.kind {
         lk2_core::creature::CreatureKind::Pig => "Pig",
         lk2_core::creature::CreatureKind::Sheep => "Sheep",
@@ -832,25 +743,7 @@ pub fn update_animal_indicator(
     text.0 = format!("{}  {}  {:.1}m", arrow, label, dist);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 const NEST_MARKER_SIZE: (f32, f32, f32) = (0.4, 4.0, 0.4);
-
 
 #[derive(Component)]
 pub struct NestMarker {
@@ -861,13 +754,8 @@ pub struct NestMarker {
     pub offset_z: f32,
 }
 
-
 #[derive(Resource, Default)]
 pub struct NestMarkerCount(pub u32);
-
-
-
-
 
 pub fn spawn_nest_markers(
     mut commands: Commands,
@@ -886,7 +774,6 @@ pub fn spawn_nest_markers(
             continue;
         }
         for (nid, nest) in kingdom.nests.iter() {
-
             let (base_r, base_g, base_b) = match nest.biome {
                 Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32),
                 Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),
@@ -905,7 +792,6 @@ pub fn spawn_nest_markers(
                 NEST_MARKER_SIZE.1,
                 NEST_MARKER_SIZE.2,
             ));
-
 
             let nx = nest.center[0] as f32 + 0.5;
             let nz = nest.center[2] as f32 + 0.5;
@@ -930,30 +816,20 @@ pub fn spawn_nest_markers(
     );
 }
 
-
 pub fn update_nest_marker_positions(
     mut q: Query<(&NestMarker, &mut Transform)>,
     player: Res<PlayerState>,
 ) {
-
     let px = player.pos.x;
     let pz = player.pos.z;
     for (m, mut tf) in q.iter_mut() {
-
-
         tf.translation.x = px + m.offset_x;
         tf.translation.z = pz + m.offset_z;
-
     }
 }
 
-
 #[derive(Component)]
 pub struct NestIndicatorText;
-
-
-
-
 
 pub fn update_nest_indicator(
     mut q_text: Query<&mut Text, With<NestIndicatorText>>,
@@ -966,7 +842,6 @@ pub fn update_nest_indicator(
     };
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
-
 
     let mut best: Option<([i32; 3], u32, f32)> = None;
     for (_kid, k) in monsters.kingdoms.iter() {
@@ -993,7 +868,6 @@ pub fn update_nest_indicator(
         text.0 = format!("* Nest underfoot / {} mobs", count);
         return;
     }
-
 
     let arrow = if let Ok(tf) = camera.single() {
         let f = tf.forward();
@@ -1026,10 +900,8 @@ pub fn update_nest_indicator(
     text.0 = format!("{} Nest {:.0}m / {} mobs", arrow, dist, count);
 }
 
-
 #[derive(Resource, Default)]
 pub struct LastMoveDirection(pub Vec3);
-
 
 pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -1044,15 +916,10 @@ pub fn player_input(
     freefly: Res<FreeFlyState>,
     cfg: Res<RenderConfig>,
 ) {
-
-
     let freefly_active = freefly.enabled;
-
-
 
     let cam_tf = camera.single().ok();
     let (forward, right) = if let Some(tf) = cam_tf {
-
         let f = tf.forward();
         let f_h = Vec3::new(f.x, 0.0, f.z);
         let f_n = if f_h.length() > 0.01 {
@@ -1066,8 +933,6 @@ pub fn player_input(
     } else {
         (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0))
     };
-
-
 
     let mut d = Vec3::ZERO;
     if !freefly_active {
@@ -1091,8 +956,6 @@ pub fn player_input(
         }
     }
 
-
-
     if !freefly_active {
         if keys.just_pressed(KeyCode::KeyQ) {
             angles.yaw -= YAW_QE_STEP;
@@ -1100,7 +963,6 @@ pub fn player_input(
             angles.yaw += YAW_QE_STEP;
         }
     }
-
 
     if d.length() > 0.01 {
         if d.y.abs() > 0.01 && d.x.abs() < 0.01 && d.z.abs() < 0.01 {
@@ -1125,9 +987,7 @@ pub fn player_input(
                 cfg.ground_step_threshold,
             );
         }
-
     }
-
 
     if keys.just_pressed(KeyCode::KeyG) {
         let (x, y, z) = (
@@ -1155,10 +1015,6 @@ pub fn player_input(
         }
     }
 
-
-
-
-
     if keys.just_pressed(KeyCode::KeyF) {
         if player.nation_id.is_some() {
             info!("🚩 你已经是一个国家的王了，不能再立旗");
@@ -1183,7 +1039,6 @@ pub fn player_input(
             }
         }
     }
-
 
     if keys.just_pressed(KeyCode::KeyJ) {
         let p = player.block_pos;
@@ -1288,10 +1143,6 @@ fn set_player_position(player: &mut PlayerState, pos: Vec3, block_pos: [i32; 3])
     player.block_pos = block_pos;
 }
 
-
-
-
-
 fn try_player_move(
     player: &mut PlayerState,
     game_world: &mut GameWorld,
@@ -1331,11 +1182,6 @@ fn try_player_move(
     true
 }
 
-
-
-
-
-
 fn try_player_move_continuous(
     player: &mut PlayerState,
     game_world: &GameWorld,
@@ -1368,8 +1214,6 @@ fn try_player_move_continuous(
 #[derive(Component)]
 pub struct Player;
 
-
-
 pub fn auto_demo(
     time: Res<Time>,
     mut player: ResMut<PlayerState>,
@@ -1388,10 +1232,6 @@ pub fn auto_demo(
     creatures: Query<&lk2_core::creature::Creature>,
     monsters: Res<lk2_core::monster::MonsterEcosystem>,
 ) {
-    info!("[auto_demo] frame");
-
-
-
     if cfg.auto_keys {
         *auto_frame += 1;
 
@@ -1433,7 +1273,6 @@ pub fn auto_demo(
         return;
     }
 
-
     if keys.pressed(KeyCode::KeyW)
         || keys.pressed(KeyCode::KeyA)
         || keys.pressed(KeyCode::KeyS)
@@ -1445,14 +1284,16 @@ pub fn auto_demo(
     }
     *walk_timer += time.delta_secs();
 
-    let walk_interval = if cfg.auto_keys { 0.1 } else { cfg.auto_walk_interval_secs };
+    let walk_interval = if cfg.auto_keys {
+        0.1
+    } else {
+        cfg.auto_walk_interval_secs
+    };
     if *walk_timer < walk_interval {
         return;
     }
     *walk_timer = 0.0;
     *walk_step += 1;
-
-
 
     let need_refresh = match *walk_target {
         None => true,
@@ -1463,8 +1304,6 @@ pub fn auto_demo(
         }
     };
     if need_refresh {
-
-
         const MIN_WALK_SPREAD: f32 = 25.0;
         let mut best: Option<(f32, [i32; 3])> = None;
         let p = player.block_pos;
@@ -1499,7 +1338,6 @@ pub fn auto_demo(
         *walk_target = best.map(|(_, pos)| pos);
     }
 
-
     let all_dirs: [[i32; 3]; 9] = [
         [1, 0, 0],
         [-1, 0, 0],
@@ -1511,9 +1349,6 @@ pub fn auto_demo(
         [-1, 0, -1],
         [0, 1, 0],
     ];
-
-
-
 
     let near_y = player.block_pos[1] as f32;
     let good_dirs: Vec<[i32; 3]> = all_dirs
@@ -1537,8 +1372,6 @@ pub fn auto_demo(
         })
         .copied()
         .collect();
-
-
 
     let d: [i32; 3] = if good_dirs.is_empty() {
         match *walk_target {
@@ -1568,7 +1401,6 @@ pub fn auto_demo(
 
     let moved = try_player_move(&mut player, &mut game_world, d, cfg.ground_step_threshold);
     if !moved {
-
         let nx = player.block_pos[0] + d[0];
         let nz = player.block_pos[2] + d[2];
         if game_world.in_bounds(nx, 1, nz) {
@@ -1591,10 +1423,6 @@ pub fn auto_demo(
             tf.translation = player.pos;
         }
     }
-
-
-
-
 
     const AI_WALK_KING_ID_BASE: u32 = 100;
     if let Some(target) = *walk_target {
@@ -1630,15 +1458,11 @@ pub fn auto_demo(
                     );
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "[auto-demo walk] 到达 walk_target 但建新国失败: {}",
-                        e
-                    );
+                    tracing::warn!("[auto-demo walk] 到达 walk_target 但建新国失败: {}", e);
                 }
             }
         }
     }
-
 
     let cur = game_world.get(
         player.block_pos[0],
@@ -1659,9 +1483,6 @@ pub fn auto_demo(
     }
 }
 
-
-
-
 pub fn first_person_camera(
     mut q: Query<&mut Transform, With<Camera3d>>,
     time: Res<Time>,
@@ -1676,11 +1497,9 @@ pub fn first_person_camera(
     mut orbit_angle: Local<f32>,
     anim_state: Res<PlayerAnimState>,
 ) {
-    info!("[cam] frame");
     let Ok(mut tf) = q.single_mut() else {
         return;
     };
-
 
     if freefly.enabled {
         let (sy, cy) = angles.yaw.sin_cos();
@@ -1691,10 +1510,6 @@ pub fn first_person_camera(
         tf.look_at(look_target, Vec3::Y);
         return;
     }
-
-
-
-
 
     if cfg.auto_orbit && !cfg.mouse_look {
         *orbit_angle += time.delta_secs() * cfg.auto_orbit_speed;
@@ -1710,7 +1525,6 @@ pub fn first_person_camera(
         tf.look_at(target, Vec3::Y);
         return;
     }
-
 
     if *mode == CameraMode::ThirdPerson {
         let (sy, cy) = angles.yaw.sin_cos();
@@ -1732,12 +1546,10 @@ pub fn first_person_camera(
     let eye = eye_base + Vec3::new(bob_x, bob_y, 0.0);
 
     let dir = if cfg.mouse_look {
-
         let (sy, cy) = angles.yaw.sin_cos();
         let (sp, cp) = angles.pitch.sin_cos();
         Vec3::new(sy * cp, sp, -cy * cp)
     } else {
-
         let mut candidates: Vec<(f32, [i32; 3])> = Vec::new();
         for c in creatures.iter() {
             let dx = (c.block_pos[0] as f32 + 0.5) - eye.x;
@@ -1790,4 +1602,4 @@ pub fn first_person_camera(
     let look_target = eye + dir * 5.0 - Vec3::new(0.0, 1.0, 0.0);
     tf.translation = eye;
     tf.look_at(look_target, Vec3::Y);
-}
+}

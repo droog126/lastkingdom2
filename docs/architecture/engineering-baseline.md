@@ -12,8 +12,9 @@ This repo is a Bevy workspace with three runtime crates:
 - `lk2-client` owns presentation and local UX only. It may call shared simulation APIs, but it should not fork rule logic that belongs in `lk2-core`.
 - `lk2-server` owns authority and network ingress. It must not depend on client rendering, UI, camera, or pretty asset code.
 - `tools/` owns reproducible asset generation. Generated runtime output belongs in `screenshots/` or `run-logs/`, not the repo root.
-- Root `loop.ps1` and `tdd.ps1` are compatibility wrappers and the supported developer entry points.
-- Real script implementations live under `scripts/loop`, `scripts/dev`, `scripts/ci`, and `scripts/maintenance`.
+- `xtask/` owns durable workflow automation: loop orchestration, TDD scopes, health checks, screenshot/state assertions, scenarios, and audits.
+- `justfile` owns short human-friendly command aliases.
+- `scripts/` is not a workflow runtime. Blender/model scripts stay under `tools/`; loop automation stays in Rust.
 
 ## Current Architecture Debt
 
@@ -30,15 +31,15 @@ Do not add broad new behavior to these files without either:
 
 ## Required Checks
 
-Use the project wrappers:
+Use the project task runner:
 
-```powershell
-.\tdd.ps1 -Scope changed
-.\tdd.ps1 -Scope audit
-.\loop.ps1 -Offline -Seconds 12
+```sh
+just test-changed
+just audit-tdd
+just loop
 ```
 
-`.\tdd.ps1 -Scope audit` includes `scripts/ci/architecture_audit.ps1`, which checks:
+`cargo run -q -p xtask -- audit-architecture` checks:
 
 - no hard-coded local absolute paths in project scripts,
 - no duplicate client objective setup registration,

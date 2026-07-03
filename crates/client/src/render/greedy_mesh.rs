@@ -1,5 +1,3 @@
-
-
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -93,7 +91,6 @@ pub fn greedy_mesh_for_type_aabb(
     min: [i32; 3],
     max: [i32; 3],
 ) -> BlockTypeMesh {
-
     let size_x = (max[0] - min[0]) as u32;
     let size_y = (max[1] - min[1]) as u32;
     let size_z = (max[2] - min[2]) as u32;

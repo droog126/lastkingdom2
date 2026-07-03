@@ -6,28 +6,28 @@
 
 本地默认使用根目录脚本：
 
-```powershell
-.\tdd.ps1
+```sh
+just test-core
 ```
 
 常用范围：
 
-```powershell
-.\tdd.ps1 -Scope core
-.\tdd.ps1 -Scope changed
-.\tdd.ps1 -Scope client
-.\tdd.ps1 -Scope server
-.\tdd.ps1 -Scope workspace
-.\tdd.ps1 -Scope fmt
-.\tdd.ps1 -Scope audit
+```sh
+just test-core
+just test-changed
+just test-client
+just test-server
+just test
+just fmt
+just audit-tdd
 ```
 
 默认 `core`，因为 `crates/core` 是规则、状态机、资源和协议的主战场，反馈最快。
 
 `changed` 默认对比 `HEAD`，需要对比其他基线时：
 
-```powershell
-.\tdd.ps1 -Scope changed -BaseRef master
+```sh
+cargo run -q -p xtask -- tdd --scope changed --base-ref master
 ```
 
 ## 红绿流程
@@ -35,13 +35,13 @@
 每个非纯视觉任务都按这个顺序：
 
 1. 写一个失败测试，命名直接描述规则或 bug。
-2. 跑 `.\tdd.ps1 -Scope core` 或更小的 `cargo test -p lk2-core <test_name>`。
+2. 跑 `just test-core` 或更小的 `cargo test -p lk2-core <test_name>`。
 3. 确认失败原因是预期问题，而不是测试写错。
 4. 写最小实现。
 5. 重跑同一个测试。
 6. 补边界测试。
 7. 跑对应 scope。
-8. 影响视觉/玩法时再跑 `.\loop.ps1`。
+8. 影响视觉/玩法时再跑 `just loop`。
 
 不要先大改再补测试。后补测试只能作为债务补救，不算完整 TDD。
 
@@ -49,17 +49,17 @@
 
 | 层级 | 位置 | 目标 | 命令 |
 | --- | --- | --- | --- |
-| 单元规则 | `crates/core/src/**` | 资源、战斗、国家、保护期、AI 决策 | `.\tdd.ps1 -Scope core` |
-| crate 集成 | `crates/client` / `crates/server` | 编译接口、Bevy system 接线 | `.\tdd.ps1 -Scope client/server` |
-| workspace | 全仓库 | 发布前兜底 | `.\tdd.ps1 -Scope workspace` |
-| 闭环 | `loop.ps1` + `screenshots` | 截图、HUD、自动 demo、状态输出 | `.\loop.ps1` |
+| 单元规则 | `crates/core/src/**` | 资源、战斗、国家、保护期、AI 决策 | `just test-core` |
+| crate 集成 | `crates/client` / `crates/server` | 编译接口、Bevy system 接线 | `just test-client` / `just test-server` |
+| workspace | 全仓库 | 发布前兜底 | `just test` |
+| 闭环 | `xtask loop` + `screenshots` | 截图、HUD、自动 demo、状态输出 | `just loop` |
 
 ## 测试审计
 
 定期运行：
 
-```powershell
-.\tdd.ps1 -Scope audit
+```sh
+just audit-tdd
 ```
 
 它会扫描 `crates/core/src`：
@@ -121,7 +121,7 @@
 
 ### P2：闭环和可观测性
 
-- [ ] `loop.ps1` 每次生成 `decision.template.md` 的字段和 `AGENTS.md` 保持一致。
+- [ ] `xtask loop` 每次生成 `decision.template.md` 的字段和闭环协议保持一致。
 - [ ] `final_state.json` 至少包含 tick、player、resource、monster/creature 关键字段。
 - [ ] `diff.json` 对关键资源 delta 做稳定排序，便于 AI 对比。
 - [ ] 自动 demo 运行 N 秒后玩家位置发生可解释变化。
@@ -170,6 +170,6 @@ fn works() {}
 
 - 新增或修正测试
 - 测试先红后绿，或说明这是补历史缺口
-- `.\tdd.ps1 -Scope core` 或对应 scope 通过
-- 影响视觉/玩法时跑 `.\loop.ps1`
+- `just test-core` 或对应 scope 通过
+- 影响视觉/玩法时跑 `just loop`
 - 总结剩余风险

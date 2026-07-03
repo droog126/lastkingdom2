@@ -6,26 +6,26 @@ The core workflow is: run the game, capture screenshots and state JSON, inspect 
 
 ## Quick Start
 
-```powershell
+```sh
 cargo build --workspace
-$env:BEVY_DISABLE_ACCESSIBILITY="1"
-$env:RUST_LOG="info"
+export BEVY_DISABLE_ACCESSIBILITY=1
+export RUST_LOG=info
 cargo run -p lk2-client -- --offline
 ```
 
 Closed-loop run:
 
-```powershell
-.\loop.ps1
+```sh
+just loop
 ```
 
 Useful validation entry points:
 
-```powershell
-.\tdd.ps1 -Scope core
-.\tdd.ps1 -Scope changed
-.\tdd.ps1 -Scope workspace
-.\tdd.ps1 -Scope fmt
+```sh
+just test-core
+just test-changed
+just test
+just fmt
 ```
 
 ## Project Layout
@@ -40,8 +40,8 @@ Useful validation entry points:
 - `scenarios/` - scenario JSON scripts
 - `screenshots/` - closed-loop output, ignored by Git except archived material
 - `docs/` - design notes, architecture plans, gameplay design, and archived imports
-- `loop.ps1` - build/run/capture closed-loop driver
-- `tdd.ps1` - validation command wrapper
+- `xtask/` - Rust task runner for loop, health, TDD, scenarios, and audits
+- `justfile` - short human-friendly command aliases
 - `AGENTS.md` - AI-agent operating manual
 - `docs/architecture/engineering-baseline.md` - current engineering boundaries, audit gates, and refactor order
 
@@ -65,16 +65,19 @@ should not proceed without a completed `decision.md`.
 
 Model generation must be reproducible from Python scripts and Blender. Use:
 
-```powershell
-& "F:\BLENDER\blender-launcher.exe" --background --python tools\build_all_models.py
-& "F:\BLENDER\blender-launcher.exe" --background --python tools\create_eco_models.py
+```sh
+blender --background --python tools/build_all_models.py
+blender --background --python tools/create_eco_models.py
 ```
+
+On this Windows workstation the Blender launcher is `F:\BLENDER\blender-launcher.exe`; keep that
+as local setup knowledge, not as a committed workflow dependency.
 
 After generating models, validate assets:
 
-```powershell
-python tools\validate_pretty_glbs.py
-python tools\verify_poly_budget.py
+```sh
+python tools/validate_pretty_glbs.py
+python tools/verify_poly_budget.py
 ```
 
 Do not commit Python caches, Blender backup files, temporary exports, or local absolute-path config.

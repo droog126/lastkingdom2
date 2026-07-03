@@ -119,7 +119,6 @@ pub struct ScenarioState {
     pub end_requested: bool,
 
     pub move_to_started_at_tick: Option<u64>,
-    pub frame_count: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -161,7 +160,6 @@ impl ScenarioState {
             pending_gather_left: 0,
             end_requested: false,
             move_to_started_at_tick: None,
-            frame_count: 0,
         }
     }
 }
@@ -236,17 +234,13 @@ pub fn scenario_runner(
     mut commands: Commands,
     mut game_world: ResMut<GameWorld>,
 ) {
-    if state.frame_count % 100 == 0 {
-        info!("[scenario] frame={} cur_step={} clock.tick={}", state.frame_count, state.current_step, clock.tick);
-    }
-    state.frame_count += 1;
     let Some(scenario) = state.scenario.clone() else {
         return;
     };
 
 if state.end_requested {
 
-        if clock.tick > state.last_step_done_tick + 3 && std::env::var("LK2_QUIT_AFTER_SCENARIO").is_ok() {
+        if clock.tick > state.last_step_done_tick + 3 {
             std::process::exit(0);
         }
         return;
@@ -258,7 +252,7 @@ if state.end_requested {
 
     if state.current_step >= scenario.steps.len() {
 
-        if clock.tick > state.last_step_done_tick + 3 && std::env::var("LK2_QUIT_AFTER_SCENARIO").is_ok() {
+        if clock.tick > state.last_step_done_tick + 3 {
             std::process::exit(0);
         }
         return;

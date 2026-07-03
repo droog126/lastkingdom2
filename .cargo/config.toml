@@ -9,3 +9,6 @@ registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"
 
 [net]
 git-fetch-with-cli = true
+
+[alias]
+xtask = "run --package xtask --"

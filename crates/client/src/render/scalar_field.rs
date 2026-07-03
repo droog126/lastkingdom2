@@ -1,32 +1,5 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use lk2_core::world::BlockType;
 use lk2_core::world::World as GameWorld;
-
 
 #[derive(Debug, Clone)]
 pub struct ScalarField {
@@ -48,11 +21,6 @@ impl ScalarField {
     }
 }
 
-
-
-
-
-
 pub fn build_density_field(world: &GameWorld, min: [i32; 3], max: [i32; 3]) -> ScalarField {
     let cell_size = [
         (max[0] - min[0]).max(1) as usize,
@@ -62,8 +30,6 @@ pub fn build_density_field(world: &GameWorld, min: [i32; 3], max: [i32; 3]) -> S
     let corner_shape = [cell_size[0] + 1, cell_size[1] + 1, cell_size[2] + 1];
     let n = corner_shape[0] * corner_shape[1] * corner_shape[2];
     let mut data = vec![0.0_f32; n];
-
-
 
     for cz in 0..corner_shape[2] {
         for cy in 0..corner_shape[1] {
@@ -102,22 +68,13 @@ pub fn build_density_field(world: &GameWorld, min: [i32; 3], max: [i32; 3]) -> S
     ScalarField { data, shape: corner_shape, origin: min }
 }
 
-
-
-
-
-
 pub fn effective_ground_height(world: &GameWorld, x: i32, z: i32) -> f32 {
-
-
-
     match world.pipeline.surface_f32(x, z) {
         Some(h) => h,
 
         None => find_first_solid_y(world, x, z) as f32,
     }
 }
-
 
 fn find_first_solid_y(world: &GameWorld, x: i32, z: i32) -> i32 {
     for y in 0..world.size {
@@ -143,11 +100,6 @@ mod tests {
         assert!(max < 0.5, "全 air 时角点最大 density 应 < 0.5, got {}", max);
     }
 
-
-
-
-
-
     #[test]
     fn effective_ground_height_superflat_at_spawn_is_13() {
         let pipeline = presets::superflat_preset();
@@ -160,4 +112,4 @@ mod tests {
             h
         );
     }
-}
+}

@@ -1,5 +1,3 @@
-
-
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
@@ -75,7 +73,6 @@ pub fn on_hit_confirm(
     mut effect_writer: MessageWriter<VisualEffectEvent>,
 ) {
     for confirm in confirms.read() {
-
         let target =
             Entity::from_raw_u32(confirm.victim_id.to_bits() as u32).unwrap_or(Entity::PLACEHOLDER);
         if confirm.is_critical {
@@ -106,7 +103,6 @@ pub fn on_knockback_event(
         let target =
             Entity::from_raw_u32(kb.victim_id.to_bits() as u32).unwrap_or(Entity::PLACEHOLDER);
         if let Ok((_, mut vel)) = velocities.get_mut(target) {
-
             vel.0 = kb.velocity;
         }
         effect_writer.write(VisualEffectEvent::KnockbackApplied { target, velocity: kb.velocity });
@@ -119,7 +115,6 @@ pub fn on_damage_result(
     mut hud_text: Query<&mut Text, With<super::HealthHudMarker>>,
 ) {
     for result in results.read() {
-
         if let Ok(mut health) = healths.single_mut() {
             health.0 = result.new_health;
         }
@@ -184,9 +179,7 @@ pub fn trigger_visual_effects(
             VisualEffectEvent::KnockbackApplied { target, velocity } => {
                 info!("↔ 击退 applied to {:?}: {:?}", target, velocity);
             }
-            VisualEffectEvent::ScreenShake => {
-
-            }
+            VisualEffectEvent::ScreenShake => {}
         }
     }
 }
@@ -198,7 +191,6 @@ fn spawn_hit_particle(
     pos: Vec3,
     color: Color,
 ) {
-
     let linear = color.to_linear();
     let emissive = bevy::color::LinearRgba::new(
         linear.red * 0.5,
