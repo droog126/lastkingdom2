@@ -2,7 +2,7 @@
 
 Bevy 0.18.1 voxel simulation and rendering demo with a closed-loop AI iteration workflow.
 
-The core workflow is: run the game, capture screenshots and state JSON, inspect the result, decide the next change, then build and run again. Read [Agent.md](./Agent.md) before making code changes.
+The core workflow is: run the game, capture screenshots and state JSON, inspect the result, decide the next change, then build and run again. Read [AGENTS.md](./AGENTS.md) before making code changes.
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ Useful validation entry points:
 - `docs/` - design notes, architecture plans, gameplay design, and archived imports
 - `loop.ps1` - build/run/capture closed-loop driver
 - `tdd.ps1` - validation command wrapper
-- `Agent.md` - AI-agent operating manual
+- `AGENTS.md` - AI-agent operating manual
 - `docs/architecture/engineering-baseline.md` - current engineering boundaries, audit gates, and refactor order
 
 ## Closed-Loop Output

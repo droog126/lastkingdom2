@@ -1,0 +1,4 @@
+interface:
+  display_name: "LK2 TDD Iteration"
+  short_description: "Test-first iteration and validation workflow."
+  default_prompt: "Use $tdd-iteration to implement a test-driven change."

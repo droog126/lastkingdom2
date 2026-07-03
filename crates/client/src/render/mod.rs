@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use avian3d::prelude::{Collider, RigidBody};
 
+use crate::pretty::PlayerAnimState;
 use lk2_core::constant;
 use lk2_core::creature::Creature;
 use lk2_core::monster::MonsterEcosystem;
@@ -49,15 +50,15 @@ pub struct RenderConfig {
 
 impl Default for RenderConfig {
     fn default() -> Self {
-        Self {
-            radius: 36,
-            max_blocks: 3000,
+Self {
+            radius: 48,
+            max_blocks: 5000,
             y_offset: 0.0,
             sky_color: Color::srgb(0.45, 0.65, 0.95),
             fog_color: Color::srgb(0.78, 0.85, 0.95),
             fog_start: 130.0,
             fog_end: 360.0,
-            auto_orbit: true,
+auto_orbit: false,
 
             auto_orbit_speed: 0.30,
 
@@ -68,8 +69,8 @@ auto_walk: false,
             auto_keys: false,
             mouse_look: false,
 
-            smooth_terrain: true,
-            smooth_passes: 2,
+smooth_terrain: true,
+            smooth_passes: 4,
             ground_step_threshold: 0.85,
         }
     }
@@ -152,6 +153,7 @@ pub struct SpawnedBlocks {
     pub collider_entities: Vec<Entity>,
 
     pub last_player_block: [i32; 3],
+    pub last_mesh_center: Option<Vec3>,
 }
 
 
@@ -184,12 +186,21 @@ pub fn spawn_terrain_around_player(
 
 
 
-    let now = time.elapsed_secs();
+let now = time.elapsed_secs();
     let moved = spawned.last_player_block != player.block_pos;
+    let moved_far = if let Some(last) = spawned.last_mesh_center {
+        last.distance(Vec3::new(
+            player.block_pos[0] as f32,
+            player.block_pos[1] as f32,
+            player.block_pos[2] as f32,
+        )) > cfg.ground_step_threshold * 6.0
+    } else {
+        true
+    };
     if !moved && !spawned.visual_entities.is_empty() {
         return;
     }
-    if moved && now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
+    if moved_far && now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
         return;
     }
 
@@ -217,17 +228,14 @@ pub fn spawn_terrain_around_player(
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
 
-
-            let mat = materials.add(StandardMaterial {
+let mat = materials.add(StandardMaterial {
                 base_color: Color::WHITE,
-
-                emissive: Color::srgb(0.10, 0.12, 0.08).into(),
-
-
-                unlit: true,
-                perceptual_roughness: 0.92,
+                emissive: Color::srgb(0.04, 0.05, 0.03).into(),
+                unlit: false,
+                perceptual_roughness: 0.95,
                 metallic: 0.0,
-                cull_mode: None,
+                cull_mode: Some(bevy::render::render_resource::Face::Back),
+                double_sided: false,
                 ..default()
             });
             let mesh_handle = meshes.add(sm.mesh.clone());
@@ -261,6 +269,11 @@ pub fn spawn_terrain_around_player(
             spawned.collider_entities.push(collider_ent);
 
             spawned.last_player_block = player.block_pos;
+            spawned.last_mesh_center = Some(Vec3::new(
+                player.block_pos[0] as f32,
+                player.block_pos[1] as f32,
+                player.block_pos[2] as f32,
+            ));
             let mesh_secs = time.elapsed_secs() - started;
             info!(
                 "🌊 smooth mesh: {} tris, passes={}, 耗时 {:.0}ms（玩家 {:?}）",
@@ -1375,6 +1388,7 @@ pub fn auto_demo(
     creatures: Query<&lk2_core::creature::Creature>,
     monsters: Res<lk2_core::monster::MonsterEcosystem>,
 ) {
+    info!("[auto_demo] frame");
 
 
 
@@ -1660,7 +1674,9 @@ pub fn first_person_camera(
     freefly: Res<FreeFlyState>,
     mode: Res<CameraMode>,
     mut orbit_angle: Local<f32>,
+    anim_state: Res<PlayerAnimState>,
 ) {
+    info!("[cam] frame");
     let Ok(mut tf) = q.single_mut() else {
         return;
     };
@@ -1707,7 +1723,13 @@ pub fn first_person_camera(
         return;
     }
 
-    let eye = player.pos + Vec3::Y * 1.7;
+    let eye_base = player.pos + Vec3::Y * 1.7;
+
+    let phase = anim_state.step_phase;
+    let speed = anim_state.smoothed_speed;
+    let bob_y = phase.sin().abs() * 0.06 * speed + (phase * 0.18).sin() * 0.012;
+    let bob_x = (phase * 0.5).sin() * 0.04 * speed;
+    let eye = eye_base + Vec3::new(bob_x, bob_y, 0.0);
 
     let dir = if cfg.mouse_look {
 

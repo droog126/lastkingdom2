@@ -8,10 +8,12 @@
 
 
 use bevy::prelude::*;
+use lk2_core::controller::components::PvPController;
 use lk2_core::player::PlayerState;
 use lk2_core::world::{Biome, World as GameWorld};
 
 use crate::render::scalar_field::effective_ground_height;
+use crate::render::CameraAngles;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -80,6 +82,96 @@ pub fn follow_water(player: Res<PlayerState>, mut q: Query<&mut Transform, With<
 #[derive(Component)]
 pub struct AvatarPart {
     pub offset: Vec3,
+    pub rest_scale: Vec3,
+    pub sokpop: SokpopAnim,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AvatarPartKind {
+    Head,
+    Hair,
+    HeadDetail,
+    Torso,
+    Thigh,
+    Shin,
+    Hand,
+    Foot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SquashAxis {
+    None,
+    Y,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SokpopAnim {
+    pub kind: AvatarPartKind,
+    pub phase_offset: f32,
+    pub bob_amp: Vec3,
+    pub lean_factor: f32,
+    pub squash_axis: SquashAxis,
+}
+
+fn avatar_sokpop(kind: AvatarPartKind) -> SokpopAnim {
+    match kind {
+        AvatarPartKind::Head => SokpopAnim {
+            kind,
+            phase_offset: 0.0,
+            bob_amp: Vec3::new(0.02, 0.05, 0.0),
+            lean_factor: 0.85,
+            squash_axis: SquashAxis::None,
+        },
+        AvatarPartKind::Hair => SokpopAnim {
+            kind,
+            phase_offset: 0.25,
+            bob_amp: Vec3::new(0.02, 0.06, 0.0),
+            lean_factor: 0.9,
+            squash_axis: SquashAxis::None,
+        },
+        AvatarPartKind::HeadDetail => SokpopAnim {
+            kind,
+            phase_offset: 0.15,
+            bob_amp: Vec3::new(0.02, 0.045, 0.0),
+            lean_factor: 0.95,
+            squash_axis: SquashAxis::None,
+        },
+        AvatarPartKind::Torso => SokpopAnim {
+            kind,
+            phase_offset: 0.0,
+            bob_amp: Vec3::new(0.04, 0.06, 0.0),
+            lean_factor: 1.0,
+            squash_axis: SquashAxis::Y,
+        },
+        AvatarPartKind::Thigh => SokpopAnim {
+            kind,
+            phase_offset: 0.0,
+            bob_amp: Vec3::new(0.16, 0.09, 0.0),
+            lean_factor: 0.25,
+            squash_axis: SquashAxis::None,
+        },
+        AvatarPartKind::Shin => SokpopAnim {
+            kind,
+            phase_offset: std::f32::consts::PI,
+            bob_amp: Vec3::new(0.18, 0.05, 0.0),
+            lean_factor: 0.15,
+            squash_axis: SquashAxis::None,
+        },
+        AvatarPartKind::Hand => SokpopAnim {
+            kind,
+            phase_offset: std::f32::consts::PI,
+            bob_amp: Vec3::new(0.22, 0.06, 0.0),
+            lean_factor: 0.7,
+            squash_axis: SquashAxis::None,
+        },
+        AvatarPartKind::Foot => SokpopAnim {
+            kind,
+            phase_offset: std::f32::consts::PI,
+            bob_amp: Vec3::new(0.10, 0.04, 0.0),
+            lean_factor: 0.05,
+            squash_axis: SquashAxis::None,
+        },
+    }
 }
 
 const AVATAR_VISUAL_SCALE: f32 = 0.55;
@@ -88,10 +180,87 @@ fn avatar_offset(offset: Vec3) -> Vec3 {
     offset * AVATAR_VISUAL_SCALE
 }
 
+impl AvatarPart {
+    pub fn new(offset: Vec3, rest_scale: Vec3, kind: AvatarPartKind) -> Self {
+        Self { offset, rest_scale, sokpop: avatar_sokpop(kind) }
+    }
+}
+
+fn spawn_avatar_part(
+    commands: &mut Commands,
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    pos: Vec3,
+    offset: Vec3,
+    rest_scale: Vec3,
+    kind: AvatarPartKind,
+) {
+    commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(pos).with_scale(rest_scale),
+        AvatarPart::new(offset, rest_scale, kind),
+    ));
+}
+
 
 #[derive(Component)]
 pub struct MonsterCube {
     pub base: Vec3,
+}
+
+
+#[derive(Resource, Default)]
+pub struct PlayerAnimState {
+    pub step_phase: f32,
+    pub smoothed_speed: f32,
+    pub smoothed_move_world: Vec2,
+    pub last_pos_y: f32,
+    pub vertical_vel: f32,
+    pub initialized: bool,
+    pub frame_count: u64,
+}
+
+pub fn update_player_anim_state(
+    time: Res<Time>,
+    player: Res<PlayerState>,
+    ctrl: Query<&PvPController>,
+    camera_angles: Res<CameraAngles>,
+    mut state: ResMut<PlayerAnimState>,
+) {
+    state.frame_count += 1;
+    if state.frame_count % 30 == 0 || state.frame_count < 5 {
+        info!("[anim] frame_count={} step_phase={:.2}", state.frame_count, state.step_phase);
+    }
+    let dt = time.delta_secs().max(0.0001);
+    let Ok(ctrl) = ctrl.single() else {
+        return;
+    };
+
+    if !state.initialized {
+        state.last_pos_y = player.pos.y;
+        state.initialized = true;
+    }
+
+    let smooth_k = 1.0 - (-dt * 8.0).exp();
+
+    let raw_speed = ctrl.move_input.length().min(1.0);
+    state.smoothed_speed = state.smoothed_speed + (raw_speed - state.smoothed_speed) * smooth_k;
+
+    let yaw = camera_angles.yaw;
+    let (sy, cy) = yaw.sin_cos();
+    let (mx, mz) = (ctrl.move_input.x, ctrl.move_input.y);
+    let world_x = cy * mz + sy * mx;
+    let world_z = -sy * mz + cy * mx;
+    let target_move = Vec2::new(world_x, world_z);
+    state.smoothed_move_world = state.smoothed_move_world.lerp(target_move, smooth_k);
+
+    let step_freq = 1.6 + 2.4 * state.smoothed_speed;
+    state.step_phase += step_freq * dt * std::f32::consts::TAU;
+
+    let vy = (player.pos.y - state.last_pos_y) / dt;
+    state.vertical_vel = state.vertical_vel + (vy - state.vertical_vel) * smooth_k;
+    state.last_pos_y = player.pos.y;
 }
 
 
@@ -140,8 +309,8 @@ pub fn spawn_pretty(
 
 
 
-        let s = 56.0_f32;
-        let water_y = lk2_core::constant::WATER_Y;
+        let s = 14.0_f32;
+        let water_y = lk2_core::constant::WATER_Y - 1.5;
         let cx = player.pos.x;
         let cz = player.pos.z;
         commands.spawn((
@@ -204,204 +373,253 @@ pub fn spawn_pretty(
 
 
 
-    if cfg.show_player_avatar {
+if cfg.show_player_avatar {
         let base = player.pos;
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.30))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=0 head
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.30)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.85, 0.75),
                 emissive: LinearRgba::from(Color::srgb(0.40, 0.34, 0.30)) * 0.5,
                 perceptual_roughness: 0.5,
                 metallic: 0.0,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.0, 0.70, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.93, 0.93)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.0, 0.70, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.0, 0.70, 0.0)),
+            avatar_offset(Vec3::new(0.0, 0.70, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.93, 0.93),
+            AvatarPartKind::Head,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.30))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=1 hair
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.30)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.45, 0.30, 0.20),
                 emissive: LinearRgba::from(Color::srgb(0.18, 0.12, 0.08)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.0, 0.80, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.60, 1.0)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.0, 0.80, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.0, 0.80, 0.0)),
+            avatar_offset(Vec3::new(0.0, 0.80, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.60, 1.0),
+            AvatarPartKind::Hair,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.09))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=2 left eye (black)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.09)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.05, 0.02, 0.04),
                 emissive: Color::BLACK.into(),
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(-0.10, 0.72, 0.22)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.78, 1.0, 0.55)),
-            AvatarPart { offset: avatar_offset(Vec3::new(-0.10, 0.72, 0.22)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(-0.10, 0.72, 0.22)),
+            avatar_offset(Vec3::new(-0.10, 0.72, 0.22)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.78, 1.0, 0.55),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.09))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=3 right eye (black)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.09)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.05, 0.02, 0.04),
                 emissive: Color::BLACK.into(),
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.10, 0.72, 0.22)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.78, 1.0, 0.55)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.10, 0.72, 0.22)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.10, 0.72, 0.22)),
+            avatar_offset(Vec3::new(0.10, 0.72, 0.22)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.78, 1.0, 0.55),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.03))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=4 left pupil (white)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.03)),
+            materials.add(StandardMaterial {
                 base_color: Color::WHITE,
                 emissive: Color::WHITE.to_linear() * 1.5,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(-0.085, 0.76, 0.27)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.6, 0.7, 0.3)),
-            AvatarPart { offset: avatar_offset(Vec3::new(-0.085, 0.76, 0.27)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(-0.085, 0.76, 0.27)),
+            avatar_offset(Vec3::new(-0.085, 0.76, 0.27)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.6, 0.7, 0.3),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.03))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=5 right pupil (white)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.03)),
+            materials.add(StandardMaterial {
                 base_color: Color::WHITE,
                 emissive: Color::WHITE.to_linear() * 1.5,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.115, 0.76, 0.27)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.6, 0.7, 0.3)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.115, 0.76, 0.27)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.115, 0.76, 0.27)),
+            avatar_offset(Vec3::new(0.115, 0.76, 0.27)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.6, 0.7, 0.3),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.07))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=6 left ear (pink)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.07)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.65, 0.70),
                 emissive: LinearRgba::from(Color::srgb(0.50, 0.30, 0.30)) * 0.5,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(-0.22, 0.66, 0.18)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.7, 0.5)),
-            AvatarPart { offset: avatar_offset(Vec3::new(-0.22, 0.66, 0.18)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(-0.22, 0.66, 0.18)),
+            avatar_offset(Vec3::new(-0.22, 0.66, 0.18)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.7, 0.5),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.07))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=7 right ear (pink)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.07)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.65, 0.70),
                 emissive: LinearRgba::from(Color::srgb(0.50, 0.30, 0.30)) * 0.5,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.22, 0.66, 0.18)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.7, 0.5)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.22, 0.66, 0.18)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.22, 0.66, 0.18)),
+            avatar_offset(Vec3::new(0.22, 0.66, 0.18)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.7, 0.5),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.04))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=8 mouth
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.04)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.85, 0.30, 0.40),
                 emissive: LinearRgba::from(Color::srgb(0.40, 0.10, 0.15)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.0, 0.62, 0.27)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.4, 0.3, 0.3)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.0, 0.62, 0.27)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.0, 0.62, 0.27)),
+            avatar_offset(Vec3::new(0.0, 0.62, 0.27)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.4, 0.3, 0.3),
+            AvatarPartKind::HeadDetail,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.30))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=9 torso (red)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.30)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.40, 0.40),
                 emissive: LinearRgba::from(Color::srgb(0.50, 0.20, 0.20)) * 0.5,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.0, 0.40, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.93, 0.83)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.0, 0.40, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.0, 0.40, 0.0)),
+            avatar_offset(Vec3::new(0.0, 0.40, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.93, 0.83),
+            AvatarPartKind::Torso,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.10))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=10 left thigh (blue)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.10)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.40, 0.55, 0.95),
                 emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(-0.10, 0.10, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0)),
-            AvatarPart { offset: avatar_offset(Vec3::new(-0.10, 0.10, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(-0.10, 0.10, 0.0)),
+            avatar_offset(Vec3::new(-0.10, 0.10, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
+            AvatarPartKind::Thigh,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.10))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=11 right thigh (blue)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.10)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.40, 0.55, 0.95),
                 emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.10, 0.10, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.10, 0.10, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.10, 0.10, 0.0)),
+            avatar_offset(Vec3::new(0.10, 0.10, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
+            AvatarPartKind::Thigh,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.13))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=12 left shin/foot
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.13)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.40, 0.55, 0.95),
                 emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(-0.10, 0.05, 0.05)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.6, 1.2)),
-            AvatarPart { offset: avatar_offset(Vec3::new(-0.10, 0.05, 0.05)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(-0.10, 0.05, 0.05)),
+            avatar_offset(Vec3::new(-0.10, 0.05, 0.05)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.6, 1.2),
+            AvatarPartKind::Shin,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.13))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=13 right shin/foot
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.13)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(0.40, 0.55, 0.95),
                 emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.10, 0.05, 0.05)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.6, 1.2)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.10, 0.05, 0.05)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.10, 0.05, 0.05)),
+            avatar_offset(Vec3::new(0.10, 0.05, 0.05)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.6, 1.2),
+            AvatarPartKind::Shin,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.10))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=14 left hand (skin)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.10)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.85, 0.75),
                 emissive: LinearRgba::from(Color::srgb(0.40, 0.34, 0.30)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(-0.30, 0.42, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0)),
-            AvatarPart { offset: avatar_offset(Vec3::new(-0.30, 0.42, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(-0.30, 0.42, 0.0)),
+            avatar_offset(Vec3::new(-0.30, 0.42, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
+            AvatarPartKind::Hand,
+        );
 
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.10))),
-            MeshMaterial3d(materials.add(StandardMaterial {
+        // i=15 right hand (skin)
+        spawn_avatar_part(
+            &mut commands,
+            meshes.add(Sphere::new(0.10)),
+            materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.85, 0.75),
                 emissive: LinearRgba::from(Color::srgb(0.40, 0.34, 0.30)) * 0.4,
                 ..default()
-            })),
-            Transform::from_translation(base + avatar_offset(Vec3::new(0.30, 0.42, 0.0)))
-                .with_scale(Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0)),
-            AvatarPart { offset: avatar_offset(Vec3::new(0.30, 0.42, 0.0)) },
-        ));
+            }),
+            base + avatar_offset(Vec3::new(0.30, 0.42, 0.0)),
+            avatar_offset(Vec3::new(0.30, 0.42, 0.0)),
+            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
+            AvatarPartKind::Hand,
+        );
+
         info!(
-            "🧍 玩家 avatar (v5-cute Q 版球体) 已 spawn at {:?}",
+            "🧍 玩家 avatar (sokpop-style Q 版) 已 spawn at {:?}",
             player.pos
         );
     }
@@ -764,19 +982,6 @@ fn spawn_v2_cube(
         .id()
 }
 
-fn spawn_avatar_cube(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    pos: Vec3,
-    size: Vec3,
-    color: Color,
-    offset: Vec3,
-) {
-    let entity = spawn_cube(commands, meshes, materials, pos, size, color);
-    commands.entity(entity).insert(AvatarPart { offset });
-}
-
 fn spawn_cube(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -804,16 +1009,58 @@ fn spawn_cube(
 
 
 
-pub fn follow_player_avatar(
+pub fn animate_avatar(
     mut q: Query<(&mut Transform, &AvatarPart)>,
     player: Res<PlayerState>,
     game_world: Res<GameWorld>,
+    state: Res<PlayerAnimState>,
 ) {
     let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+    let base_x = player.pos.x;
+    let base_z = player.pos.z;
 
-    for (mut t, part) in q.iter_mut() {
-        t.translation = Vec3::new(player.pos.x, ground_top + part.offset.y, player.pos.z)
-            + Vec3::new(part.offset.x, 0.0, part.offset.z);
+    let phase = state.step_phase;
+    let speed = state.smoothed_speed;
+    let idle = (1.0 - speed).max(0.0);
+    let breath = (phase * 0.18).sin() * 0.03 * idle;
+
+    let move_world = state.smoothed_move_world;
+    let lean_strength = 0.18 * speed.max(0.1);
+    let lean_pitch = -move_world.y * lean_strength;
+    let lean_roll = move_world.x * lean_strength;
+
+    let vy = state.vertical_vel;
+    let stretch = (1.0 + vy * 0.06).clamp(0.85, 1.15);
+
+    for (mut transform, part) in q.iter_mut() {
+        let p = phase + part.sokpop.phase_offset;
+        let amp = part.sokpop.bob_amp;
+
+        let sway_x = p.sin() * amp.x;
+        let bob_y = p.sin() * amp.y + breath;
+        let sway_z = p.cos() * amp.z * 0.5;
+
+        let rest = part.offset;
+        transform.translation = Vec3::new(
+            base_x + rest.x + sway_x,
+            ground_top + rest.y + bob_y,
+            base_z + rest.z + sway_z,
+        );
+
+        let lf = part.sokpop.lean_factor;
+        let pitch = lean_pitch * lf;
+        let roll = lean_roll * lf;
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, 0.0, pitch, roll);
+
+        let scale = match part.sokpop.squash_axis {
+            SquashAxis::Y => Vec3::new(
+                part.rest_scale.x / stretch,
+                part.rest_scale.y * stretch,
+                part.rest_scale.z / stretch,
+            ),
+            SquashAxis::None => part.rest_scale,
+        };
+        transform.scale = scale;
     }
 }
 
@@ -876,35 +1123,4 @@ pub fn animate_cloud_puffs(time: Res<Time>, mut q: Query<(&mut Transform, &Cloud
 
 
 
-pub fn animate_avatar(
-    time: Res<Time>,
-    mut q: Query<&mut Transform, With<AvatarPart>>,
-    player: Res<PlayerState>,
-) {
-    let t = time.elapsed_secs();
-    let bob = (t * 2.0).sin() * 0.05;
-    let upper_bob = bob;
-    let base = player.pos;
-    for (i, mut transform) in q.iter_mut().enumerate() {
-        let offset = match i {
-            0 => avatar_offset(Vec3::new(0.0, 0.70 + upper_bob, 0.0)),
-            1 => avatar_offset(Vec3::new(0.0, 0.80 + upper_bob, 0.0)),
-            2 => avatar_offset(Vec3::new(-0.10, 0.72 + upper_bob, 0.22)),
-            3 => avatar_offset(Vec3::new(0.10, 0.72 + upper_bob, 0.22)),
-            4 => avatar_offset(Vec3::new(-0.085, 0.76 + upper_bob, 0.27)),
-            5 => avatar_offset(Vec3::new(0.115, 0.76 + upper_bob, 0.27)),
-            6 => avatar_offset(Vec3::new(-0.22, 0.66 + upper_bob, 0.18)),
-            7 => avatar_offset(Vec3::new(0.22, 0.66 + upper_bob, 0.18)),
-            8 => avatar_offset(Vec3::new(0.0, 0.62 + upper_bob, 0.27)),
-            9 => avatar_offset(Vec3::new(0.0, 0.40 + upper_bob, 0.0)),
-            10 => avatar_offset(Vec3::new(-0.10, 0.10, 0.0)),
-            11 => avatar_offset(Vec3::new(0.10, 0.10, 0.0)),
-            12 => avatar_offset(Vec3::new(-0.10, 0.05, 0.05)),
-            13 => avatar_offset(Vec3::new(0.10, 0.05, 0.05)),
-            14 => avatar_offset(Vec3::new(-0.30, 0.42 + upper_bob, 0.0)),
-            15 => avatar_offset(Vec3::new(0.30, 0.42 + upper_bob, 0.0)),
-            _ => Vec3::ZERO,
-        };
-        transform.translation = base + offset;
-    }
-}
+

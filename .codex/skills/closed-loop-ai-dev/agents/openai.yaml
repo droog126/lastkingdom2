@@ -1,0 +1,4 @@
+interface:
+  display_name: "LK2 Closed Loop"
+  short_description: "Closed-loop observe, decide, run, and review workflow."
+  default_prompt: "Use $closed-loop-ai-dev to run and evaluate a closed-loop AI iteration."

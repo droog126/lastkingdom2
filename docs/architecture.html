@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>lastkingdom2 · 项目架构</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --bg-soft: #efeae0;
+    --card: #ffffff;
+    --line: #e9e3d6;
+    --line-soft: #efeae0;
+    --ink: #14171e;
+    --ink-mid: #3a4256;
+    --muted: #7c7a72;
+    --primary: #2f6f5e;
+    --primary-soft: rgba(47, 111, 94, 0.08);
+    --primary-line: rgba(47, 111, 94, 0.22);
+    --accent: #c97b3f;
+    --accent-soft: rgba(201, 123, 63, 0.10);
+    --code-bg: #f1ede4;
+    --shadow: 0 2px 8px rgba(20, 23, 30, 0.04);
+    --shadow-md: 0 4px 16px -2px rgba(20, 23, 30, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before, body::after {
+    content: "";
+    position: fixed;
+    width: 520px;
+    height: 520px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::before {
+    top: -200px; right: -180px;
+    background: radial-gradient(circle, rgba(47,111,94,0.05), transparent 70%);
+  }
+  body::after {
+    bottom: -220px; left: -160px;
+    background: radial-gradient(circle, rgba(201,123,63,0.05), transparent 70%);
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 32px 80px;
+  }
+
+  /* ========== HERO ========== */
+  .hero {
+    margin-bottom: 64px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--primary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: var(--primary);
+  }
+  h1 {
+    font-family: 'DM Serif Display', 'Georgia', serif;
+    font-weight: 400;
+    font-size: 38px;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 16px;
+    color: var(--ink);
+  }
+  .hero .lede {
+    font-size: 17px;
+    color: var(--ink-mid);
+    max-width: 720px;
+    margin: 0 0 32px;
+  }
+  .meta {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    padding: 20px 24px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+  }
+  .meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .meta-item .k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .meta-item .v {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* ========== SECTION ========== */
+  section {
+    margin-bottom: 56px;
+  }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .sec-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  h2 {
+    font-family: 'DM Serif Display', serif;
+    font-weight: 400;
+    font-size: 26px;
+    line-height: 1.2;
+    margin: 0;
+    color: var(--ink);
+  }
+  .sec-sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 4px 0 0;
+  }
+
+  /* ========== CRATE LAYOUT (3-up stack) ========== */
+  .crates {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .crate {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 26px;
+    box-shadow: var(--shadow);
+    transition: transform .2s, box-shadow .2s;
+  }
+  .crate:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .crate-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .crate-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 6px;
+    letter-spacing: 0.04em;
+  }
+  .tag-core { background: var(--primary-soft); color: var(--primary); border: 1px solid var(--primary-line); }
+  .tag-client { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(201,123,63,0.25); }
+  .tag-server { background: rgba(99, 102, 241, 0.08); color: #4f46e5; border: 1px solid rgba(99,102,241,0.22); }
+  .crate-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .crate-role {
+    font-size: 14px;
+    color: var(--ink-mid);
+    margin: 0 0 14px;
+  }
+  .crate-detail {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 6px 14px;
+    font-size: 13.5px;
+  }
+  .crate-detail dt { color: var(--muted); }
+  .crate-detail dd { margin: 0; color: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 12.5px; }
+
+  /* ========== CORE MODULE TREE ========== */
+  .core-tree {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  .tree-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .tree-card h3 {
+    margin: 0 0 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tree-card h3 svg { flex-shrink: 0; }
+  .tree-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tree-list li {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 4px 10px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--ink-mid);
+  }
+
+  /* ========== CLOSED LOOP ========== */
+  .loop-wrap {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: var(--shadow);
+  }
+  .loop-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .loop-legend {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px 28px;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px dashed var(--line);
+  }
+  .legend-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .legend-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 22px;
+  }
+  .legend-text strong {
+    display: block;
+    color: var(--ink);
+    font-size: 14px;
+    margin-bottom: 2px;
+  }
+  .legend-text span {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* ========== DEP STACK ========== */
+  .dep-stack {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .dep-layer {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+  .dep-layer h4 {
+    margin: 0 0 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .dep-chip {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink);
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--line-soft);
+  }
+  .dep-chip:last-child { border-bottom: none; }
+  .dep-chip b { color: var(--primary); font-weight: 500; }
+
+  /* ========== TDD FLOW ========== */
+  .tdd-flow {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 28px 32px;
+    box-shadow: var(--shadow);
+  }
+  .tdd-steps {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    align-items: stretch;
+  }
+  .tdd-step {
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 10px;
+    text-align: center;
+    position: relative;
+  }
+  .tdd-step::after {
+    content: "→";
+    position: absolute;
+    right: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--accent);
+    font-size: 14px;
+  }
+  .tdd-step:last-child::after { display: none; }
+  .tdd-step .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .tdd-step .lbl {
+    font-size: 13px;
+    color: var(--ink);
+    margin-top: 4px;
+    line-height: 1.35;
+  }
+  .tdd-cmd {
+    margin-top: 18px;
+    padding: 14px 18px;
+    background: var(--code-bg);
+    border-radius: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-mid);
+    border: 1px solid var(--line);
+  }
+  .tdd-cmd b { color: var(--primary); font-weight: 600; }
+
+  /* ========== FOOTER ========== */
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12.5px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  @media (max-width: 768px) {
+    .wrap { padding: 32px 20px 60px; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; }
+    .meta { gap: 20px; padding: 16px 18px; }
+    .core-tree { grid-template-columns: 1fr; }
+    .dep-stack { grid-template-columns: 1fr 1fr; }
+    .tdd-steps { grid-template-columns: repeat(2, 1fr); }
+    .tdd-step::after { display: none; }
+    .loop-legend { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="eyebrow">项目架构 · Architecture</div>
+    <h1>lastkingdom2<br>万国起源：最后一国 钻石版</h1>
+    <p class="lede">一个 Bevy 0.18 体素游戏 demo,核心特征是<strong>闭环 AI 迭代</strong>——游戏自己跑、自己截图、AI 读结果并决定下一步改什么,人不在回路里。</p>
+    <div class="meta">
+      <div class="meta-item"><span class="k">引擎</span><span class="v">Bevy 0.18.1</span></div>
+      <div class="meta-item"><span class="k">物理</span><span class="v">avian3d 0.6.1</span></div>
+      <div class="meta-item"><span class="k">网络</span><span class="v">lightyear 0.26</span></div>
+      <div class="meta-item"><span class="k">Crate</span><span class="v">3 个 · core/client/server</span></div>
+      <div class="meta-item"><span class="k">冷构建</span><span class="v">~22 min</span></div>
+      <div class="meta-item"><span class="k">增量</span><span class="v">~1 s</span></div>
+    </div>
+  </header>
+
+  <!-- 1 · CRATES -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <div>
+        <h2>Workspace 结构</h2>
+        <p class="sec-sub">`crates/*` 下的三个 crate,core 是唯一的共享逻辑层</p>
+      </div>
+    </div>
+
+    <div class="crates">
+
+      <div class="crate">
+        <div class="crate-head">
+          <span class="crate-tag tag-core">core</span>
+          <span class="crate-name">lk2-core</span>
+        </div>
+        <p class="crate-role">共享仿真数据 / 协议 / 规则。TDD 首选位置——反馈最快、最稳定。所有可序列化逻辑都在这里。</p>
+        <dl class="crate-detail">
+          <dt>入口</dt><dd>crates/core/src/lib.rs</dd>
+          <dt>依赖</dt><dd>无,被 client/server 引用</dd>
+          <dt>测试</dt><dd>cargo test -p lk2-core</dd>
+        </dl>
+      </div>
+
+      <div class="crate">
+        <div class="crate-head">
+          <span class="crate-tag tag-client">client</span>
+          <span class="crate-name">lk2-client</span>
+        </div>
+        <p class="crate-role">Bevy 客户端入口。负责渲染、HUD、截图、离线 demo、自动 demo 表现。</p>
+        <dl class="crate-detail">
+          <dt>入口</dt><dd>crates/client/src/main.rs</dd>
+          <dt>子模块</dt><dd>pretty/ · render/</dd>
+          <dt>运行</dt><dd>cargo run -p lk2-client -- --offline</dd>
+        </dl>
+      </div>
+
+      <div class="crate">
+        <div class="crate-head">
+          <span class="crate-tag tag-server">server</span>
+          <span class="crate-name">lk2-server</span>
+        </div>
+        <p class="crate-role">Headless 权威服务端。自检、权威仿真、UDP 监听。</p>
+        <dl class="crate-detail">
+          <dt>入口</dt><dd>crates/server/src/main.rs</dd>
+          <dt>子模块</dt><dd>(单文件入口)</dd>
+          <dt>运行</dt><dd>cargo run -p lk2-server</dd>
+        </dl>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 2 · CORE TREE -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <div>
+        <h2>core 模块地图</h2>
+        <p class="sec-sub">11 个子目录 + 18 个顶层文件,按职责分桶</p>
+      </div>
+    </div>
+
+    <div class="core-tree">
+
+      <div class="tree-card">
+        <h3>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+          世界 / 仿真核心
+        </h3>
+        <ul class="tree-list">
+          <li>world/</li><li>sim.rs</li><li>clock.rs</li><li>match_state.rs</li><li>diagnostics.rs</li><li>protocol.rs</li>
+        </ul>
+      </div>
+
+      <div class="tree-card">
+        <h3>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+          国家 / 玩家
+        </h3>
+        <ul class="tree-list">
+          <li>nation/</li><li>player.rs</li><li>pvp/</li><li>sovereign_spark.rs</li><li>protection.rs</li>
+        </ul>
+      </div>
+
+      <div class="tree-card">
+        <h3>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 7v10l8 5 8-5V7l-8-5z"/><path d="M12 22V12M4 7l8 5 8-5"/></svg>
+          生物 / 战斗
+        </h3>
+        <ul class="tree-list">
+          <li>creature/</li><li>monster/</li><li>ai/</li><li>combat.rs</li><li>controller/</li><li>equipment.rs</li>
+        </ul>
+      </div>
+
+      <div class="tree-card">
+        <h3>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg>
+          资源 / 经济 / 场景
+        </h3>
+        <ul class="tree-list">
+          <li>resource/</li><li>mining_site.rs</li><li>eco_cycle.rs</li><li>scenario/</li><li>objectives.rs</li>
+          <li>terrain_overlay.rs</li>
+        </ul>
+      </div>
+
+      <div class="tree-card">
+        <h3>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          实验性 / 常量
+        </h3>
+        <ul class="tree-list">
+          <li>v2/</li><li>constant/</li><li>transport.rs</li><li>hint.rs</li>
+        </ul>
+      </div>
+
+      <div class="tree-card">
+        <h3>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          client 子模块
+        </h3>
+        <ul class="tree-list">
+          <li>render/</li><li>pretty/</li><li>main.rs</li><li>examples/</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 3 · CLOSED LOOP -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <div>
+        <h2>闭环迭代 · 项目的核心工作流</h2>
+        <p class="sec-sub">观察 → 决策 → 行动 → 构建 → 再跑,AI 不间断推动项目演化</p>
+      </div>
+    </div>
+
+    <div class="loop-wrap">
+      <svg class="loop-svg" viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#c97b3f"/>
+          </marker>
+        </defs>
+
+        <!-- 4 boxes around a circle -->
+        <g font-family="JetBrains Mono, monospace">
+
+          <!-- OBSERVE (top) -->
+          <g transform="translate(380,30)">
+            <rect width="140" height="62" rx="10" fill="#ffffff" stroke="#e9e3d6" stroke-width="1.5"/>
+            <text x="70" y="22" text-anchor="middle" font-size="10" fill="#7c7a72" font-weight="500">STEP 1 · OBSERVE</text>
+            <text x="70" y="44" text-anchor="middle" font-size="14" fill="#14171e" font-weight="600">读 health.json</text>
+          </g>
+
+          <!-- DECIDE (right) -->
+          <g transform="translate(710,135)">
+            <rect width="140" height="62" rx="10" fill="#ffffff" stroke="#e9e3d6" stroke-width="1.5"/>
+            <text x="70" y="22" text-anchor="middle" font-size="10" fill="#7c7a72" font-weight="500">STEP 2 · DECIDE</text>
+            <text x="70" y="44" text-anchor="middle" font-size="14" fill="#14171e" font-weight="600">写 decision.md</text>
+          </g>
+
+          <!-- ACT (bottom) -->
+          <g transform="translate(380,240)">
+            <rect width="140" height="62" rx="10" fill="#ffffff" stroke="#e9e3d6" stroke-width="1.5"/>
+            <text x="70" y="22" text-anchor="middle" font-size="10" fill="#7c7a72" font-weight="500">STEP 3 · ACT</text>
+            <text x="70" y="44" text-anchor="middle" font-size="14" fill="#14171e" font-weight="600">改 crates/core 或 client</text>
+          </g>
+
+          <!-- BUILD+RUN (left) -->
+          <g transform="translate(50,135)">
+            <rect width="160" height="62" rx="10" fill="#ffffff" stroke="#e9e3d6" stroke-width="1.5"/>
+            <text x="80" y="22" text-anchor="middle" font-size="10" fill="#7c7a72" font-weight="500">STEP 4 · BUILD + RUN</text>
+            <text x="80" y="44" text-anchor="middle" font-size="14" fill="#14171e" font-weight="600">.\loop.ps1 (12s)</text>
+          </g>
+
+          <!-- Center label -->
+          <g transform="translate(450,165)">
+            <circle r="56" fill="#f7f5f0" stroke="#2f6f5e" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.6"/>
+            <text x="0" y="-4" text-anchor="middle" font-size="11" fill="#7c7a72" font-weight="500">每轮</text>
+            <text x="0" y="14" text-anchor="middle" font-size="13" fill="#2f6f5e" font-weight="600">12 秒</text>
+          </g>
+
+          <!-- arrows clockwise -->
+          <path d="M 520 61 C 620 61, 690 100, 710 135" fill="none" stroke="#c97b3f" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <path d="M 710 197 C 690 232, 620 271, 520 271" fill="none" stroke="#c97b3f" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <path d="M 380 271 C 280 271, 210 232, 210 197" fill="none" stroke="#c97b3f" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <path d="M 210 135 C 210 100, 280 61, 380 61" fill="none" stroke="#c97b3f" stroke-width="1.5" marker-end="url(#arrow)"/>
+        </g>
+
+        <!-- output artifacts strip -->
+        <g font-family="JetBrains Mono, monospace" font-size="10" fill="#7c7a72">
+          <text x="50" y="305">产物 · screenshots/iter_NN/{iter_NN.png, final_state.json, diff.json, assertions.json, decision.md, health.json}</text>
+        </g>
+      </svg>
+
+      <div class="loop-legend">
+        <div class="legend-item">
+          <span class="legend-num">1</span>
+          <div class="legend-text"><strong>观察 · health.json 优先</strong><span>体积比 PNG 小 2000 倍,先读它;FAIL/PARTIAL 才看 assertions</span></div>
+        </div>
+        <div class="legend-item">
+          <span class="legend-num">2</span>
+          <div class="legend-text"><strong>决策 · decision.md</strong><span>评分 6 维度(天空/玩家/地形/装饰/HUD/玩法),写明 next</span></div>
+        </div>
+        <div class="legend-item">
+          <span class="legend-num">3</span>
+          <div class="legend-text"><strong>行动 · 改代码</strong><span>纯逻辑走 TDD 先写测试,视觉改动最小化、聚焦 1–3 个相关问题</span></div>
+        </div>
+        <div class="legend-item">
+          <span class="legend-num">4</span>
+          <div class="legend-text"><strong>验证 · loop.ps1</strong><span>build + 12s run + 截图 + state 导出;无 decision.md = 没复盘</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · DEP STACK -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <div>
+        <h2>依赖分层</h2>
+        <p class="sec-sub">workspace.dependencies 集中管理,所有 crate 共享同一份版本</p>
+      </div>
+    </div>
+
+    <div class="dep-stack">
+      <div class="dep-layer">
+        <h4>渲染 / 引擎</h4>
+        <span class="dep-chip"><b>bevy</b> 0.18.1</span>
+        <span class="dep-chip"><b>avian3d</b> 0.6.1</span>
+        <span class="dep-chip"><b>bevy_egui</b> 0.39</span>
+        <span class="dep-chip"><b>bevy_panorbit_camera</b></span>
+        <span class="dep-chip"><b>bevy-inspector-egui</b></span>
+      </div>
+      <div class="dep-layer">
+        <h4>网络 / 输入</h4>
+        <span class="dep-chip"><b>lightyear</b> 0.26</span>
+        <span class="dep-chip"><b>lightyear_inputs_leafwing</b></span>
+        <span class="dep-chip"><b>leafwing-input-manager</b> 0.20</span>
+      </div>
+      <div class="dep-layer">
+        <h4>体素 / 几何</h4>
+        <span class="dep-chip"><b>building-blocks</b> 0.7.1</span>
+        <span class="dep-chip"><b>block-mesh</b> 0.2.0</span>
+        <span class="dep-chip"><b>ndshape</b> 0.3.0</span>
+        <span class="dep-chip"><b>parry3d</b> 0.28.0</span>
+        <span class="dep-chip"><b>fastnoise-lite</b></span>
+      </div>
+      <div class="dep-layer">
+        <h4>数据 / 工具</h4>
+        <span class="dep-chip"><b>serde / serde_json</b></span>
+        <span class="dep-chip"><b>rkyv / postcard</b></span>
+        <span class="dep-chip"><b>sled / zstd</b></span>
+        <span class="dep-chip"><b>rhai</b> (脚本)</span>
+        <span class="dep-chip"><b>dashmap / rand</b></span>
+        <span class="dep-chip"><b>tracing</b></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · TDD FLOW -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <div>
+        <h2>TDD 任务路径</h2>
+        <p class="sec-sub">任何纯逻辑改动都按这个顺序走——7 步从定位到提交</p>
+      </div>
+    </div>
+
+    <div class="tdd-flow">
+      <div class="tdd-steps">
+        <div class="tdd-step"><div class="num">1</div><div class="lbl">明确边界</div></div>
+        <div class="tdd-step"><div class="num">2</div><div class="lbl">读相关代码</div></div>
+        <div class="tdd-step"><div class="num">3</div><div class="lbl">先写测试</div></div>
+        <div class="tdd-step"><div class="num">4</div><div class="lbl">最小实现</div></div>
+        <div class="tdd-step"><div class="num">5</div><div class="lbl">跑验证</div></div>
+        <div class="tdd-step"><div class="num">6</div><div class="lbl">跑闭环</div></div>
+        <div class="tdd-step"><div class="num">7</div><div class="lbl">总结风险</div></div>
+      </div>
+
+      <div class="tdd-cmd">
+        <b>core 改动:</b>  .\tdd.ps1 -Scope core<br>
+        <b>client 改动:</b>  .\tdd.ps1 -Scope client<br>
+        <b>server 改动:</b>  .\tdd.ps1 -Scope server<br>
+        <b>跨 crate:</b>      .\tdd.ps1 -Scope workspace<br>
+        <b>视觉 / 玩法:</b>  .\loop.ps1   →  读 screenshots/iter_NN/health.json
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>lastkingdom2 · 项目架构总览</span>
+    <span>基于 Cargo.toml · AGENTS.md · 目录扫描生成</span>
+  </footer>
+
+</div>
+</body>
+</html>

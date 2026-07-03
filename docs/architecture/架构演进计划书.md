@@ -487,7 +487,7 @@
 - [ ] `loop.ps1` 跑通，生成 `iter_*.png` + `state_t*.json`
 - [ ] code-reviewer 签字
 - [ ] demo 视频上传到 `document/iterations/pN_*.mp4`
-- [ ] 阶段总结追加到 `Agent.md` 的"当前状态"段
+- [ ] 阶段总结追加到 `AGENTS.md` 的"当前状态"段
 
 未签字不进下一阶段。
 

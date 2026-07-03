@@ -1,7 +1,10 @@
 
 
 use bevy::prelude::*;
+use lk2_core::player::PlayerState;
 use lk2_core::world::World as GameWorld;
+
+use crate::render::scalar_field::effective_ground_height;
 
 const RING_PATHS: &[(&str, &str)] = &[
     ("player_avatar", "procedural/pretty/player_avatar.glb"),
@@ -63,6 +66,11 @@ const RING_PATHS: &[(&str, &str)] = &[
 
 #[derive(Component)]
 pub struct AuditPrettyMarker;
+
+#[derive(Component)]
+pub struct AuditRingOffset {
+    pub rel: Vec3,
+}
 
 pub fn spawn_audit_ring(
     commands: &mut Commands,
@@ -168,12 +176,16 @@ pub fn spawn_audit_ring(
         &asset_server,
         "cloud_puff",
         player_pos + Vec3::new(-30.0, 6.0, 0.0),
+        player_pos,
+        ground_y,
     );
     spawn_single(
         commands,
         &asset_server,
         "cloud_puff",
         player_pos + Vec3::new(30.0, 8.0, 0.0),
+        player_pos,
+        ground_y,
     );
 }
 
@@ -198,11 +210,14 @@ fn spawn_ring(
         let angle = (i as f32) / (n as f32) * std::f32::consts::TAU;
         let x = player_pos.x + angle.cos() * radius;
         let z = player_pos.z + angle.sin() * radius;
+        let world_y = ground_y + y_offset - 0.5;
+        let rel = Vec3::new(x - player_pos.x, world_y - ground_y, z - player_pos.z);
         let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
         commands.spawn((
             SceneRoot(scene),
-            Transform::from_translation(Vec3::new(x, ground_y + y_offset, z)),
+            Transform::from_translation(Vec3::new(x, world_y, z)),
             AuditPrettyMarker,
+            AuditRingOffset { rel },
         ));
         info!(
             "[audit-pretty-models]   [{}] {} at ({:.1}, {:.1})",
@@ -211,7 +226,14 @@ fn spawn_ring(
     }
 }
 
-fn spawn_single(commands: &mut Commands, asset_server: &Res<AssetServer>, name: &str, pos: Vec3) {
+fn spawn_single(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    name: &str,
+    pos: Vec3,
+    origin_player: Vec3,
+    origin_ground: f32,
+) {
     let path = match RING_PATHS.iter().find(|(n, _)| *n == name) {
         Some((_, p)) => *p,
         None => {
@@ -219,11 +241,32 @@ fn spawn_single(commands: &mut Commands, asset_server: &Res<AssetServer>, name: 
             return;
         }
     };
+    let rel = Vec3::new(
+        pos.x - origin_player.x,
+        pos.y - origin_ground - 0.5,
+        pos.z - origin_player.z,
+    );
     let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
     commands.spawn((
         SceneRoot(scene),
         Transform::from_translation(pos),
         AuditPrettyMarker,
+        AuditRingOffset { rel },
     ));
     info!("[audit-pretty-models]   single {} at {:?}", name, pos);
+}
+
+pub fn follow_audit_ring(
+    player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
+    mut q: Query<(&mut Transform, &AuditRingOffset)>,
+) {
+    for (mut t, off) in &mut q {
+        let ix = t.translation.x as i32;
+        let iz = t.translation.z as i32;
+        let ground_top = effective_ground_height(&game_world, ix, iz);
+        t.translation.x = player.pos.x + off.rel.x;
+        t.translation.z = player.pos.z + off.rel.z;
+        t.translation.y = ground_top + off.rel.y;
+    }
 }

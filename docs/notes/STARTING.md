@@ -64,7 +64,7 @@ cargo run -p lk2-client -- --offline --auto-demo
 
 HUD 直接显示在截图上（左上角）：tick、玩家坐标、4 个资源、怪物数、invariant 状态、动物方向箭头。
 
-### 1c. 项目自带的闭环脚本（`Agent.md` 推荐的 AI 迭代姿势）
+### 1c. 项目自带的闭环脚本（`AGENTS.md` 推荐的 AI 迭代姿势）
 
 ```powershell
 cd F:\rustProject\lastkingdom2
@@ -139,8 +139,7 @@ cargo fmt                  # 自动格式化（rustfmt.toml: max_width=100）
 
 看项目根目录：
 
-- `Agent.md` — 给接手 AI agent 的完整操作手册（4 阶段闭环 + 视觉目标 + 踩坑清单）
-- `AGENTS.md` — 项目级约定（cargo 风格、PR 流程、闭包架构）
+- `AGENTS.md` — 项目级约定 + AI agent 操作手册（cargo 风格、PR 流程、4 阶段闭环、视觉目标、踩坑清单）
 - `docs/`（本目录）— 各种专题文档：架构、规划、动画系统、资源系统等
   - `docs/architecture_plan_v2.md` — 架构总览
   - `docs/short_term_plan_v3.md` — 短期迭代计划

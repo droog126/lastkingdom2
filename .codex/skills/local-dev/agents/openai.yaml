@@ -1,0 +1,4 @@
+interface:
+  display_name: "LK2 Local Dev"
+  short_description: "Local development workflow for lastkingdom2."
+  default_prompt: "Use $local-dev to make a local development change in lastkingdom2."

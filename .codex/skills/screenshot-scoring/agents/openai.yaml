@@ -1,0 +1,4 @@
+interface:
+  display_name: "LK2 Screenshot Scoring"
+  short_description: "Rubric for visual screenshot scoring and iteration decisions."
+  default_prompt: "Use $screenshot-scoring to score a lastkingdom2 loop screenshot."

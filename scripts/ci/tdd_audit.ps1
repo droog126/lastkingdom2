@@ -8,10 +8,10 @@ Set-Location $ProjectRoot
 
 function Test-DecisionTemplateSync {
     $loopPath = Join-Path $ProjectRoot "scripts\loop\loop.ps1"
-    $agentPath = Join-Path $ProjectRoot "Agent.md"
+    $agentPath = Join-Path $ProjectRoot "AGENTS.md"
 
     if (-not (Test-Path $loopPath) -or -not (Test-Path $agentPath)) {
-        Write-Host "decision template audit skipped: scripts/loop/loop.ps1 or Agent.md missing" -ForegroundColor Yellow
+        Write-Host "decision template audit skipped: scripts/loop/loop.ps1 or AGENTS.md missing" -ForegroundColor Yellow
         return
     }
 
@@ -59,7 +59,7 @@ function Test-DecisionTemplateSync {
         Write-Host ""
         Write-Host "## Decision template source mismatch" -ForegroundColor Red
         foreach ($fragment in $agentMissing) {
-            Write-Host ("- missing in Agent.md: {0}" -f $fragment)
+            Write-Host ("- missing in AGENTS.md: {0}" -f $fragment)
         }
         exit 1
     }
@@ -67,13 +67,13 @@ function Test-DecisionTemplateSync {
     if (-not ($agentContent -match '# iter_NN decision')) {
         Write-Host ""
         Write-Host "## Decision template source mismatch" -ForegroundColor Red
-        Write-Host "- missing canonical decision heading in Agent.md"
+        Write-Host "- missing canonical decision heading in AGENTS.md"
         exit 1
     }
 
     Write-Host ""
     Write-Host "## Decision template sync" -ForegroundColor Yellow
-    Write-Host "- scripts/loop/loop.ps1 decision template matches Agent.md required fields"
+    Write-Host "- scripts/loop/loop.ps1 decision template matches AGENTS.md required fields"
 }
 
 function Test-FinalStateContract {
@@ -167,4 +167,5 @@ if ($totalTests -eq 0) {
 Test-DecisionTemplateSync
 Test-FinalStateContract
 
-exit 0
+exit 0
+

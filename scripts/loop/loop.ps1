@@ -32,11 +32,17 @@ param(
 
     [string]$ServerAddr = "127.0.0.1:5000",
 
-    [switch]$FirstPerson = $false
+    [switch]$FirstPerson = $false,
+    [switch]$AuditPrettyModels = $false
 )
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $ProjectRoot
+
+$LogDir = Join-Path $ProjectRoot "run-logs"
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
 
 
 
@@ -58,7 +64,7 @@ if ($RequireDecision) {
             Write-Host " Previous loop ($prevIterName) has no decision.md; refusing next loop." -ForegroundColor Red
             Write-Host " Write $prevDecision, then run loop.ps1 again." -ForegroundColor Red
             Write-Host " Template: $prevIterDir\decision.template.md" -ForegroundColor Red
-            Write-Host " See Agent.md decision template and completion criteria." -ForegroundColor Red
+            Write-Host " See AGENTS.md decision template and completion criteria." -ForegroundColor Red
             Write-Host "" -ForegroundColor Red
             exit 1
         }
@@ -88,10 +94,17 @@ Start-Sleep -Seconds 1
 
 
 
-$featureArgs = if ($Dynamic) { "--features dev-dynamic-linking,lk2-core/dev-dynamic-linking,audit-pretty-models" } else { "--features audit-pretty-models"
-
+$features = @()
+if ($Dynamic) {
+    $features += "dev-dynamic-linking"
+    $features += "lk2-core/dev-dynamic-linking"
 }
+if ($AuditPrettyModels) {
+    $features += "audit-pretty-models"
+}
+$featureArgs = if ($features.Count -gt 0) { "--features " + ($features -join ",") } else { "" }
 if ($Dynamic) { Write-Host ">>> dynamic linking ON <<<" -ForegroundColor Cyan }
+if ($AuditPrettyModels) { Write-Host ">>> audit pretty models ON <<<" -ForegroundColor Cyan }
 
 
 $buildTargets = if ($UseOffline -or $NoServer) { @("lk2-client") } else { @("lk2-client","lk2-server") }
@@ -104,7 +117,7 @@ if (-not $SkipBuild) {
     foreach ($t in $buildTargets) {
         Write-Host ">>> cargo build -p $t $featureArgs ..." -ForegroundColor Cyan
         $buildOutput = cmd /c "cargo build -p $t $featureArgs 2>&1"
-        $buildOutput | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        $buildOutput | Tee-Object -FilePath (Join-Path $LogDir "build_loop.log") | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) {
             Write-Host ">>> BUILD FAILED for $t" -ForegroundColor Red
             exit 1
@@ -114,12 +127,12 @@ if (-not $SkipBuild) {
 
     if ($needClientBuild) {
         Write-Host ">>> client binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
-        cmd /c "cargo build -p lk2-client $featureArgs 2>&1" | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        cmd /c "cargo build -p lk2-client $featureArgs 2>&1" | Tee-Object -FilePath (Join-Path $LogDir "build_loop.log") | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
     }
     if ($needServerBuild) {
         Write-Host ">>> server binary missing, building (SkipBuild override) ..." -ForegroundColor Cyan
-        cmd /c "cargo build -p lk2-server $featureArgs 2>&1" | Tee-Object -FilePath "build_loop.log" | Select-Object -Last 5
+        cmd /c "cargo build -p lk2-server $featureArgs 2>&1" | Tee-Object -FilePath (Join-Path $LogDir "build_loop.log") | Select-Object -Last 5
         if ($LASTEXITCODE -ne 0) { Write-Host ">>> BUILD FAILED" -ForegroundColor Red; exit 1 }
     }
 }
@@ -386,4 +399,5 @@ next:
 } else {
  Write-Host ""
  Write-Host "[warn] no iter_* directory found -- can't write decision.template.md" -ForegroundColor Yellow
-}
+}
+

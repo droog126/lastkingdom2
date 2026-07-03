@@ -1,6 +1,6 @@
 {
-  "version": 6,
-  "spec": "v5-cute 梦幻可爱 Q 版 (糖果色 + 强 emissive + 大眼睛 + smooth 球形 + y ≤ 0.8m 贴地) + v6 terrain/buildings (cute 风格扩展地形与建筑)",
+  "version": 7,
+  "spec": "v5-cute 梦幻可爱 Q 版 + v6 terrain/buildings + v7 decor/creatures (8 装饰 + 4 建筑 + 3 生物)",
   "format": "glb",
   "assets": {
     "eco": [
@@ -54,6 +54,28 @@
       "fence",
       "shrine",
       "lighthouse"
+    ],
+    "decor": [
+      "campfire",
+      "lantern_post",
+      "crate",
+      "barrel",
+      "signpost",
+      "market_stall",
+      "bench",
+      "fountain",
+      "statue"
+    ],
+    "buildings_v3": [
+      "forge",
+      "chapel",
+      "pier",
+      "tavern"
+    ],
+    "creatures": [
+      "villager",
+      "wolf",
+      "bear"
     ]
   }
 }

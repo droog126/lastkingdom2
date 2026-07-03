@@ -121,7 +121,7 @@
 
 ### P2：闭环和可观测性
 
-- [ ] `loop.ps1` 每次生成 `decision.template.md` 的字段和 `Agent.md` 保持一致。
+- [ ] `loop.ps1` 每次生成 `decision.template.md` 的字段和 `AGENTS.md` 保持一致。
 - [ ] `final_state.json` 至少包含 tick、player、resource、monster/creature 关键字段。
 - [ ] `diff.json` 对关键资源 delta 做稳定排序，便于 AI 对比。
 - [ ] 自动 demo 运行 N 秒后玩家位置发生可解释变化。

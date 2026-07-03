@@ -62,8 +62,8 @@ use lk2_core::world::{World as GameWorld, WorldGenerator};
 
 use crate::controller_systems::ControllerPlugin;
 use crate::pretty::{
-    PrettyConfig, animate_avatar, animate_monsters, follow_ground_discs, follow_monster_cubes,
-    follow_player_avatar, spawn_pretty,
+    PrettyConfig, PlayerAnimState, animate_avatar, animate_monsters, follow_ground_discs,
+    follow_monster_cubes, spawn_pretty, update_player_anim_state,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -84,7 +84,7 @@ use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutori
 
 
 const AUTO_DEMO_WAIT_TICKS: u64 = 1_800;
-const FIRST_SCREENSHOT_MIN_TICK: u64 = 500;
+const FIRST_SCREENSHOT_MIN_TICK: u64 = 100;
 
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
@@ -313,7 +313,6 @@ fn main() {
             if auto_demo_mode {
 
                 cfg.auto_walk = true;
-                cfg.auto_orbit = true;
                 cfg.auto_keys = true;
                 cfg.mouse_look = false;
             }
@@ -339,6 +338,7 @@ fn main() {
         .init_resource::<ReplicatedSnapshot>()
         .init_resource::<NetworkSmoothingState>()
         .init_resource::<NestMarkerCount>()
+        .init_resource::<PlayerAnimState>()
         .insert_resource(if network_mode {
             ClientRunMode::Online
         } else {
@@ -391,9 +391,9 @@ fn main() {
         Update,
         (
 
-            lk2_core::scenario::scenario_runner,
-            lk2_core::scenario::simulate_player_actions,
-            lk2_core::scenario::scenario_tick_recorder,
+            // lk2_core::scenario::scenario_runner,
+            // lk2_core::scenario::simulate_player_actions,
+            // lk2_core::scenario::scenario_tick_recorder,
 
 
             apply_networked_position,
@@ -422,6 +422,8 @@ fn main() {
         )
             .chain(),
     );
+
+    app.add_systems(Update, update_player_anim_state.before(animate_avatar));
     app.add_systems(
         Update,
         (
@@ -458,7 +460,6 @@ fn main() {
     app.add_systems(
         Update,
         (
-            follow_player_avatar,
             follow_ground_discs,
             follow_monster_cubes,
             animate_monsters,
@@ -1109,6 +1110,7 @@ fn simulation_tick(
     mut eco: ResMut<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
+    let prev = clock.tick;
     let _ = advance_fixed_authority_tick(
         fixed_time.delta_secs(),
         &mut clock,
@@ -1118,6 +1120,9 @@ fn simulation_tick(
         &mut obs,
         SimRole::ClientOffline,
     );
+    if clock.tick != prev && clock.tick % 100 == 0 {
+        info!("[sim] tick={} prev={}", clock.tick, prev);
+    }
 }
 
 fn end_tick_system(
@@ -1157,9 +1162,10 @@ fn periodic_screenshot(
     monsters: Res<MonsterEcosystem>,
     eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
-    game_world: Res<GameWorld>,
+game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
 ) {
+
 
 
 
@@ -1172,17 +1178,17 @@ fn periodic_screenshot(
     let _ = time;
 
 
+    eprintln!("[shot] poll tick={} wall={:.1} last={:.1}", clock.tick, now, clock.last_screenshot_wall);
 
-    if clock.tick < FIRST_SCREENSHOT_MIN_TICK {
-        return;
-    }
-
-    if now - clock.last_screenshot_wall < 4.0 {
+    let interval = std::env::var("LK2_SCREENSHOT_INTERVAL")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(4.0);
+    if now - clock.last_screenshot_wall < interval {
         return;
     }
     clock.last_screenshot_wall = now;
     clock.screenshot_count += 1;
-
     let iter_id = clock.screenshot_count;
     let iter_dir = format!("screenshots/iter_{:02}", iter_id);
     let _ = std::fs::create_dir_all(&iter_dir);
@@ -1227,7 +1233,9 @@ fn periodic_screenshot(
 
 fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
     if keys.just_pressed(KeyCode::Escape) {
-        std::process::exit(0);
+        info!("[exit_on_esc] ESC pressed — would exit");
+        // TEMP: disabled to debug schedule survival
+        // std::process::exit(0);
     }
 }
 

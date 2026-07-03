@@ -1,74 +1,29 @@
 # AGENTS.md
 
-Bevy 0.18.1 voxel game demo ("万国起源：最后一国 钻石版") with **closed-loop AI iteration** — the game runs itself, captures screenshots, AI reads results and decides the next change. No human in the loop per iteration.
+This repository uses project skills for detailed instructions. Keep this file as a routing table only. When a task matches a route, read the matching `SKILL.md` before acting.
 
-## Setup commands
+## Skill Routing
 
-- Install deps: `cargo build --workspace` (Rust 1.75+, edition 2024)
-- Start dev: `$env:BEVY_DISABLE_ACCESSIBILITY="1"; $env:RUST_LOG="info"; cargo run -p lk2-client -- --offline` (auto-demo / offline loop)
-- Build: `cargo build --workspace` (~22 min cold from scratch, ~1 s incremental)
-- Test: `cargo test --workspace`
-- Lint: `cargo clippy --workspace`
-- Format: `cargo fmt` (style in `rustfmt.toml`)
+- Use `$local-dev` for ordinary repository work: inspect files, make local code/docs/script changes, choose validation scope, handle git hygiene, or prepare branch/commit/PR work.
+- Use `$tdd-iteration` for testable behavior changes: pure logic, rules, state machines, resources, drops, conservation, nations, monsters, animals, combat, protection periods, phase timing, CLI/protocol/network parsing, AI decisions, scenarios, tick observers, bug fixes, and regressions.
+- Use `$bevy-gameplay-dev` for Bevy 0.18.1 client/server/gameplay work: `crates/client`, `crates/server`, gameplay systems in `crates/core`, render/input/HUD/camera, voxel rendering, networking behavior, scenarios, performance, and log-spam fixes.
+- Use `$closed-loop-ai-dev` for visual/gameplay-experience iteration: screenshots, offline auto-demo, `loop.ps1`, `scripts/loop`, observer health, `health.json`, `assertions.json`, `diff.json`, `final_state.json`, PNG review, and `decision.md`.
+- Use `$screenshot-scoring` for evidence-backed screenshot scoring: visual category scores, hard gates, previous/current comparison, `decision.md` score sections, and next visual iteration choice.
+- Use `$ai-modeling` for 3D assets: Blender-generated GLBs, procedural models, `tools/build_*.py`, `assets/procedural/pretty`, `assets/procedural/eco`, animals, terrain buildings, `MANIFEST.json`, and poly-budget validation.
 
-## Closed-loop iteration (核心)
+## Composition
 
-The project's defining workflow. **Read [`Agent.md`](./Agent.md) before changing anything** — it documents the 4-phase observe → decide → act → build → re-run loop and lists required code infrastructure.
+- For gameplay rule changes, use `$tdd-iteration` plus `$bevy-gameplay-dev`.
+- For visible client/gameplay changes, use `$bevy-gameplay-dev` plus `$closed-loop-ai-dev`.
+- For loop screenshot review, use `$closed-loop-ai-dev` plus `$screenshot-scoring`.
+- For generated models that appear in game, use `$ai-modeling` plus `$closed-loop-ai-dev`.
+- For broad tasks, start with `$local-dev`, then add the more specific skill above.
 
-Quickstart:
+## Skill Files
 
-```powershell
-.\loop.ps1                           # build + 12s run + capture iter_NN.png + state_NN.json
-Get-ChildItem screenshots\iter_*\iter_*.png | Sort LastWriteTime -Descending | Select -First 3
-```
-
-## Project layout
-
-- `crates/client/src/main.rs` — Bevy client entry, HUD, screenshot, offline demo, client-side render/input
-- `crates/server/src/main.rs` — headless server entry, self-check, authority sim, UDP listen
-- `crates/core/src/` — shared sim/data/protocol modules (`world`, `ai`, `scenario`, `monster`, `nation`, `resource`, ...)
-- `scenarios/` — scenario JSON files (test scripts)
-- `screenshots/` — output of `loop.ps1` (PNG + state JSON)
-- `docs/` — design notes, architecture plans, gameplay design, and archived imports
-- `assets/` — art / 3D models
-- `loop.ps1`, `tdd.ps1` — root compatibility wrappers for daily development
-- `scripts/loop/` — closed-loop drivers and health checks
-- `scripts/dev/` — developer command wrappers
-- `scripts/ci/` — test and architecture audits
-- `scripts/maintenance/` — one-off repo maintenance helpers
-- `Agent.md` — the project's AI-agent operations manual (read this first)
-
-Legacy note: the old root `minecraft_bevy` package and `launchers/` wrappers were removed. Do not route new work through them.
-
-## Modeling assets
-
-- If AI needs to create or modify 3D models, use Blender through Python scripts.
-- Blender launcher path: `F:\BLENDER\blender-launcher.exe`
-- Preferred command shape: `& "F:\BLENDER\blender-launcher.exe" --background --python tools\build_all_models.py`
-- Keep generated assets reproducible from scripts under `tools/`; do not commit `__pycache__`, Blender backups, or local absolute-path config.
-
-## Code style
-
-- `rustfmt.toml` — `max_width = 100`, `comment_width = 100`, `tab_spaces = 4`, `use_field_init_shorthand = true`, `newline_style = "Unix"`
-- Bevy 0.18.1 patterns: use `Mesh3d` / `MeshMaterial3d` components, NOT the deprecated `PbrBundle` / `MaterialMeshBundle`
-- Share `Handle<Mesh>` / `Handle<StandardMaterial>` across blocks of the same type (GPU state changes are expensive)
-- `Cargo.toml` pins `compt = ">=1.9, <1.10"` — broccoli 0.6 does NOT compile with compt 1.10. Do not bump it
-- `info!` / `warn!` in a system that runs every tick should be throttled (use `Local<u32>` to dedupe per tick)
-
-## Testing instructions
-
-- Unit tests: `cargo test --workspace` (cargo's built-in test framework)
-- Visual / scenario validation: `loop.ps1`, then read the latest `iter_NN.png` + `state_NN.json`
-- All scenarios must complete or fail with a clear reason — never dead-loop on `OUT OF BOUNDS` or spam `体素过多` warnings
-- All tests + a fresh `loop.ps1` run must pass before opening a PR
-
-## PR & commit conventions
-
-- Branch from `master` (current dev branch); CI builds from `main` after merge
-- Commit message: conventional commits (`feat:` / `fix:` / `docs:` / `refactor:` / `chore:`)
-- Open PR via `gh pr create` once local `cargo build` + `loop.ps1` are green
-
-## Security
-
-- No secrets in the repo. Network code exists for local multiplayer, but no auth/secrets flow
-- Do not commit `target/`, `screenshots/iter_*.png`, `*.log` — most are already in `.gitignore`; double-check with `git status` before pushing
+- `.codex/skills/local-dev/SKILL.md`
+- `.codex/skills/tdd-iteration/SKILL.md`
+- `.codex/skills/bevy-gameplay-dev/SKILL.md`
+- `.codex/skills/closed-loop-ai-dev/SKILL.md`
+- `.codex/skills/screenshot-scoring/SKILL.md`
+- `.codex/skills/ai-modeling/SKILL.md`

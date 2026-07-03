@@ -66,3 +66,6 @@ __pycache__/
 # Node.js artifacts
 node_modules/
 package-lock.json
+
+# do_check.bat 输出（防止 do_check.bat 回归时漏管）
+cargo_check_out.txt

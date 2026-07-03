@@ -14,7 +14,7 @@
 1. **完善闭环系统** — 让 capture + read 阶段更自动化、AI 友好
 2. **开发游戏** — 通过闭环驱动游戏本体的改进（视觉、玩法、稳定性）
 
-读了 `Agent.md` (4 阶段闭环) / `AGENTS.md` (项目约定) / `loop.ps1` (执行脚本) / `docs/总纲.md` (3 套架构) / `docs/STARTING.md` (启动指南) / `docs/目标.md` (本次的工作方向)。
+读了 `AGENTS.md` (4 阶段闭环 + 项目约定) / `loop.ps1` (执行脚本) / `docs/总纲.md` (3 套架构) / `docs/STARTING.md` (启动指南) / `docs/目标.md` (本次的工作方向)。
 
 ---
 
@@ -74,7 +74,7 @@
 ### P2 — 视觉可读性 (这是 AI 截图能看出东西的前提)
 
 6. **iter_07.png 天空全黑**
-   - Agent.md P0 列表 "天空不是黑色" 打了 ✅ 但**实际还是黑的** — 这是 stale checkbox
+   - AGENTS.md P0 列表 "天空不是黑色" 打了 ✅ 但**实际还是黑的** — 这是 stale checkbox
    - 修法: `setup_atmosphere` 把 `ClearColor` 改成固定天蓝色 (白天)，或实现 `day_night_cycle` 但默认 t=12:00
 
 7. **HUD 几乎不可见**
@@ -91,9 +91,9 @@
 10. **C 切 3rd person** — 已改未测
 11. **F5 紧急传送** — 已加
 12. **F3 灵魂出窍** — 已加
-13. **平坦出生地** — Agent.md P1 "未做"，未启动
-14. **远景雾 / 阴影** — Agent.md P2，未启动
-15. **怪物 AI 真实移动** — Agent.md P2，未启动
+13. **平坦出生地** — AGENTS.md P1 "未做"，未启动
+14. **远景雾 / 阴影** — AGENTS.md P2，未启动
+15. **怪物 AI 真实移动** — AGENTS.md P2，未启动
 
 ---
 

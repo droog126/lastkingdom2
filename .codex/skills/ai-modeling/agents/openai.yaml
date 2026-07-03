@@ -1,0 +1,4 @@
+interface:
+  display_name: "LK2 AI Modeling"
+  short_description: "Reproducible Blender asset generation workflow."
+  default_prompt: "Use $ai-modeling to create or modify reproducible 3D assets."
