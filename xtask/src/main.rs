@@ -66,7 +66,7 @@ fn print_help() {
     println!("xtask commands:");
     println!("  loop [--offline] [--seconds N]");
     println!("  tdd --scope core|changed|client|server|workspace|fmt|clippy|audit");
-    println!("  dev build|test|core|clippy|fmt|loop|health|help");
+    println!("  dev build|stage-runtime|test|core|clippy|fmt|loop|health|help");
     println!("  health [iter_NN|path]");
     println!("  scenario --json scenarios/*.json");
 }
@@ -88,7 +88,9 @@ fn run_dev(root: &std::path::Path, args: &[String]) -> Result<()> {
                 "--features",
                 "dev-dynamic-linking,lk2-core/dev-dynamic-linking",
             ],
-        ),
+        )
+        .and_then(|_| loop_cmd::stage_windows_runtime_files(root)),
+        "stage-runtime" => loop_cmd::stage_windows_runtime_files(root),
         "test" => tdd::run_step(root, "workspace tests", &["cargo", "test", "--workspace"]),
         "core" => tdd::run_step(root, "core tests", &["cargo", "test", "-p", "lk2-core"]),
         "clippy" => tdd::run_step(

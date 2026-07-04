@@ -1,5 +1,3 @@
-
-
 use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
 use lk2_core::pvp::FixedTick;
@@ -21,7 +19,6 @@ pub struct ServerPvPPlugin;
 impl Plugin for ServerPvPPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(FixedUpdate, (record_position_history,));
-
     }
 }
 

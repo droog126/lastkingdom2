@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use avian3d::prelude::{Collider, RigidBody};
 
 use crate::pretty::PlayerAnimState;
+use crate::render::scalar_field::effective_ground_height;
 use lk2_core::constant;
 use lk2_core::creature::Creature;
 use lk2_core::monster::MonsterEcosystem;
@@ -293,6 +294,7 @@ pub fn spawn_terrain_around_player(
             StandardMaterial {
                 base_color: Color::srgba(c[0], c[1], c[2], c[3]),
                 emissive: emissive.into(),
+                unlit: true,
                 perceptual_roughness: 0.85,
                 metallic: 0.0,
                 ..default()
@@ -1508,6 +1510,17 @@ pub fn first_person_camera(
         let look_target = freefly.position + dir * 5.0;
         tf.translation = freefly.position;
         tf.look_at(look_target, Vec3::Y);
+        return;
+    }
+
+    if cfg.auto_keys && cfg.auto_orbit && !cfg.mouse_look {
+        let center_x = constant::WORLD_SIZE as f32 * 0.5 + 0.5;
+        let center_z = constant::WORLD_SIZE as f32 * 0.5 + 0.5;
+        let ground_top =
+            effective_ground_height(&world, center_x.floor() as i32, center_z.floor() as i32);
+        let target = Vec3::new(center_x, ground_top + 1.8, center_z);
+        tf.translation = target + Vec3::new(-8.5, 7.5, 12.0);
+        tf.look_at(target, Vec3::Y);
         return;
     }
 

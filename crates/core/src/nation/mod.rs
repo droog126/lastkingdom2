@@ -1,30 +1,39 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
+use crate::clock::SimClock;
 use crate::constant::*;
 use crate::resource::{
     GlobalResourcePool, PoolError, ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer,
 };
+
+
+// =============================================================================
+// 自动 upkeep（资源循环闭环）
+//
+// 每个 nation 每 NATION_UPKEEP_INTERVAL_TICKS tick 自动消耗 Wood + Food 维持 flag，
+// 缺资源时 flag_hp 扣 NATION_UPKEEP_MISS_HP_LOSS，flag_hp 归零就 dissolve。
+//
+// 设计：放在 server 的 FixedUpdate chain (after `simulation_tick`)，
+// `simulation_tick` 已经会 try_add(Apple, +1) / try_add(Food, +2)，
+// nation 消耗 Wood/Food 让 pool 有真"流出"，配合玩家挖矿 / 战斗产 Wood/Soul，
+// 形成 Wood/Soul 流向 nation、Food 从 sim tick 流回 nation 的资源循环。
+// =============================================================================
+pub const NATION_UPKEEP_WOOD_PER_TICK: i64 = 1;
+pub const NATION_UPKEEP_FOOD_PER_TICK: i64 = 1;
+pub const NATION_UPKEEP_INTERVAL_TICKS: u64 = 30;
+pub const NATION_UPKEEP_MISS_HP_LOSS: u32 = 5;
+
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpkeepReport {
+    pub checked: usize,
+    pub kept: usize,
+    pub missed: usize,
+    pub dissolved: usize,
+}
 
 
 
@@ -309,7 +318,7 @@ impl NationRegistry {
             return Err(UpgradeError::InsufficientResources);
         }
 
-        if wood > 0 {
+if wood > 0 {
             pool.try_sub(ResourceKind::Wood, wood as i64)
                 .map_err(|e: PoolError| UpgradeError::PoolError(e))?;
         }
@@ -324,6 +333,64 @@ impl NationRegistry {
 
         n.pop_cap = target;
         Ok(())
+    }
+
+
+    /// 自动 upkeep：每 `NATION_UPKEEP_INTERVAL_TICKS` tick 对每个 nation 扣
+    /// `NATION_UPKEEP_WOOD_PER_TICK` Wood + `NATION_UPKEEP_FOOD_PER_TICK` Food。
+    /// 池不够 → flag_hp 扣 `NATION_UPKEEP_MISS_HP_LOSS`，归零就 dissolve。
+    ///
+    /// 返回 [`UpkeepReport`]（不写日志，避免每 tick spam；日志由调用方按需 throttle）。
+    pub fn tick_upkeep(
+        &mut self,
+        pool: &mut GlobalResourcePool,
+        current_tick: u64,
+    ) -> UpkeepReport {
+        let mut report = UpkeepReport::default();
+        if current_tick % NATION_UPKEEP_INTERVAL_TICKS != 0 {
+            return report;
+        }
+        let ids: Vec<NationId> = self.nations.keys().copied().collect();
+        let mut to_dissolve: Vec<NationId> = Vec::new();
+        for id in ids {
+            report.checked += 1;
+            let have_wood = pool.get(ResourceKind::Wood) >= NATION_UPKEEP_WOOD_PER_TICK;
+            let have_food = pool.get(ResourceKind::Food) >= NATION_UPKEEP_FOOD_PER_TICK;
+            if have_wood && have_food {
+
+                let _ = pool.try_sub(ResourceKind::Wood, NATION_UPKEEP_WOOD_PER_TICK);
+                let _ = pool.try_sub(ResourceKind::Food, NATION_UPKEEP_FOOD_PER_TICK);
+                report.kept += 1;
+            } else if let Some(n) = self.nations.get_mut(&id) {
+                n.flag_hp = n.flag_hp.saturating_sub(NATION_UPKEEP_MISS_HP_LOSS);
+                report.missed += 1;
+                if n.flag_hp == 0 {
+                    to_dissolve.push(id);
+                }
+            }
+        }
+        for id in to_dissolve {
+            self.dissolve(id);
+            report.dissolved += 1;
+        }
+        report
+    }
+}
+
+
+/// Bevy system 包装 — 在 server 的 FixedUpdate 调一次，自动 throttle 日志。
+pub fn tick_nations_upkeep_system(
+    mut pool: ResMut<GlobalResourcePool>,
+    mut registry: ResMut<NationRegistry>,
+    clock: Res<SimClock>,
+) {
+    let report = registry.tick_upkeep(&mut pool, clock.tick);
+    if report.checked > 0 && clock.tick % (NATION_UPKEEP_INTERVAL_TICKS * 10) == 0 {
+
+        info!(
+            "[nation-upkeep] tick={} checked={} kept={} missed={} dissolved={}",
+            clock.tick, report.checked, report.kept, report.missed, report.dissolved
+        );
     }
 }
 
@@ -342,7 +409,7 @@ pub enum FoundError {
 impl fmt::Display for FoundError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FoundError::MaxFlagsReached(n) => write!(f, "已达 {} 面上限", n),
+            FoundError::MaxFlagsReached(n) => write!(f, "已达国家数量上限: {}, n),
             FoundError::AlreadyInNation => write!(f, "你已在一个国家里"),
             FoundError::InsufficientSouls { have, need } => {
                 write!(f, "灵魂不足: 有 {} 需 {}", have, need)
@@ -364,7 +431,7 @@ pub enum JoinError {
 impl fmt::Display for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            JoinError::AlreadyInNation => write!(f, "你已在一个国家里"),
+JoinError::AlreadyInNation => write!(f, "你已在一个国家里"),
             JoinError::NoSuchNation => write!(f, "国家不存在"),
             JoinError::PopulationFull { current, cap } => {
                 write!(f, "人口上限: {}/{}", current, cap)
@@ -402,7 +469,7 @@ pub enum UpgradeError {
 impl fmt::Display for UpgradeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UpgradeError::NoSuchNation => write!(f, "国家不存在"),
+            UpgradeError::NoSuchNation => write!(f, "国家不存在,
             UpgradeError::AlreadyAtOrAbove { current, target } => {
                 write!(f, "当前人口上限 {} >= 目标 {}", current, target)
             }
@@ -579,5 +646,82 @@ mod tests {
         assert_eq!(reg.find_nation_by_player(2), Some(id_b));
         assert_eq!(reg.find_nation_by_player(4), Some(id_b));
         assert_eq!(reg.find_nation_by_player(99), None);
+    }
+
+
+    fn reg_with_two_nations_and_pool(
+        wood: i64,
+        food: i64,
+    ) -> (NationRegistry, GlobalResourcePool, NationId, NationId) {
+        let mut reg = NationRegistry::new();
+        let mut pool = GlobalResourcePool::new();
+        pool.force_add(ResourceKind::Soul, 10 + 15);
+        pool.force_add(ResourceKind::Wood, wood);
+        pool.force_add(ResourceKind::Food, food);
+        let id_a = reg.found(&mut pool, 1, "A".into(), [1, 1, 1], 0).unwrap();
+        let id_b = reg.found(&mut pool, 2, "B".into(), [2, 1, 1], 0).unwrap();
+        (reg, pool, id_a, id_b)
+    }
+
+    #[test]
+    fn upkeep_consumes_wood_and_food_per_interval_tick() {
+        let (mut reg, mut pool, _id_a, _id_b) = reg_with_two_nations_and_pool(100, 100);
+        let wood_before = pool.get(ResourceKind::Wood);
+        let food_before = pool.get(ResourceKind::Food);
+
+        let report = reg.tick_upkeep(&mut pool, NATION_UPKEEP_INTERVAL_TICKS);
+
+        assert_eq!(report.checked, 2);
+        assert_eq!(report.kept, 2);
+        assert_eq!(report.missed, 0);
+        assert_eq!(report.dissolved, 0);
+        assert_eq!(
+            pool.get(ResourceKind::Wood),
+            wood_before - 2 * NATION_UPKEEP_WOOD_PER_TICK
+        );
+        assert_eq!(
+            pool.get(ResourceKind::Food),
+            food_before - 2 * NATION_UPKEEP_FOOD_PER_TICK
+        );
+    }
+
+    #[test]
+    fn upkeep_is_noop_off_interval() {
+        let (mut reg, mut pool, _id_a, _id_b) = reg_with_two_nations_and_pool(100, 100);
+        let wood_before = pool.get(ResourceKind::Wood);
+        let food_before = pool.get(ResourceKind::Food);
+        let report = reg.tick_upkeep(&mut pool, NATION_UPKEEP_INTERVAL_TICKS + 1);
+        assert_eq!(report, UpkeepReport::default());
+        assert_eq!(pool.get(ResourceKind::Wood), wood_before);
+        assert_eq!(pool.get(ResourceKind::Food), food_before);
+    }
+
+    #[test]
+    fn upkeep_decreases_flag_hp_when_pool_low() {
+        let (mut reg, mut pool, id_a, _id_b) = reg_with_two_nations_and_pool(0, 0);
+        let hp_before = reg.nations.get(&id_a).unwrap().flag_hp;
+
+        let report = reg.tick_upkeep(&mut pool, NATION_UPKEEP_INTERVAL_TICKS);
+
+        assert_eq!(report.checked, 2);
+        assert_eq!(report.kept, 0);
+        assert_eq!(report.missed, 2);
+        assert_eq!(report.dissolved, 0);
+        let hp_after = reg.nations.get(&id_a).unwrap().flag_hp;
+        assert_eq!(hp_after, hp_before - NATION_UPKEEP_MISS_HP_LOSS);
+    }
+
+    #[test]
+    fn upkeep_dissolves_nation_when_flag_hp_reaches_zero() {
+
+        let (mut reg, mut pool, id_a, _id_b) = reg_with_two_nations_and_pool(0, 0);
+
+        let start_hp = reg.nations.get(&id_a).unwrap().flag_hp;
+        let ticks_needed = start_hp.div_ceil(NATION_UPKEEP_MISS_HP_LOSS);
+        for i in 0..ticks_needed {
+            reg.tick_upkeep(&mut pool, (i as u64 + 1) * NATION_UPKEEP_INTERVAL_TICKS);
+        }
+        assert!(!reg.nations.contains_key(&id_a));
+        assert_eq!(reg.flag_count, 1);
     }
 }

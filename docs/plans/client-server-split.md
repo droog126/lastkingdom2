@@ -1,5 +1,7 @@
 # 客户端 / 服务端 拆分 (MinimalPlugins vs DefaultPlugins) 计划
 
+> 当前说明：这是 2026-06-07 的拆分草稿快照。仓库现在已经是 `lk2-core` / `lk2-client` / `lk2-server` workspace，当前工程边界以 `docs/architecture/engineering-baseline.md` 为准；闭环入口以 `docs/STARTING.md` 和 `.codex/skills/closed-loop-ai-dev/SKILL.md` 为准。文中 `loop.ps1`、`.harness/reins` 和 `scripts/` 工作流描述均按历史背景阅读，不作为当前执行入口。
+
 > 日期: 2026-06-07
 > 状态: 草稿，等用户拍板后进 `.harness/reins/developer` 执行
 > 范围: 仓库从「单 binary 单 crate」拆成「workspace 3 crate」 — `core` (sim 逻辑) / `server` (headless MinimalPlugins) / `client` (DefaultPlugins)

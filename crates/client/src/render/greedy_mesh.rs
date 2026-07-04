@@ -8,7 +8,7 @@ use ndshape::{ConstShape, ConstShape3u32};
 
 use lk2_core::world::{BlockType, World as GameWorld};
 
-type ChunkShape = ConstShape3u32<41, 41, 41>;
+type ChunkShape = ConstShape3u32<97, 97, 97>;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug)]
 struct Vox(u8);

@@ -16,7 +16,9 @@ use bevy::prelude::*;
 
 #[derive(Resource)]
 pub struct SimClock {
+    pub frame_tick: u64,
     pub tick: u64,
+    pub last_sim_step_ran: bool,
     pub last_tick_wall: f32,
     pub slow_tick_accum: f32,
     pub last_hud_wall: f32,
@@ -43,7 +45,9 @@ impl Default for SimClock {
             }
         }
         Self {
+            frame_tick: 0,
             tick: 0,
+            last_sim_step_ran: false,
             last_tick_wall: 0.0,
             slow_tick_accum: 0.0,
             last_hud_wall: 0.0,

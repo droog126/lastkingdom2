@@ -1,21 +1,17 @@
 # 启动指南 / How to Run
 
-> 万国起源：最后一国 钻石版 — `F:\rustProject\lastkingdom2` 的所有"怎么跑起来"在这里。根 `minecraft_bevy` 和旧 `launchers/` 已删除。
-
----
+> 当前工程入口在 `F:\rustProject\lastkingdom2`。根 `minecraft_bevy`、旧 `launchers/`、根 PowerShell 闭环脚本和 `scripts/` 工作流运行时都是历史口径。当前自动化事实源是 Rust `xtask`，`justfile` 只做短命令别名。
 
 ## 0. 一次性准备
 
-第一次 clone 后要装依赖 + 编译一次（冷编译 ~22 分钟，增量 ~1-30 秒）：
+第一次 clone 后要装依赖并编译一次：
 
 ```powershell
 cd F:\rustProject\lastkingdom2
-cargo build --workspace
+just build
 ```
 
 > Rust edition 2024，需要 Rust 1.75+。`Cargo.toml` 已固定 `compt = ">=1.9, <1.10"`（broccoli 0.6 配套版本）— **不要 bump 它**。
-
----
 
 ## 1. 三种运行姿势
 
@@ -23,13 +19,11 @@ cargo build --workspace
 
 ```powershell
 cd F:\rustProject\lastkingdom2
-$env:BEVY_DISABLE_ACCESSIBILITY="1"   # 跳过 Windows 辅助 API，启动快很多
-cargo run -p lk2-client -- --offline
+$env:BEVY_DISABLE_ACCESSIBILITY="1"
+just offline
 ```
 
 打开一个 1280×720 的窗口，出生在 `96³` 世界的中心。
-
-**操作**：
 
 | 键 | 动作 |
 | --- | --- |
@@ -44,9 +38,7 @@ cargo run -p lk2-client -- --offline
 | `J` | 攻击 2 格内最近怪物 |
 | `Esc` | 退出 |
 
-逻辑驱动的移动（不是完整刚体物理）：水平移动会按软地表寻找可站落脚点，低矮体素边缘直接走过；只有高度差过大或身体空间被挡时才拒绝移动。
-
-### 1b. 自动演示（无输入 / 适合 AI 迭代）
+### 1b. 自动演示（无输入 / 调试用）
 
 ```powershell
 cd F:\rustProject\lastkingdom2
@@ -55,69 +47,58 @@ $env:RUST_LOG="info"
 cargo run -p lk2-client -- --offline --auto-demo
 ```
 
-行为：
-- 玩家不动（保留在出生点附近，能看见起始牧场）
-- 相机自动跟最近的动物（auto-follow），**不读鼠标**
-- `t=1.0s` 自动按 F（造国）+ `t=4.0s` 自动按 J（杀怪）+ `t=8.0s` 再按 F（验证"已有国家"分支）
-- **每 5 秒**自动截一张全屏图到 `screenshots\iter_NN.png`
-- **每 5 tick** 自动 dump 一次状态 JSON 到 `screenshots\state_tNN.json`（t=5, 10, 15, ...）
+自动演示会驱动基础场景、HUD 和截图输出。需要完整 AI 闭环时优先用 `just loop`，因为它会同时处理 build、health、状态差异和决策模板。
 
-HUD 直接显示在截图上（左上角）：tick、玩家坐标、4 个资源、怪物数、invariant 状态、动物方向箭头。
-
-### 1c. 项目自带的闭环脚本（`AGENTS.md` 推荐的 AI 迭代姿势）
+### 1c. 项目闭环（推荐的 AI 迭代姿势）
 
 ```powershell
 cd F:\rustProject\lastkingdom2
-.\loop.ps1
+just loop
 ```
 
-等价于：按需 build `lk2-client`/`lk2-server` + 跑 12 秒 + 杀进程 + 准备下一轮。AI agent 读最新截图 → 决定改什么 → 改代码 → 再跑。
+等价于：
 
----
+```powershell
+cargo run -q -p xtask -- loop --offline --seconds 60
+```
+
+`xtask loop` 会按需 build `lk2-client`，运行离线 auto-demo，生成 `screenshots\iter_NN\` 目录，执行 health 检查，并写入 `decision.template.md`。下一轮运行前，上一轮必须有 `decision.md`。
+
+闭环阅读顺序：
+
+1. 先读 `screenshots\iter_NN\health.json`。
+2. 如果是 `PARTIAL` 或 `FAIL`，读 `assertions.json`。
+3. 需要解释状态变化时读 `final_state.json` 和 `diff.json`。
+4. 只有视觉判断需要时再打开 `iter_NN.png`。
+5. 把本轮判断写入 `decision.md`。
 
 ## 2. 改完代码怎么看效果？
 
-**增量编译**：
+常用验证：
 
 ```powershell
-cd F:\rustProject\lastkingdom2
-cargo build --workspace
-# 第一次：~22 分钟（cold）  后续：1-30 秒
+just test-changed
+just test
+just audit-tdd
+just fmt
+just clippy
 ```
 
-然后启动 .exe 看效果（参考上面 §1a 或 §1b）。
-
-**只跑测试**（不生成 .exe）：
+视觉、玩法体验、HUD、auto-demo、截图或状态观察改变后，再跑：
 
 ```powershell
-cargo test --workspace
+just loop
 ```
 
-**代码质量**：
-
-```powershell
-cargo clippy --workspace   # lint
-cargo fmt                  # 自动格式化（rustfmt.toml: max_width=100）
-```
-
----
-
-## 3. 常见问题 / "为什么没效果"
+## 3. 常见问题
 
 | 现象 | 原因 | 解决 |
 | --- | --- | --- |
 | 启动后窗口黑屏几秒 | Vulkan 加载 + 96³ Greedy Mesh 构建 | 等 1-2 秒；首次会很慢 |
 | 终端一片 `VK_LAYER_KHRONOS_validation` 红字 | 没装 Vulkan 验证层 | 忽略，不影响运行 |
-| HUD 中文显示豆腐块 / 终端 `Path not found: fonts/NotoSansCJKsc-Regular.otf` | 字体 asset 路径找不到 | 把 `assets/fonts/NotoSansCJKsc-Regular.otf` 复制到 `target\debug\assets\fonts/`，或在 Cargo.toml 加 `asset` |
-| 天空是纯黑色 | `day_night_cycle` 的 ClearColor 逻辑有 bug | pre-existing 毛病，不在 Greedy Mesh 范围；等修 |
-| 准星在左上角而不是正中央 | `left: px(50.0)` 是 50px，不是 50% | pre-existing UI bug，等修 |
-| 启动后立刻 panic，提示 `bevy_pvp::ActionState not found` | PvP 的 InputMap 资源没插 | 已知，运行 demo 无影响（已用 `Option<ResMut>` 容错） |
-| 启动后立刻 panic，提示 `Message not initialized` | 某个 `Message<T>` 没 `.add_message::<T>()` | 已知，运行 demo 无影响（已注册全部消息） |
-| 启动后立刻 panic，提示 `min=[0,0,0] max=[96,96,96] out of bounds` | `block-mesh` 0.2 的 3×3×3 kernel 需要 `chunk_shape` 比世界 +1 | 已用 `ConstShape3u32<97, 97, 97>` 解决 |
-| 鼠标锁死在窗口中央 | FPS mouse-look 默认开 | 按 `Esc` 解锁；或 `--auto-demo` 模式自动关 mouse-look |
-| 看不到 `.exe` 产物 | 第一次 build 没跑完 | 跑一次 `cargo build` 即可（22 分钟） |
-
----
+| HUD 中文显示豆腐块 / 终端 `Path not found: fonts/NotoSansCJKsc-Regular.otf` | 字体 asset 路径找不到 | 检查 `assets/fonts/NotoSansCJKsc-Regular.otf` 是否可被 Bevy asset root 找到 |
+| 鼠标锁死在窗口中央 | FPS mouse-look 默认开 | 按 `Esc` 解锁；或用 `--auto-demo` |
+| `just loop` 拒绝运行并提示缺 `decision.md` | 上一轮闭环没有记录决策 | 根据 `decision.template.md` 写 `screenshots\iter_NN\decision.md` 后再跑 |
 
 ## 4. 输出文件位置
 
@@ -125,41 +106,38 @@ cargo fmt                  # 自动格式化（rustfmt.toml: max_width=100）
 | --- | --- |
 | `target\debug\lk2-client.exe` | 客户端二进制 |
 | `target\debug\lk2-server.exe` | 服务端二进制 |
-| `screenshots\iter_NN\iter_NN.png` | 启动后每轮生成的截图（含 HUD overlay） |
-| `screenshots\state_tNN.json` | 每 5 tick 的 sim 状态（玩家坐标、资源、怪物、invariant 违例） |
-| `target\debug\deps\` | 增量编译缓存（删掉等于 cold rebuild） |
-| `log\*.log` | 编译/运行日志（`cargo build > log\build.log` 这种） |
+| `screenshots\iter_NN\iter_NN.png` | 每轮主截图（含 HUD overlay） |
+| `screenshots\iter_NN\final_state.json` | 每轮终态 sim 状态 |
+| `screenshots\iter_NN\diff.json` | 相对上一轮的关键状态差异 |
+| `screenshots\iter_NN\assertions.json` | health 断言详情 |
+| `screenshots\iter_NN\health.json` | 闭环健康结论，优先读取 |
+| `screenshots\iter_NN\decision.template.md` | xtask 生成的决策记录模板 |
+| `screenshots\iter_NN\decision.md` | 本轮人工/AI 决策记录，下一轮前必须存在 |
+| `run-logs\*.log` | xtask 编译/运行日志 |
 
-> `.gitignore` 已经忽略 `target/`、`screenshots/iter_*.png`、`*.log` 和 `log/`。  
-> **约定：所有 build/run log 写到 `log/` 下，别再往根目录喷 `build_xxx.log`。**
+运行产物写到 `screenshots/` 或 `run-logs/`，不要往根目录写 `build_xxx.log`。
 
----
+## 5. 文档入口
 
-## 5. 想要更详细的 dev 流程？
-
-看项目根目录：
-
-- `AGENTS.md` — 项目级约定 + AI agent 操作手册（cargo 风格、PR 流程、4 阶段闭环、视觉目标、踩坑清单）
-- `docs/`（本目录）— 各种专题文档：架构、规划、动画系统、资源系统等
-  - `docs/architecture_plan_v2.md` — 架构总览
-  - `docs/short_term_plan_v3.md` — 短期迭代计划
-
----
+- `AGENTS.md`：项目技能路由和同步策略。
+- `.codex/skills/*/SKILL.md`：AI agent 的详细操作规则。
+- `docs/architecture/engineering-baseline.md`：当前工程边界和自动化事实源。
+- `docs/plans/closed-loop-iteration.md`：当前闭环维护计划。
+- `docs/notes/tdd.md`：TDD 入口和 backlog。
 
 ## 6. TL;DR
 
 ```powershell
-# 玩
 cd F:\rustProject\lastkingdom2
-cargo build --workspace
-$env:BEVY_DISABLE_ACCESSIBILITY="1"
-cargo run -p lk2-client -- --offline
 
-# AI 迭代（截图 + 状态）
-cargo run -p lk2-client -- --offline --auto-demo
-# → 读 screenshots\iter_NN.png 和 state_tNN.json
+# 玩
+just build
+just offline
 
 # 改完代码
-cargo build --workspace
-# 再跑
+just test-changed
+
+# AI 闭环
+just loop
+# 先读 screenshots\iter_NN\health.json，再按需读 assertions/final_state/diff/PNG
 ```

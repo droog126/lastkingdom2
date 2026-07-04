@@ -27,7 +27,14 @@ description: Local development workflow for the lastkingdom2 Rust/Bevy workspace
 - `xtask/`: Rust task runner for loop, health, TDD scopes, scenarios, and audits.
 - `justfile`: short cross-platform aliases for the Rust task runner.
 
-Legacy note: do not route work through removed `minecraft_bevy` or `launchers/` paths.
+Active docs:
+
+- `AGENTS.md`: project skill routing and synchronization policy.
+- `docs/architecture/engineering-baseline.md`: current engineering boundaries and automation ownership.
+- `docs/STARTING.md`: current run guide.
+- `docs/README.md`: docs map.
+
+Legacy note: do not route work through removed `minecraft_bevy`, `launchers/`, root PowerShell workflow wrappers, or `scripts/` workflow-runtime paths.
 
 ## Tooling Choices
 
@@ -63,6 +70,15 @@ just test
 just audit-tdd
 just fmt
 just clippy
+```
+
+Closed-loop entry points:
+
+```sh
+just loop
+just health
+cargo run -q -p xtask -- loop --offline --seconds 60
+cargo run -q -p xtask -- health
 ```
 
 Use dev dynamic linking only for local client/server development when the repo scripts expect it. Do not use it for release or CI validation.

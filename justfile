@@ -1,8 +1,22 @@
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
 default:
     @just --list
 
 build:
     cargo run -q -p xtask -- dev build
+
+build-client:
+    cargo build -p lk2-client --features dev-dynamic-linking,lk2-core/dev-dynamic-linking
+
+server:
+    cargo run -p lk2-server --features dev-dynamic-linking
+
+client:
+    cargo run -p lk2-client --features dev-dynamic-linking,lk2-core/dev-dynamic-linking -- --connect=127.0.0.1:5000
+
+offline:
+    cargo run -p lk2-client -- --offline
 
 build-server:
     cargo build -p lk2-server --features dev-dynamic-linking
@@ -10,6 +24,16 @@ build-server:
 build-full:
     cargo build -p lk2-client --features dev-dynamic-linking,lk2-core/dev-dynamic-linking
     cargo build -p lk2-server --features dev-dynamic-linking
+
+release-client:
+    cargo build --release -p lk2-client
+
+release-server:
+    cargo build --release -p lk2-server
+
+release-full:
+    cargo build --release -p lk2-client
+    cargo build --release -p lk2-server
 
 test:
     cargo run -q -p xtask -- tdd --scope workspace
@@ -50,7 +74,7 @@ loop-skip-build:
 health:
     cargo run -q -p xtask -- health
 
-health ITER_DIR:
+health-iter ITER_DIR:
     cargo run -q -p xtask -- health {{ITER_DIR}}
 
 scenario JSON:

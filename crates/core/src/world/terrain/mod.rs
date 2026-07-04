@@ -675,7 +675,8 @@ impl TerrainPipeline {
 
 pub mod presets {
     use super::*;
-    use rand::prelude::*;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     pub fn default_preset() -> TerrainPipeline {
 
@@ -777,7 +778,7 @@ pub mod presets {
     }
 
     pub fn lold_arena_preset() -> TerrainPipeline {
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(0x10AD_AE7A);
         let mut h = HeightmapModule::default();
         h.amplitude_big = rng.random_range(5.0..25.0);
         h.amplitude_detail = rng.random_range(1.0..6.0);
@@ -1025,5 +1026,16 @@ mod tests {
             "superflat 出生点 ground 应 = 13 (SEA_LEVEL+1), got {}",
             ground_at_spawn
         );
+    }
+
+    #[test]
+    fn lold_arena_preset_is_seeded_and_reproducible() {
+        let a = presets::lold_arena_preset();
+        let b = presets::lold_arena_preset();
+
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.seed, b.seed);
+        assert_eq!(a.surface_f32(48, 48), b.surface_f32(48, 48));
+        assert_eq!(a.generate(48, 16, 48), b.generate(48, 16, 48));
     }
 }

@@ -4,8 +4,8 @@ use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::player::PlayerState;
 use lk2_core::world::{Biome, World as GameWorld};
 
-use crate::render::scalar_field::effective_ground_height;
 use crate::render::CameraAngles;
+use crate::render::scalar_field::effective_ground_height;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -202,7 +202,7 @@ pub enum RabbitVisualPart {
 }
 
 pub fn eco_fruit_marker_count(fruit: u32) -> u32 {
-    fruit.min(3)
+    fruit.clamp(1, 3)
 }
 
 const ECO_CO2_BUBBLE_COUNT: u32 = 6;
@@ -266,7 +266,11 @@ pub struct CloudPuff {
 pub struct V2WorldMarker;
 
 #[derive(Component)]
-pub struct KenneyLandmark;
+pub struct KenneyLandmark {
+    /// Local offset from the player: x = camera-right, y = vertical, z = camera-forward.
+    pub rel: Vec3,
+    pub y_offset: f32,
+}
 
 #[allow(unreachable_code)]
 pub fn spawn_pretty(
@@ -845,38 +849,38 @@ fn spawn_kenney_landmarks(
     const LANDMARKS: &[(&str, &str, Vec3, f32)] = &[
         (
             "kenney_campfire_pit",
-            "kenney_survival-kit/Models/GLB format/campfire-pit.glb",
-            Vec3::new(4.8, -0.45, -3.2),
+            "kenney/curated/survival_props/kenney_campfire_pit.glb",
+            Vec3::new(-1.4, -0.35, 3.2),
             1.0,
         ),
         (
             "kenney_tent",
-            "kenney_survival-kit/Models/GLB format/tent.glb",
-            Vec3::new(6.4, -0.45, -4.0),
+            "kenney/curated/survival_props/kenney_tent.glb",
+            Vec3::new(1.2, -0.35, 4.0),
             1.0,
         ),
         (
             "kenney_workbench",
-            "kenney_survival-kit/Models/GLB format/workbench.glb",
-            Vec3::new(3.3, -0.45, -5.0),
+            "kenney/curated/survival_props/kenney_workbench.glb",
+            Vec3::new(0.0, -0.35, 2.6),
             1.0,
         ),
         (
             "kenney_row_boat_small",
-            "kenney_pirate-kit/Models/GLB format/boat-row-small.glb",
-            Vec3::new(-6.0, -0.45, 5.0),
+            "kenney/curated/coastal_and_pirate/kenney_row_boat_small.glb",
+            Vec3::new(2.2, -0.35, 4.8),
             1.0,
         ),
         (
             "kenney_coin_gold",
-            "kenney_platformer-kit/Models/GLB format/coin-gold.glb",
-            Vec3::new(-2.7, 0.15, -3.2),
+            "kenney/curated/terrain_and_pickups/kenney_coin_gold.glb",
+            Vec3::new(-0.7, 0.25, 2.1),
             1.0,
         ),
         (
             "kenney_heart",
-            "kenney_platformer-kit/Models/GLB format/heart.glb",
-            Vec3::new(-3.7, 0.25, -2.2),
+            "kenney/curated/terrain_and_pickups/kenney_heart.glb",
+            Vec3::new(0.8, 0.35, 2.2),
             1.0,
         ),
     ];
@@ -886,14 +890,32 @@ fn spawn_kenney_landmarks(
         let pos = Vec3::new(
             player_pos.x + offset.x,
             ground_y + offset.y,
-            player_pos.z + offset.z,
+            player_pos.z - offset.z,
         );
         commands.spawn((
             SceneRoot(scene),
             Transform::from_translation(pos).with_scale(Vec3::splat(*scale)),
-            KenneyLandmark,
+            KenneyLandmark { rel: *offset, y_offset: offset.y },
         ));
         info!("[kenney] spawned landmark {} at {:?}", name, pos);
+    }
+}
+
+pub fn follow_kenney_landmarks(
+    player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
+    camera_angles: Res<CameraAngles>,
+    mut q: Query<(&mut Transform, &KenneyLandmark)>,
+) {
+    let yaw = camera_angles.yaw;
+    let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
+    let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
+    for (mut transform, landmark) in &mut q {
+        let rel = right * landmark.rel.x + forward * landmark.rel.z;
+        let x = player.pos.x + rel.x;
+        let z = player.pos.z + rel.z;
+        let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+        transform.translation = Vec3::new(x, ground_y + landmark.y_offset, z);
     }
 }
 
@@ -1039,35 +1061,40 @@ pub fn spawn_eco_visuals(
 
     let rabbit_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.92, 0.82),
-        emissive: Color::srgb(0.35, 0.25, 0.20).into(),
+        emissive: Color::srgb(0.70, 0.55, 0.38).into(),
+        unlit: true,
         perceptual_roughness: 0.72,
         metallic: 0.0,
         ..default()
     });
     let rabbit_inner_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 0.55, 0.68),
-        emissive: Color::srgb(0.35, 0.10, 0.16).into(),
+        emissive: Color::srgb(0.75, 0.18, 0.28).into(),
+        unlit: true,
         perceptual_roughness: 0.72,
         metallic: 0.0,
         ..default()
     });
     let bush_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.22, 0.58, 0.20),
-        emissive: Color::srgb(0.04, 0.20, 0.03).into(),
+        base_color: Color::srgb(0.20, 0.72, 0.22),
+        emissive: Color::srgb(0.10, 0.38, 0.06).into(),
+        unlit: true,
         perceptual_roughness: 0.88,
         metallic: 0.0,
         ..default()
     });
     let fruit_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.95, 0.14, 0.28),
-        emissive: Color::srgb(0.80, 0.05, 0.15).into(),
+        base_color: Color::srgb(1.0, 0.05, 0.18),
+        emissive: Color::srgb(1.0, 0.12, 0.20).into(),
+        unlit: true,
         perceptual_roughness: 0.42,
         metallic: 0.0,
         ..default()
     });
     let bubble_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.45, 0.88, 1.0, 0.48),
-        emissive: Color::srgb(0.18, 0.55, 0.85).into(),
+        base_color: Color::srgba(0.45, 0.90, 1.0, 0.62),
+        emissive: Color::srgb(0.25, 0.75, 1.0).into(),
+        unlit: true,
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.18,
         metallic: 0.0,
@@ -1191,7 +1218,7 @@ pub fn update_eco_visuals(
                 let z = rabbit.pos.y;
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let phase = t * 5.0 + id as f32 * 0.9;
-                let hop = phase.sin().max(0.0) * 0.14;
+                let hop = phase.sin().max(0.0) * 0.28;
                 let breath = (t * 2.2 + id as f32).sin() * 0.025;
                 let (offset, scale) = rabbit_part_pose(part, breath);
                 transform.translation = Vec3::new(x, ground_y, z) + offset + Vec3::Y * hop;
@@ -1207,8 +1234,8 @@ pub fn update_eco_visuals(
                 let z = berry.pos.y;
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let sway = (t * 1.4 + id as f32).sin() * 0.035;
-                transform.translation = Vec3::new(x, ground_y + 0.36 + sway, z);
-                transform.scale = Vec3::new(0.95, 0.58 + sway.abs(), 0.95);
+                transform.translation = Vec3::new(x, ground_y + 0.50 + sway, z);
+                transform.scale = Vec3::new(1.25, 0.82 + sway.abs(), 1.25);
             }
             EcoVisual::BerryFruit { id, index } => {
                 let Some(berry) = eco.berries.iter().find(|berry| berry.id == id) else {
@@ -1225,11 +1252,12 @@ pub fn update_eco_visuals(
                 let angle = index as f32 * std::f32::consts::TAU / 3.0 + id as f32 * 0.35;
                 let bob = (t * 3.0 + index as f32).sin() * 0.035;
                 transform.translation = Vec3::new(
-                    x + angle.cos() * 0.35,
-                    ground_y + 0.68 + bob,
-                    z + angle.sin() * 0.35,
+                    x + angle.cos() * 0.46,
+                    ground_y + 0.92 + bob,
+                    z + angle.sin() * 0.46,
                 );
-                transform.scale = Vec3::splat(0.18);
+                let fruit_scale = if berry.fruit == 0 { 0.16 } else { 0.30 };
+                transform.scale = Vec3::splat(fruit_scale);
             }
             EcoVisual::Co2Bubble { index } => {
                 if eco.rabbits.is_empty() {
@@ -1241,14 +1269,14 @@ pub fn update_eco_visuals(
                 let z = rabbit.pos.y;
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let phase = t * 1.8 + index as f32 * 1.13;
-                let radius = 0.35 + index as f32 * 0.08;
-                let alpha_scale = (eco.co2 / 2.0).clamp(0.35, 1.35);
+                let radius = 0.55 + index as f32 * 0.10;
+                let alpha_scale = (eco.co2 / 2.0).clamp(0.55, 1.55);
                 transform.translation = Vec3::new(
                     x + phase.cos() * radius,
-                    ground_y + 0.95 + phase.sin().abs() * 0.75,
+                    ground_y + 1.35 + phase.sin().abs() * 1.05,
                     z + phase.sin() * radius,
                 );
-                transform.scale = Vec3::splat((0.18 + index as f32 * 0.025) * alpha_scale);
+                transform.scale = Vec3::splat((0.34 + index as f32 * 0.04) * alpha_scale);
             }
         }
     }
@@ -1257,22 +1285,22 @@ pub fn update_eco_visuals(
 fn rabbit_part_pose(part: RabbitVisualPart, breath: f32) -> (Vec3, Vec3) {
     match part {
         RabbitVisualPart::Body => (
-            Vec3::new(0.0, 0.34 + breath, 0.0),
-            Vec3::new(0.70, 0.42, 0.95),
+            Vec3::new(0.0, 0.48 + breath, 0.0),
+            Vec3::new(1.05, 0.62, 1.30),
         ),
         RabbitVisualPart::Head => (
-            Vec3::new(0.0, 0.58 + breath, -0.42),
-            Vec3::new(0.42, 0.38, 0.42),
+            Vec3::new(0.0, 0.86 + breath, -0.62),
+            Vec3::new(0.64, 0.56, 0.64),
         ),
         RabbitVisualPart::EarLeft => (
-            Vec3::new(-0.13, 0.95 + breath, -0.47),
-            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(-0.24, 1.42 + breath, -0.68),
+            Vec3::new(1.6, 1.7, 1.6),
         ),
         RabbitVisualPart::EarRight => (
-            Vec3::new(0.13, 0.95 + breath, -0.47),
-            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(0.24, 1.42 + breath, -0.68),
+            Vec3::new(1.6, 1.7, 1.6),
         ),
-        RabbitVisualPart::Tail => (Vec3::new(0.0, 0.43 + breath, 0.48), Vec3::splat(0.26)),
+        RabbitVisualPart::Tail => (Vec3::new(0.0, 0.62 + breath, 0.68), Vec3::splat(0.38)),
     }
 }
 
@@ -1383,8 +1411,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eco_fruit_marker_count_is_capped_for_readability() {
-        assert_eq!(eco_fruit_marker_count(0), 0);
+    fn eco_fruit_marker_count_keeps_empty_bushes_readable() {
+        assert_eq!(eco_fruit_marker_count(0), 1);
         assert_eq!(eco_fruit_marker_count(1), 1);
         assert_eq!(eco_fruit_marker_count(3), 3);
         assert_eq!(eco_fruit_marker_count(9), 3);

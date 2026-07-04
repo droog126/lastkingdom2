@@ -1,7 +1,3 @@
-
-
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -151,10 +147,10 @@ impl InvariantKind {
     pub const fn label_zh(self) -> &'static str {
         match self {
             InvariantKind::ResourceConservation => "资源守恒",
-            InvariantKind::MonsterCountConsistency => "怪物计数一致",
+            InvariantKind::MonsterCountConsistency => "怪物计数一�?,
             InvariantKind::FlagCountCap => "国旗上限",
             InvariantKind::PlayerInBounds => "玩家在世界内",
-            InvariantKind::TickDurationBounded => "Tick 时长 ≤ 50ms",
+            InvariantKind::TickDurationBounded => "Tick 时长 �?50ms",
         }
     }
 }
@@ -253,7 +249,7 @@ impl TickObserver {
                     tick: dec.tick,
                     kind: AnomalyKind::Oscillation,
                     detail: format!(
-                        "agent {} 在 5 tick 内反复做 {} 决定",
+                        "agent {} �?5 tick 内反复做 {} 决定",
                         dec.agent_id,
                         dec.kind.label_zh()
                     ),
@@ -348,7 +344,7 @@ impl TickObserver {
                 .map(|k| k.total_individuals())
                 .sum();
             errors.push(format!(
-                "[怪物计数 @ tick {}] current={} 但 sum-of-nests={}",
+                "[怪物计数 @ tick {}] current={} �?sum-of-nests={}",
                 tick, monsters.current_individuals, sum
             ));
         }
@@ -401,7 +397,7 @@ impl TickObserver {
         let mut s = String::new();
         s.push_str("=== TickObserver 报告 ===\n");
         s.push_str(&format!(
-            "  总 tick: {}, 快照: {}, 决策: {}\n",
+            "  �?tick: {}, 快照: {}, 决策: {}\n",
             self.snapshots.len(),
             self.snapshots.len(),
             self.decisions.len()
@@ -409,7 +405,7 @@ impl TickObserver {
         s.push_str("\n--- Invariants ---\n");
         for (kind, inv) in &self.invariants {
             s.push_str(&format!(
-                "  [{}] 违例 {} 次，最后 @ tick {}\n",
+                "  [{}] 违例 {} 次，最�?@ tick {}\n",
                 kind.label_zh(),
                 inv.total_violations,
                 inv.last_violation_tick.map(|t| t.to_string()).unwrap_or_else(|| "n/a".into())
@@ -417,7 +413,7 @@ impl TickObserver {
         }
         s.push_str("\n--- Anomalies ---\n");
         if self.anomalies.is_empty() {
-            s.push_str("  (无)\n");
+            s.push_str("  (�?\n");
         } else {
 
             for a in self.anomalies.iter().take(20) {
@@ -437,7 +433,7 @@ impl TickObserver {
             let avg = total / self.tick_durations.len() as u32;
             let max = self.tick_durations.iter().max().unwrap();
             s.push_str(&format!(
-                "\n--- Tick 性能 ---\n  平均: {:?}, 最大: {:?} (样本 {})\n",
+                "\n--- Tick 性能 ---\n  平均: {:?}, 最�? {:?} (样本 {})\n",
                 avg,
                 max,
                 self.tick_durations.len()

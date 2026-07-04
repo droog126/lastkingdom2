@@ -4,7 +4,8 @@
 
 
 use bevy::prelude::*;
-use rand::prelude::*;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 use crate::combat::{
     AttackState, BlockState, Downed, Health as CombatHealth, InputBuffer, Knockback, ParryWindow,
@@ -136,7 +137,7 @@ pub fn spawn_creatures(
     done.0 = true;
 
     let s = world.size;
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(0xC0FF_EE01);
     let kinds = [
         CreatureKind::Pig,
         CreatureKind::Sheep,
@@ -157,6 +158,7 @@ pub fn spawn_creatures(
         &kinds,
         spawn_cx,
         spawn_cz,
+        &mut rng,
     ) {
         placed += 1;
     } else if spawn_debug_training_creature(
@@ -185,6 +187,7 @@ pub fn spawn_creatures(
             z,
             None,
             None,
+            &mut rng,
         ) {
             placed += 1;
         }
@@ -211,6 +214,7 @@ pub fn spawn_creatures(
             z,
             None,
             None,
+            &mut rng,
         ) {
             placed += 1;
         }
@@ -227,6 +231,7 @@ fn try_spawn_training_creature_near_spawn(
     kinds: &[CreatureKind; 4],
     spawn_cx: i32,
     spawn_cz: i32,
+    rng: &mut StdRng,
 ) -> bool {
     const OFFSETS: &[(i32, i32)] = &[
         (0, -1),
@@ -253,6 +258,7 @@ fn try_spawn_training_creature_near_spawn(
             spawn_cz + dz,
             Some(CreatureKind::Cow),
             Some(9999.0),
+            rng,
         ) {
             return true;
         }
@@ -321,8 +327,8 @@ fn try_spawn_creature(
     z: i32,
     fixed_kind: Option<CreatureKind>,
     fixed_wander_secs: Option<f32>,
+    rng: &mut StdRng,
 ) -> bool {
-    let mut rng = rand::rng();
     let s = world.size;
     if x < 2 || x >= s - 2 || z < 2 || z >= s - 2 {
         return false;
@@ -423,10 +429,11 @@ pub fn player_attack_creatures(
 pub fn update_creatures(
     time: Res<Time>,
     world: Res<GameWorld>,
+    mut rng: Local<Option<StdRng>>,
     mut q: Query<(&mut Creature, &mut CreatureAI, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
-    let mut rng = rand::rng();
+    let rng = rng.get_or_insert_with(|| StdRng::seed_from_u64(0xC0FF_EE02));
     for (mut creature, mut ai, mut tf) in q.iter_mut() {
         ai.wander_timer += dt;
         ai.bob_phase += dt * 3.0;

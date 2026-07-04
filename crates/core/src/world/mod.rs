@@ -1,18 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -819,7 +804,7 @@ mod tests {
             + w.count_biome_ores(Biome::Jungle);
         assert!(
             total_ores > 0,
-            "至少一个 biome 应该有 ore (实际: D={}, T={}, J={})",
+            "至少一�?biome 应该�?ore (实际: D={}, T={}, J={})",
             w.count_biome_ores(Biome::Desert),
             w.count_biome_ores(Biome::Tundra),
             w.count_biome_ores(Biome::Jungle)

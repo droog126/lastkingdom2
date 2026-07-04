@@ -1,5 +1,7 @@
 # 万国起源 2.0 — 计划书：从"能跑"到"百万实体级"现代架构演进
 
+> 当前说明：这是 2026-06-06 的架构演进计划快照。当前自动化入口已经从 `loop.ps1` 收敛到 Rust `xtask`/`just loop`；当前工程边界以 `docs/architecture/engineering-baseline.md` 为准。文中 `loop.ps1`、`state_t*.json`、`.harness/reins` 等描述按历史阶段阅读。
+
 > **作者**：Mavis (orchestrator)
 > **版本**：v0.2（2026-06-06 决策版）
 > **状态**：1-4 决策已锁，**P1 启动中**

@@ -65,62 +65,54 @@ const RING_PATHS: &[(&str, &str)] = &[
 const KENNEY_RING_PATHS: &[(&str, &str, f32)] = &[
     (
         "kenney_bunny",
-        "kenney_cube-pets_1.0/Models/GLB format/animal-bunny.glb",
+        "kenney/curated/animals/kenney_bunny.glb",
         1.0,
     ),
-    (
-        "kenney_deer",
-        "kenney_cube-pets_1.0/Models/GLB format/animal-deer.glb",
-        1.0,
-    ),
-    (
-        "kenney_cow",
-        "kenney_cube-pets_1.0/Models/GLB format/animal-cow.glb",
-        1.0,
-    ),
+    ("kenney_deer", "kenney/curated/animals/kenney_deer.glb", 1.0),
+    ("kenney_cow", "kenney/curated/animals/kenney_cow.glb", 1.0),
     (
         "kenney_villager_male_a",
-        "kenney_mini-characters/Models/GLB format/character-male-a.glb",
+        "kenney/curated/characters/kenney_villager_male_a.glb",
         1.0,
     ),
     (
         "kenney_villager_female_a",
-        "kenney_mini-characters/Models/GLB format/character-female-a.glb",
+        "kenney/curated/characters/kenney_villager_female_a.glb",
         1.0,
     ),
     (
         "kenney_campfire_pit",
-        "kenney_survival-kit/Models/GLB format/campfire-pit.glb",
+        "kenney/curated/survival_props/kenney_campfire_pit.glb",
         1.0,
     ),
     (
         "kenney_tent",
-        "kenney_survival-kit/Models/GLB format/tent.glb",
+        "kenney/curated/survival_props/kenney_tent.glb",
         1.0,
     ),
     (
         "kenney_workbench",
-        "kenney_survival-kit/Models/GLB format/workbench.glb",
+        "kenney/curated/survival_props/kenney_workbench.glb",
         1.0,
     ),
     (
         "kenney_row_boat_small",
-        "kenney_pirate-kit/Models/GLB format/boat-row-small.glb",
+        "kenney/curated/coastal_and_pirate/kenney_row_boat_small.glb",
         1.0,
     ),
     (
         "kenney_pirate_flag",
-        "kenney_pirate-kit/Models/GLB format/flag-pirate.glb",
+        "kenney/curated/coastal_and_pirate/kenney_pirate_flag.glb",
         1.0,
     ),
     (
         "kenney_coin_gold",
-        "kenney_platformer-kit/Models/GLB format/coin-gold.glb",
+        "kenney/curated/terrain_and_pickups/kenney_coin_gold.glb",
         1.0,
     ),
     (
         "kenney_heart",
-        "kenney_platformer-kit/Models/GLB format/heart.glb",
+        "kenney/curated/terrain_and_pickups/kenney_heart.glb",
         1.0,
     ),
 ];

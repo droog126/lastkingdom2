@@ -1,5 +1,7 @@
 # 万国起源：最后一国 钻石版 - 架构文档
 
+> 当前说明：这是早期架构快照。当前工程边界以 `docs/architecture/engineering-baseline.md` 为准；当前运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。文中旧 `loop.ps1`、平铺截图和直接 `cargo test --workspace` 口径按历史背景阅读。
+
 ## 一、项目概述
 
 这是一个基于 **Bevy 0.18.1** 的体素游戏 Demo，核心特色是 **AI 闭环迭代**：游戏自动运行 → 截图 → AI 读取结果 → 决定修改 → 重建运行，形成无人干预的迭代循环。

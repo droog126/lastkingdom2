@@ -104,6 +104,7 @@ pub fn build_state_json(
     role: SnapshotRole,
 ) -> serde_json::Value {
     serde_json::json!({
+        "frame_tick": clock.frame_tick,
         "tick": clock.tick,
         "wall_secs": time.elapsed_secs(),
         "role": role.as_str(),
@@ -175,7 +176,9 @@ mod tests {
     fn build_state_json_includes_closed_loop_contract_fields() {
         let time = Time::default();
         let clock = SimClock {
+            frame_tick: 420,
             tick: 42,
+            last_sim_step_ran: true,
             last_tick_wall: 0.0,
             slow_tick_accum: 0.0,
             last_hud_wall: 0.0,
@@ -217,6 +220,7 @@ mod tests {
         );
 
         assert_eq!(assert_has_path(&json, &["tick"]).as_u64(), Some(42));
+        assert_eq!(assert_has_path(&json, &["frame_tick"]).as_u64(), Some(420));
         assert_eq!(
             assert_has_path(&json, &["role"]).as_str(),
             Some("client_offline")

@@ -10,5 +10,11 @@ registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"
 [net]
 git-fetch-with-cli = true
 
+[build]
+rustc-wrapper = "sccache"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/bigobj"]
+
 [alias]
 xtask = "run --package xtask --"

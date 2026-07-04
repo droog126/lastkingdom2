@@ -2,6 +2,15 @@
 
 This repository uses project skills for detailed instructions. Keep this file as a routing table only. When a task matches a route, read the matching `SKILL.md` before acting.
 
+## Synchronization Policy
+
+- `AGENTS.md` is the routing table, not the detailed handbook.
+- `.codex/skills/*/SKILL.md` files are the operational instructions for agents.
+- `docs/architecture/engineering-baseline.md` is the human-readable engineering baseline.
+- `docs/STARTING.md` is the human-readable run guide.
+- If these sources drift, prefer current code and `xtask` behavior first, then the relevant `SKILL.md`, then active docs. Update all touched sources in the same change.
+- Historical material under `docs/archive/` and imported design notes may mention old paths; do not treat them as current workflow instructions unless an active doc points there.
+
 ## Technology Direction
 
 - Framework: Bevy 0.18.1.

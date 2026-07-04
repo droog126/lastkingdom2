@@ -43,21 +43,19 @@ audit-pretty-models = []
 [dependencies]
 # 共享依赖版本（与 umbrella / core 对齐）
 bevy = { workspace = true }
+bevy-inspector-egui = { workspace = true }
 
 # 物理 — 仅可视化插值，server 跑确定性 step（详见 client-server-split.md §5）
 avian3d = { workspace = true }
+bevy-tnua = { workspace = true }
+bevy-tnua-avian3d = { workspace = true }
 
-# UI / 编辑器
-bevy_egui = { workspace = true }
-bevy-inspector-egui = { workspace = true }
+# 相机控制
 bevy_panorbit_camera = { workspace = true }
 
 # 序列化（state.json dump）
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# 噪声（地形生成）
-fastnoise-lite = { workspace = true }
 
 # 渲染 — greedy_mesh.rs 用 block-mesh + ndshape 生成合并 mesh
 block-mesh = { workspace = true }
@@ -84,11 +82,12 @@ lk2-core = { workspace = true }
 #   没有 ReplicationReceivePlugin, server 复制的 Replicate entity 不会被
 #   client 接收 + 解码 (PlayerPos 复制失效)。
 lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication", "netcode"] }
+lightyear_avian3d = { workspace = true }
 lightyear_inputs_leafwing = { workspace = true }
-lightyear_netcode = { version = "0.26" }
+lightyear_netcode = { version = "0.28" }
 # lightyear_connection 直接拉,只是为了在 main.rs 里 import ClientOf
 # (ClientOf 在 lightyear_connection::client_of, lightyear prelude 没 re-export)
-lightyear_connection = { version = "0.26", features = ["client"] }
+lightyear_connection = { version = "0.28", features = ["client"] }
 leafwing-input-manager = { workspace = true }
 
 [dev-dependencies]

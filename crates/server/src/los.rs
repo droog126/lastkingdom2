@@ -1,12 +1,9 @@
-
-
 use bevy::prelude::*;
 use lk2_core::world::BlockType;
 use lk2_core::world::World as GameWorld;
 
 #[derive(Clone, Debug)]
 pub struct LosResult {
-
     pub blocked: bool,
 
     pub block_pos: Option<[i32; 3]>,

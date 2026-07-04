@@ -1,8 +1,5 @@
 
 
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 pub mod clock;
 pub mod combat;
 pub mod constant;

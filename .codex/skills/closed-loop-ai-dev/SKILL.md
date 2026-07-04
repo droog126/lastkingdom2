@@ -7,7 +7,9 @@ description: Closed-loop AI iteration workflow for lastkingdom2. Use when tasks 
 
 ## Contract
 
-The loop is observe -> decide -> act -> build -> re-run. A loop is not complete until the run artifacts are inspected and `decision.md` records the result.
+The loop is observe -> decide -> act -> build -> re-run. A loop is not complete until the run artifacts are inspected and `screenshots/iter_NN/decision.md` records the result.
+
+`xtask loop` enforces this: before starting a new iteration, the previous `screenshots/iter_NN/decision.md` must exist. After a run it writes `decision.template.md` for the latest iteration.
 
 Use this skill for visual, gameplay, client UX, offline demo, scenario, screenshot, and automated observation changes. Use `$screenshot-scoring` whenever inspecting PNGs or writing the score section of `decision.md`.
 
@@ -17,10 +19,16 @@ Use this skill for visual, gameplay, client UX, offline demo, scenario, screensh
 just loop
 ```
 
+Direct form:
+
+```sh
+cargo run -q -p xtask -- loop --offline --seconds 60
+```
+
 Quickly find latest iterations:
 
 ```sh
-cargo run -q -p xtask -- health
+just health
 ```
 
 ## Artifact Order

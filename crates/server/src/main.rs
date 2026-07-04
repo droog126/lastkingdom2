@@ -75,7 +75,10 @@ mod pvp_systems;
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
-use lk2_core::creature::{CreatureSpawnerDone, update_creatures};
+use lk2_core::creature::{
+    Creature, CreatureAI, CreatureKind, CreatureSpawnerDone, award_creature_drop,
+    creature_attack_distance_sq, update_creatures, CREATURE_TRAINING_ATTACK_RANGE_SQ,
+};
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
@@ -110,6 +113,285 @@ struct LastVoxelDeltaState {
 impl Default for LastVoxelDeltaState {
     fn default() -> Self {
         Self { revision: 0, x: 0, y: 0, z: 0, block: lk2_core::world::BlockType::Air }
+    }
+}
+
+
+fn block_type_to_u8(block: lk2_core::world::BlockType) -> u8 {
+    use lk2_core::world::BlockType;
+    match block {
+        BlockType::Air => 0,
+        BlockType::Dirt => 1,
+        BlockType::Stone => 2,
+        BlockType::Sand => 3,
+        BlockType::Snow => 4,
+        BlockType::Leaves => 5,
+        BlockType::Water => 6,
+        BlockType::Wood => 7,
+        BlockType::IronOre => 8,
+        BlockType::SunstoneOre => 9,
+        BlockType::FrostcoreOre => 10,
+        BlockType::LivingRoot => 11,
+        BlockType::BerryThicket => 12,
+    }
+}
+
+fn build_gameplay_hud_state(
+    clock: &SimClock,
+    player: &PlayerState,
+    pool: &GlobalResourcePool,
+    nations: &NationRegistry,
+    monsters: &MonsterEcosystem,
+    obs: &TickObserver,
+) -> GameplayHudState {
+    GameplayHudState {
+        tick: clock.tick,
+        player_block_pos: player.block_pos,
+        player_pos: [player.pos.x, player.pos.y, player.pos.z],
+        nation_id: player.nation_id.map(|id| id.0),
+        monsters_killed: player.monsters_killed,
+        blocks_gathered: player.blocks_gathered,
+        nations_founded: player.nations_founded,
+        inventory_wood: player.inventory.get(&ResourceKind::Wood).copied().unwrap_or(0),
+        inventory_food: player.inventory.get(&ResourceKind::Food).copied().unwrap_or(0),
+        inventory_apple: player.inventory.get(&ResourceKind::Apple).copied().unwrap_or(0),
+        inventory_soul: player.inventory.get(&ResourceKind::Soul).copied().unwrap_or(0),
+        pool_wood: pool.get(ResourceKind::Wood),
+        pool_food: pool.get(ResourceKind::Food),
+        pool_apple: pool.get(ResourceKind::Apple),
+        pool_soul: pool.get(ResourceKind::Soul),
+        flag_count: nations.flag_count,
+        total_nations: nations.nations.len() as u32,
+        monster_count: monsters.current_individuals,
+        observer_anomalies: obs.anomalies.len() as u64,
+        observer_invariant_violations: lk2_core::diagnostics::total_invariant_violations(obs),
+        status_line: format!(
+            "server tick={} pos={:?} flags={} monsters={}",
+            clock.tick, player.block_pos, nations.flag_count, monsters.current_individuals
+        ),
+    }
+}
+
+fn empty_gameplay_hud_state() -> GameplayHudState {
+    GameplayHudState {
+        tick: 0,
+        player_block_pos: [0, 0, 0],
+        player_pos: [0.0, 0.0, 0.0],
+        nation_id: None,
+        monsters_killed: 0,
+        blocks_gathered: 0,
+        nations_founded: 0,
+        inventory_wood: 0,
+        inventory_food: 0,
+        inventory_apple: 0,
+        inventory_soul: 0,
+        pool_wood: 0,
+        pool_food: 0,
+        pool_apple: 0,
+        pool_soul: 0,
+        flag_count: 0,
+        total_nations: 0,
+        monster_count: 0,
+        observer_anomalies: 0,
+        observer_invariant_violations: 0,
+        status_line: String::new(),
+    }
+}
+
+fn empty_voxel_delta() -> VoxelDelta {
+    VoxelDelta { revision: 0, x: 0, y: 0, z: 0, block: block_type_to_u8(lk2_core::world::BlockType::Air) }
+}
+
+fn record_voxel_delta(
+    revision: &mut WorldRevision,
+    last_delta: &mut LastVoxelDeltaState,
+    x: i32,
+    y: i32,
+    z: i32,
+    block: lk2_core::world::BlockType,
+) {
+    revision.0 = revision.0.wrapping_add(1).max(1);
+    *last_delta = LastVoxelDeltaState { revision: revision.0, x, y, z, block };
+}
+
+fn apply_gameplay_command(
+    cmd: &GameplayCommand,
+    world: &mut GameWorld,
+    pool: &mut GlobalResourcePool,
+    nations: &mut NationRegistry,
+    player: &mut PlayerState,
+    revision: &mut WorldRevision,
+    last_delta: &mut LastVoxelDeltaState,
+    nearest_creature: Option<CreatureKind>,
+) -> GameplayFeedback {
+    let mut ok = true;
+    let summary = match cmd.kind {
+        GameplayCommandKind::GatherFootBlock => {
+            let [x, y, z] = [player.block_pos[0], player.block_pos[1] - 1, player.block_pos[2]];
+            match lk2_core::world::gather_block(world, pool, x, y, z, 0) {
+                Ok(Some((kind, amount))) => {
+                    *player.inventory.entry(kind).or_insert(0) += amount;
+                    player.blocks_gathered += 1;
+                    record_voxel_delta(revision, last_delta, x, y, z, lk2_core::world::BlockType::Air);
+                    format!("gathered {:?} x{}", kind, amount)
+                }
+                Ok(None) => {
+                    ok = false;
+                    "nothing to gather".to_string()
+                }
+                Err(err) => {
+                    ok = false;
+                    err
+                }
+            }
+        }
+        GameplayCommandKind::PlaceWoodFootBlock => {
+            let [x, y, z] = [player.block_pos[0], player.block_pos[1] - 1, player.block_pos[2]];
+            if !world.in_bounds(x, y, z) {
+                ok = false;
+                "place target out of bounds".to_string()
+            } else if world.get(x, y, z) != lk2_core::world::BlockType::Air {
+                ok = false;
+                "place target is occupied".to_string()
+            } else {
+                match pool.try_sub(ResourceKind::Wood, PLACE_WOOD_COST) {
+                    Ok(_) => {
+                        world.set(x, y, z, lk2_core::world::BlockType::Wood);
+                        record_voxel_delta(
+                            revision,
+                            last_delta,
+                            x,
+                            y,
+                            z,
+                            lk2_core::world::BlockType::Wood,
+                        );
+                        "placed wood".to_string()
+                    }
+                    Err(err) => {
+                        ok = false;
+                        format!("not enough wood: {}", err)
+                    }
+                }
+            }
+        }
+        GameplayCommandKind::Craft(recipe) => {
+            ok = false;
+            format!("craft {:?} is not implemented on server", recipe)
+        }
+        GameplayCommandKind::FoundNation => {
+            if player.nation_id.is_some() {
+                ok = false;
+                "already in nation".to_string()
+            } else {
+                match nations.found(
+                    pool,
+                    0,
+                    format!("PlayerNation#{}", nations.flag_count + 1),
+                    player.block_pos,
+                    cmd.tick,
+                ) {
+                    Ok(id) => {
+                        player.nation_id = Some(id);
+                        player.nations_founded += 1;
+                        format!("founded nation {}", id.0)
+                    }
+                    Err(err) => {
+                        ok = false;
+                        format!("found nation failed: {}", err)
+                    }
+                }
+            }
+        }
+        GameplayCommandKind::KillNearestCreature => {
+            if let Some(kind) = nearest_creature {
+                match award_creature_drop(pool, player, kind) {
+                    Ok(drop) => format!("killed {:?}, awarded {:?}", kind, drop),
+                    Err(err) => {
+                        ok = false;
+                        format!("creature drop failed: {}", err)
+                    }
+                }
+            } else {
+                ok = false;
+                "no creature in range".to_string()
+            }
+        }
+    };
+
+    GameplayFeedback { ok, summary }
+}
+
+fn apply_gameplay_commands(
+    mut reader: MessageReader<GameplayCommand>,
+    mut world: ResMut<GameWorld>,
+    mut pool: ResMut<GlobalResourcePool>,
+    mut nations: ResMut<NationRegistry>,
+    mut player: ResMut<PlayerState>,
+    mut revision: ResMut<WorldRevision>,
+    mut last_delta: ResMut<LastVoxelDeltaState>,
+    mut feedback: MessageWriter<GameplayFeedback>,
+    mut commands: Commands,
+    creatures: Query<(Entity, &Creature, &CreatureAI)>,
+) {
+    for cmd in reader.read() {
+        let nearest_creature = if matches!(cmd.kind, GameplayCommandKind::KillNearestCreature) {
+            creatures
+                .iter()
+                .filter_map(|(entity, creature, _)| {
+                    let d2 = creature_attack_distance_sq(player.block_pos, creature.block_pos);
+                    (d2 <= CREATURE_TRAINING_ATTACK_RANGE_SQ).then_some((entity, d2, creature.kind))
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+        } else {
+            None
+        };
+        let nearest_kind = nearest_creature.map(|(_, _, kind)| kind);
+        let result = apply_gameplay_command(
+            cmd,
+            &mut world,
+            &mut pool,
+            &mut nations,
+            &mut player,
+            &mut revision,
+            &mut last_delta,
+            nearest_kind,
+        );
+        if result.ok {
+            if let Some((entity, _, _)) = nearest_creature {
+                commands.entity(entity).despawn();
+            }
+        }
+        if result.ok {
+            info!("[gameplay] {}", result.summary);
+        } else {
+            warn!("[gameplay] {}", result.summary);
+        }
+        feedback.write(result);
+    }
+}
+
+fn sync_authoritative_snapshot_components(
+    clock: Res<SimClock>,
+    player: Res<PlayerState>,
+    pool: Res<GlobalResourcePool>,
+    nations: Res<NationRegistry>,
+    monsters: Res<MonsterEcosystem>,
+    obs: Res<TickObserver>,
+    last_delta: Res<LastVoxelDeltaState>,
+    mut q: Query<(&mut GameplayHudState, &mut VoxelDelta), With<PlayerPos>>,
+) {
+    let hud = build_gameplay_hud_state(&clock, &player, &pool, &nations, &monsters, &obs);
+    for (mut hud_state, mut delta) in q.iter_mut() {
+        *hud_state = hud.clone();
+        if last_delta.revision > 0 {
+            *delta = VoxelDelta {
+                revision: last_delta.revision,
+                x: last_delta.x,
+                y: last_delta.y,
+                z: last_delta.z,
+                block: block_type_to_u8(last_delta.block),
+            };
+        }
     }
 }
 
@@ -217,6 +499,8 @@ fn main() {
 
 
         .add_message::<lk2_core::protocol::messages::AttackInput>()
+        .add_message::<lk2_core::protocol::messages::GameplayCommand>()
+        .add_message::<lk2_core::protocol::messages::GameplayFeedback>()
         .add_message::<lk2_core::protocol::messages::HitConfirm>()
         .add_message::<lk2_core::protocol::messages::KnockbackEvent>()
         .add_message::<lk2_core::protocol::messages::DamageResult>()
@@ -241,6 +525,8 @@ fn main() {
         .init_resource::<PlayerState>()
         .init_resource::<FixedTick>()
         .init_resource::<ServerTickCounter>()
+        .init_resource::<WorldRevision>()
+        .init_resource::<LastVoxelDeltaState>()
         .insert_resource(scenario_state)
 
         .add_systems(
@@ -273,6 +559,12 @@ fn main() {
             FixedUpdate,
             (
                 simulation_tick.in_set(SimSet::Interaction),
+                // iter_199 Phase A: nation 自动 upkeep — 每个 nation 周期消耗
+                // Wood/Food 维持 flag，缺资源时扣 flag_hp 并可能 dissolve。
+                // 放在 simulation_tick 之后才能看到 sim tick 加的 Apple/Food。
+                lk2_core::nation::tick_nations_upkeep_system
+                    .after(simulation_tick)
+                    .in_set(SimSet::Interaction),
                 end_tick_system.in_set(SimSet::ScoreAndAudit),
                 tick_recorder.in_set(SimSet::Snapshot),
             ),
@@ -282,7 +574,9 @@ fn main() {
             FixedUpdate,
             (
 
+                apply_gameplay_commands,
                 apply_input_to_player,
+                sync_authoritative_snapshot_components,
                 broadcast_player_pos,
                 read_attack_inputs,
                 melee_hit_registration,
@@ -429,6 +723,8 @@ fn spawn_player(mut commands: Commands) {
         Name::new("Player"),
         bevy::prelude::Transform::from_translation(spawn),
         lk2_core::protocol::components::PlayerPos(spawn),
+        empty_gameplay_hud_state(),
+        empty_voxel_delta(),
     ));
 }
 
@@ -454,7 +750,7 @@ fn spawn_player(mut commands: Commands) {
 fn replicate_player_for_connected(
     trigger: On<Add, lightyear_connection::client_of::ClientOf>,
     mut commands: Commands,
-    player_q: Query<Entity, With<Name>>,
+    player_q: Query<Entity, With<PlayerPos>>,
 ) {
     let client_of_entity = trigger.entity;
     info!(
@@ -534,6 +830,7 @@ fn apply_input_to_player(
         ),
         (With<Name>, With<lightyear::prelude::ControlledBy>),
     >,
+    mut player: ResMut<PlayerState>,
 ) {
     let mut dir = bevy::math::Vec2::ZERO;
     let speed = 4.0;
@@ -560,6 +857,12 @@ fn apply_input_to_player(
         transform.translation += delta;
 
         player_pos.0 = transform.translation;
+        player.pos = transform.translation;
+        player.block_pos = [
+            transform.translation.x.floor() as i32,
+            transform.translation.y.floor() as i32,
+            transform.translation.z.floor() as i32,
+        ];
         if local_dir.length() > 0.01 {
             dir = local_dir;
             applied_count += 1;
@@ -737,6 +1040,10 @@ fn end_tick_system(
     mut obs: ResMut<TickObserver>,
     player: Res<lk2_core::player::PlayerState>,
 ) {
+    if !clock.last_sim_step_ran {
+        return;
+    }
+
     if let Err(e) = obs.end_tick(
         clock.tick,
         &game_world,
@@ -794,4 +1101,4 @@ fn tick_recorder(
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
     }
-}
+}

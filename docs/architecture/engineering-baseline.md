@@ -1,5 +1,7 @@
 # Engineering Baseline
 
+This file is the active engineering baseline for humans. `AGENTS.md` routes agent work to skills, and `.codex/skills/*/SKILL.md` files carry the operational instructions. If active docs and skills drift, prefer current code and `xtask` behavior, then update the docs and skill wording together.
+
 This repo is a Bevy workspace with three runtime crates:
 
 - `lk2-core`: shared game state, rules, protocol types, diagnostics, and pure logic.
@@ -15,6 +17,18 @@ This repo is a Bevy workspace with three runtime crates:
 - `xtask/` owns durable workflow automation: loop orchestration, TDD scopes, health checks, screenshot/state assertions, scenarios, and audits.
 - `justfile` owns short human-friendly command aliases.
 - `scripts/` is not a workflow runtime. Blender/model scripts stay under `tools/`; loop automation stays in Rust.
+- Root PowerShell workflow wrappers are legacy. Do not add new durable workflow logic outside `xtask/`.
+
+## Offline Authority Boundary
+
+Current offline demo mode is `client-offline authority`: the Bevy client owns the window and runs
+shared `lk2-core` simulation APIs in-process so screenshots and HUD capture stay simple. Online
+play remains `lk2-server` authority.
+
+Do not add a second copy of gameplay rules to the client. If offline and online behavior need the
+same rule, move that rule into `lk2-core` first and call it from both sides. The intended future
+state is an in-process headless server for offline mode, but that should be a dedicated
+networking/refactor task, not an incidental gameplay change.
 
 ## Current Architecture Debt
 
@@ -37,6 +51,13 @@ Use the project task runner:
 just test-changed
 just audit-tdd
 just loop
+just health
+```
+
+`just loop` currently maps to:
+
+```sh
+cargo run -q -p xtask -- loop --offline --seconds 60
 ```
 
 `cargo run -q -p xtask -- audit-architecture` checks:
@@ -45,6 +66,24 @@ just loop
 - no duplicate client objective setup registration,
 - no runtime/build output in the repo root,
 - known oversized Rust modules are reported as warnings.
+
+## Closed-Loop Artifacts
+
+The current loop output shape is directory-based:
+
+```text
+screenshots/iter_NN/
+  iter_NN.png
+  final_state.json
+  diff.json
+  assertions.json
+  health.json
+  health.txt
+  decision.template.md
+  decision.md
+```
+
+Read `health.json` first. A new loop run should not start until the previous iteration has a `decision.md`.
 
 ## Next Refactor Order
 

@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 use bevy::window::PresentMode;
 use bevy::window::WindowResolution;

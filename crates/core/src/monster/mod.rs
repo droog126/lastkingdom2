@@ -1,16 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -458,4 +445,5 @@ mod tests {
         eco.kill_individual(kid, nid, mid, &mut pool);
         assert!(eco.verify_individual_count());
     }
-}
+}
+

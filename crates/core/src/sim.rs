@@ -73,7 +73,8 @@ pub fn advance_fixed_authority_tick(
     obs: &mut TickObserver,
     role: SimRole,
 ) -> bool {
-    clock.tick += 1;
+    clock.last_sim_step_ran = false;
+    clock.frame_tick += 1;
     clock.slow_tick_accum += delta_secs.max(0.0);
 
     if clock.slow_tick_accum + f32::EPSILON < constant::SLOW_TICK_SECS {
@@ -81,13 +82,15 @@ pub fn advance_fixed_authority_tick(
     }
 
     clock.slow_tick_accum -= constant::SLOW_TICK_SECS;
+    clock.tick += 1;
+    clock.last_sim_step_ran = true;
     let _ = pool.try_add(ResourceKind::Apple, 1);
     let _ = pool.try_add(ResourceKind::Food, 2);
     obs.begin_tick();
     monsters.tick(pool);
     eco.tick();
 
-    if clock.tick % 300 == 0 {
+    if clock.tick % 10 == 0 {
         info!(
             "⏱ {} {}: monsters={}, food={}",
             role.tick_log_label(),
@@ -105,7 +108,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fixed_authority_tick_advances_every_call_but_slow_logic_waits_one_second() {
+    fn fixed_authority_frame_advances_every_call_but_sim_tick_waits_one_second() {
         let mut clock = SimClock::default();
         let mut pool = GlobalResourcePool::default();
         let mut monsters = MonsterEcosystem::default();
@@ -126,7 +129,8 @@ mod tests {
             assert!(!ran_slow);
         }
 
-        assert_eq!(clock.tick, 29);
+        assert_eq!(clock.frame_tick, 29);
+        assert_eq!(clock.tick, 0);
         assert_eq!(pool.get(ResourceKind::Food), initial_food);
 
         let ran_slow = advance_fixed_authority_tick(
@@ -140,7 +144,8 @@ mod tests {
         );
 
         assert!(ran_slow);
-        assert_eq!(clock.tick, 30);
+        assert_eq!(clock.frame_tick, 30);
+        assert_eq!(clock.tick, 1);
         assert_eq!(pool.get(ResourceKind::Food), initial_food + 2);
     }
 }

@@ -26,6 +26,7 @@ struct LoopArgs {
     first_person: bool,
     audit_pretty_models: bool,
     no_kenney: bool,
+    legacy_voxel: bool,
 }
 
 impl Default for LoopArgs {
@@ -45,6 +46,7 @@ impl Default for LoopArgs {
             first_person: false,
             audit_pretty_models: false,
             no_kenney: false,
+            legacy_voxel: false,
         }
     }
 }
@@ -90,7 +92,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
     }
-    copy_bevy_dylib_alias(root)?;
+    stage_windows_runtime_files(root)?;
 
     let before = latest_iter(root).and_then(|p| iter_number(&p)).unwrap_or(0);
     let server_log = root.join("screenshots/loop_server.log");
@@ -131,6 +133,9 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     };
     if parsed.first_person {
         client_args.push("--first-person".to_string());
+    }
+    if parsed.legacy_voxel {
+        client_args.push("--legacy-voxel".to_string());
     }
 
     let mut server_proc = None;
@@ -223,6 +228,7 @@ pub fn scenario(root: &Path, raw: &[String]) -> Result<()> {
     if !skip_build || !client_exe.exists() {
         cargo_build(root, "lk2-client", &["dev-dynamic-linking"], &envs)?;
     }
+    stage_windows_runtime_files(root)?;
     let files = expand_pattern(root, &json)?;
     if files.is_empty() {
         return Err(format!("no JSON files matched: {json}"));
@@ -285,6 +291,7 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
                 parsed.audit_pretty_models = true
             }
             Some("nokenney") | Some("no-kenney") => parsed.no_kenney = true,
+            Some("legacyvoxel") | Some("legacy-voxel") => parsed.legacy_voxel = true,
             _ => {}
         }
         i += 1;
@@ -320,15 +327,14 @@ fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
             path.push(sysroot_bin.display().to_string());
         }
     }
-    let mut path_str = path.join(sep);
-    if !path_str.is_empty() {
-        path_str.push_str(sep);
-    }
-    path_str.push_str(&env::var("PATH").unwrap_or_default());
+    let path_str = path.join(sep);
+    println!(
+        ">>> PATH (truncated): {}...",
+        path_str.chars().take(100).collect::<String>()
+    );
     Ok(vec![
         ("BEVY_DISABLE_ACCESSIBILITY".to_string(), "1".to_string()),
         ("BEVY_ASSET_ROOT".to_string(), root.display().to_string()),
-        ("WGPU_BACKEND".to_string(), "dx12".to_string()),
         ("RUST_LOG".to_string(), rust_log.to_string()),
         ("CARGO_MANIFEST_DIR".to_string(), root.display().to_string()),
         ("PATH".to_string(), path_str),
@@ -383,10 +389,13 @@ fn spawn_logged(
         .stdout(Stdio::from(File::create(log).map_err(|e| e.to_string())?))
         .stderr(Stdio::from(
             File::create(stderr).map_err(|e| e.to_string())?,
-        ));
+        ))
+        .stdin(Stdio::null());
+    cmd.env_remove("PATH");
     for (k, v) in envs {
         cmd.env(k, v);
     }
+    println!(">>> Running: {:?}", cmd);
     cmd.spawn().map_err(|e| format!("failed to start {}: {e}", exe.display()))
 }
 
@@ -581,7 +590,7 @@ fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn copy_bevy_dylib_alias(root: &Path) -> Result<()> {
+pub fn stage_windows_runtime_files(root: &Path) -> Result<()> {
     if !cfg!(windows) {
         return Ok(());
     }
@@ -589,6 +598,21 @@ fn copy_bevy_dylib_alias(root: &Path) -> Result<()> {
     if !debug.exists() {
         return Ok(());
     }
+
+    for dll in find_bevy_dylibs(&debug)? {
+        copy_to_dir(&dll, &debug)?;
+    }
+
+    for dll in find_rust_std_dylibs(root)? {
+        copy_to_dir(&dll, &debug)?;
+    }
+
+    copy_bevy_dylib_alias(&debug)?;
+    stage_assets_dir(root, &debug)?;
+    Ok(())
+}
+
+fn find_bevy_dylibs(debug: &Path) -> Result<Vec<PathBuf>> {
     let mut dlls = audit::find_files(&debug, |p| {
         p.file_name()
             .and_then(OsStr::to_str)
@@ -596,10 +620,109 @@ fn copy_bevy_dylib_alias(root: &Path) -> Result<()> {
             .unwrap_or(false)
     })?;
     dlls.sort_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
+    Ok(dlls)
+}
+
+fn find_rust_std_dylibs(root: &Path) -> Result<Vec<PathBuf>> {
+    let output = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("rustc --print sysroot failed: {e}"))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let sysroot = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sysroot.is_empty() {
+        return Ok(Vec::new());
+    }
+    let bin = PathBuf::from(sysroot).join("bin");
+    if !bin.exists() {
+        return Ok(Vec::new());
+    }
+    let mut dlls = Vec::new();
+    for entry in fs::read_dir(bin).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let name = path.file_name().and_then(OsStr::to_str).unwrap_or("");
+        if name.starts_with("std-") && name.ends_with(".dll") {
+            dlls.push(path);
+        }
+    }
+    dlls.sort();
+    Ok(dlls)
+}
+
+fn copy_bevy_dylib_alias(debug: &Path) -> Result<()> {
+    let mut dlls = find_bevy_dylibs(debug)?;
     if let Some(latest) = dlls.pop() {
-        let vanilla = debug.join("bevy_dylib.dll");
-        if !vanilla.exists() {
-            fs::copy(latest, vanilla).map_err(|e| e.to_string())?;
+        copy_file_if_different(&latest, &debug.join("bevy_dylib.dll"))?;
+    }
+    Ok(())
+}
+
+fn copy_to_dir(src: &Path, dst_dir: &Path) -> Result<()> {
+    let Some(name) = src.file_name() else {
+        return Ok(());
+    };
+    copy_file_if_different(src, &dst_dir.join(name))
+}
+
+fn copy_file_if_different(src: &Path, dst: &Path) -> Result<()> {
+    if src == dst {
+        return Ok(());
+    }
+    if dst.exists() {
+        let src_meta = fs::metadata(src).map_err(|e| e.to_string())?;
+        let dst_meta = fs::metadata(dst).map_err(|e| e.to_string())?;
+        if src_meta.len() == dst_meta.len() {
+            return Ok(());
+        }
+    }
+    fs::copy(src, dst).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn stage_assets_dir(root: &Path, debug: &Path) -> Result<()> {
+    let src = root.join("assets");
+    if !src.exists() {
+        return Ok(());
+    }
+    let dst = debug.join("assets");
+    if dst.exists() {
+        return Ok(());
+    }
+    if try_junction(&src, &dst).is_ok() {
+        return Ok(());
+    }
+    copy_dir_recursive(&src, &dst)
+}
+
+fn try_junction(src: &Path, dst: &Path) -> Result<()> {
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(dst)
+        .arg(src)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("mklink /J failed".to_string())
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            copy_file_if_different(&src_path, &dst_path)?;
         }
     }
     Ok(())
@@ -649,10 +772,12 @@ mod tests {
             "12".into(),
             "-Dynamic:$false".into(),
             "-FirstPerson".into(),
+            "--legacy-voxel".into(),
         ]);
         assert!(parsed.offline);
         assert_eq!(parsed.seconds, 12);
         assert!(!parsed.dynamic);
         assert!(parsed.first_person);
+        assert!(parsed.legacy_voxel);
     }
 }
