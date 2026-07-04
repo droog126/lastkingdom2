@@ -1,13 +1,13 @@
-# 万国起源：最后一国 钻石版 - 架构文档
+﻿# 万国起源：最后一国 钻石版 - 架构文档
 
 > 当前说明：这是早期架构快照。当前工程边界以 `docs/architecture/engineering-baseline.md` 为准；当前运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。文中旧 `loop.ps1`、平铺截图和直接 `cargo test --workspace` 口径按历史背景阅读。
 
 ## 一、项目概述
 
-这是一个基于 **Bevy 0.18.1** 的体素游戏 Demo，核心特色是 **AI 闭环迭代**：游戏自动运行 → 截图 → AI 读取结果 → 决定修改 → 重建运行，形成无人干预的迭代循环。
+这是一个基于 **Bevy 0.19** 的体素游戏 Demo，核心特色是 **AI 闭环迭代**：游戏自动运行 → 截图 → AI 读取结果 → 决定修改 → 重建运行，形成无人干预的迭代循环。
 
 ### 项目定位
-- **技术栈**：Rust + Bevy 0.18.1 + ECS 架构
+- **技术栈**：Rust + Bevy 0.19 + ECS 架构
 - **世界规模**：32³ 体素（简化版 Demo）
 - **核心玩法**：采集、造国、杀怪、资源管理
 
@@ -310,12 +310,12 @@ App::new()
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| bevy | 0.18.1 | 游戏引擎（ECS + 渲染 + 输入） |
-| avian3d | 0.5 | 物理引擎 |
+| bevy | 0.19 | 游戏引擎（ECS + 渲染 + 输入） |
+| avian3d | 0.7 | 物理引擎 |
 | broccoli | 0.6 | 碰撞检测 |
 | rand | 0.8.5 | 随机数生成 |
 | sepax2d | 0.3 | 2D 碰撞检测 |
-| bevy-inspector-egui | 0.36 | 调试工具 |
+| bevy-inspector-egui | 0.37 | 调试工具 |
 | serde + serde_json | 1.x | 状态序列化 |
 | crossbeam-channel | 0.5 | 并发通道 |
 

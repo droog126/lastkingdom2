@@ -16,7 +16,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import models_lib
-models_lib.OUT_DIR = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
 
 from models_lib import (  # noqa: E402
     clear_scene, cone, cube, cylinder, export_glb, ico_sphere, mat, uv_sphere,
@@ -241,20 +240,20 @@ def make_ground_patch() -> None:
     cylinder("ring3", (0.0, 0.0, 0.0), 5.5, 0.02, grass_dark, vertices=48)
     cylinder("ring4", (0.0, 0.0, 0.0), 3.0, 0.02, grass_pale, vertices=32)
 
-    for ang_deg in range(0, 360, 12):
+    for ang_deg in range(0, 360, 24):
         ang = math.radians(ang_deg)
-        for r in [2.0, 4.0, 6.5, 9.5, 11.0]:
+        for r in [2.0, 5.5, 9.5]:
             x = math.cos(ang) * r
             z = math.sin(ang) * r
-            uv_sphere(f"tuft_{ang_deg}_{r}", (x, 0.05, z), (0.12, 0.04, 0.12), grass_dark, 6, 4)
+            uv_sphere(f"tuft_{ang_deg}_{r}", (x, 0.05, z), (0.12, 0.04, 0.12), grass_dark, 4, 3)
 
-    for ang_deg in range(15, 360, 30):
+    for ang_deg in range(15, 360, 45):
         ang = math.radians(ang_deg)
         r = 3.5 + (ang_deg % 7) * 0.6
         x = math.cos(ang) * r
         z = math.sin(ang) * r
         flower = flower_w if (ang_deg % 3 == 0) else (flower_y if (ang_deg % 3 == 1) else flower_p)
-        uv_sphere(f"flower_{ang_deg}", (x, 0.05, z), (0.06, 0.04, 0.06), flower, 6, 5)
+        uv_sphere(f"flower_{ang_deg}", (x, 0.05, z), (0.06, 0.04, 0.06), flower, 4, 3)
 
     for ang_deg in [25, 110, 200, 285]:
         ang = math.radians(ang_deg)
@@ -267,7 +266,7 @@ def make_ground_patch() -> None:
         ang = math.radians(ang_deg)
         x = math.cos(ang) * 11.5
         z = math.sin(ang) * 11.5
-        uv_sphere(f"edge_tuft_{ang_deg}", (x, 0.05, z), (0.20, 0.10, 0.20), grass_dark, 8, 5)
+        uv_sphere(f"edge_tuft_{ang_deg}", (x, 0.05, z), (0.20, 0.10, 0.20), grass_dark, 5, 3)
 
     export_glb("ground_patch")
 

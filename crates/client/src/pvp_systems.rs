@@ -1,10 +1,11 @@
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
+use lightyear::prelude::Controlled;
 use lightyear::prelude::Predicted;
 use lk2_core::combat::{AttackType, CombatIntent, InputBuffer};
 use lk2_core::protocol::PlayerAction;
-use lk2_core::protocol::components::{CombatReady, Health};
+use lk2_core::protocol::components::Health;
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
 use lk2_core::pvp::FixedTick;
 use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
@@ -12,13 +13,13 @@ use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
 pub fn collect_local_input(
     tick: Res<FixedTick>,
 
-    input_manager: Option<ResMut<ActionState<PlayerAction>>>,
+    input_manager: Query<&ActionState<PlayerAction>, With<Controlled>>,
     player_transform: Query<&Transform, With<Camera>>,
     mut writer: MessageWriter<AttackInput>,
     combat: Query<&CombatState>,
     mut last_attack_was_sent: Local<bool>,
 ) {
-    let Some(input_manager) = input_manager else {
+    let Ok(input_manager) = input_manager.single() else {
         return;
     };
 

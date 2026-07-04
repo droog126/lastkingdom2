@@ -1,30 +1,6 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use bevy::prelude::*;
+#[cfg(feature = "client-render")]
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::clock::SimClock;
@@ -34,10 +10,6 @@ use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
-
-
-
-
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Scenario {
@@ -50,7 +22,6 @@ pub struct Scenario {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type")]
 pub enum ScenarioStep {
-
     #[serde(rename = "move_to")]
     MoveTo { pos: [i32; 3] },
 
@@ -87,7 +58,6 @@ pub enum ScenarioStep {
     #[serde(rename = "quit")]
     Quit,
 
-
     #[serde(rename = "add_geo_layer")]
     AddGeoLayer {
         layer: crate::world::terrain::ShapeLayer,
@@ -99,10 +69,6 @@ pub enum ScenarioStep {
     #[serde(rename = "clear_geo_overlay")]
     ClearGeoOverlay,
 }
-
-
-
-
 
 #[derive(Resource, Default)]
 pub struct ScenarioState {
@@ -176,12 +142,7 @@ pub fn award_gathered_resource(
     Ok(new_value)
 }
 
-
-
-
-
 pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
-
     let path = args.iter().skip(1).find(|a| !a.starts_with("--") && a.ends_with(".json")).cloned();
 
     if let Some(p) = path {
@@ -198,7 +159,6 @@ pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
             Err(e) => warn!("⚠ 读取剧本失败: {} — 用默认", e),
         }
     }
-
 
     Scenario {
         name: "default".into(),
@@ -223,10 +183,6 @@ pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
     }
 }
 
-
-
-
-
 pub fn scenario_runner(
     time: Res<Time>,
     mut state: ResMut<ScenarioState>,
@@ -238,8 +194,7 @@ pub fn scenario_runner(
         return;
     };
 
-if state.end_requested {
-
+    if state.end_requested {
         if clock.tick > state.last_step_done_tick + 3 {
             std::process::exit(0);
         }
@@ -251,7 +206,6 @@ if state.end_requested {
     }
 
     if state.current_step >= scenario.steps.len() {
-
         if clock.tick > state.last_step_done_tick + 3 {
             std::process::exit(0);
         }
@@ -267,7 +221,6 @@ if state.end_requested {
             advance_step(&mut state);
         }
         ScenarioStep::WaitTicks { ticks } => {
-
             if clock.tick >= state.last_step_done_tick + ticks {
                 advance_step(&mut state);
             } else {
@@ -275,8 +228,6 @@ if state.end_requested {
             }
         }
         ScenarioStep::RecordBegin => {
-
-
             if scenario.name == "default" || scenario.name == "idle" {
                 state.recording = false;
                 state.record_buffer.clear();
@@ -310,7 +261,6 @@ if state.end_requested {
             state.recording = false;
 
             if !state.record_path.as_os_str().is_empty() {
-
                 let jsonl: Vec<String> = state
                     .record_buffer
                     .iter()
@@ -329,7 +279,10 @@ if state.end_requested {
         ScenarioStep::Screenshot { name } => {
             let path = format!("screenshots/{}_{}.png", scenario.name, name);
             info!("📸 截图 → {}", path);
+            #[cfg(feature = "client-render")]
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+            #[cfg(not(feature = "client-render"))]
+            let _ = (&mut commands, &path);
 
             if clock.tick > state.last_step_done_tick {
                 advance_step(&mut state);
@@ -338,15 +291,11 @@ if state.end_requested {
             }
         }
         ScenarioStep::MoveTo { pos } => {
-
-
-
             state.pending_target = Some(*pos);
             state.move_to_started_at_tick = Some(clock.tick);
             info!("🚶 走向 {:?}（tick {}）", pos, clock.tick);
         }
         ScenarioStep::Step { dir } => {
-
             state.current_dir = *dir;
             info!("👣 步 {:?}", dir);
             advance_step(&mut state);
@@ -407,10 +356,6 @@ fn advance_step(state: &mut ScenarioState) {
     state.step_in_progress = false;
 }
 
-
-
-
-
 pub fn simulate_player_actions(
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
@@ -420,10 +365,8 @@ pub fn simulate_player_actions(
     mut state: ResMut<ScenarioState>,
     clock: Res<SimClock>,
 ) {
-
     if let Some(target) = state.pending_target {
         let cur = player.block_pos;
-
 
         if let Some(start) = state.move_to_started_at_tick {
             if clock.tick.saturating_sub(start) > 200 {
@@ -455,18 +398,14 @@ pub fn simulate_player_actions(
         };
 
         if dir == [0, 0, 0] {
-
             state.pending_target = None;
             state.move_to_started_at_tick = None;
             info!("✓ 到达 {:?}", target);
             advance_step(&mut state);
         } else {
-
             try_move_with_fallback(&mut player, &mut game_world, dir, target);
         }
-    }
-
-    else if state.pending_gather_left > 0 {
+    } else if state.pending_gather_left > 0 {
         let (x, y, z) = (
             player.block_pos[0],
             player.block_pos[1],
@@ -546,10 +485,7 @@ pub fn simulate_player_actions(
         if state.pending_gather_left == 0 {
             state.current_step += 1;
         }
-    }
-
-    else if let Some(_s) = step_active(&state, ScenarioStepKind::Attack) {
-
+    } else if let Some(_s) = step_active(&state, ScenarioStepKind::Attack) {
         let mut best: Option<(u32, u32, u32, f32)> = None;
         for (kid, k) in monsters.kingdoms.iter() {
             if k.destroyed {
@@ -577,9 +513,7 @@ pub fn simulate_player_actions(
             info!("附近 4 格无怪物");
         }
         state.current_step += 1;
-    }
-
-    else if let Some(_s) = step_active(&state, ScenarioStepKind::FoundNation) {
+    } else if let Some(_s) = step_active(&state, ScenarioStepKind::FoundNation) {
         if nations.can_found_new() {
             let cost = nations.next_flag_cost() as u64;
             let flag_count = nations.flag_count;
@@ -598,9 +532,7 @@ pub fn simulate_player_actions(
             info!("国旗已满 8");
         }
         state.current_step += 1;
-    }
-
-    else if let Some(target) = step_active(&state, ScenarioStepKind::UpgradePop) {
+    } else if let Some(target) = step_active(&state, ScenarioStepKind::UpgradePop) {
         if let Some(my_id) = player.nation_id {
             if let Some(n) = nations.nations.get_mut(&my_id) {
                 if n.pop_cap < target {
@@ -685,8 +617,6 @@ fn step_active(state: &ScenarioState, kind: ScenarioStepKind) -> Option<u32> {
     }
 }
 
-
-
 fn try_move_with_fallback(
     player: &mut PlayerState,
     game_world: &mut GameWorld,
@@ -738,7 +668,6 @@ fn attempt_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3
     }
     let b = game_world.get(new_pos[0], new_pos[1], new_pos[2]);
     if b.is_solid() {
-
         for up in 1..=4 {
             let try_pos = [new_pos[0], new_pos[1] + up, new_pos[2]];
             if game_world.in_bounds(try_pos[0], try_pos[1], try_pos[2])
@@ -769,10 +698,6 @@ fn attempt_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3
     info!("→ move to {:?}", new_pos);
     true
 }
-
-
-
-
 
 pub fn scenario_tick_recorder(
     clock: Res<SimClock>,
@@ -933,8 +858,6 @@ mod tests {
         let mut w = World::new(8);
         w.procedural = true;
 
-
-
         let baseline = w.generate_voxel(3, 1, 3);
 
         let layer = ShapeLayer {
@@ -959,4 +882,4 @@ mod tests {
 
         let _ = baseline;
     }
-}
+}

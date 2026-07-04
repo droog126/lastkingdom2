@@ -1,4 +1,7 @@
-with open(r'F:\rustProject\lastkingdom2\tools\build_v5_cute.py','rb') as f:
+from pathlib import Path
+
+
+with (Path(__file__).resolve().parent / "build_v5_cute.py").open("rb") as f:
     data = f.read()
 target = b'uv_sphere("body"'
 idx = data.find(target)

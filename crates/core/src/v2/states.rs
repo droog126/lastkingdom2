@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash)]
@@ -30,7 +28,6 @@ pub enum MatchState {
 }
 
 impl MatchState {
-
     pub fn next(self) -> Self {
         match self {
             Self::OpeningProtection => Self::WildRace,

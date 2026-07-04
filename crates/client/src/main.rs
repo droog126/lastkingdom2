@@ -1,8 +1,9 @@
-use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::ecs::schedule::{IntoScheduleConfigs, common_conditions::resource_equals};
 use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
 
 use avian3d::prelude::{Collider, Gravity, LinearVelocity, PhysicsPlugins, RigidBody};
+use std::path::PathBuf;
 
 mod capture;
 mod controller_systems;
@@ -21,21 +22,19 @@ use lk2_core::creature::{
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
-use lk2_core::player::PlayerState;
+use lk2_core::player::{PlayerState, PlayerTag};
 use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
-use lk2_core::world::{World as GameWorld, WorldGenerator};
+use lk2_core::world::World as GameWorld;
 
-use crate::capture::{
-    FIRST_SCREENSHOT_MIN_FRAME, TickRecorder, periodic_screenshot, tick_recorder,
-};
+use crate::capture::{TickRecorder, periodic_screenshot, tick_recorder};
 use crate::controller_systems::ControllerPlugin;
 use crate::pretty::{
-    PlayerAnimState, PrettyConfig, animate_avatar, animate_monsters, follow_ground_discs,
-    follow_kenney_landmarks, follow_monster_cubes, spawn_eco_visuals, spawn_pretty,
-    update_eco_visuals, update_player_anim_state,
+    PlayerAnimState, PrettyConfig, animate_avatar, animate_cloud_puffs, animate_monsters,
+    follow_ground_discs, follow_kenney_landmarks, follow_monster_cubes, follow_water,
+    spawn_eco_visuals, spawn_pretty, update_eco_visuals, update_player_anim_state,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -43,18 +42,21 @@ use crate::pvp_systems::{
     trigger_visual_effects,
 };
 use crate::render::{
-    AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, LastMoveDirection,
-    NestIndicatorText, NestMarkerCount, Player, RenderConfig, SpawnedBlocks, SwordSwing, auto_demo,
-    camera_mode_toggle, cycle_terrain_preset, emergency_teleport, first_person_camera,
-    freefly_movement, freefly_toggle, held_weapon_follow, mouse_look_system, player_input,
-    player_spawn_position_at, setup_atmosphere, setup_cursor_grab, setup_terrain_underlay,
-    spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
-    underlay_follow_player, update_animal_indicator, update_nest_indicator,
+    CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, NestMarkerCount, Player,
+    RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle, cycle_terrain_preset,
+    emergency_teleport, first_person_camera, freefly_movement, freefly_toggle,
+    held_weapon_follow, mouse_look_system, player_input, player_spawn_position_at,
+    setup_atmosphere, setup_cursor_grab, spawn_nest_markers, spawn_terrain_around_player,
+    toggle_cursor_grab_on_esc, update_animal_indicator, update_nest_indicator,
     update_nest_marker_positions,
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
 
 const AUTO_DEMO_WAIT_TICKS: u64 = 120;
+
+fn workspace_asset_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("assets")
+}
 
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
@@ -91,6 +93,7 @@ struct ReplicatedSnapshot {
 }
 
 #[derive(Resource, Debug, Clone)]
+#[allow(dead_code)]
 struct NetworkSmoothingState {
     initialized: bool,
     target_pos: Vec3,
@@ -109,7 +112,9 @@ impl Default for NetworkSmoothingState {
     }
 }
 
+#[allow(dead_code)]
 const ONLINE_INTERP_SPEED: f32 = 14.0;
+#[allow(dead_code)]
 const ONLINE_SNAP_DISTANCE: f32 = 8.0;
 
 static PRESET_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -189,7 +194,10 @@ fn main() {
 
     app.add_plugins(
         DefaultPlugins
-            .set(AssetPlugin { file_path: "assets".into(), ..default() })
+            .set(AssetPlugin {
+                file_path: workspace_asset_root().to_string_lossy().into_owned(),
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: format!("万国起源：最后一国 钻石版 — {}", scenario.name).into(),
@@ -313,9 +321,11 @@ fn main() {
     app.add_systems(
         Update,
         (
-            lk2_core::scenario::scenario_runner,
-            lk2_core::scenario::simulate_player_actions,
-            lk2_core::scenario::scenario_tick_recorder,
+            lk2_core::scenario::scenario_runner.run_if(resource_equals(ClientRunMode::Offline)),
+            lk2_core::scenario::simulate_player_actions
+                .run_if(resource_equals(ClientRunMode::Offline)),
+            lk2_core::scenario::scenario_tick_recorder
+                .run_if(resource_equals(ClientRunMode::Offline)),
             apply_networked_position,
             apply_server_pos_update,
             debug_dump_replicated_entities,
@@ -323,13 +333,13 @@ fn main() {
             apply_voxel_delta,
             send_online_gameplay_commands,
             collect_keys_to_action_state,
-            auto_demo,
+            auto_demo.run_if(resource_equals(ClientRunMode::Offline)),
             mouse_look_system,
             first_person_camera,
             held_weapon_follow,
             player_input,
             sync_player_combat_anchor,
-            offline_player_attack_creatures,
+            offline_player_attack_creatures.run_if(resource_equals(ClientRunMode::Offline)),
             animate_avatar,
             spawn_terrain_around_player,
             toggle_cursor_grab_on_esc,
@@ -369,9 +379,11 @@ fn main() {
         Update,
         (
             follow_ground_discs,
+            follow_water,
             follow_kenney_landmarks,
             follow_monster_cubes,
             animate_monsters,
+            animate_cloud_puffs,
         )
             .chain(),
     );
@@ -383,17 +395,17 @@ fn main() {
     app.add_systems(
         Update,
         (
-            simulation_tick,
+            simulation_tick.run_if(resource_equals(ClientRunMode::Offline)),
             update_eco_visuals,
-            end_tick_system,
+            end_tick_system.run_if(resource_equals(ClientRunMode::Offline)),
             update_hud,
             update_tutorial_overlay,
             update_animal_indicator,
             update_nest_indicator,
             tick_recorder,
             periodic_screenshot,
-            despawn_dead_creatures,
-            update_creatures,
+            despawn_dead_creatures.run_if(resource_equals(ClientRunMode::Offline)),
+            update_creatures.run_if(resource_equals(ClientRunMode::Offline)),
             day_night_cycle,
             exit_on_esc,
         )
@@ -523,7 +535,7 @@ fn apply_server_pos_update(
     >,
     mut player: ResMut<PlayerState>,
 ) {
-    if true {
+    if *run_mode != ClientRunMode::Online {
         for mut receiver in receiver_q.iter_mut() {
             for _msg in receiver.receive() {}
         }
@@ -688,8 +700,6 @@ fn collect_keys_to_action_state(
     keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<&mut ActionState<PlayerAction>, With<Controlled>>,
 ) {
-    use leafwing_input_manager::prelude::ActionState as _;
-
     let mut action_state = match q.single_mut() {
         Ok(s) => s,
         Err(_) => {
@@ -762,7 +772,7 @@ fn setup_light(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 22000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             color: Color::srgb(1.0, 0.96, 0.88),
             ..default()
         },
@@ -773,7 +783,7 @@ fn setup_light(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 6000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             color: Color::srgb(0.85, 0.88, 0.95),
             ..default()
         },
@@ -873,6 +883,7 @@ fn setup_world(
 
     commands.spawn((
         Player,
+        PlayerTag(0),
         Transform::from_translation(player.pos),
         GlobalTransform::default(),
     ));
@@ -967,7 +978,10 @@ fn end_tick_system(
     }
 }
 
-fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>) {
+fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>, cfg: Res<RenderConfig>) {
+    if cfg.mouse_look {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         std::process::exit(0);
     }
@@ -1030,6 +1044,7 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture::FIRST_SCREENSHOT_MIN_FRAME;
 
     #[test]
     fn client_self_check_resources_are_registered() {

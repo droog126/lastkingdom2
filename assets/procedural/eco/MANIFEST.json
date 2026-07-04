@@ -1,4 +1,13 @@
 {
-  "version": 5,
-  "spec": "v5-cute \u68a6\u5e7b\u53ef\u7231"
+  "version": 8,
+  "spec": "procedural generated GLB manifest, synced from assets/procedural/eco",
+  "format": "glb",
+  "assets": {
+    "eco": [
+      "rabbit",
+      "berry_bush",
+      "berry_fruit",
+      "co2_bubble"
+    ]
+  }
 }

@@ -1,6 +1,6 @@
 use std::{env, path::Path, process::Command};
 
-use crate::{args, audit, Result};
+use crate::{Result, args, audit};
 
 #[derive(Debug)]
 struct TddArgs {

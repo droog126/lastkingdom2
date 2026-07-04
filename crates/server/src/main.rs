@@ -1,29 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -33,8 +7,6 @@ use bevy::prelude::*;
 use lightyear::prelude::LocalAddr;
 use lightyear::prelude::server::ServerUdpIo;
 
-
-
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
@@ -42,54 +14,32 @@ use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
 use lightyear::prelude::PeerMetadata;
-
-
 
 use lightyear::prelude::LinkStart;
 
-
-
-
-use bevy::scene::SceneSpawner;
-
 use std::time::Duration;
-
 
 mod los;
 mod pvp_systems;
-
 
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::creature::{
-    Creature, CreatureAI, CreatureKind, CreatureSpawnerDone, award_creature_drop,
-    creature_attack_distance_sq, update_creatures, CREATURE_TRAINING_ATTACK_RANGE_SQ,
+    CREATURE_TRAINING_ATTACK_RANGE_SQ, Creature, CreatureAI, CreatureKind, CreatureSpawnerDone,
+    award_creature_drop, creature_attack_distance_sq,
 };
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
-use lk2_core::player::PlayerState;
+use lk2_core::player::{PlayerState, PlayerTag};
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{World as GameWorld, WorldGenerator};
-
 
 use crate::pvp_systems::{
     ServerPvPPlugin, apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
@@ -115,7 +65,6 @@ impl Default for LastVoxelDeltaState {
         Self { revision: 0, x: 0, y: 0, z: 0, block: lk2_core::world::BlockType::Air }
     }
 }
-
 
 fn block_type_to_u8(block: lk2_core::world::BlockType) -> u8 {
     use lk2_core::world::BlockType;
@@ -199,7 +148,13 @@ fn empty_gameplay_hud_state() -> GameplayHudState {
 }
 
 fn empty_voxel_delta() -> VoxelDelta {
-    VoxelDelta { revision: 0, x: 0, y: 0, z: 0, block: block_type_to_u8(lk2_core::world::BlockType::Air) }
+    VoxelDelta {
+        revision: 0,
+        x: 0,
+        y: 0,
+        z: 0,
+        block: block_type_to_u8(lk2_core::world::BlockType::Air),
+    }
 }
 
 fn record_voxel_delta(
@@ -227,12 +182,23 @@ fn apply_gameplay_command(
     let mut ok = true;
     let summary = match cmd.kind {
         GameplayCommandKind::GatherFootBlock => {
-            let [x, y, z] = [player.block_pos[0], player.block_pos[1] - 1, player.block_pos[2]];
+            let [x, y, z] = [
+                player.block_pos[0],
+                player.block_pos[1] - 1,
+                player.block_pos[2],
+            ];
             match lk2_core::world::gather_block(world, pool, x, y, z, 0) {
                 Ok(Some((kind, amount))) => {
                     *player.inventory.entry(kind).or_insert(0) += amount;
                     player.blocks_gathered += 1;
-                    record_voxel_delta(revision, last_delta, x, y, z, lk2_core::world::BlockType::Air);
+                    record_voxel_delta(
+                        revision,
+                        last_delta,
+                        x,
+                        y,
+                        z,
+                        lk2_core::world::BlockType::Air,
+                    );
                     format!("gathered {:?} x{}", kind, amount)
                 }
                 Ok(None) => {
@@ -246,7 +212,11 @@ fn apply_gameplay_command(
             }
         }
         GameplayCommandKind::PlaceWoodFootBlock => {
-            let [x, y, z] = [player.block_pos[0], player.block_pos[1] - 1, player.block_pos[2]];
+            let [x, y, z] = [
+                player.block_pos[0],
+                player.block_pos[1] - 1,
+                player.block_pos[2],
+            ];
             if !world.in_bounds(x, y, z) {
                 ok = false;
                 "place target out of bounds".to_string()
@@ -395,17 +365,6 @@ fn sync_authoritative_snapshot_components(
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
 #[derive(Resource)]
 pub struct TimeOfDay(pub f32);
 
@@ -415,13 +374,7 @@ impl Default for TimeOfDay {
     }
 }
 
-
-
-
-
 fn main() {
-
-
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -429,10 +382,8 @@ fn main() {
         )
         .init();
 
-
     let port: u16 = std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000);
     info!("[server] listening on UDP 0.0.0.0:{}", port);
-
 
     let args: Vec<String> = std::env::args().collect();
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
@@ -455,38 +406,11 @@ fn main() {
     let _ = std::fs::create_dir_all("screenshots");
 
     App::new()
-
-
         .add_plugins(MinimalPlugins)
-
+        .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins(PhysicsPlugins::default())
-
-
-
-
-
-
-        .add_plugins(bevy::asset::AssetPlugin::default())
-        .init_asset::<bevy::prelude::Mesh>()
-        .add_message::<bevy::asset::AssetEvent<bevy::prelude::Mesh>>()
-
-
-
-
-
-
-
-        .init_resource::<bevy::scene::SceneSpawner>()
-
-
-
-
-
-
-
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
-
         .add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
@@ -495,9 +419,6 @@ fn main() {
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(ServerPvPPlugin)
-
-
-
         .add_message::<lk2_core::protocol::messages::AttackInput>()
         .add_message::<lk2_core::protocol::messages::GameplayCommand>()
         .add_message::<lk2_core::protocol::messages::GameplayFeedback>()
@@ -506,12 +427,7 @@ fn main() {
         .add_message::<lk2_core::protocol::messages::DamageResult>()
         .add_message::<lk2_core::pvp::DamageEvent>()
         .add_message::<lk2_core::pvp::VisualEffectEvent>()
-
-
         .init_resource::<PeerMetadata>()
-
-
-        .init_resource::<SceneSpawner>()
         .init_resource::<SimClock>()
         .init_resource::<TimeOfDay>()
         .init_resource::<GameWorld>()
@@ -528,7 +444,6 @@ fn main() {
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
         .insert_resource(scenario_state)
-
         .add_systems(
             Startup,
             (
@@ -540,17 +455,7 @@ fn main() {
             )
                 .chain(),
         )
-
-
-
-
-
-
-
         .add_observer(replicate_player_for_connected)
-
-        .add_systems(Update, update_creatures)
-
         .configure_sets(
             FixedUpdate,
             (SimSet::Interaction, SimSet::ScoreAndAudit, SimSet::Snapshot).chain(),
@@ -569,11 +474,9 @@ fn main() {
                 tick_recorder.in_set(SimSet::Snapshot),
             ),
         )
-
         .add_systems(
             FixedUpdate,
             (
-
                 apply_gameplay_commands,
                 apply_input_to_player,
                 sync_authoritative_snapshot_components,
@@ -589,28 +492,10 @@ fn main() {
         .run();
 }
 
-
-
-
 fn dump_world_resources(world: &bevy::prelude::World) {
     let has_peer_metadata = world.get_resource::<PeerMetadata>().is_some();
     info!("[debug] PeerMetadata in world? {}", has_peer_metadata);
-    let has_scene_spawner = world.get_resource::<SceneSpawner>().is_some();
-    info!("[debug] SceneSpawner in world? {}", has_scene_spawner);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 fn spawn_server(mut commands: Commands) {
     use lightyear::prelude::server::Start;
@@ -621,19 +506,6 @@ fn spawn_server(mut commands: Commands) {
         "[net] spawning server entity with ServerUdpIo + NetcodeServer + LocalAddr({})",
         server_addr
     );
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
     let protocol_id: u64 = 0x4C4B3256_4E455457;
@@ -654,35 +526,14 @@ fn spawn_server(mut commands: Commands) {
         ))
         .id();
 
-
-
-
-
     info!(
         "[net] triggering LinkStart on server entity {:?}",
         server_id
     );
     commands.trigger(LinkStart { entity: server_id });
 
-
-
-
     info!("[net] triggering Start on server entity {:?}", server_id);
     commands.trigger(Start { entity: server_id });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     info!(
         "[net] manually inserting Started marker to server entity {:?}",
@@ -691,61 +542,33 @@ fn spawn_server(mut commands: Commands) {
     commands.entity(server_id).insert(lightyear_connection::server::Started);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn spawn_player(mut commands: Commands) {
+fn spawn_player(mut commands: Commands, mut player: ResMut<PlayerState>) {
     let spawn = bevy::math::Vec3::new(
         constant::WORLD_SIZE as f32 / 2.0 + 0.5,
         (constant::SEA_LEVEL + 2) as f32 + 0.5,
         constant::WORLD_SIZE as f32 / 2.0 + 0.5,
     );
+    let spawn_block = [
+        spawn.x.floor() as i32,
+        spawn.y.floor() as i32,
+        spawn.z.floor() as i32,
+    ];
+    player.pos = spawn;
+    player.block_pos = spawn_block;
     info!(
-        "[player] spawning authoritative player entity at {:?}",
-        spawn
+        "[player] spawning authoritative player entity at {:?}, block={:?}",
+        spawn, spawn_block
     );
     commands.spawn((
         Name::new("Player"),
+        PlayerTag(0),
         bevy::prelude::Transform::from_translation(spawn),
         lk2_core::protocol::components::PlayerPos(spawn),
+        ActionState::<PlayerAction>::default(),
         empty_gameplay_hud_state(),
         empty_voxel_delta(),
     ));
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 fn replicate_player_for_connected(
     trigger: On<Add, lightyear_connection::client_of::ClientOf>,
@@ -758,37 +581,11 @@ fn replicate_player_for_connected(
         client_of_entity
     );
 
-
     commands.entity(client_of_entity).insert(lightyear::prelude::ReplicationSender::default());
     info!(
         "[net] ReplicationSender attached to ClientOf entity {:?} — now this client can receive replicated entities",
         client_of_entity
     );
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     if let Some(entity) = player_q.iter().next() {
         commands.entity(entity).insert((
@@ -804,22 +601,6 @@ fn replicate_player_for_connected(
         );
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 fn apply_input_to_player(
     mut q: Query<
@@ -876,30 +657,6 @@ fn apply_input_to_player(
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ServerTickCounter(pub u32);
 
@@ -924,18 +681,13 @@ fn broadcast_player_pos(
             pos: transform.translation,
         };
 
-
-        let _ = sender.send::<_, lightyear::prelude::MetadataChannel>(
+        let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(
             &msg,
             server,
             &lightyear::prelude::NetworkTarget::All,
         );
     }
 }
-
-
-
-
 
 fn setup_world(
     _commands: Commands,
@@ -944,7 +696,6 @@ fn setup_world(
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
 ) {
-
     let pipeline = lk2_core::world::terrain::presets::by_name("default");
     *game_world = GameWorld::with_pipeline(constant::WORLD_SIZE, pipeline);
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
@@ -1008,10 +759,6 @@ fn port_from_env() -> u16 {
     std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000)
 }
 
-
-
-
-
 fn simulation_tick(
     fixed_time: Res<Time<Fixed>>,
     mut clock: ResMut<SimClock>,
@@ -1057,10 +804,6 @@ fn end_tick_system(
         }
     }
 }
-
-
-
-
 
 #[derive(Resource, Default)]
 pub struct TickRecorder {

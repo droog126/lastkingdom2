@@ -10,10 +10,6 @@ use crate::resource::{
 };
 use crate::world::Biome;
 
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MonsterKind {
     Snake,
@@ -24,7 +20,6 @@ pub enum MonsterKind {
 }
 
 impl MonsterKind {
-
     pub fn biome(self) -> Biome {
         match self {
             MonsterKind::Snake => Biome::Jungle,
@@ -45,7 +40,6 @@ impl MonsterKind {
         }
     }
 
-
     pub fn food_on_death(self) -> i64 {
         match self {
             MonsterKind::Snake => 5,
@@ -56,10 +50,6 @@ impl MonsterKind {
         }
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone)]
 pub struct MonsterIndividual {
@@ -96,11 +86,9 @@ impl MonsterIndividual {
         }
     }
 
-
     pub fn die(&self, pool: &mut GlobalResourcePool) {
         let soul = (self.food as f64 * 0.25) as i64;
         if soul > 0 {
-
             let t = Transfer {
                 kind: ResourceKind::Soul,
                 amount: soul,
@@ -111,10 +99,6 @@ impl MonsterIndividual {
         }
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone)]
 pub struct MonsterNest {
@@ -149,7 +133,6 @@ impl MonsterNest {
         self.individuals.len() as u32
     }
 
-
     pub fn check_dormancy(&mut self, current_tick: u64) {
         if !self.dormant
             && current_tick.saturating_sub(self.last_activity_tick) > NEST_DORMANCY_SECS as u64
@@ -158,7 +141,6 @@ impl MonsterNest {
         }
     }
 
-
     pub fn tick_decay(&mut self, rng: &mut StdRng) -> bool {
         if !self.dormant {
             return false;
@@ -166,10 +148,6 @@ impl MonsterNest {
         rng.next_u32() % 4 == 0
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone)]
 pub struct MonsterKingdom {
@@ -200,10 +178,6 @@ impl MonsterKingdom {
     }
 }
 
-
-
-
-
 #[derive(Resource, Debug)]
 pub struct MonsterEcosystem {
     pub kingdoms: HashMap<u32, MonsterKingdom>,
@@ -215,8 +189,6 @@ pub struct MonsterEcosystem {
 
     pub soul_yielded: i64,
 }
-
-
 
 impl Clone for MonsterEcosystem {
     fn clone(&self) -> Self {
@@ -264,7 +236,6 @@ impl MonsterEcosystem {
         }
     }
 
-
     pub fn demo_init(&mut self, world_center: [i32; 3]) {
         self.spawn_kingdom(
             Biome::Jungle,
@@ -283,7 +254,6 @@ impl MonsterEcosystem {
         id
     }
 
-
     pub fn tick(&mut self, _pool: &mut GlobalResourcePool) {
         self.current_tick += 1;
         let current = self.current_tick;
@@ -297,7 +267,6 @@ impl MonsterEcosystem {
             for (_nid, n) in k.nests.iter_mut() {
                 n.check_dormancy(current);
                 if n.tick_decay(&mut rng) {
-
                     self.current_individuals = self.current_individuals.saturating_sub(n.size());
                     to_remove.push(n.id);
                 }
@@ -311,8 +280,6 @@ impl MonsterEcosystem {
         }
         self.rng = rng;
     }
-
-
 
     pub fn kill_individual(
         &mut self,
@@ -335,8 +302,6 @@ impl MonsterEcosystem {
         false
     }
 
-
-
     pub fn destroy_kingdom(&mut self, kingdom_id: u32) {
         if let Some(k) = self.kingdoms.get_mut(&kingdom_id) {
             let count = k.total_individuals();
@@ -347,17 +312,12 @@ impl MonsterEcosystem {
         }
     }
 
-
     pub fn verify_individual_count(&self) -> bool {
         let sum: u32 =
             self.kingdoms.values().filter(|k| !k.destroyed).map(|k| k.total_individuals()).sum();
         sum == self.current_individuals
     }
 }
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -446,4 +406,3 @@ mod tests {
         assert!(eco.verify_individual_count());
     }
 }
-

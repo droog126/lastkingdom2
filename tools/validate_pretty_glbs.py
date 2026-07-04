@@ -40,8 +40,8 @@ def validate(path: Path) -> tuple[bool, str]:
     return True, f"ok, {len(glb.meshes)} meshes, {len(glb.nodes) if glb.nodes else 0} nodes, materials={has_materials}"
 
 def main() -> int:
-    out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else
-                   r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
+    root = Path(__file__).resolve().parents[1]
+    out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "assets" / "procedural" / "pretty"
     fails = []
     for p in sorted(out_dir.glob("*.glb")):
         ok, msg = validate(p)

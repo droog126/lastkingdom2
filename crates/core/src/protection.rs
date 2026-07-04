@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +6,6 @@ use crate::player::PlayerTag;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtectionSource {
-
     Opening,
 
     MidJoin,

@@ -1,11 +1,16 @@
 import sys
-sys.path.insert(0, r"F:\rustProject\lastkingdom2\tools")
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
 import importlib.util
-spec = importlib.util.spec_from_file_location("v5", r"F:\rustProject\lastkingdom2\tools\build_v5_cute.py")
+target = HERE / "build_v5_cute.py"
+spec = importlib.util.spec_from_file_location("v5", target)
 
 import ast
-src = open(r"F:\rustProject\lastkingdom2\tools\build_v5_cute.py", encoding='utf-8').read()
+src = target.read_text(encoding="utf-8")
 try:
     ast.parse(src)
     print("AST parse OK")

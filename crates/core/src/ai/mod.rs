@@ -31,7 +31,6 @@ impl TickSnapshot {
         monsters: &MonsterEcosystem,
         player_pos: Option<[i32; 3]>,
     ) -> Self {
-
         use crate::resource::ResourceKind;
         let mut pool_totals = Vec::new();
         for k in ResourceKind::ALL {
@@ -82,7 +81,6 @@ pub struct AiDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AiDecisionKind {
-
     MonsterMove,
 
     NestDormancy,
@@ -131,7 +129,6 @@ pub struct Invariant {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InvariantKind {
-
     ResourceConservation,
 
     MonsterCountConsistency,
@@ -147,10 +144,10 @@ impl InvariantKind {
     pub const fn label_zh(self) -> &'static str {
         match self {
             InvariantKind::ResourceConservation => "资源守恒",
-            InvariantKind::MonsterCountConsistency => "怪物计数一�?,
+            InvariantKind::MonsterCountConsistency => "怪物计数一致",
             InvariantKind::FlagCountCap => "国旗上限",
             InvariantKind::PlayerInBounds => "玩家在世界内",
-            InvariantKind::TickDurationBounded => "Tick 时长 �?50ms",
+            InvariantKind::TickDurationBounded => "Tick 时长 <= 50ms",
         }
     }
 }
@@ -164,7 +161,6 @@ pub struct Anomaly {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnomalyKind {
-
     Oscillation,
 
     TickSpike,
@@ -235,7 +231,6 @@ impl TickObserver {
     }
 
     pub fn observe_ai_decision(&mut self, dec: AiDecision) {
-
         let history = self.agent_decision_history.entry(dec.agent_id).or_insert_with(Vec::new);
         history.push((dec.tick, dec.kind));
         if history.len() > 10 {
@@ -249,7 +244,7 @@ impl TickObserver {
                     tick: dec.tick,
                     kind: AnomalyKind::Oscillation,
                     detail: format!(
-                        "agent {} �?5 tick 内反复做 {} 决定",
+                        "agent {} 在 5 tick 内反复做 {} 决定",
                         dec.agent_id,
                         dec.kind.label_zh()
                     ),
@@ -268,7 +263,6 @@ impl TickObserver {
         monsters: &MonsterEcosystem,
         player_pos: Option<[i32; 3]>,
     ) -> Result<(), Vec<String>> {
-
         let dur = self.tick_start.map(|s| s.elapsed()).unwrap_or_default();
         self.tick_durations.push(dur);
         if self.tick_durations.len() > 100 {
@@ -281,9 +275,7 @@ impl TickObserver {
 
         let new_digest = snap.digest();
         if let Some(prev) = self.last_snapshot_digest {
-            if new_digest != prev {
-
-            }
+            if new_digest != prev {}
         }
         self.last_snapshot_digest = Some(new_digest);
         if self.snapshots.len() < self.max_snapshots {
@@ -344,7 +336,7 @@ impl TickObserver {
                 .map(|k| k.total_individuals())
                 .sum();
             errors.push(format!(
-                "[怪物计数 @ tick {}] current={} �?sum-of-nests={}",
+                "[怪物计数 @ tick {}] current={} != sum-of-nests={}",
                 tick, monsters.current_individuals, sum
             ));
         }
@@ -385,6 +377,14 @@ impl TickObserver {
     }
 
     fn check_tick_duration(&mut self, dur: Duration, tick: u64, errors: &mut Vec<String>) {
+        if dur > Duration::from_millis(50) {
+            self.anomalies.push(Anomaly {
+                tick,
+                kind: AnomalyKind::TickSpike,
+                detail: format!("dur={:?} > 50ms", dur),
+            });
+            return;
+        }
         let inv = self.get_or_register(InvariantKind::TickDurationBounded);
         if dur > Duration::from_millis(50) {
             inv.last_violation_tick = Some(tick);
@@ -397,7 +397,7 @@ impl TickObserver {
         let mut s = String::new();
         s.push_str("=== TickObserver 报告 ===\n");
         s.push_str(&format!(
-            "  �?tick: {}, 快照: {}, 决策: {}\n",
+            "  总 tick: {}, 快照: {}, 决策: {}\n",
             self.snapshots.len(),
             self.snapshots.len(),
             self.decisions.len()
@@ -405,7 +405,7 @@ impl TickObserver {
         s.push_str("\n--- Invariants ---\n");
         for (kind, inv) in &self.invariants {
             s.push_str(&format!(
-                "  [{}] 违例 {} 次，最�?@ tick {}\n",
+                "  [{}] 违例 {} 次，最后 @ tick {}\n",
                 kind.label_zh(),
                 inv.total_violations,
                 inv.last_violation_tick.map(|t| t.to_string()).unwrap_or_else(|| "n/a".into())
@@ -413,9 +413,8 @@ impl TickObserver {
         }
         s.push_str("\n--- Anomalies ---\n");
         if self.anomalies.is_empty() {
-            s.push_str("  (�?\n");
+            s.push_str("  (无)\n");
         } else {
-
             for a in self.anomalies.iter().take(20) {
                 s.push_str(&format!(
                     "  tick {} [{}] {}\n",
@@ -433,7 +432,7 @@ impl TickObserver {
             let avg = total / self.tick_durations.len() as u32;
             let max = self.tick_durations.iter().max().unwrap();
             s.push_str(&format!(
-                "\n--- Tick 性能 ---\n  平均: {:?}, 最�? {:?} (样本 {})\n",
+                "\n--- Tick 性能 ---\n  平均: {:?}, 最大: {:?} (样本 {})\n",
                 avg,
                 max,
                 self.tick_durations.len()
@@ -537,16 +536,8 @@ mod tests {
         let (world, pool, nations, monsters) = fresh_world();
         let mut obs = TickObserver::new();
         obs.begin_tick();
-        let err = obs
-            .end_tick(
-                0,
-                &world,
-                &pool,
-                &nations,
-                &monsters,
-                Some([100, 100, 100]),
-            )
-            .unwrap_err();
+        let err =
+            obs.end_tick(0, &world, &pool, &nations, &monsters, Some([100, 100, 100])).unwrap_err();
         assert!(err.iter().any(|e| e.contains("玩家出界")));
     }
 
@@ -599,6 +590,19 @@ mod tests {
         }
         let osc_count = obs.anomalies.iter().filter(|a| a.kind == AnomalyKind::Oscillation).count();
         assert_eq!(osc_count, 0);
+    }
+
+    #[test]
+    fn slow_tick_is_anomaly_not_invariant_error() {
+        let mut obs = TickObserver::new();
+        let mut errors = Vec::new();
+        obs.check_tick_duration(Duration::from_millis(75), 12, &mut errors);
+
+        assert!(errors.is_empty(), "slow tick should not fail invariants: {:?}", errors);
+        assert_eq!(obs.anomalies.len(), 1);
+        assert_eq!(obs.anomalies[0].tick, 12);
+        assert_eq!(obs.anomalies[0].kind, AnomalyKind::TickSpike);
+        assert!(obs.invariants.get(&InvariantKind::TickDurationBounded).is_none());
     }
 
     #[test]

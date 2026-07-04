@@ -9,7 +9,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import models_lib
-models_lib.OUT_DIR = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
 
 from models_lib import (
     clear_scene, cube, cone, cylinder, export_glb, ico_sphere, mat, uv_sphere,
@@ -279,7 +278,7 @@ def make_co2_bubble_v6() -> None:
 
 def export_glb_v6_eco(name):
     import models_lib
-    eco_dir = Path(r"F:\rustProject\lastkingdom2\assets\procedural\eco")
+    eco_dir = models_lib.ROOT / "assets" / "procedural" / "eco"
     eco_dir.mkdir(parents=True, exist_ok=True)
     bpy_path_fix = models_lib.OUT_DIR
     models_lib.OUT_DIR = eco_dir
@@ -367,9 +366,9 @@ def main() -> None:
             "co2_bubble": "0.50m (放大)",
         },
     }
-    mp = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty\MANIFEST.json")
+    mp = models_lib.ROOT / "assets" / "procedural" / "pretty" / "MANIFEST.json"
     mp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    eco_manifest = Path(r"F:\rustProject\lastkingdom2\assets\procedural\eco\MANIFEST.json")
+    eco_manifest = models_lib.ROOT / "assets" / "procedural" / "eco" / "MANIFEST.json"
     eco_manifest.write_text(json.dumps({"version": 6, "spec": "v6-balanced"}, indent=2), encoding="utf-8")
     print(f"\nMANIFEST -> {mp}")
     print("=== done ===")

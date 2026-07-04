@@ -1,11 +1,8 @@
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MatchPhase {
-
     AshOpening,
 
     Wildland,
@@ -16,7 +13,6 @@ pub enum MatchPhase {
 }
 
 impl MatchPhase {
-
     pub fn label(self) -> &'static str {
         match self {
             Self::AshOpening => "AshOpening",
@@ -64,7 +60,6 @@ impl MatchPhase {
 
 #[derive(Resource, Debug, Clone)]
 pub struct MatchClock {
-
     pub wall_secs: f32,
 
     pub phase: MatchPhase,
@@ -87,7 +82,6 @@ impl Default for MatchClock {
 }
 
 impl MatchClock {
-
     pub fn advance(&mut self, delta_secs: f32) {
         self.wall_secs += delta_secs;
     }
@@ -148,7 +142,6 @@ pub fn advance_match_clock(
     mut clock: ResMut<MatchClock>,
     mut phase_events: MessageWriter<MatchPhaseChanged>,
 ) {
-
     let dt = time.delta_secs();
     clock.advance(dt);
     if let Some((from, to)) = clock.refresh_phase() {

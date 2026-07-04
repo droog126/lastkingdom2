@@ -6,9 +6,8 @@ use std::fmt;
 use crate::clock::SimClock;
 use crate::constant::*;
 use crate::resource::{
-    GlobalResourcePool, PoolError, ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer,
+    GlobalResourcePool, PoolError, ResourceKind, Transfer, TransferDst, TransferSrc,
 };
-
 
 // =============================================================================
 // 自动 upkeep（资源循环闭环）
@@ -26,7 +25,6 @@ pub const NATION_UPKEEP_FOOD_PER_TICK: i64 = 1;
 pub const NATION_UPKEEP_INTERVAL_TICKS: u64 = 30;
 pub const NATION_UPKEEP_MISS_HP_LOSS: u32 = 5;
 
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpkeepReport {
     pub checked: usize,
@@ -34,10 +32,6 @@ pub struct UpkeepReport {
     pub missed: usize,
     pub dissolved: usize,
 }
-
-
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NationId(pub u32);
@@ -47,10 +41,6 @@ impl fmt::Display for NationId {
         write!(f, "Nation#{}", self.0)
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone)]
 pub struct Nation {
@@ -110,7 +100,6 @@ impl Nation {
         self.members.len()
     }
 
-
     pub fn can_upgrade_to_10(&self, pool: &GlobalResourcePool) -> bool {
         pool.get(ResourceKind::Wood) >= POP_UPGRADE_10_COST.0 as i64
             && pool.get(ResourceKind::Food) >= POP_UPGRADE_10_COST.1 as i64
@@ -127,13 +116,8 @@ impl Nation {
     }
 }
 
-
-
-
-
 #[derive(Resource, Debug, Clone, Default)]
 pub struct NationRegistry {
-
     pub nations: HashMap<NationId, Nation>,
 
     next_id: u32,
@@ -148,7 +132,6 @@ impl NationRegistry {
         Self::default()
     }
 
-
     pub fn len(&self) -> usize {
         self.nations.len()
     }
@@ -157,28 +140,18 @@ impl NationRegistry {
         self.nations.is_empty()
     }
 
-
     pub fn can_found_new(&self) -> bool {
         self.flag_count < MAX_NATIONAL_FLAGS
     }
 
-
     pub fn next_flag_cost(&self) -> i64 {
         let i = self.flag_count as usize;
         if i >= FLAG_COSTS_SOULS.len() {
-
             FLAG_COSTS_SOULS[FLAG_COSTS_SOULS.len() - 1] as i64
         } else {
             FLAG_COSTS_SOULS[i] as i64
         }
     }
-
-
-
-
-
-
-
 
     pub fn found(
         &mut self,
@@ -188,7 +161,6 @@ impl NationRegistry {
         flag_pos: [i32; 3],
         tick: u64,
     ) -> Result<NationId, FoundError> {
-
         if !self.can_found_new() {
             return Err(FoundError::MaxFlagsReached(self.flag_count));
         }
@@ -210,21 +182,13 @@ impl NationRegistry {
             dst: TransferDst::Wasted,
         };
 
-
-
-
         pool.try_sub(ResourceKind::Soul, cost).map_err(|e| FoundError::PoolError(e))?;
-
-
-
 
         let id = NationId(self.next_id);
         self.next_id += 1;
 
-
         let order = (self.flag_count + 1) as u32;
         self.flag_orders_taken.insert(order);
-
 
         let nation = Nation::new(id, name, player_id, flag_pos, tick, order);
         self.nations.insert(id, nation);
@@ -233,9 +197,7 @@ impl NationRegistry {
         Ok(id)
     }
 
-
     pub fn join(&mut self, nation_id: NationId, player_id: u32) -> Result<(), JoinError> {
-
         if self.find_nation_by_player(player_id).is_some() {
             return Err(JoinError::AlreadyInNation);
         }
@@ -247,14 +209,10 @@ impl NationRegistry {
         Ok(())
     }
 
-
     pub fn leave(&mut self, player_id: u32) -> Result<NationId, LeaveError> {
         let id = self.find_nation_by_player(player_id).ok_or(LeaveError::NotInNation)?;
         let n = self.nations.get_mut(&id).unwrap();
         if player_id == n.king {
-
-
-
             n.flag_hp = 0;
         } else {
             n.members.remove(&player_id);
@@ -262,12 +220,9 @@ impl NationRegistry {
         Ok(id)
     }
 
-
     pub fn find_nation_by_player(&self, player_id: u32) -> Option<NationId> {
         self.nations.values().find(|n| n.is_member(player_id)).map(|n| n.id)
     }
-
-
 
     pub fn damage_flag(&mut self, nation_id: NationId, dmg: u32) -> u32 {
         if let Some(n) = self.nations.get_mut(&nation_id) {
@@ -282,9 +237,7 @@ impl NationRegistry {
         }
     }
 
-
     fn dissolve(&mut self, nation_id: NationId) {
-
         if let Some(n) = self.nations.get(&nation_id) {
             self.flag_orders_taken.remove(&n.founding_order);
         }
@@ -293,7 +246,6 @@ impl NationRegistry {
 
         self.flag_count = self.flag_count.saturating_sub(1);
     }
-
 
     pub fn upgrade_population(
         &mut self,
@@ -318,7 +270,7 @@ impl NationRegistry {
             return Err(UpgradeError::InsufficientResources);
         }
 
-if wood > 0 {
+        if wood > 0 {
             pool.try_sub(ResourceKind::Wood, wood as i64)
                 .map_err(|e: PoolError| UpgradeError::PoolError(e))?;
         }
@@ -334,7 +286,6 @@ if wood > 0 {
         n.pop_cap = target;
         Ok(())
     }
-
 
     /// 自动 upkeep：每 `NATION_UPKEEP_INTERVAL_TICKS` tick 对每个 nation 扣
     /// `NATION_UPKEEP_WOOD_PER_TICK` Wood + `NATION_UPKEEP_FOOD_PER_TICK` Food。
@@ -357,7 +308,6 @@ if wood > 0 {
             let have_wood = pool.get(ResourceKind::Wood) >= NATION_UPKEEP_WOOD_PER_TICK;
             let have_food = pool.get(ResourceKind::Food) >= NATION_UPKEEP_FOOD_PER_TICK;
             if have_wood && have_food {
-
                 let _ = pool.try_sub(ResourceKind::Wood, NATION_UPKEEP_WOOD_PER_TICK);
                 let _ = pool.try_sub(ResourceKind::Food, NATION_UPKEEP_FOOD_PER_TICK);
                 report.kept += 1;
@@ -377,7 +327,6 @@ if wood > 0 {
     }
 }
 
-
 /// Bevy system 包装 — 在 server 的 FixedUpdate 调一次，自动 throttle 日志。
 pub fn tick_nations_upkeep_system(
     mut pool: ResMut<GlobalResourcePool>,
@@ -386,17 +335,12 @@ pub fn tick_nations_upkeep_system(
 ) {
     let report = registry.tick_upkeep(&mut pool, clock.tick);
     if report.checked > 0 && clock.tick % (NATION_UPKEEP_INTERVAL_TICKS * 10) == 0 {
-
         info!(
             "[nation-upkeep] tick={} checked={} kept={} missed={} dissolved={}",
             clock.tick, report.checked, report.kept, report.missed, report.dissolved
         );
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FoundError {
@@ -409,10 +353,10 @@ pub enum FoundError {
 impl fmt::Display for FoundError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FoundError::MaxFlagsReached(n) => write!(f, "已达国家数量上限: {}, n),
+            FoundError::MaxFlagsReached(n) => write!(f, "已达国家数量上限: {}", n),
             FoundError::AlreadyInNation => write!(f, "你已在一个国家里"),
             FoundError::InsufficientSouls { have, need } => {
-                write!(f, "灵魂不足: 有 {} 需 {}", have, need)
+                write!(f, "灵魂不足: 有 {} 需要 {}", have, need)
             }
             FoundError::PoolError(e) => write!(f, "Pool: {}", e),
         }
@@ -431,7 +375,7 @@ pub enum JoinError {
 impl fmt::Display for JoinError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-JoinError::AlreadyInNation => write!(f, "你已在一个国家里"),
+            JoinError::AlreadyInNation => write!(f, "你已在一个国家里"),
             JoinError::NoSuchNation => write!(f, "国家不存在"),
             JoinError::PopulationFull { current, cap } => {
                 write!(f, "人口上限: {}/{}", current, cap)
@@ -469,7 +413,7 @@ pub enum UpgradeError {
 impl fmt::Display for UpgradeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UpgradeError::NoSuchNation => write!(f, "国家不存在,
+            UpgradeError::NoSuchNation => write!(f, "国家不存在"),
             UpgradeError::AlreadyAtOrAbove { current, target } => {
                 write!(f, "当前人口上限 {} >= 目标 {}", current, target)
             }
@@ -481,10 +425,6 @@ impl fmt::Display for UpgradeError {
 }
 
 impl std::error::Error for UpgradeError {}
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -605,7 +545,6 @@ mod tests {
 
     #[test]
     fn dissolve_releases_founding_order() {
-
         let (mut reg, mut pool) = reg_with_souls(25);
         let id1 = reg.found(&mut pool, 1, "A".into(), [1, 1, 1], 0).unwrap();
         let _id2 = reg.found(&mut pool, 2, "B".into(), [2, 1, 1], 0).unwrap();
@@ -618,7 +557,6 @@ mod tests {
 
     #[test]
     fn flag_costs_follow_doc_table() {
-
         assert_eq!(FLAG_COSTS_SOULS, [10, 15, 20, 25, 30, 40, 50, 60]);
     }
 
@@ -647,7 +585,6 @@ mod tests {
         assert_eq!(reg.find_nation_by_player(4), Some(id_b));
         assert_eq!(reg.find_nation_by_player(99), None);
     }
-
 
     fn reg_with_two_nations_and_pool(
         wood: i64,
@@ -713,7 +650,6 @@ mod tests {
 
     #[test]
     fn upkeep_dissolves_nation_when_flag_hp_reaches_zero() {
-
         let (mut reg, mut pool, id_a, _id_b) = reg_with_two_nations_and_pool(0, 0);
 
         let start_hp = reg.nations.get(&id_a).unwrap().flag_hp;
@@ -724,4 +660,4 @@ mod tests {
         assert!(!reg.nations.contains_key(&id_a));
         assert_eq!(reg.flag_count, 1);
     }
-}
+}

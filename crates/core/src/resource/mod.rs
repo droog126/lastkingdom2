@@ -1,13 +1,3 @@
-
-
-
-
-
-
-
-
-
-
 #![allow(dead_code)]
 
 use bevy::prelude::*;
@@ -15,17 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-
-
-
-
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceKind {
-
     Wood,
     HardenedWood,
     Apple,
@@ -67,7 +48,6 @@ pub enum ResourceKind {
 }
 
 impl ResourceKind {
-
     pub const fn max(self) -> i64 {
         use ResourceKind::*;
         match self {
@@ -97,7 +77,6 @@ impl ResourceKind {
             VampireFang => 20,
             PhoenixFeather => 10,
 
-
             SpiritEssence => 2_400,
             RuneStone => 1_400,
             RunePowder => 900,
@@ -107,9 +86,6 @@ impl ResourceKind {
             SparkFragment => 18,
         }
     }
-
-
-
 
     pub const fn demo_initial_amount(self) -> i64 {
         let max = self.max();
@@ -158,7 +134,6 @@ impl ResourceKind {
         }
     }
 
-
     pub const ALL: &'static [ResourceKind] = &[
         ResourceKind::Wood,
         ResourceKind::HardenedWood,
@@ -185,7 +160,6 @@ impl ResourceKind {
         ResourceKind::EarthRune,
         ResourceKind::VampireFang,
         ResourceKind::PhoenixFeather,
-
         ResourceKind::SpiritEssence,
         ResourceKind::RuneStone,
         ResourceKind::RunePowder,
@@ -195,16 +169,6 @@ impl ResourceKind {
         ResourceKind::SparkFragment,
     ];
 }
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct GlobalResourcePool {
@@ -216,7 +180,6 @@ pub struct GlobalResourcePool {
 }
 
 impl GlobalResourcePool {
-
     pub fn new() -> Self {
         let mut current = HashMap::new();
         let mut audit_added = HashMap::new();
@@ -229,12 +192,9 @@ impl GlobalResourcePool {
         Self { current, audit_added, audit_subtracted }
     }
 
-
     pub fn get(&self, k: ResourceKind) -> i64 {
         *self.current.get(&k).unwrap_or(&0)
     }
-
-
 
     pub fn try_add(&mut self, k: ResourceKind, amount: i64) -> Result<i64, PoolError> {
         if amount <= 0 {
@@ -251,7 +211,6 @@ impl GlobalResourcePool {
         Ok(new)
     }
 
-
     pub fn force_add(&mut self, k: ResourceKind, amount: i64) -> i64 {
         debug_assert!(amount >= 0, "force_add amount must be >= 0, got {}", amount);
         let new = self.get(k) + amount;
@@ -259,7 +218,6 @@ impl GlobalResourcePool {
         *self.audit_added.entry(k).or_insert(0) += amount;
         new
     }
-
 
     pub fn try_sub(&mut self, k: ResourceKind, amount: i64) -> Result<i64, PoolError> {
         if amount <= 0 {
@@ -274,8 +232,6 @@ impl GlobalResourcePool {
         *self.audit_subtracted.entry(k).or_insert(0) += amount;
         Ok(new)
     }
-
-
 
     pub fn verify_conservation(&self) -> Result<(), String> {
         let mut errs: Vec<String> = Vec::new();
@@ -299,8 +255,6 @@ impl GlobalResourcePool {
                     subbed - added
                 ));
             }
-
-
         }
         if errs.is_empty() {
             Ok(())
@@ -309,7 +263,6 @@ impl GlobalResourcePool {
         }
     }
 
-
     pub fn reset_for_tests(&mut self) {
         for k in ResourceKind::ALL {
             self.current.insert(*k, 0);
@@ -317,7 +270,6 @@ impl GlobalResourcePool {
             self.audit_subtracted.insert(*k, 0);
         }
     }
-
 
     pub fn non_zero_count(&self) -> usize {
         self.current.values().filter(|&&v| v > 0).count()
@@ -346,10 +298,6 @@ impl fmt::Display for GlobalResourcePool {
         Ok(())
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PoolError {
@@ -392,11 +340,6 @@ impl fmt::Display for PoolError {
 
 impl std::error::Error for PoolError {}
 
-
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Transfer {
     pub kind: ResourceKind,
@@ -405,10 +348,8 @@ pub struct Transfer {
     pub dst: TransferDst,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferSrc {
-
     Init,
 
     PlayerGather(u32),
@@ -420,10 +361,8 @@ pub enum TransferSrc {
     Nation(u32),
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferDst {
-
     PlayerUse(u32),
 
     NationTreasury(u32),
@@ -433,14 +372,6 @@ pub enum TransferDst {
     Wasted,
 }
 
-
-
-
-
-
-
-
-
 pub fn apply_transfer(pool: &mut GlobalResourcePool, t: Transfer) -> Result<i64, PoolError> {
     debug_assert!(t.amount > 0, "transfer amount must be > 0");
     match t.src {
@@ -448,22 +379,16 @@ pub fn apply_transfer(pool: &mut GlobalResourcePool, t: Transfer) -> Result<i64,
         | TransferSrc::Init
         | TransferSrc::PlayerGather(_)
         | TransferSrc::MonsterDrop(_) => {
-
-
             pool.force_add(t.kind, t.amount);
         }
         TransferSrc::Nation(nation_id) => {
-
             pool.try_sub(t.kind, t.amount)?;
 
             match t.dst {
-                TransferDst::Wasted => {
-
-                }
+                TransferDst::Wasted => {}
                 TransferDst::PlayerUse(_)
                 | TransferDst::NationTreasury(_)
                 | TransferDst::NationBuild(_) => {
-
                     let _ = pool.try_add(t.kind, t.amount)?;
                 }
             }
@@ -472,10 +397,6 @@ pub fn apply_transfer(pool: &mut GlobalResourcePool, t: Transfer) -> Result<i64,
     }
     Ok(pool.get(t.kind))
 }
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -523,7 +444,6 @@ mod tests {
 
     #[test]
     fn all_resource_maxes_match_doc() {
-
         assert_eq!(ResourceKind::Wood.max(), 10_000);
         assert_eq!(ResourceKind::HardenedWood.max(), 500);
         assert_eq!(ResourceKind::Apple.max(), 5_000);
@@ -543,7 +463,6 @@ mod tests {
 
     #[test]
     fn all_25_resources_present() {
-
         assert_eq!(ResourceKind::ALL.len(), 32);
     }
 
@@ -600,7 +519,6 @@ mod tests {
             dst: TransferDst::Wasted,
         };
 
-
         apply_transfer(&mut p, t).unwrap();
         assert_eq!(p.get(ResourceKind::Wood), 70);
     }
@@ -624,7 +542,6 @@ mod tests {
 
     #[test]
     fn cannot_force_add_past_max_during_init() {
-
         let mut p = GlobalResourcePool::new();
         p.force_add(ResourceKind::Sunstone, 200);
 
@@ -637,4 +554,4 @@ mod tests {
             err
         );
     }
-}
+}

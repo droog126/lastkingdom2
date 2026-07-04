@@ -1,11 +1,8 @@
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EquipmentSlot {
-
     MainHand,
 
     OffHand,
@@ -22,7 +19,6 @@ pub enum EquipmentSlot {
 }
 
 impl EquipmentSlot {
-
     pub fn id_str(self) -> &'static str {
         match self {
             Self::MainHand => "slot_main_hand",
@@ -60,7 +56,6 @@ impl EquipmentSlot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EquipmentQuality {
-
     Crude,
 
     Crafted,
@@ -120,7 +115,6 @@ impl EquipmentQuality {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DurabilityState {
-
     Normal,
 
     Damaged,
@@ -129,7 +123,6 @@ pub enum DurabilityState {
 }
 
 impl DurabilityState {
-
     pub fn from_percent(p: f32) -> Self {
         if p <= 0.0 {
             Self::Broken
@@ -167,7 +160,6 @@ impl DurabilityState {
 
 #[derive(Component, Debug, Clone)]
 pub struct EquipmentInstance {
-
     pub id: u32,
 
     pub item_id: String,
@@ -184,7 +176,6 @@ pub struct EquipmentInstance {
 }
 
 impl EquipmentInstance {
-
     pub fn new(
         id: u32,
         item_id: &str,
@@ -207,7 +198,6 @@ impl EquipmentInstance {
 
     pub fn durability_state(&self) -> DurabilityState {
         if !self.quality.uses_normal_durability() {
-
             return DurabilityState::Normal;
         }
         DurabilityState::from_percent(self.current_durability / self.max_durability.max(1.0))
@@ -241,7 +231,6 @@ impl EquipmentInstance {
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct EquipmentState {
-
     pub slots: std::collections::HashMap<EquipmentSlot, EquipmentInstance>,
 }
 
@@ -251,7 +240,6 @@ impl EquipmentState {
     }
 
     pub fn equip(&mut self, item: EquipmentInstance) -> Option<EquipmentInstance> {
-
         if let Some(existing) = self.slots.get(&item.slot) {
             if existing.id == item.id {
                 return None;
@@ -315,7 +303,6 @@ mod tests {
 
     #[test]
     fn slot_id_str_matches_doc() {
-
         assert_eq!(EquipmentSlot::MainHand.id_str(), "slot_main_hand");
         assert_eq!(EquipmentSlot::OffHand.id_str(), "slot_off_hand");
         assert_eq!(EquipmentSlot::Body.id_str(), "slot_body");
@@ -327,7 +314,6 @@ mod tests {
 
     #[test]
     fn all_7_slots_in_all_array() {
-
         assert_eq!(EquipmentSlot::ALL.len(), 7);
 
         let mut sorted: Vec<_> = EquipmentSlot::ALL.iter().collect();
@@ -397,7 +383,6 @@ mod tests {
 
     #[test]
     fn durability_state_thresholds() {
-
         assert_eq!(DurabilityState::from_percent(1.0), DurabilityState::Normal);
         assert_eq!(DurabilityState::from_percent(0.50), DurabilityState::Normal);
         assert_eq!(DurabilityState::from_percent(0.25), DurabilityState::Normal);
@@ -540,7 +525,6 @@ mod tests {
 
     #[test]
     fn effective_multiplier_combines_quality_and_durability() {
-
         let e = EquipmentInstance::new(
             20,
             "x",

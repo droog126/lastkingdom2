@@ -3,7 +3,7 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::prelude::*;
 
 use super::marching_cubes::{McVertex, build_mesh as mc_build_mesh};
-use super::scalar_field::{ScalarField, build_density_field};
+use super::scalar_field::build_density_field;
 use lk2_core::world::World as GameWorld;
 
 pub struct SmoothMesh {
@@ -71,7 +71,7 @@ fn terrain_color(p: [f32; 3]) -> [f32; 4] {
     let macro_n = (p[0] * 0.015 + p[2] * 0.018).sin() * 0.5 + 0.5;
     let patch_n = (p[0] * 0.32 + p[2] * 0.28).sin() * 0.5 + 0.5;
     let fine_n = ((p[0] * 0.85).sin() * (p[2] * 0.73).cos()) * 0.5 + 0.5;
-    let micro_n = ((p[0] * 1.7 + p[2] * 1.3).sin() * 0.5 + 0.5);
+    let micro_n = (p[0] * 1.7 + p[2] * 1.3).sin() * 0.5 + 0.5;
     let height_t = ((p[1] - 2.0) / 35.0).clamp(0.0, 1.0);
 
     let (base_rgb, base_w) = if macro_n > 0.88 {

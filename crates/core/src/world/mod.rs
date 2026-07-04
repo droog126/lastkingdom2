@@ -6,10 +6,6 @@ use crate::constant::*;
 use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
 use crate::world::terrain::TerrainModule;
 
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Biome {
     Desert,
@@ -18,10 +14,7 @@ pub enum Biome {
 }
 
 impl Biome {
-
-
     pub fn noise_field(x: i32, z: i32) -> f32 {
-
         let cell = 64_i32;
         let cx = (x as f32 / cell as f32).floor() as i32;
         let cz = (z as f32 / cell as f32).floor() as i32;
@@ -46,7 +39,6 @@ impl Biome {
         big * 0.7 + detail * 0.3
     }
 
-
     pub fn from_xz_infinite(x: i32, z: i32) -> Self {
         let n = Self::noise_field(x, z);
         if n < 0.33 {
@@ -57,7 +49,6 @@ impl Biome {
             Biome::Tundra
         }
     }
-
 
     pub fn from_xz(_x: i32, z: i32) -> Self {
         let n = WORLD_SIZE as i32;
@@ -70,7 +61,6 @@ impl Biome {
         }
     }
 
-
     pub fn ore_block(self) -> BlockType {
         match self {
             Biome::Desert => BlockType::SunstoneOre,
@@ -78,7 +68,6 @@ impl Biome {
             Biome::Jungle => BlockType::LivingRoot,
         }
     }
-
 
     pub fn ore_resource(self) -> ResourceKind {
         match self {
@@ -96,10 +85,6 @@ impl Biome {
         }
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockType {
@@ -119,7 +104,6 @@ pub enum BlockType {
 }
 
 impl BlockType {
-
     pub const fn is_solid(self) -> bool {
         !matches!(self, BlockType::Air | BlockType::Water)
     }
@@ -134,8 +118,6 @@ impl BlockType {
             BlockType::Dirt | BlockType::Sand | BlockType::Snow | BlockType::BerryThicket
         )
     }
-
-
 
     pub fn yields(self) -> Option<(ResourceKind, i64)> {
         use BlockType::*;
@@ -152,7 +134,6 @@ impl BlockType {
             BerryThicket => Some((R::Apple, 1)),
         }
     }
-
 
     pub fn debug_color_rgba(self) -> [f32; 4] {
         use BlockType::*;
@@ -174,13 +155,8 @@ impl BlockType {
     }
 }
 
-
-
-
-
 #[derive(Resource, Debug, Clone, Default)]
 pub struct World {
-
     pub blocks: Vec<BlockType>,
     pub size: i32,
 
@@ -191,8 +167,6 @@ pub struct World {
     pub seed: u64,
 
     pub pipeline: std::sync::Arc<terrain::TerrainPipeline>,
-
-
 
     pub geo_overlay: Vec<terrain::ShapeLayer>,
 
@@ -216,8 +190,6 @@ impl World {
         }
     }
 
-
-
     pub fn push_geo_layer(&mut self, layer: terrain::ShapeLayer) {
         let name = layer.name.clone();
         self.geo_overlay.retain(|l| l.name != name);
@@ -225,14 +197,12 @@ impl World {
         self.geo_overlay_names.insert(name);
     }
 
-
     pub fn remove_geo_layer(&mut self, name: &str) -> bool {
         let before = self.geo_overlay.len();
         self.geo_overlay.retain(|l| l.name != name);
         self.geo_overlay_names.remove(name);
         self.geo_overlay.len() != before
     }
-
 
     pub fn clear_geo_overlay(&mut self) {
         self.geo_overlay.clear();
@@ -253,7 +223,6 @@ impl World {
     }
 
     pub fn get(&self, x: i32, y: i32, z: i32) -> BlockType {
-
         let s = self.size;
         if y < 0 || y >= s {
             return BlockType::Air;
@@ -269,10 +238,7 @@ impl World {
         self.generate_voxel(x, y, z)
     }
 
-
-
     pub fn generate_voxel(&self, x: i32, y: i32, z: i32) -> BlockType {
-
         let mut sorted: Vec<&terrain::ShapeLayer> = self.geo_overlay.iter().collect();
         sorted.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
         for layer in &sorted {
@@ -280,7 +246,6 @@ impl World {
                 terrain::TerrainContext { x, y, z, seed: self.seed, surface_y: None, biome: None };
             if let Some(b) = layer.decide(&mut ctx) {
                 if let Some(biome) = layer.biome_override {
-
                     let _ = biome;
                 }
                 return b;
@@ -301,10 +266,8 @@ impl World {
     }
 
     pub fn in_bounds(&self, _x: i32, y: i32, _z: i32) -> bool {
-
         y >= 0 && y < self.size
     }
-
 
     pub fn for_each_solid<F: FnMut(i32, i32, i32, BlockType)>(&self, mut f: F) {
         for y in 0..self.size {
@@ -319,7 +282,6 @@ impl World {
         }
     }
 
-
     pub fn count_biome_ores(&self, biome: Biome) -> u32 {
         let mut count = 0;
         self.for_each_solid(|_, _, _, b| {
@@ -330,11 +292,6 @@ impl World {
         count
     }
 }
-
-
-
-
-
 
 fn hash01(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     let mut h = seed
@@ -348,7 +305,6 @@ fn hash01(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     h ^= h >> 16;
     (h & 0xFFFF) as f32 / 65536.0
 }
-
 
 fn noise3(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     let xi = x as f32;
@@ -379,10 +335,6 @@ fn noise3(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     y0 * (1.0 - w) + y1 * w
 }
 
-
-
-
-
 pub struct WorldGenerator {
     pub seed: u32,
     pub ore_threshold: f32,
@@ -404,11 +356,9 @@ impl Default for WorldGenerator {
 }
 
 impl WorldGenerator {
-
     pub fn generate(&self, size: i32) -> World {
         let mut w = World::new(size);
         let s = size as i32;
-
 
         let spawn_x = s / 2;
         let spawn_z = s / 2;
@@ -419,7 +369,6 @@ impl WorldGenerator {
             for x in 0..s {
                 let biome = Biome::from_xz(x, z);
                 let dist_from_spawn = (((x - spawn_x).pow(2) + (z - spawn_z).pow(2)) as f32).sqrt();
-
 
                 let h_big = noise3(x / 8, 0, z / 8, self.seed);
                 let h_detail = noise3(x, 0, z, self.seed ^ 0xCAFE);
@@ -433,7 +382,6 @@ impl WorldGenerator {
                 let h = if dist_from_spawn < flat_radius {
                     SEA_LEVEL + 1
                 } else if dist_from_spawn < flat_radius + 6.0 {
-
                     let t = (dist_from_spawn - flat_radius) / 6.0;
                     let flat = (SEA_LEVEL + 1) as f32;
                     (flat * (1.0 - t) + base_h * t) as i32
@@ -441,7 +389,6 @@ impl WorldGenerator {
                     base_h as i32
                 }
                 .clamp(1, s - 4);
-
 
                 let surface = match biome {
                     Biome::Desert => BlockType::Sand,
@@ -460,7 +407,6 @@ impl WorldGenerator {
                 }
             }
         }
-
 
         for y in 1..(s - 2) {
             for z in 0..s {
@@ -486,7 +432,6 @@ impl WorldGenerator {
             }
         }
 
-
         for z in 0..s {
             for x in 0..s {
                 for y in 0..=SEA_LEVEL {
@@ -497,22 +442,16 @@ impl WorldGenerator {
             }
         }
 
-
         for biome in [Biome::Desert, Biome::Tundra, Biome::Jungle] {
             self.place_ore_clusters(&mut w, biome);
         }
 
         self.place_generic_iron(&mut w);
 
-
-
-
-
         for z in 0..s {
             for x in 0..s {
                 let biome = Biome::from_xz(x, z);
                 if biome == Biome::Desert {
-
                     if (x - spawn_x).abs() + (z - spawn_z).abs() >= clear_radius
                         && hash01(x, z, 0, self.seed ^ 0xC4) < 0.015
                     {
@@ -532,14 +471,12 @@ impl WorldGenerator {
                 {
                     if let Some(y) = self.find_surface(w.clone(), x, z) {
                         let (trunk_h, canopy) = match biome {
-                            Biome::Jungle => (
-                                5 + (hash01(x, z, 8, self.seed) * 3.0) as i32,
-                                (3, 2),
-                            ),
-                            Biome::Tundra => (
-                                4 + (hash01(x, z, 8, self.seed) * 2.0) as i32,
-                                (2, 2),
-                            ),
+                            Biome::Jungle => {
+                                (5 + (hash01(x, z, 8, self.seed) * 3.0) as i32, (3, 2))
+                            }
+                            Biome::Tundra => {
+                                (4 + (hash01(x, z, 8, self.seed) * 2.0) as i32, (2, 2))
+                            }
                             Biome::Desert => unreachable!(),
                         };
 
@@ -559,7 +496,6 @@ impl WorldGenerator {
                                     if w.in_bounds(px, py, pz)
                                         && w.get(px, py, pz) == BlockType::Air
                                     {
-
                                         if dx == 0 && dz == 0 && dy < canopy.1 - 1 {
                                             continue;
                                         }
@@ -575,7 +511,6 @@ impl WorldGenerator {
                 }
             }
         }
-
 
         for z in 0..s {
             for x in 0..s {
@@ -593,7 +528,6 @@ impl WorldGenerator {
                 }
             }
         }
-
 
         for z in 0..s {
             for x in 0..s {
@@ -618,7 +552,6 @@ impl WorldGenerator {
         w
     }
 
-
     fn place_ore_clusters(&self, w: &mut World, biome: Biome) {
         let s = w.size as i32;
         let mut placed: Vec<(i32, i32)> = Vec::new();
@@ -628,7 +561,6 @@ impl WorldGenerator {
                     continue;
                 }
                 if hash01(x, z, 2, self.seed ^ (biome as u32) * 0x100) < 0.08 {
-
                     if placed.iter().all(|(px, pz)| {
                         (x - px).abs() + (z - pz).abs() > self.min_ore_cluster_spacing
                     }) {
@@ -649,14 +581,12 @@ impl WorldGenerator {
         }
     }
 
-
     fn place_generic_iron(&self, w: &mut World) {
         let s = w.size as i32;
         for z in 0..s {
             for x in 0..s {
                 let h = self.find_surface(w.clone(), x, z);
                 if let Some(surf) = h {
-
                     let depth = 1 + (hash01(x, z, 7, self.seed) * 3.0) as i32;
                     let y = surf - depth;
                     if y > 0
@@ -670,7 +600,6 @@ impl WorldGenerator {
         }
     }
 
-
     fn find_surface(&self, w: World, x: i32, z: i32) -> Option<i32> {
         for y in (0..w.size).rev() {
             if w.get(x, y, z).is_solid() {
@@ -680,12 +609,6 @@ impl WorldGenerator {
         None
     }
 }
-
-
-
-
-
-
 
 pub fn gather_block(
     world: &mut World,
@@ -718,14 +641,6 @@ pub fn gather_block(
     Ok(Some((kind, amount)))
 }
 
-
-
-
-
-
-
-
-
 pub fn visible_blocks(
     world: &World,
     px: i32,
@@ -751,10 +666,6 @@ pub fn visible_blocks(
     }
     out
 }
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -804,7 +715,7 @@ mod tests {
             + w.count_biome_ores(Biome::Jungle);
         assert!(
             total_ores > 0,
-            "至少一�?biome 应该�?ore (实际: D={}, T={}, J={})",
+            "expected at least one biome ore (actual: D={}, T={}, J={})",
             w.count_biome_ores(Biome::Desert),
             w.count_biome_ores(Biome::Tundra),
             w.count_biome_ores(Biome::Jungle)
@@ -864,7 +775,6 @@ mod tests {
 
     #[test]
     fn block_yields_match() {
-
         assert_eq!(
             BlockType::SunstoneOre.yields(),
             Some((ResourceKind::Sunstone, 1))
@@ -875,4 +785,4 @@ mod tests {
             Some((ResourceKind::Apple, 1))
         );
     }
-}
+}

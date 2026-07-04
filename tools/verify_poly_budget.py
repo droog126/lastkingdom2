@@ -21,8 +21,8 @@ def triangle_count(glb_path: Path) -> tuple[int, int]:
     return t, v
 
 def main() -> int:
-    out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else
-                   r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
+    root = Path(__file__).resolve().parents[1]
+    out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "assets" / "procedural" / "pretty"
     budget = 5000
     worst = 0
     fails = []

@@ -1,11 +1,8 @@
-
-
 use bevy::prelude::*;
 
 #[derive(Component, Clone, Debug, Reflect)]
 #[require(Transform)]
 pub struct PvPController {
-
     pub speed: f32,
 
     pub jump_impulse: f32,
@@ -42,7 +39,6 @@ pub struct PvPController {
 impl Default for PvPController {
     fn default() -> Self {
         Self {
-
             speed: 5.0,
             jump_impulse: 8.0,
             air_control: 0.3,
@@ -68,7 +64,6 @@ impl Default for PvPController {
 }
 
 impl PvPController {
-
     pub fn new() -> Self {
         Self::default()
     }
@@ -109,7 +104,6 @@ impl PvPController {
 
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct PlayerCollider {
-
     pub radius: f32,
 
     pub half_height: f32,
@@ -119,17 +113,12 @@ pub struct PlayerCollider {
 
 impl Default for PlayerCollider {
     fn default() -> Self {
-        Self {
-            radius: 0.3,
-            half_height: 0.9,
-            eye_height: 1.62,
-        }
+        Self { radius: 0.3, half_height: 0.9, eye_height: 1.62 }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct GroundHit {
-
     pub point: Vec3,
 
     pub normal: Vec3,

@@ -1,49 +1,14 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::match_state::{MatchClock, MatchPhase};
+use crate::match_state::MatchClock;
 use crate::monster::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, ResourceKind};
 
-
-
-
-
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObjectiveKind {
-
     GatherResource { kind: ResourceKind, count: i64 },
 
     FoundNation,
@@ -69,7 +34,6 @@ impl ObjectiveKind {
             }
         }
     }
-
 
     pub fn progress_str(&self, progress: &ObjectiveProgress) -> String {
         match (self, progress) {
@@ -104,11 +68,6 @@ impl ObjectiveKind {
     }
 }
 
-
-
-
-
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ObjectiveProgress {
     #[default]
@@ -139,11 +98,6 @@ impl ObjectiveProgress {
     }
 }
 
-
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Objective {
     pub id: String,
@@ -164,7 +118,6 @@ impl Objective {
         Self { id: id.into(), kind, progress, done: false }
     }
 
-
     pub fn check_complete(&self) -> bool {
         match (&self.kind, &self.progress) {
             (ObjectiveKind::GatherResource { count, .. }, ObjectiveProgress::Count(p)) => {
@@ -181,15 +134,8 @@ impl Objective {
     }
 }
 
-
-
-
-
-
-
 #[derive(Resource, Debug, Clone, Default)]
 pub struct Objectives {
-
     pub all: Vec<Objective>,
 
     pub current_idx: Option<usize>,
@@ -207,7 +153,6 @@ impl Objectives {
         self.all.push(obj);
     }
 
-
     pub fn current(&self) -> Option<&Objective> {
         self.current_idx.and_then(|i| self.all.get(i))
     }
@@ -216,8 +161,6 @@ impl Objectives {
         let i = self.current_idx?;
         self.all.get_mut(i)
     }
-
-
 
     pub fn try_complete_current(&mut self) -> bool {
         let Some(i) = self.current_idx else {
@@ -239,7 +182,6 @@ impl Objectives {
         self.current_idx = next;
         true
     }
-
 
     pub fn default_chain() -> Self {
         let mut o = Objectives::new();
@@ -271,23 +213,12 @@ impl Objectives {
     }
 }
 
-
-
-
-
-
 #[derive(Message, Debug, Clone)]
 pub struct ObjectiveCompleted {
     pub id: String,
     pub kind: ObjectiveKind,
     pub at_wall_secs: f32,
 }
-
-
-
-
-
-
 
 pub fn auto_advance_objectives(
     mut objectives: ResMut<Objectives>,
@@ -298,7 +229,6 @@ pub fn auto_advance_objectives(
     match_clock: Res<MatchClock>,
     mut completed_events: MessageWriter<ObjectiveCompleted>,
 ) {
-
     let mut safety = 16;
     while safety > 0 {
         safety -= 1;
@@ -308,7 +238,6 @@ pub fn auto_advance_objectives(
         if obj.done {
             break;
         }
-
 
         match &obj.kind {
             ObjectiveKind::GatherResource { kind, .. } => {
@@ -354,7 +283,6 @@ pub fn auto_advance_objectives(
             }
         }
 
-
         if objectives.try_complete_current() {
             let just_done = objectives
                 .all
@@ -380,9 +308,6 @@ pub fn auto_advance_objectives(
     }
 }
 
-
-
-
 pub fn objective_phase_hints(
     mut completed_events: MessageReader<ObjectiveCompleted>,
     match_clock: Res<MatchClock>,
@@ -407,11 +332,6 @@ pub fn objective_phase_hints(
     }
 }
 
-
-
-
-
-
 pub struct ObjectivesPlugin;
 
 impl Plugin for ObjectivesPlugin {
@@ -423,12 +343,9 @@ impl Plugin for ObjectivesPlugin {
     }
 }
 
-
 pub fn setup_default_objectives(mut commands: Commands) {
     commands.insert_resource(Objectives::default_chain());
 }
-
-
 
 pub fn on_phase_change_emit_summary(
     mut phase_events: MessageReader<crate::match_state::MatchPhaseChanged>,
@@ -446,10 +363,6 @@ pub fn on_phase_change_emit_summary(
         );
     }
 }
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -479,7 +392,6 @@ mod tests {
         let mut c = Objectives::default_chain();
         let mut pool = fresh_pool();
         add(&mut pool, ResourceKind::Wood, 5);
-
 
         let mut player = PlayerState::default();
         player.nation_id = None;
@@ -607,7 +519,6 @@ mod tests {
 
     #[test]
     fn completed_event_payload() {
-
         let ev = ObjectiveCompleted {
             id: "q1".into(),
             kind: ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 },
@@ -630,7 +541,6 @@ mod tests {
 
     #[test]
     fn objectives_plugin_can_be_added_without_panic() {
-
         fn _assert_plugin<P: Plugin>(_: &P) {}
         let p = ObjectivesPlugin;
         _assert_plugin(&p);
@@ -643,4 +553,4 @@ mod tests {
         assert_eq!(c.current_idx, None);
         assert!(!c.try_complete_current());
     }
-}
+}

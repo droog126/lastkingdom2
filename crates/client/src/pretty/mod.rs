@@ -886,14 +886,14 @@ fn spawn_kenney_landmarks(
     ];
 
     for (name, path, offset, scale) in LANDMARKS {
-        let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
+        let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(*path));
         let pos = Vec3::new(
             player_pos.x + offset.x,
             ground_y + offset.y,
             player_pos.z - offset.z,
         );
         commands.spawn((
-            SceneRoot(scene),
+            WorldAssetRoot(scene),
             Transform::from_translation(pos).with_scale(Vec3::splat(*scale)),
             KenneyLandmark { rel: *offset, y_offset: offset.y },
         ));

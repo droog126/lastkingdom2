@@ -21,7 +21,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import models_lib
-models_lib.OUT_DIR = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
 
 from models_lib import (  # noqa: E402
     clear_scene, cube, cone, cylinder, export_glb, ico_sphere, mat, uv_sphere,
@@ -374,7 +373,7 @@ def make_ground_disc_cute(name, color, glow) -> None:
 def export_glb_v5_eco(name):
     """导出�?eco/ 目录."""
     import models_lib
-    eco_dir = Path(r"F:\rustProject\lastkingdom2\assets\procedural\eco")
+    eco_dir = models_lib.ROOT / "assets" / "procedural" / "eco"
     eco_dir.mkdir(parents=True, exist_ok=True)
     path = eco_dir / f"{name}.glb"
     bpy_path_fix = models_lib.OUT_DIR
@@ -465,9 +464,9 @@ def main() -> None:
             ],
         },
     }
-    mp = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty\MANIFEST.json")
+    mp = models_lib.ROOT / "assets" / "procedural" / "pretty" / "MANIFEST.json"
     mp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    eco_manifest = Path(r"F:\rustProject\lastkingdom2\assets\procedural\eco\MANIFEST.json")
+    eco_manifest = models_lib.ROOT / "assets" / "procedural" / "eco" / "MANIFEST.json"
     eco_manifest.write_text(json.dumps({"version": 5, "spec": "v5-cute 梦幻可爱"}, indent=2), encoding="utf-8")
     print(f"\nMANIFEST -> {mp}")
     print(f"ECO MANIFEST -> {eco_manifest}")

@@ -1,24 +1,16 @@
-
-
-
-
-
 use bevy::prelude::*;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
+#[cfg(feature = "client-render")]
 use crate::combat::{
-    AttackState, BlockState, Downed, Health as CombatHealth, InputBuffer, Knockback, ParryWindow,
-    Stamina, StunState,
+    AttackState, BlockState, Downed, InputBuffer, Knockback, ParryWindow, Stamina, StunState,
 };
+use crate::combat::Health as CombatHealth;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
-
-
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CreatureKind {
@@ -29,6 +21,7 @@ pub enum CreatureKind {
 }
 
 impl CreatureKind {
+    #[cfg(feature = "client-render")]
     pub fn color(self) -> Color {
         match self {
             CreatureKind::Pig => Color::srgb(0.95, 0.75, 0.78),
@@ -55,6 +48,7 @@ impl CreatureKind {
     }
 }
 
+#[cfg(feature = "client-render")]
 pub fn creature_material(kind: CreatureKind) -> StandardMaterial {
     let color = kind.color();
     StandardMaterial {
@@ -85,10 +79,6 @@ pub fn award_creature_drop(
     Ok(drop)
 }
 
-
-
-
-
 pub const CREATURE_TRAINING_ATTACK_RANGE_SQ: f32 = 25.0;
 
 pub fn creature_attack_distance_sq(
@@ -113,17 +103,10 @@ pub struct CreatureAI {
     pub bob_phase: f32,
 }
 
-
-
-
-
 #[derive(Resource, Default)]
 pub struct CreatureSpawnerDone(pub bool);
 
-
-
-
-
+#[cfg(feature = "client-render")]
 pub fn spawn_creatures(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -171,7 +154,6 @@ pub fn spawn_creatures(
         placed += 1;
     }
 
-
     let mut starter_attempts = 0;
     while placed < 12 && starter_attempts < 400 {
         starter_attempts += 1;
@@ -193,7 +175,6 @@ pub fn spawn_creatures(
         }
     }
     info!("🐄 起始牧场 spawn {} 只", placed);
-
 
     let target = count;
     while placed < target && attempts < count * 20 {
@@ -222,7 +203,7 @@ pub fn spawn_creatures(
     info!("🐄 总共 spawn {} 只动物 (尝试 {} 次)", placed, attempts);
 }
 
-
+#[cfg(feature = "client-render")]
 fn try_spawn_training_creature_near_spawn(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -266,6 +247,7 @@ fn try_spawn_training_creature_near_spawn(
     false
 }
 
+#[cfg(feature = "client-render")]
 fn spawn_debug_training_creature(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -285,6 +267,7 @@ fn spawn_debug_training_creature(
     )
 }
 
+#[cfg(feature = "client-render")]
 fn spawn_debug_creature_at(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -317,6 +300,7 @@ fn spawn_debug_creature_at(
     true
 }
 
+#[cfg(feature = "client-render")]
 fn try_spawn_creature(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -383,8 +367,7 @@ pub fn despawn_dead_creatures(
     }
 }
 
-
-
+#[cfg(feature = "client-render")]
 pub fn player_attack_creatures(
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<PlayerState>,
@@ -404,7 +387,6 @@ pub fn player_attack_creatures(
         }
     }
     if let Some((e, _d, kind)) = best {
-
         match award_creature_drop(&mut pool, &mut player, kind) {
             Ok(drop) => {
                 info!("⚔ 你杀了一只{}（+3 {:?}）", kind.label_zh(), drop);
@@ -421,10 +403,6 @@ pub fn player_attack_creatures(
         info!("⚔ 挥空（范围内没有动物）");
     }
 }
-
-
-
-
 
 pub fn update_creatures(
     time: Res<Time>,
@@ -445,7 +423,6 @@ pub fn update_creatures(
         }
         ai.wander_timer = 0.0;
         ai.next_wander_secs = rng.random_range(1.5..3.0);
-
 
         let dirs: [[i32; 3]; 4] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
         let d = dirs[rng.random_range(0..dirs.len())];
@@ -541,6 +518,7 @@ mod tests {
         assert!(d2 <= CREATURE_TRAINING_ATTACK_RANGE_SQ);
     }
 
+    #[cfg(feature = "client-render")]
     #[test]
     fn creature_material_keeps_small_animals_readable() {
         let material = creature_material(CreatureKind::Cow);
@@ -562,4 +540,4 @@ mod tests {
         let health = CombatHealth { current: 0.0, max: 12.0, invuln_until_tick: 0 };
         assert!(health.is_dead());
     }
-}
+}

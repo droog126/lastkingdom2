@@ -258,9 +258,9 @@ fn spawn_kenney_ring(
         let z = player_pos.z + angle.sin() * radius;
         let world_y = ground_y - 0.5;
         let rel = Vec3::new(x - player_pos.x, world_y - ground_y, z - player_pos.z);
-        let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
+        let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(*path));
         commands.spawn((
-            SceneRoot(scene),
+            WorldAssetRoot(scene),
             Transform::from_translation(Vec3::new(x, world_y, z)).with_scale(Vec3::splat(*scale)),
             AuditPrettyMarker,
             AuditRingOffset { rel },
@@ -295,9 +295,9 @@ fn spawn_ring(
         let z = player_pos.z + angle.sin() * radius;
         let world_y = ground_y + y_offset - 0.5;
         let rel = Vec3::new(x - player_pos.x, world_y - ground_y, z - player_pos.z);
-        let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
+        let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
         commands.spawn((
-            SceneRoot(scene),
+            WorldAssetRoot(scene),
             Transform::from_translation(Vec3::new(x, world_y, z)),
             AuditPrettyMarker,
             AuditRingOffset { rel },
@@ -329,9 +329,9 @@ fn spawn_single(
         pos.y - origin_ground - 0.5,
         pos.z - origin_player.z,
     );
-    let scene: Handle<Scene> = asset_server.load(format!("{}#Scene0", path));
+    let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
     commands.spawn((
-        SceneRoot(scene),
+        WorldAssetRoot(scene),
         Transform::from_translation(pos),
         AuditPrettyMarker,
         AuditRingOffset { rel },

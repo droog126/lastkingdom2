@@ -1,61 +1,8 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use std::net::SocketAddr;
-
-
-
-
-
-
 
 pub const DEFAULT_PORT: u16 = 5000;
 
-
-
-
-
-
-
 pub const PROTOCOL_ID: u64 = 0x1cbe_4f9e_d4a0_4c2b;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 pub fn server_listen_addr() -> SocketAddr {
     let port = server_listen_port_from_env(std::env::var("LK2_PORT").ok().as_deref());
@@ -66,56 +13,14 @@ fn server_listen_port_from_env(raw: Option<&str>) -> u16 {
     raw.and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_PORT)
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub fn parse_connect_arg(args: &[String]) -> Option<SocketAddr> {
     args.iter()
         .find(|a| a.starts_with("--connect="))
         .and_then(|a| a.trim_start_matches("--connect=").parse().ok())
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[derive(Debug, Clone)]
 pub struct CliArgs {
-
     pub offline: bool,
 
     pub connect: Option<SocketAddr>,
@@ -128,21 +33,9 @@ pub struct CliArgs {
 }
 
 impl CliArgs {
-
-
-
-
-
-
-
-
-
-
     pub fn parse() -> Self {
         Self::parse_from(&std::env::args().collect::<Vec<_>>())
     }
-
-
 
     pub fn parse_from(args: &[String]) -> Self {
         let offline = args.iter().any(|a| a == "--offline");
@@ -154,7 +47,6 @@ impl CliArgs {
             .find(|a| a.starts_with("--preset="))
             .map(|a| a.trim_start_matches("--preset=").to_string())
             .unwrap_or_else(|| "default".to_string());
-
 
         let walk = args.iter().find(|a| a.starts_with("--walk=")).and_then(|a| {
             let s = a.trim_start_matches("--walk=");
@@ -172,10 +64,6 @@ impl CliArgs {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,7 +79,6 @@ mod tests {
 
     #[test]
     fn protocol_id_is_nonzero() {
-
         assert_ne!(PROTOCOL_ID, 0);
     }
 
@@ -270,7 +157,6 @@ mod tests {
 
     #[test]
     fn cli_args_walk_bad_format() {
-
         let args = make_args(&["--walk=10"]);
         let cli = CliArgs::parse_from(&args);
         assert!(cli.walk.is_none());
@@ -289,4 +175,4 @@ mod tests {
         assert_eq!(cli.preset, "hills");
         assert_eq!(cli.walk, Some((5, 15)));
     }
-}
+}

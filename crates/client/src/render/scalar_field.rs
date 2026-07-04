@@ -5,8 +5,6 @@ use lk2_core::world::World as GameWorld;
 pub struct ScalarField {
     pub data: Vec<f32>,
     pub shape: [usize; 3],
-
-    pub origin: [i32; 3],
 }
 
 impl ScalarField {
@@ -65,7 +63,7 @@ pub fn build_density_field(world: &GameWorld, min: [i32; 3], max: [i32; 3]) -> S
         }
     }
 
-    ScalarField { data, shape: corner_shape, origin: min }
+    ScalarField { data, shape: corner_shape }
 }
 
 pub fn effective_ground_height(world: &GameWorld, x: i32, z: i32) -> f32 {

@@ -12,81 +12,27 @@ name = "audit_player"
 path = "examples/audit_player.rs"
 
 [features]
-# 启用 Bevy 动态链接，大幅缩短开发期增量编译时间。
-# 用法: cargo run -p lk2-client --features dev-dynamic-linking
-# 注意：仅供开发使用，切勿在发布构建中启用。
 dev-dynamic-linking = ["bevy/dynamic_linking"]
-
-# audit-pretty-models: 在 spawn_pretty 末尾额外 spawn 所有
-# assets/procedural/pretty/*.glb 在玩家周围, 方便不替换原 pretty 代码就能
-# 验证新资产在引擎里实际渲染. 默认不启用, 跑法:
-#   cargo run -p lk2-client --features audit-pretty-models -- --offline
 audit-pretty-models = []
 
-# ============================================================================
-# 客户端 binary：DefaultPlugins + lightyear ClientPlugins + 渲染 + 输入 + UI
-#
-# 对应 docs/plans/client-server-split.md §5 / §9 步骤 5
-#
-# 设计：
-#   - 启 Bevy 的 DefaultPlugins (含 winit / wgpu / WindowPlugin)
-#   - 加 lightyear 0.26 ClientPlugins（默认是 NetcodeClient，--offline 模式里
-#     不会真去连 server，但 Plugin 仍然要 add 以便 NetworkMessages / Replication
-#     资源存在）
-#   - 渲染 / pretty / 客户端 PvP 预测 / 本地输入预测 / HUD 全部在本 crate
-#   - **不**包含 server-only 代码（`pvp::systems_server` / `SelfCheck` /
-#     `SimulationTick` 这些）
-#   - **不**直连 UDP/TCP transport（那是后续 `wire-network-and-loop` task 拆）
-#   - 共享数据 / sim 逻辑走 lk2-core（不带渲染类型 / 物理 plugin）
-# ============================================================================
-
 [dependencies]
-# 共享依赖版本（与 umbrella / core 对齐）
 bevy = { workspace = true }
 bevy-inspector-egui = { workspace = true }
-
-# 物理 — 仅可视化插值，server 跑确定性 step（详见 client-server-split.md §5）
 avian3d = { workspace = true }
 bevy-tnua = { workspace = true }
 bevy-tnua-avian3d = { workspace = true }
-
-# 相机控制
 bevy_panorbit_camera = { workspace = true }
-
-# 序列化（state.json dump）
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# 渲染 — greedy_mesh.rs 用 block-mesh + ndshape 生成合并 mesh
 block-mesh = { workspace = true }
 ndshape = { workspace = true }
-
-# tracing / log
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-
-# sim 共享库
-lk2-core = { workspace = true }
-
-# lightyear 0.26 — client 注册消息 / 组件 + leafwing 输入
-# 注意：lightyear_inputs_leafwing 在 lk2-core 那边已经依赖，本 crate
-# 也直接拉是为了在 main.rs 里用 `lightyear_inputs_leafwing::InputPlugin`
-# 引用
-# wire-network-and-loop 任务（2026-06-10）: 加 client + udp feature
-# - client: 拉 lightyear_udp 的 client 模块（UdpIo 给 client 用）
-# - udp: 把 lightyear_udp 这个 sub-crate 引入
-# wire-network-and-loop 任务（2026-06-11）: 加 replication feature
-# - replication: 启 lightyear_replication prelude (ReplicationSendPlugin /
-#   ReplicationReceivePlugin / HierarchySendPlugin / AuthorityPlugin /
-#   NetworkVisibilityPlugin / ProtocolCheckPlugin)。缺这个 client 端
-#   没有 ReplicationReceivePlugin, server 复制的 Replicate entity 不会被
-#   client 接收 + 解码 (PlayerPos 复制失效)。
+lk2-core = { workspace = true, features = ["client-render"] }
 lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication", "netcode"] }
 lightyear_avian3d = { workspace = true }
 lightyear_inputs_leafwing = { workspace = true }
 lightyear_netcode = { version = "0.28" }
-# lightyear_connection 直接拉,只是为了在 main.rs 里 import ClientOf
-# (ClientOf 在 lightyear_connection::client_of, lightyear prelude 没 re-export)
 lightyear_connection = { version = "0.28", features = ["client"] }
 leafwing-input-manager = { workspace = true }
 

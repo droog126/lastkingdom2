@@ -13,7 +13,7 @@ This repository uses project skills for detailed instructions. Keep this file as
 
 ## Technology Direction
 
-- Framework: Bevy 0.18.1.
+- Framework: Bevy 0.19.
 - Visual target: Sokpop-style small, readable, colorful, toy-like game presentation with clear silhouettes and simple shapes.
 - First choice for core automation: Rust `xtask`, especially closed-loop orchestration, health checks, screenshot/state assertions, test runners, state files, JSON contracts, cross-platform command logic, and robust error handling.
 - Second choice: Python only for Blender, asset generation, and focused one-off analysis outside the loop workflow.
@@ -24,7 +24,7 @@ This repository uses project skills for detailed instructions. Keep this file as
 
 - Use `$local-dev` for ordinary repository work: inspect files, make local code/docs/script changes, choose validation scope, handle git hygiene, or prepare branch/commit/PR work.
 - Use `$tdd-iteration` for testable behavior changes: pure logic, rules, state machines, resources, drops, conservation, nations, monsters, animals, combat, protection periods, phase timing, CLI/protocol/network parsing, AI decisions, scenarios, tick observers, bug fixes, and regressions.
-- Use `$bevy-gameplay-dev` for Bevy 0.18.1 client/server/gameplay work: `crates/client`, `crates/server`, gameplay systems in `crates/core`, render/input/HUD/camera, voxel rendering, networking behavior, scenarios, performance, and log-spam fixes.
+- Use `$bevy-gameplay-dev` for Bevy 0.19 client/server/gameplay work: `crates/client`, `crates/server`, gameplay systems in `crates/core`, render/input/HUD/camera, voxel rendering, networking behavior, scenarios, performance, and log-spam fixes.
 - Use `$closed-loop-ai-dev` for visual/gameplay-experience iteration: screenshots, offline auto-demo, `cargo run -q -p xtask -- loop` (or `just loop`), observer health, `health.json`, `assertions.json`, `diff.json`, `final_state.json`, PNG review, and `decision.md`.
 - Use `$screenshot-scoring` for evidence-backed screenshot scoring: visual category scores, hard gates, previous/current comparison, `decision.md` score sections, and next visual iteration choice.
 - Use `$ai-modeling` for 3D assets: Blender-generated GLBs, procedural models, `tools/build_*.py`, `assets/procedural/pretty`, `assets/procedural/eco`, animals, terrain buildings, `MANIFEST.json`, and poly-budget validation.

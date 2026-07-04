@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
@@ -40,7 +38,6 @@ impl WeaponStats {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Hitbox {
-
     pub half_extents: Vec3,
 
     pub offset: Vec3,
@@ -48,10 +45,7 @@ pub struct Hitbox {
 
 impl Default for Hitbox {
     fn default() -> Self {
-        Self {
-            half_extents: Vec3::new(0.3, 0.9, 0.3),
-            offset: Vec3::new(0.0, 0.9, 0.0),
-        }
+        Self { half_extents: Vec3::new(0.3, 0.9, 0.3), offset: Vec3::new(0.0, 0.9, 0.0) }
     }
 }
 
@@ -173,7 +167,6 @@ pub struct WeaponEntry {
 }
 
 const WEAPON_TABLE: &[WeaponEntry] = &[
-
     WeaponEntry {
         name: "Fists",
         damage: 1.0,
@@ -182,7 +175,6 @@ const WEAPON_TABLE: &[WeaponEntry] = &[
         attack_speed: 1.4,
         sweep_deg: 60.0,
     },
-
     WeaponEntry {
         name: "Wooden Sword",
         damage: 4.0,
@@ -191,7 +183,6 @@ const WEAPON_TABLE: &[WeaponEntry] = &[
         attack_speed: 1.6,
         sweep_deg: 60.0,
     },
-
     WeaponEntry {
         name: "Stone Sword",
         damage: 5.0,
@@ -200,7 +191,6 @@ const WEAPON_TABLE: &[WeaponEntry] = &[
         attack_speed: 1.6,
         sweep_deg: 60.0,
     },
-
     WeaponEntry {
         name: "Iron Sword",
         damage: 6.0,
@@ -209,7 +199,6 @@ const WEAPON_TABLE: &[WeaponEntry] = &[
         attack_speed: 1.6,
         sweep_deg: 60.0,
     },
-
     WeaponEntry {
         name: "Diamond Sword",
         damage: 7.0,
@@ -218,7 +207,6 @@ const WEAPON_TABLE: &[WeaponEntry] = &[
         attack_speed: 1.6,
         sweep_deg: 60.0,
     },
-
     WeaponEntry {
         name: "Gold Sword",
         damage: 4.0,

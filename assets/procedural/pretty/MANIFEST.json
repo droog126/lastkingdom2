@@ -1,14 +1,8 @@
 {
-  "version": 7,
-  "spec": "v5-cute 梦幻可爱 Q 版 + v6 terrain/buildings + v7 decor/creatures (8 装饰 + 4 建筑 + 3 生物)",
+  "version": 8,
+  "spec": "procedural generated GLB manifest, synced from assets/procedural/pretty",
   "format": "glb",
   "assets": {
-    "eco": [
-      "rabbit",
-      "berry_bush",
-      "berry_fruit",
-      "co2_bubble"
-    ],
     "pretty": [
       "player_avatar",
       "monster_snake",
@@ -42,7 +36,8 @@
       "swamp",
       "cliff",
       "cave_entrance",
-      "beach"
+      "beach",
+      "ground_patch"
     ],
     "buildings": [
       "house_small",
@@ -53,7 +48,11 @@
       "barn",
       "fence",
       "shrine",
-      "lighthouse"
+      "lighthouse",
+      "forge",
+      "chapel",
+      "pier",
+      "tavern"
     ],
     "decor": [
       "campfire",
@@ -64,18 +63,29 @@
       "market_stall",
       "bench",
       "fountain",
-      "statue"
-    ],
-    "buildings_v3": [
-      "forge",
-      "chapel",
-      "pier",
-      "tavern"
+      "statue",
+      "mushroom_red",
+      "mushroom_brown",
+      "crystal_blue",
+      "crystal_pink",
+      "treasure_chest",
+      "boat",
+      "arch_stone",
+      "cart",
+      "tombstone",
+      "haystack",
+      "cauldron",
+      "cooking_station",
+      "spit_roast",
+      "sword"
     ],
     "creatures": [
       "villager",
       "wolf",
       "bear"
+    ],
+    "test": [
+      "test_cube"
     ]
   }
 }

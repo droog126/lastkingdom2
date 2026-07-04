@@ -1,6 +1,6 @@
 ---
 name: bevy-gameplay-dev
-description: Bevy 0.18.1 gameplay, client, server, render, HUD, simulation, networking, and scenario development rules for lastkingdom2. Use when editing crates/client, crates/server, crates/core gameplay systems, Bevy rendering/input/HUD/camera code, voxel rendering, multiplayer protocol behavior, scenario logic, or performance/logging issues.
+description: Bevy 0.19 gameplay, client, server, render, HUD, simulation, networking, and scenario development rules for lastkingdom2. Use when editing crates/client, crates/server, crates/core gameplay systems, Bevy rendering/input/HUD/camera code, voxel rendering, multiplayer protocol behavior, scenario logic, or performance/logging issues.
 ---
 
 # Bevy Gameplay Dev
@@ -11,14 +11,17 @@ Use this skill for gameplay-facing and engine-facing changes. Combine it with `$
 
 ## Game Direction
 
-- Build on Bevy 0.18.1.
+- Build on Bevy 0.19.
 - Aim for Sokpop-style presentation: small readable scenes, bright but restrained color, simple toy-like geometry, clear silhouettes, immediate state readability, and charming low-poly/voxel economy.
 - Prefer clarity over density. A screenshot should quickly show player, terrain, important props/actors, and HUD state.
 - Avoid noisy realism, over-detailed assets, huge dark scenes, and visual clutter that makes loop scoring ambiguous.
 
-## Bevy 0.18.1 Rules
+## Bevy 0.19 Rules
 
 - Use `Mesh3d` and `MeshMaterial3d`; do not add deprecated `PbrBundle` or `MaterialMeshBundle`.
+- Spawn GLTF scenes with `WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(path)))`; the old `SceneRoot(Handle<Scene>)` path is not the current Bevy 0.19 API.
+- Use `DirectionalLight.shadow_maps_enabled`; `shadows_enabled` was removed.
+- UI `TextFont` uses `FontSource` and `FontSize` rather than raw `Handle<Font>` and `f32`.
 - Share `Handle<Mesh>` and `Handle<StandardMaterial>` for repeated block/model types.
 - Avoid naming conflicts with Bevy `World`; use `World as GameWorld` when needed.
 - Throttle per-tick `info!` and `warn!` logs with `Local<u32>` or equivalent.

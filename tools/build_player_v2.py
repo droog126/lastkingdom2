@@ -15,7 +15,6 @@ from models_lib import (
 )
 
 import models_lib
-models_lib.OUT_DIR = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
 
 def make_player_avatar_v2() -> None:
     

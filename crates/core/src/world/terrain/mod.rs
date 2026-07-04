@@ -1,5 +1,3 @@
-
-
 pub mod shapes;
 
 pub use shapes::{
@@ -149,7 +147,6 @@ pub struct VillageMarkModule {
 
 impl Default for VillageMarkModule {
     fn default() -> Self {
-
         Self {
             name: "village_mark".into(),
             sites: vec![(48, 70), (70, 48), (26, 48), (70, 70), (26, 70)],
@@ -163,7 +160,6 @@ impl Default for VillageMarkModule {
 }
 
 impl VillageMarkModule {
-
     pub fn nearest_village(&self, x: i32, z: i32) -> Option<(i32, i32)> {
         const SPACING: i32 = 80;
 
@@ -279,7 +275,6 @@ impl Default for HeightmapModule {
 }
 
 impl HeightmapModule {
-
     pub fn compute_surface_f32(&self, x: i32, z: i32) -> f32 {
         let fx_big = (x as f32 * self.frequency_big) as i32;
         let fz_big = (z as f32 * self.frequency_big) as i32;
@@ -466,9 +461,7 @@ impl Default for TreeModule {
 }
 
 impl TreeModule {
-
     fn is_tree_center(&self, x: i32, z: i32) -> bool {
-
         let cell_x = x.div_euclid(8);
         let cell_z = z.div_euclid(8);
         let _cell_seed = (cell_x as u64).wrapping_mul(0x9E3779B1)
@@ -498,7 +491,6 @@ impl TerrainModule for TreeModule {
     }
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
-
         let surface = ctx.surface_y?;
         if ctx.y > surface {
             return None;
@@ -525,7 +517,6 @@ impl TerrainModule for TreeModule {
         let canopy_top = surface + trunk_height;
         let canopy_bottom = canopy_top - self.canopy_radius;
         if ctx.y > canopy_bottom && ctx.y <= canopy_top + 1 {
-
             let n = hash01(ctx.x, ctx.y, ctx.z, (self.seed ^ 0xCAFE) as u32);
 
             let dy = ctx.y - canopy_top;
@@ -570,7 +561,6 @@ impl Default for OreModule {
 
 impl OreModule {
     fn is_in_ore_cluster(&self, x: i32, y: i32, z: i32) -> bool {
-
         let cell_size = 16;
         let cx_cell = x.div_euclid(cell_size);
         let cy_cell = y.div_euclid(cell_size);
@@ -676,10 +666,9 @@ impl TerrainPipeline {
 pub mod presets {
     use super::*;
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
 
     pub fn default_preset() -> TerrainPipeline {
-
         let mut h = HeightmapModule { seed: 0xDEADBEEF, ..Default::default() };
         h.amplitude_big = 16.0;
         h.amplitude_detail = 5.0;
@@ -748,7 +737,6 @@ pub mod presets {
             name: "superflat".into(),
             modules: vec![
                 Box::new(h),
-
                 Box::new(WaterFillModule { weight: 0.0, ..WaterFillModule::default() }),
             ],
             vertical_min: 0,

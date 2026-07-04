@@ -1,78 +1,6 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use bevy::prelude::*;
 use leafwing_input_manager::Actionlike;
 use serde::{Deserialize, Serialize};
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Reflect, Actionlike, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlayerAction {
@@ -91,30 +19,9 @@ pub enum PlayerAction {
     KillCreature,
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub mod messages {
 
-
     use super::*;
-
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct AttackInput {
@@ -123,7 +30,6 @@ pub mod messages {
         pub is_falling: bool,
         pub combo_count: u8,
     }
-
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct HitConfirm {
@@ -134,14 +40,12 @@ pub mod messages {
         pub server_tick: u32,
     }
 
-
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct KnockbackEvent {
         pub victim_id: lightyear::prelude::PeerId,
         pub velocity: Vec3,
         pub server_tick: u32,
     }
-
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct DamageResult {
@@ -150,7 +54,6 @@ pub mod messages {
         pub is_dead: bool,
         pub server_tick: u32,
     }
-
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct KillFeedEntry {
@@ -187,18 +90,6 @@ pub mod messages {
         pub summary: String,
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct ServerPosUpdate {
         pub server_tick: u32,
@@ -206,38 +97,13 @@ pub mod messages {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub mod components {
 
-
     use super::*;
-
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     #[component(storage = "SparseSet")]
     pub struct Health(pub f32);
-
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct WeaponStatsRaw {
@@ -248,10 +114,8 @@ pub mod components {
         pub sweep_angle_deg: f32,
     }
 
-
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct EquippedWeapon(pub u8);
-
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct CombatReady {
@@ -264,24 +128,17 @@ pub mod components {
         pub attack_cooldown: f32,
     }
 
-
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct KnockbackImmunity(pub f32);
-
-
-
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct PlayerPos(pub Vec3);
 
-
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct PlayerRot(pub f32);
 
-
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct MonsterKind(pub u8);
-
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct MonsterHealth(pub f32);
@@ -321,53 +178,22 @@ pub mod components {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
         use lightyear::prelude::*;
 
-
-
-
-
-
-
-
-
-
-
-
-
         app.init_resource::<MessageRegistry>();
-
-
 
         app.add_plugins(lightyear_inputs_leafwing::prelude::InputPlugin::<
             PlayerAction,
         >::default());
 
-
-
         app.register_message::<messages::AttackInput>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<messages::GameplayCommand>()
             .add_direction(NetworkDirection::ClientToServer);
-
 
         app.register_message::<messages::HitConfirm>()
             .add_direction(NetworkDirection::ServerToClient);
@@ -380,23 +206,19 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<messages::GameplayFeedback>()
             .add_direction(NetworkDirection::ServerToClient);
 
-
-
-
         app.register_message::<messages::ServerPosUpdate>()
             .add_direction(NetworkDirection::ServerToClient);
 
-
-        app.register_component::<components::Health>();
-        app.register_component::<components::WeaponStatsRaw>();
-        app.register_component::<components::EquippedWeapon>();
-        app.register_component::<components::CombatReady>();
-        app.register_component::<components::KnockbackImmunity>();
-        app.register_component::<components::PlayerPos>();
-        app.register_component::<components::PlayerRot>();
-        app.register_component::<components::MonsterKind>();
-        app.register_component::<components::MonsterHealth>();
-        app.register_component::<components::GameplayHudState>();
-        app.register_component::<components::VoxelDelta>();
+        app.component::<components::Health>().replicate();
+        app.component::<components::WeaponStatsRaw>().replicate();
+        app.component::<components::EquippedWeapon>().replicate();
+        app.component::<components::CombatReady>().replicate();
+        app.component::<components::KnockbackImmunity>().replicate();
+        app.component::<components::PlayerPos>().replicate();
+        app.component::<components::PlayerRot>().replicate();
+        app.component::<components::MonsterKind>().replicate();
+        app.component::<components::MonsterHealth>().replicate();
+        app.component::<components::GameplayHudState>().replicate();
+        app.component::<components::VoxelDelta>().replicate();
     }
-}
+}

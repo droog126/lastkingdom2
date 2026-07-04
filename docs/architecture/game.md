@@ -1,10 +1,10 @@
-# 万国起源：最后一国 钻石版 — 游戏架构文档
+﻿# 万国起源：最后一国 钻石版 — 游戏架构文档
 
 > 当前说明：这是 2026-06-06 的游戏架构快照。当前工程边界以 `docs/architecture/engineering-baseline.md` 为准；当前运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。文中旧 `loop.ps1`、平铺截图和直接 `cargo test --workspace` 口径按历史背景阅读。
 
 > **项目名称**：万国起源：最后一国 钻石版
 > **游戏类型**：体素沙盒 + 策略模拟
-> **技术栈**：Rust + Bevy 0.18.1 + ECS 架构
+> **技术栈**：Rust + Bevy 0.19 + ECS 架构
 > **文档版本**：v1.0
 > **更新日期**：2026-06-06
 
@@ -37,7 +37,7 @@
 
 ### 2.2 已实现功能
 
-- ✅ ECS 架构（Bevy 0.18.1 原生 Archetype ECS）
+- ✅ ECS 架构（Bevy 0.19 原生 Archetype ECS）
 - ✅ 体素世界生成（32³ → 96³，3 生物群落，12 种方块）
 - ✅ 确定性世界生成（hash01 + trilinear noise）
 - ✅ 玩家第一人称视角 + 自动演示模式
@@ -767,12 +767,12 @@ P4.5 热插拔         P5 实体规模        P6 渲染现代化
 
 | 依赖 | 版本 | 用途 | 备注 |
 |------|------|------|------|
-| bevy | 0.18.1 | 游戏引擎 | ECS + 渲染 + 输入 |
-| avian3d | 0.5 | 物理引擎 | 未启用，待 P3 |
+| bevy | 0.19 | 游戏引擎 | ECS + 渲染 + 输入 |
+| avian3d | 0.7 | 物理引擎 | 未启用，待 P3 |
 | broccoli | 0.6 | 碰撞检测 | **注意**: compt < 1.10 |
 | rand | 0.8.5 | 随机数 | 待替换为 PcgRng |
 | sepax2d | 0.3 | 2D 碰撞 | |
-| bevy-inspector-egui | 0.36 | 调试工具 | |
+| bevy-inspector-egui | 0.37 | 调试工具 | |
 | serde | 1.x | 序列化 | |
 | serde_json | 1.x | JSON | |
 | crossbeam-channel | 0.5 | 并发 | |
@@ -801,7 +801,7 @@ compt = ">=1.9, <1.10"
 ### 9.2 代码风格
 
 - `rustfmt.toml`: max_width=100, tab_spaces=4, use_field_init_shorthand=true
-- Bevy 0.18.1: 使用 `Mesh3d`/`MeshMaterial3d`，不用已废弃的 `PbrBundle`
+- Bevy 0.19: 使用 `Mesh3d`/`MeshMaterial3d`，不用已废弃的 `PbrBundle`
 - 材质共享: 同类型方块复用 Handle，减少 GPU 状态切换
 - 日志节流: `info!`/`warn!` 用 `Local<u32>` 去重
 

@@ -10,7 +10,9 @@ use std::{
 
 use serde_json::Value;
 
-use crate::{args, audit, health as rust_health, Result};
+use crate::{Result, args, audit, health as rust_health};
+
+const DEV_DYNAMIC_FEATURES: &[&str] = &["dev-dynamic-linking", "lk2-core/dev-dynamic-linking"];
 
 #[derive(Debug)]
 struct LoopArgs {
@@ -72,8 +74,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
 
     let mut features = Vec::new();
     if parsed.dynamic {
-        features.push("dev-dynamic-linking");
-        features.push("lk2-core/dev-dynamic-linking");
+        features.extend_from_slice(DEV_DYNAMIC_FEATURES);
         println!(">>> dynamic linking ON <<<");
     }
     if parsed.audit_pretty_models {
@@ -226,7 +227,7 @@ pub fn scenario(root: &Path, raw: &[String]) -> Result<()> {
     )?;
     let client_exe = exe_path(root, "lk2-client");
     if !skip_build || !client_exe.exists() {
-        cargo_build(root, "lk2-client", &["dev-dynamic-linking"], &envs)?;
+        cargo_build(root, "lk2-client", DEV_DYNAMIC_FEATURES, &envs)?;
     }
     stage_windows_runtime_files(root)?;
     let files = expand_pattern(root, &json)?;
@@ -425,8 +426,7 @@ fn wait_for_iter(
         if started.elapsed() < min {
             continue;
         }
-        let iter = newest_iter_after(root, before)?;
-        if iter_ready(&iter) {
+        if let Some(iter) = next_ready_iter(root, before) {
             return Some(iter);
         }
     }
@@ -452,6 +452,11 @@ fn iter_ready(iter: &Path) -> bool {
     })
 }
 
+fn next_ready_iter(root: &Path, before: u32) -> Option<PathBuf> {
+    let iter = newest_iter_after(root, before)?;
+    iter_ready(&iter).then_some(iter)
+}
+
 fn evaluate_health(root: &Path, iter: &Path, prev: Option<&Path>, quiet: bool) -> Result<String> {
     let _ = root;
     let evaluation = rust_health::evaluate_iter(iter, prev)?;
@@ -468,7 +473,10 @@ fn run_latest_health(root: &Path) -> Result<()> {
         return Ok(());
     };
     let prev = previous_iter(root, &iter);
-    let _ = evaluate_health(root, &iter, prev.as_deref(), false);
+    let verdict = evaluate_health(root, &iter, prev.as_deref(), false)?;
+    if verdict == "FAIL" {
+        return Err("health verdict FAIL".to_string());
+    }
     Ok(())
 }
 
@@ -779,5 +787,39 @@ mod tests {
         assert!(!parsed.dynamic);
         assert!(parsed.first_person);
         assert!(parsed.legacy_voxel);
+    }
+
+    #[test]
+    fn dev_dynamic_features_include_core_alignment() {
+        assert_eq!(
+            DEV_DYNAMIC_FEATURES,
+            &["dev-dynamic-linking", "lk2-core/dev-dynamic-linking"]
+        );
+    }
+
+    #[test]
+    fn next_ready_iter_waits_when_no_new_iter_exists() {
+        let root = temp_root("xtask_no_new_iter");
+        fs::create_dir_all(root.join("screenshots")).unwrap();
+        assert!(next_ready_iter(&root, 1).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn next_ready_iter_ignores_incomplete_new_iter() {
+        let root = temp_root("xtask_incomplete_iter");
+        let iter = root.join("screenshots/iter_2");
+        fs::create_dir_all(&iter).unwrap();
+        fs::write(iter.join("final_state.json"), r#"{"tick":499}"#).unwrap();
+        assert!(next_ready_iter(&root, 1).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!("{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
     }
 }

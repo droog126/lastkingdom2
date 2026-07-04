@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +5,6 @@ use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MiningSiteKind {
-
     SurfacePit,
 
     CaveFissure,
@@ -58,7 +55,6 @@ impl MiningSiteKind {
     pub fn primary_yields(self) -> &'static [(ResourceKind, i64)] {
         use ResourceKind::*;
         match self {
-
             Self::SurfacePit => &[(Wood, 0)],
 
             Self::CaveFissure => &[(Wood, 0)],
@@ -115,7 +111,6 @@ impl MiningSiteKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MiningMode {
-
     Steady,
 
     Hard,
@@ -138,7 +133,6 @@ impl MiningMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DepletionTier {
-
     Normal,
 
     LowYield,
@@ -218,7 +212,6 @@ impl MiningSite {
 
 #[derive(Component, Debug, Clone)]
 pub struct MiningSlot {
-
     pub site_id: u32,
 
     pub slot_index: u32,
@@ -306,7 +299,6 @@ pub fn tick_mining_slots(
     mut completed_events: MessageWriter<MiningSlotCompleted>,
     mut depletion_events: MessageWriter<MiningSiteDepletionChanged>,
 ) {
-
     for (slot_entity, mut slot) in slots.iter_mut() {
         let Some(player_id) = slot.occupant else {
             continue;
@@ -315,7 +307,6 @@ pub fn tick_mining_slots(
         let site_id = slot.site_id;
         let site_kind = sites.iter().find(|s| s.id == site_id).map(|s| s.kind);
         let Some(site_kind) = site_kind else {
-
             slot.occupant = None;
             slot.progress_ticks = 0;
             let _ = slot_entity;
@@ -334,7 +325,6 @@ pub fn tick_mining_slots(
         let tier = site.depletion_tier();
         let mult = tier.yield_multiplier();
         if mult <= 0.0 {
-
             info!(
                 "[mine] site {} ({}) depleted, no yield for player {}",
                 site_id,
@@ -346,7 +336,6 @@ pub fn tick_mining_slots(
         let (kind, base_amount) = site_kind.per_yield();
         let amount = ((base_amount as f32) * mult).round() as i64;
         if amount > 0 {
-
             match award_mining_yield(&mut pool, kind, amount) {
                 Ok(_) => {
                     completed_events.write(MiningSlotCompleted {
@@ -386,7 +375,6 @@ pub fn tick_mining_slots(
     }
 
     for mut site in sites.iter_mut() {
-
         let occupied =
             slots.iter().filter(|(_, s)| s.occupant.is_some() && s.site_id == site.id).count()
                 as f32;
@@ -435,7 +423,6 @@ mod tests {
 
     #[test]
     fn kind_id_str_matches_table() {
-
         assert_eq!(MiningSiteKind::SurfacePit.id_str(), "mine_surface_pit");
         assert_eq!(MiningSiteKind::CaveFissure.id_str(), "mine_cave_fissure");
         assert_eq!(MiningSiteKind::MoonRidge.id_str(), "mine_moon_ridge");
@@ -449,7 +436,6 @@ mod tests {
 
     #[test]
     fn slot_count_in_range_2_to_5() {
-
         for k in [
             MiningSiteKind::SurfacePit,
             MiningSiteKind::CaveFissure,
@@ -537,7 +523,6 @@ mod tests {
 
     #[test]
     fn spirit_sink_yields_spirit_essence() {
-
         let (kind, amount) = MiningSiteKind::SpiritSink.per_yield();
         assert_eq!(kind, ResourceKind::SpiritEssence);
         assert!(amount > 0);
@@ -545,7 +530,6 @@ mod tests {
 
     #[test]
     fn calamity_bloom_yields_spark_fragment() {
-
         let (kind, _) = MiningSiteKind::CalamityBloom.per_yield();
         assert_eq!(kind, ResourceKind::SparkFragment);
     }

@@ -1,17 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use bevy::prelude::*;
 
 #[derive(Resource)]
@@ -28,8 +14,6 @@ pub struct SimClock {
 
 impl Default for SimClock {
     fn default() -> Self {
-
-
         let mut max_iter: u32 = 0;
         if let Ok(entries) = std::fs::read_dir("screenshots") {
             for e in entries.flatten() {
@@ -55,4 +39,4 @@ impl Default for SimClock {
             screenshot_count: max_iter,
         }
     }
-}
+}

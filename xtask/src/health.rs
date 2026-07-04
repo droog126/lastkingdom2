@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::Result;
 
@@ -187,7 +187,7 @@ fn decode_png_rgb(path: &Path) -> Result<(u32, u32, Vec<[u8; 3]>)> {
             }
         }
         png::ColorType::Indexed => {
-            return Err("indexed PNG is not supported by xtask health".to_string())
+            return Err("indexed PNG is not supported by xtask health".to_string());
         }
     }
     Ok((info.width, info.height, pixels))

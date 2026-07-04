@@ -2,11 +2,17 @@
 
 This file is the active engineering baseline for humans. `AGENTS.md` routes agent work to skills, and `.codex/skills/*/SKILL.md` files carry the operational instructions. If active docs and skills drift, prefer current code and `xtask` behavior, then update the docs and skill wording together.
 
-This repo is a Bevy workspace with three runtime crates:
+This repo is a Bevy 0.19 workspace with three runtime crates:
 
 - `lk2-core`: shared game state, rules, protocol types, diagnostics, and pure logic.
 - `lk2-client`: Bevy window, rendering, HUD, input, offline demo, screenshots, and client-side prediction.
 - `lk2-server`: headless authority loop, networking, replication, and server-side PvP.
+
+Current engine-family dependencies are Bevy 0.19, Avian3D 0.7, Lightyear 0.28,
+Leafwing Input Manager 0.21, bevy-inspector-egui 0.37, bevy-tnua 0.32, and
+bevy_panorbit_camera 0.35. Historical docs and archived drift reports may still
+describe Bevy 0.18 or Lightyear 0.26; treat those as background unless active code
+or this baseline points back to them.
 
 ## Hard Boundaries
 

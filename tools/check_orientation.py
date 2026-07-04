@@ -1,18 +1,22 @@
 
 import pygltflib
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 NAMES = [
     ("player_avatar", "pretty"),
     ("rabbit", "eco"),
-    ("monster_snake", "eco"),
+    ("monster_snake", "pretty"),
     ("tree", "pretty"),
     ("cloud_puff", "pretty"),
 ]
 
 for name, sub in NAMES:
-    p = rf"F:\rustProject\lastkingdom2\assets\procedural\{sub}\{name}.glb"
+    p = ROOT / "assets" / "procedural" / sub / f"{name}.glb"
     try:
-        glb = pygltflib.GLTF2.load(p)
+        glb = pygltflib.GLTF2.load(str(p))
         for m in glb.meshes:
             for prim in m.primitives:
                 pos = glb.accessors[prim.attributes.POSITION]

@@ -25,9 +25,10 @@ fn main() {
 
 fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     info!("=== audit_player: spawn player_avatar.glb at (0, 0, 0) ===");
-    let scene: Handle<Scene> = asset_server.load("procedural/pretty/player_avatar.glb#Scene0");
+    let scene = asset_server
+        .load(GltfAssetLabel::Scene(0).from_asset("procedural/pretty/player_avatar.glb"));
     commands.spawn((
-        SceneRoot(scene),
+        WorldAssetRoot(scene),
         Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)).with_scale(Vec3::splat(20.0)),
     ));
 

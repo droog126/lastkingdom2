@@ -1,5 +1,3 @@
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +7,6 @@ use crate::resource::{GlobalResourcePool, ResourceKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SparkStatus {
-
     Dropped,
 
     Carried,
@@ -66,7 +63,6 @@ impl Spark {
 
 #[derive(Resource, Debug)]
 pub struct SparkRegistry {
-
     next_id: u32,
 
     pub max_sparks: u32,
@@ -76,11 +72,7 @@ pub struct SparkRegistry {
 
 impl Default for SparkRegistry {
     fn default() -> Self {
-        Self {
-            next_id: 1,
-            max_sparks: 3,
-            active: Vec::new(),
-        }
+        Self { next_id: 1, max_sparks: 3, active: Vec::new() }
     }
 }
 
@@ -124,7 +116,6 @@ pub fn drop_spark_on_player_death(
     mut events: MessageWriter<SparkDropped>,
     match_clock: Res<crate::match_state::MatchClock>,
 ) {
-
     for (_entity, mut spark) in sparks.iter_mut() {
         if spark.status != SparkStatus::Carried {
             continue;
@@ -147,7 +138,6 @@ pub fn drop_spark_on_player_death(
             "[spark] id={} dropped from dead player {} at {:?}",
             spark.id, holder, spark.world_pos
         );
-
     }
 }
 
@@ -160,7 +150,6 @@ pub fn consume_spark_for_founding(
     mut events: MessageWriter<SparkConsumedForFounding>,
     match_clock: Res<crate::match_state::MatchClock>,
 ) {
-
     for (_entity, mut spark) in sparks.iter_mut() {
         if spark.status != SparkStatus::Carried {
             continue;
@@ -210,11 +199,9 @@ pub fn recirculate_spark_on_nation_end(
 ) {
     for mut spark in sparks.iter_mut() {
         if spark.status == SparkStatus::Consumed && !spark.recirculated {
-
             let _ = pool.try_add(ResourceKind::Soul, 50);
             spark.recirculated = true;
             info!("[spark] id={} recirculated to +50 Soul (V2 §5.4)", spark.id);
-
         }
     }
 }
@@ -274,7 +261,6 @@ mod tests {
 
     #[test]
     fn consumed_spark_recirculates_to_pool() {
-
         let _s = Spark { status: SparkStatus::Consumed, ..Spark::new(1, [0.0; 3], 0.0) };
 
         let mut pool = GlobalResourcePool::default();
@@ -293,15 +279,18 @@ mod tests {
             .add_systems(Update, consume_spark_for_founding);
 
         app.world_mut().spawn(PlayerTag(7));
-        let spark_entity = app.world_mut().spawn(Spark {
-            id: 1,
-            status: SparkStatus::Carried,
-            holder: Some(7),
-            world_pos: [0.0; 3],
-            revealed_at_secs: 0.0,
-            broadcast: false,
-            recirculated: false,
-        }).id();
+        let spark_entity = app
+            .world_mut()
+            .spawn(Spark {
+                id: 1,
+                status: SparkStatus::Carried,
+                holder: Some(7),
+                world_pos: [0.0; 3],
+                revealed_at_secs: 0.0,
+                broadcast: false,
+                recirculated: false,
+            })
+            .id();
 
         app.update();
 

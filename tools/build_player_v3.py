@@ -7,7 +7,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import models_lib
-models_lib.OUT_DIR = Path(r"F:\rustProject\lastkingdom2\assets\procedural\pretty")
 
 from models_lib import clear_scene, cube, cone, cylinder, export_glb, ico_sphere, mat, merge_into, uv_sphere
 

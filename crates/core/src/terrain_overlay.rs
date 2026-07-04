@@ -1,11 +1,8 @@
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OverlayKind {
-
     Ditch,
 
     WoodWall,
@@ -22,7 +19,6 @@ pub enum OverlayKind {
 }
 
 impl OverlayKind {
-
     pub fn id_str(self) -> &'static str {
         match self {
             Self::Ditch => "ditch",
@@ -93,7 +89,6 @@ impl OverlayKind {
 
 #[derive(Component, Debug, Clone)]
 pub struct TerrainOverlayEntity {
-
     pub id: u32,
     pub kind: OverlayKind,
 
@@ -109,7 +104,6 @@ pub struct TerrainOverlayEntity {
 }
 
 impl TerrainOverlayEntity {
-
     pub fn new(id: u32, kind: OverlayKind, world_pos: [f32; 3]) -> Self {
         Self {
             id,
@@ -129,7 +123,6 @@ impl TerrainOverlayEntity {
 
 #[derive(Resource, Debug, Default, Clone)]
 pub struct TerrainOverlayRegistry {
-
     pub entries: std::collections::HashMap<u32, [f32; 3]>,
 
     pub total_spawned: u32,
@@ -183,7 +176,6 @@ pub struct OverlayDestroyedMsg {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OverlayDestroyReason {
-
     Damaged,
 
     Deconstructed,
@@ -210,7 +202,6 @@ mod tests {
 
     #[test]
     fn kind_id_str_matches_doc() {
-
         assert_eq!(OverlayKind::Ditch.id_str(), "ditch");
         assert_eq!(OverlayKind::WoodWall.id_str(), "wood_wall");
         assert_eq!(OverlayKind::StoneWall.id_str(), "stone_wall");
@@ -222,7 +213,6 @@ mod tests {
 
     #[test]
     fn label_zh_covers_all_7_kinds() {
-
         let labels: Vec<&str> = [
             OverlayKind::Ditch,
             OverlayKind::WoodWall,
@@ -350,7 +340,6 @@ mod tests {
 
     #[test]
     fn all_kinds_have_positive_footprint_radius() {
-
         for k in [
             OverlayKind::Ditch,
             OverlayKind::WoodWall,

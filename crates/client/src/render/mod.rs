@@ -1,18 +1,18 @@
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use avian3d::prelude::{Collider, RigidBody};
 
 use crate::pretty::PlayerAnimState;
 use crate::render::scalar_field::effective_ground_height;
+use crate::ui::ClientRunMode;
 use lk2_core::constant;
 use lk2_core::creature::Creature;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
-use lk2_core::resource::ResourceKind;
 use lk2_core::world::{Biome, BlockType, World as GameWorld};
 
 mod greedy_mesh;
@@ -23,6 +23,7 @@ pub mod scalar_field;
 mod smooth_mesh;
 
 #[derive(Resource, Debug, Clone)]
+#[allow(dead_code)]
 pub struct RenderConfig {
     pub radius: i32,
     pub max_blocks: usize,
@@ -53,7 +54,7 @@ impl Default for RenderConfig {
             fog_color: Color::srgb(0.78, 0.85, 0.95),
             fog_start: 130.0,
             fog_end: 360.0,
-            auto_orbit: true,
+            auto_orbit: false,
 
             auto_orbit_speed: 0.30,
 
@@ -61,7 +62,7 @@ impl Default for RenderConfig {
             auto_walk: false,
             auto_walk_interval_secs: 0.1,
             auto_keys: false,
-            mouse_look: false,
+            mouse_look: true,
 
             smooth_terrain: true,
             smooth_passes: 4,
@@ -142,6 +143,7 @@ pub struct SpawnedBlocks {
 }
 
 #[derive(Component)]
+#[allow(dead_code)]
 pub struct PlayerCube;
 
 pub fn spawn_terrain_around_player(
@@ -749,9 +751,6 @@ const NEST_MARKER_SIZE: (f32, f32, f32) = (0.4, 4.0, 0.4);
 
 #[derive(Component)]
 pub struct NestMarker {
-    pub nest_id: u32,
-    pub kingdom_id: u32,
-
     pub offset_x: f32,
     pub offset_z: f32,
 }
@@ -802,7 +801,7 @@ pub fn spawn_nest_markers(
             let offset_z = nz - pz;
 
             commands.spawn((
-                NestMarker { nest_id: *nid, kingdom_id: *kid, offset_x, offset_z },
+                NestMarker { offset_x, offset_z },
                 Mesh3d(mesh),
                 MeshMaterial3d(mat),
                 Transform::from_translation(Vec3::new(px + offset_x, ny, pz + offset_z)),
@@ -906,6 +905,7 @@ pub fn update_nest_indicator(
 pub struct LastMoveDirection(pub Vec3);
 
 pub fn player_input(
+    run_mode: Res<ClientRunMode>,
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
@@ -918,6 +918,10 @@ pub fn player_input(
     freefly: Res<FreeFlyState>,
     cfg: Res<RenderConfig>,
 ) {
+    if *run_mode != ClientRunMode::Offline {
+        return;
+    }
+
     let freefly_active = freefly.enabled;
 
     let cam_tf = camera.single().ok();

@@ -1,44 +1,8 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AttackType {
-
     Light,
 
     Thrust,
@@ -47,8 +11,6 @@ pub enum AttackType {
 }
 
 impl AttackType {
-
-
     pub fn stamina_cost(self) -> f32 {
         match self {
             Self::Light => 6.0,
@@ -56,7 +18,6 @@ impl AttackType {
             Self::Heavy => 12.0,
         }
     }
-
 
     pub fn damage_multiplier(self) -> f32 {
         match self {
@@ -66,7 +27,6 @@ impl AttackType {
         }
     }
 
-
     pub fn knockback_strength(self) -> f32 {
         match self {
             Self::Light => 0.15,
@@ -74,7 +34,6 @@ impl AttackType {
             Self::Heavy => 0.8,
         }
     }
-
 
     pub fn cooldown_secs(self) -> f32 {
         match self {
@@ -93,17 +52,8 @@ impl AttackType {
     }
 }
 
-
-
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Stamina {
-
     pub current: f32,
 
     pub max: f32,
@@ -113,32 +63,24 @@ pub struct Stamina {
 
 impl Default for Stamina {
     fn default() -> Self {
-        Self {
-            current: 100.0,
-            max: 100.0,
-            regen_per_sec: 18.0,
-        }
+        Self { current: 100.0, max: 100.0, regen_per_sec: 18.0 }
     }
 }
 
 impl Stamina {
-
     pub fn consume(&mut self, amount: f32) -> f32 {
         let before = self.current;
         self.current = (self.current - amount).max(0.0);
         before - self.current
     }
 
-
     pub fn regen(&mut self, dt: f32) {
         self.current = (self.current + self.regen_per_sec * dt).min(self.max);
     }
 
-
     pub fn has_enough(&self, cost: f32) -> bool {
         self.current >= cost
     }
-
 
     pub fn ratio(&self) -> f32 {
         if self.max <= 0.0 {
@@ -149,17 +91,8 @@ impl Stamina {
     }
 }
 
-
-
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Copy)]
 pub struct BlockState {
-
     pub blocking: bool,
 
     pub drain_per_sec: f32,
@@ -171,33 +104,24 @@ pub struct BlockState {
 
 impl Default for BlockState {
     fn default() -> Self {
-
-
         Self { blocking: false, drain_per_sec: 6.0, damage_reduction: 0.45, per_hit_cost: 4.0 }
     }
 }
 
 impl BlockState {
-
     pub fn start(&mut self) {
         self.blocking = true;
     }
 
-
     pub fn stop(&mut self) {
         self.blocking = false;
     }
-
 
     pub fn drain(&self, sta: &mut Stamina, dt: f32) {
         if self.blocking {
             sta.consume(self.drain_per_sec * dt);
         }
     }
-
-
-
-
 
     pub fn apply_hit(&mut self, raw_damage: f32, sta: &mut Stamina) -> f32 {
         if !self.blocking {
@@ -207,7 +131,6 @@ impl BlockState {
         let actual_cost = self.per_hit_cost.min(sta.current);
         sta.consume(actual_cost);
         if sta.current <= 0.0 {
-
             self.blocking = false;
             return raw_damage;
         }
@@ -215,17 +138,8 @@ impl BlockState {
     }
 }
 
-
-
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ParryWindow {
-
     pub parry_active: bool,
 
     pub parry_timer: f32,
@@ -237,8 +151,6 @@ pub struct ParryWindow {
 
 impl Default for ParryWindow {
     fn default() -> Self {
-
-
         Self {
             parry_active: false,
             parry_timer: 0.0,
@@ -249,13 +161,10 @@ impl Default for ParryWindow {
 }
 
 impl ParryWindow {
-
     pub fn begin(&mut self) {
         self.parry_active = true;
         self.parry_timer = self.parry_window_secs;
     }
-
-
 
     pub fn tick(&mut self, dt: f32) -> bool {
         if !self.parry_active {
@@ -270,11 +179,9 @@ impl ParryWindow {
         false
     }
 
-
     pub fn try_parry(&self) -> bool {
         self.parry_active
     }
-
 
     pub fn consume_on_success(&mut self) -> bool {
         if self.parry_active {
@@ -287,14 +194,6 @@ impl ParryWindow {
         }
     }
 }
-
-
-
-
-
-
-
-
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct StunState {
@@ -310,10 +209,8 @@ impl Default for StunState {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StunSource {
-
     None,
 
     Parried,
@@ -324,13 +221,11 @@ pub enum StunSource {
 }
 
 impl StunState {
-
     pub fn apply(&mut self, secs: f32, source: StunSource) {
         self.stunned = true;
         self.stun_timer = secs;
         self.source = source;
     }
-
 
     pub fn tick(&mut self, dt: f32) -> bool {
         if !self.stunned {
@@ -346,23 +241,13 @@ impl StunState {
         false
     }
 
-
     pub fn can_act(&self) -> bool {
         !self.stunned
     }
 }
 
-
-
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Knockback {
-
     pub direction: Vec3,
 
     pub magnitude: f32,
@@ -379,14 +264,12 @@ impl Default for Knockback {
 }
 
 impl Knockback {
-
     pub fn apply(&mut self, direction: Vec3, magnitude: f32, duration_secs: f32) {
         self.direction = direction.normalize_or_zero();
         self.magnitude = magnitude;
         self.remaining_secs = duration_secs;
         self.total_secs = duration_secs;
     }
-
 
     pub fn tick(&mut self, dt: f32) -> Vec3 {
         if self.remaining_secs <= 0.0 {
@@ -404,7 +287,6 @@ impl Knockback {
         self.remaining_secs > 0.0
     }
 
-
     pub fn progress(&self) -> f32 {
         if self.total_secs <= 0.0 {
             0.0
@@ -414,14 +296,8 @@ impl Knockback {
     }
 }
 
-
-
-
-
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum CombatIntent {
-
     Attack(AttackType),
 
     BlockStart,
@@ -431,14 +307,8 @@ pub enum CombatIntent {
     ParryAttempt,
 }
 
-
-
-
-
-
 #[derive(Message, Debug, Clone)]
 pub enum CombatEvent {
-
     DamageDealt {
         attacker: Entity,
         victim: Entity,
@@ -446,9 +316,15 @@ pub enum CombatEvent {
         damage: f32,
     },
 
-    Blocked { attacker: Entity, defender: Entity },
+    Blocked {
+        attacker: Entity,
+        defender: Entity,
+    },
 
-    Parried { attacker: Entity, defender: Entity },
+    Parried {
+        attacker: Entity,
+        defender: Entity,
+    },
 
     Stunned {
         entity: Entity,
@@ -456,22 +332,11 @@ pub enum CombatEvent {
         duration_secs: f32,
     },
 
-    Knockback { victim: Entity, magnitude: f32 },
+    Knockback {
+        victim: Entity,
+        magnitude: f32,
+    },
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 pub fn sweep_hits(
     attacker_pos: Vec3,
@@ -480,7 +345,6 @@ pub fn sweep_hits(
     reach: f32,
     sweep_half_angle_deg: f32,
 ) -> bool {
-
     let delta = target_pos - attacker_pos;
     let dist = Vec3::new(delta.x, 0.0, delta.z).length();
     if dist > reach {
@@ -501,11 +365,6 @@ pub fn sweep_hits(
     angle_rad <= half_angle_rad
 }
 
-
-
-
-
-
 pub fn resolve_hit(
     attacker: Entity,
     defender: Entity,
@@ -524,7 +383,6 @@ pub fn resolve_hit(
     let mut events = Vec::new();
     let raw = weapon_damage * attack.damage_multiplier();
 
-
     if defender_parry.try_parry() {
         defender_parry.consume_on_success();
 
@@ -537,7 +395,6 @@ pub fn resolve_hit(
 
         return (events, 0.0);
     }
-
 
     if defender_block.blocking {
         let actual = defender_block.apply_hit(raw, defender_stamina);
@@ -557,9 +414,7 @@ pub fn resolve_hit(
         return (events, actual);
     }
 
-
     events.push(CombatEvent::DamageDealt { attacker, victim: defender, attack, damage: raw });
-
 
     if attack.knockback_strength() > 0.0 {
         let dir = (defender_pos - attacker_pos).normalize_or_zero();
@@ -569,7 +424,6 @@ pub fn resolve_hit(
             magnitude: attack.knockback_strength() * weapon_damage * 0.5,
         });
     }
-
 
     if matches!(attack, AttackType::Heavy) {
         defender_stun.apply(0.4, StunSource::HeavyHit);
@@ -583,18 +437,6 @@ pub fn resolve_hit(
     (events, raw)
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Health {
     pub current: f32,
@@ -605,15 +447,11 @@ pub struct Health {
 
 impl Default for Health {
     fn default() -> Self {
-
         Self { current: 100.0, max: 100.0, invuln_until_tick: 0 }
     }
 }
 
 impl Health {
-
-
-
     pub fn damage(&mut self, amount: f32, current_tick: u32, invuln_ticks: u32) -> f32 {
         if current_tick < self.invuln_until_tick {
             return 0.0;
@@ -624,18 +462,15 @@ impl Health {
         actual
     }
 
-
     pub fn heal(&mut self, amount: f32) -> f32 {
         let before = self.current;
         self.current = (self.current + amount).min(self.max);
         self.current - before
     }
 
-
     pub fn is_dead(&self) -> bool {
         self.current <= 0.0
     }
-
 
     pub fn ratio(&self) -> f32 {
         if self.max <= 0.0 {
@@ -645,18 +480,6 @@ impl Health {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Downed {
@@ -671,20 +494,16 @@ pub struct Downed {
 
 impl Default for Downed {
     fn default() -> Self {
-
-
         Self { downed: false, timer: 0.0, total_secs: 8.0, revive_hp_ratio: 0.5 }
     }
 }
 
 impl Downed {
-
     pub fn knockdown(&mut self, total_secs: f32) {
         self.downed = true;
         self.timer = total_secs;
         self.total_secs = total_secs;
     }
-
 
     pub fn tick(&mut self, dt: f32) -> bool {
         if !self.downed {
@@ -699,7 +518,6 @@ impl Downed {
         false
     }
 
-
     pub fn progress(&self) -> f32 {
         if !self.downed || self.total_secs <= 0.0 {
             0.0
@@ -708,21 +526,10 @@ impl Downed {
         }
     }
 
-
     pub fn can_act(&self) -> bool {
         !self.downed
     }
 }
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttackPhase {
@@ -730,7 +537,6 @@ pub enum AttackPhase {
     Active,
     Recovery,
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct ActiveAttack {
@@ -743,19 +549,12 @@ pub struct ActiveAttack {
     pub hit_apps: u8,
 }
 
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct AttackState {
     pub current: Option<ActiveAttack>,
 }
 
 impl AttackState {
-
     pub fn try_start(
         &mut self,
         kind: AttackType,
@@ -781,8 +580,6 @@ impl AttackState {
             Some(ActiveAttack { kind, phase, phase_timer: phase_secs, phase_secs, hit_apps: 0 });
         true
     }
-
-
 
     pub fn tick(&mut self, dt: f32) -> bool {
         let Some(att) = self.current.as_mut() else {
@@ -816,7 +613,6 @@ impl AttackState {
                 att.phase_secs = recovery_secs;
             }
             AttackPhase::Recovery => {
-
                 self.current = None;
                 return true;
             }
@@ -824,16 +620,13 @@ impl AttackState {
         false
     }
 
-
     pub fn is_active(&self) -> bool {
         matches!(self.current, Some(a) if a.phase == AttackPhase::Active)
     }
 
-
     pub fn current_kind(&self) -> Option<AttackType> {
         self.current.map(|a| a.kind)
     }
-
 
     pub fn phase_progress(&self) -> f32 {
         match self.current {
@@ -843,21 +636,8 @@ impl AttackState {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 #[derive(Component, Debug, Clone, Default)]
 pub struct InputBuffer {
-
     pub queue: Vec<(CombatIntent, u32)>,
 
     pub window_secs: f32,
@@ -874,7 +654,6 @@ impl InputBuffer {
         }
     }
 
-
     pub fn push(&mut self, intent: CombatIntent, current_tick: u32) {
         if self.queue.len() >= 8 {
             self.queue.remove(0);
@@ -882,49 +661,21 @@ impl InputBuffer {
         self.queue.push((intent, current_tick));
     }
 
-
     pub fn drain_fresh(&mut self, current_tick: u32) -> Vec<CombatIntent> {
         let window = self.window_ticks;
         self.queue.retain(|(_, t)| current_tick.saturating_sub(*t) <= window);
         self.queue.drain(..).map(|(i, _)| i).collect()
     }
 
-
     pub fn clear(&mut self) {
         self.queue.clear();
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub mod systems {
 
     use super::*;
     use crate::pvp::{FixedTick, WeaponStats};
-    use bevy::prelude::*;
-
-
-
-
-
-
-
 
     pub fn regen_stamina_system(
         fixed_time: Res<Time<Fixed>>,
@@ -935,18 +686,12 @@ pub mod systems {
             let in_combat = stun.map(|s| s.stunned).unwrap_or(false)
                 || downed.map(|d| d.downed).unwrap_or(false);
             if in_combat {
-
                 sta.current = (sta.current + sta.regen_per_sec * 0.5 * dt).min(sta.max);
             } else {
                 sta.regen(dt);
             }
         }
     }
-
-
-
-
-
 
     pub fn tick_parry_window_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut ParryWindow>) {
         let dt = fixed_time.delta_secs();
@@ -955,25 +700,12 @@ pub mod systems {
         }
     }
 
-
-
-
-
-
     pub fn tick_stun_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut StunState>) {
         let dt = fixed_time.delta_secs();
         for mut s in q.iter_mut() {
             s.tick(dt);
         }
     }
-
-
-
-
-
-
-
-
 
     pub fn tick_knockback_system(
         fixed_time: Res<Time<Fixed>>,
@@ -987,14 +719,8 @@ pub mod systems {
             }
             xf.translation.x += v.x * dt;
             xf.translation.z += v.z * dt;
-
         }
     }
-
-
-
-
-
 
     pub fn tick_downed_system(
         fixed_time: Res<Time<Fixed>>,
@@ -1003,7 +729,6 @@ pub mod systems {
         let dt = fixed_time.delta_secs();
         for (mut down, mut hp) in q.iter_mut() {
             if down.tick(dt) {
-
                 let target = hp.max * down.revive_hp_ratio;
                 let need = (target - hp.current).max(0.0);
                 hp.heal(need);
@@ -1011,27 +736,12 @@ pub mod systems {
         }
     }
 
-
-
-
-
-
     pub fn tick_attack_state_system(fixed_time: Res<Time<Fixed>>, mut q: Query<&mut AttackState>) {
         let dt = fixed_time.delta_secs();
         for mut att in q.iter_mut() {
             att.tick(dt);
         }
     }
-
-
-
-
-
-
-
-
-
-
 
     pub fn process_combat_intents_system(
         fixed_tick: Res<FixedTick>,
@@ -1046,7 +756,6 @@ pub mod systems {
         )>,
     ) {
         for (mut buf, mut att, mut block, mut parry, sta, stun, down) in q.iter_mut() {
-
             let intents = buf.drain_fresh(fixed_tick.0);
             for intent in intents {
                 match intent {
@@ -1068,18 +777,6 @@ pub mod systems {
             }
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
 
     pub fn process_attack_hits_system(
         fixed_tick: Res<FixedTick>,
@@ -1104,7 +801,6 @@ pub mod systems {
             )>,
         )>,
     ) {
-
         let attackers: Vec<Entity> = {
             let q0 = queries.p0();
             q0.iter()
@@ -1114,7 +810,6 @@ pub mod systems {
         };
 
         for attacker_entity in attackers {
-
             let attacker_info = {
                 let q0 = queries.p0();
                 let Ok((_, xf, att, sta, _, weapon)) = q0.get(attacker_entity) else {
@@ -1152,14 +847,12 @@ pub mod systems {
 
             let atk_cost = attack_kind.stamina_cost();
 
-
             {
                 let mut q0 = queries.p0();
                 let Ok((_, _, mut att, mut sta, _, _)) = q0.get_mut(attacker_entity) else {
                     continue;
                 };
                 if sta_now < atk_cost {
-
                     att.current = None;
                     continue;
                 }
@@ -1171,9 +864,7 @@ pub mod systems {
                 }
             }
 
-
             let mut attacker_stun_apply: Option<(StunSource, f32)> = None;
-
 
             {
                 let mut q1 = queries.p1();
@@ -1222,11 +913,9 @@ pub mod systems {
                         weapon_reach,
                     );
 
-
                     if actual_damage > 0.0 {
                         tgt_hp.damage(actual_damage, fixed_tick.0, 6);
                     }
-
 
                     for evt in &events {
                         if let CombatEvent::Stunned { entity, source, duration_secs } = evt {
@@ -1235,7 +924,6 @@ pub mod systems {
                             }
                         }
                     }
-
 
                     {
                         let mut q0 = queries.p0();
@@ -1252,7 +940,6 @@ pub mod systems {
                 }
             }
 
-
             if let Some((source, secs)) = attacker_stun_apply {
                 let mut q0 = queries.p0();
                 if let Ok((_, _, _, _, mut stun, _)) = q0.get_mut(attacker_entity) {
@@ -1262,39 +949,8 @@ pub mod systems {
         }
     }
 
-
-
-
-
-
-
-
-
-    pub fn emit_combat_events_system(_: MessageWriter<CombatEvent>) {
-
-
-
-    }
+    pub fn emit_combat_events_system(_: MessageWriter<CombatEvent>) {}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 pub struct CombatPlugin;
 
@@ -1320,17 +976,12 @@ impl Plugin for CombatPlugin {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn attack_stamina_costs_match_doc() {
-
         assert!(
             AttackType::Light.stamina_cost() >= 5.0 && AttackType::Light.stamina_cost() <= 12.0
         );
@@ -1361,7 +1012,6 @@ mod tests {
         assert!((consumed - 30.0).abs() < 0.01);
         assert!((s.current - 70.0).abs() < 0.01);
 
-
         let consumed = s.consume(999.0);
         assert!((consumed - 70.0).abs() < 0.01);
         assert_eq!(s.current, 0.0);
@@ -1385,7 +1035,6 @@ mod tests {
 
     #[test]
     fn block_state_default_45pct_reduction() {
-
         let b = BlockState::default();
         assert!((b.damage_reduction - 0.45).abs() < 0.01);
     }
@@ -1433,7 +1082,6 @@ mod tests {
 
     #[test]
     fn parry_window_default_160ms() {
-
         let p = ParryWindow::default();
         assert!((p.parry_window_secs - 0.16).abs() < 0.01);
     }
@@ -1506,38 +1154,19 @@ mod tests {
 
     #[test]
     fn sweep_hits_within_cone() {
-
-        let hit = sweep_hits(
-            Vec3::ZERO,
-            Vec3::X,
-            Vec3::new(3.0, 0.0, 1.0),
-            4.0,
-            30.0,
-        );
+        let hit = sweep_hits(Vec3::ZERO, Vec3::X, Vec3::new(3.0, 0.0, 1.0), 4.0, 30.0);
         assert!(hit, "3m 略偏应在 60° 锥内");
     }
 
     #[test]
     fn sweep_misses_outside_cone() {
-        let miss = sweep_hits(
-            Vec3::ZERO,
-            Vec3::X,
-            Vec3::new(3.0, 0.0, 3.0),
-            4.0,
-            30.0,
-        );
+        let miss = sweep_hits(Vec3::ZERO, Vec3::X, Vec3::new(3.0, 0.0, 3.0), 4.0, 30.0);
         assert!(!miss, "45° 偏应不在 30° 半角内");
     }
 
     #[test]
     fn sweep_misses_out_of_reach() {
-        let miss = sweep_hits(
-            Vec3::ZERO,
-            Vec3::X,
-            Vec3::new(10.0, 0.0, 0.0),
-            4.0,
-            60.0,
-        );
+        let miss = sweep_hits(Vec3::ZERO, Vec3::X, Vec3::new(10.0, 0.0, 0.0), 4.0, 60.0);
         assert!(!miss, "10m 远应不在 4m 触距内");
     }
 
@@ -1669,7 +1298,6 @@ mod tests {
 
     #[test]
     fn stamina_exhaustion_should_stun() {
-
         let mut sta = Stamina { current: 1.0, max: 100.0, regen_per_sec: 10.0 };
         let consumed = sta.consume(12.0);
         assert_eq!(consumed, 1.0, "只能扣 1");
@@ -1677,10 +1305,6 @@ mod tests {
 
         assert!(!sta.has_enough(12.0));
     }
-
-
-
-
 
     #[test]
     fn health_default_100() {
@@ -1838,10 +1462,6 @@ mod tests {
         assert_eq!(buf.queue.len(), 8, "上限 8");
     }
 
-
-
-
-
     #[test]
     fn e2e_resolve_hit_full_kill_reduces_hp_to_zero() {
         let mut hp = Health::default();
@@ -1874,7 +1494,6 @@ mod tests {
 
     #[test]
     fn e2e_resolve_hit_three_hit_combo_kills_player() {
-
         let mut hp = Health { current: 30.0, max: 100.0, invuln_until_tick: 0 };
         let mut sta = Stamina::default();
         let mut block = BlockState::default();
@@ -1906,7 +1525,6 @@ mod tests {
 
     #[test]
     fn e2e_resolve_hit_parry_breaks_attacker_combo() {
-
         let atk_sta = Stamina::default();
         let mut atk_stun = StunState::default();
         let mut def_parry = ParryWindow::default();
@@ -1917,7 +1535,6 @@ mod tests {
         let def_hp = Health::default();
 
         def_parry.begin();
-
 
         let (_events, dmg) = resolve_hit(
             Entity::PLACEHOLDER,
@@ -1936,15 +1553,13 @@ mod tests {
         );
         assert_eq!(dmg, 0.0, "招架不扣血");
 
-
         atk_stun.apply(0.6, StunSource::Parried);
         assert!(atk_stun.stunned);
         assert!(!atk_stun.can_act());
-
 
         let mut att_attack = AttackState::default();
         assert!(!att_attack.try_start(AttackType::Light, &atk_sta, &atk_stun, &Downed::default()));
 
         assert_eq!(def_hp.current, 100.0);
     }
-}
+}

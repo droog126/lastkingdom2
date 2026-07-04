@@ -1,8 +1,5 @@
-
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TargetHint {
-
     pub label_zh: &'static str,
 
     pub key_hint: &'static str,
@@ -79,7 +76,6 @@ mod tests {
 
     #[test]
     fn picks_nearest_among_multiple() {
-
         let candidates = [
             hint("A", "K", [3, 0, 4]),
             hint("B", "K", [6, 0, 0]),

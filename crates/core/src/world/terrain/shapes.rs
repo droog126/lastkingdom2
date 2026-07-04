@@ -1,61 +1,9 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use serde::{Deserialize, Serialize};
 
 use crate::world::{Biome, BlockType, SEA_LEVEL};
 
-
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum FillMode {
-
     Replace(BlockType),
 
     Carve,
@@ -74,29 +22,19 @@ impl FillMode {
     }
 }
 
-
 pub trait Shape: std::fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
 
-
-
     fn contains(&self, x: i32, y: i32, z: i32) -> Option<bool>;
-
-
 
     fn surface_y_f32(&self, _x: i32, _z: i32) -> Option<f32> {
         None
     }
 
-
     fn biome_at(&self, _x: i32, _z: i32) -> Option<Biome> {
         None
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoxShape {
@@ -123,10 +61,6 @@ impl Shape for BoxShape {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SphereShape {
     pub name: String,
@@ -146,10 +80,6 @@ impl Shape for SphereShape {
         Some(d2 <= self.radius * self.radius)
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EllipsoidShape {
@@ -177,10 +107,6 @@ impl Shape for EllipsoidShape {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CylinderShape {
     pub name: String,
@@ -204,10 +130,6 @@ impl Shape for CylinderShape {
         Some(dx * dx + dz * dz <= self.radius * self.radius)
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaneShape {
@@ -245,10 +167,6 @@ impl Shape for PlaneShape {
         Some(if c[1] > 0.0 { v <= 0.0 } else { v >= 0.0 })
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HillShape {
@@ -292,11 +210,6 @@ impl Shape for HillShape {
         Some(SEA_LEVEL as f32 + 1.0 + dome_h)
     }
 }
-
-
-
-
-
 
 fn noise3_value(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     use crate::world::terrain::hash01;
@@ -349,10 +262,6 @@ impl Shape for NoiseFieldShape {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoiseHillShape {
     pub name: String,
@@ -365,7 +274,6 @@ pub struct NoiseHillShape {
 }
 
 impl NoiseHillShape {
-
     pub fn height_at(&self, x: i32, z: i32) -> f32 {
         let dx = (x - self.center_x) as f32;
         let dz = (z - self.center_z) as f32;
@@ -400,10 +308,6 @@ impl Shape for NoiseHillShape {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubtractShape {
     pub name: String,
@@ -422,10 +326,6 @@ impl Shape for SubtractShape {
         Some(in_base && !in_sub)
     }
 }
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
@@ -466,7 +366,6 @@ impl ShapeSpec {
     }
 }
 
-
 pub fn eval_spec(spec: &ShapeSpec, x: i32, y: i32, z: i32) -> Option<bool> {
     match spec {
         ShapeSpec::Box(s) => s.contains(x, y, z),
@@ -481,7 +380,6 @@ pub fn eval_spec(spec: &ShapeSpec, x: i32, y: i32, z: i32) -> Option<bool> {
     }
 }
 
-
 pub fn surface_y_f32_spec(spec: &ShapeSpec, x: i32, z: i32) -> Option<f32> {
     match spec {
         ShapeSpec::Box(_)
@@ -495,12 +393,6 @@ pub fn surface_y_f32_spec(spec: &ShapeSpec, x: i32, z: i32) -> Option<f32> {
         ShapeSpec::NoiseHill(s) => s.surface_y_f32(x, z),
     }
 }
-
-
-
-
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShapeLayer {
@@ -549,7 +441,6 @@ impl ShapeLayer {
         self
     }
 
-
     pub fn evaluate(&self, x: i32, y: i32, z: i32) -> Option<BlockType> {
         if !self.enabled {
             return None;
@@ -580,7 +471,6 @@ impl ShapeLayer {
             FillMode::Replace(b) => Some(*b),
             FillMode::Carve => Some(BlockType::Air),
             FillMode::Surface(b) => {
-
                 if !self.any_inside(x, y + 1, z) {
                     Some(*b)
                 } else {
@@ -589,8 +479,6 @@ impl ShapeLayer {
             }
             FillMode::AdaptiveSurface { surface, subsurface } => {
                 if let Some(h) = any_surface {
-
-
                     let h_int = h.round() as i32;
                     let dy = h_int - y;
                     if dy == 1 {
@@ -600,11 +488,9 @@ impl ShapeLayer {
                     } else if dy > 4 {
                         Some(BlockType::Stone)
                     } else {
-
                         None
                     }
                 } else {
-
                     Some(*subsurface)
                 }
             }
@@ -615,10 +501,6 @@ impl ShapeLayer {
         self.shapes.iter().any(|spec| eval_spec(spec, x, y, z) == Some(true))
     }
 }
-
-
-
-
 
 use crate::world::terrain::{TerrainContext, TerrainModule};
 
@@ -640,7 +522,6 @@ impl TerrainModule for ShapeLayer {
     }
 
     fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
-
         let mut best: Option<f32> = None;
         for spec in &self.shapes {
             if let Some(h) = surface_y_f32_spec(spec, x, z) {
@@ -657,14 +538,9 @@ impl TerrainModule for ShapeLayer {
     }
 }
 
-
-
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ModuleSpec {
-
     #[serde(rename = "builtin")]
     Builtin { name: String },
 
@@ -742,11 +618,7 @@ mod tests {
 
     #[test]
     fn plane_lower_half() {
-        let p = PlaneShape {
-            name: "p".into(),
-            coeffs: [0.0, 1.0, 0.0, -5.0],
-            normalize: false,
-        };
+        let p = PlaneShape { name: "p".into(), coeffs: [0.0, 1.0, 0.0, -5.0], normalize: false };
         assert_eq!(p.contains(0, 5, 0), Some(true));
         assert_eq!(p.contains(0, 0, 0), Some(true));
         assert_eq!(p.contains(0, 6, 0), Some(false));
@@ -819,7 +691,6 @@ mod tests {
 
     #[test]
     fn subtract_carves_out_interior() {
-
         let sub = SubtractShape {
             name: "donut".into(),
             base: Box::new(ShapeSpec::Sphere(SphereShape {
@@ -854,7 +725,6 @@ mod tests {
 
     #[test]
     fn shape_layer_carve_only_hits_solid() {
-
         let layer = ShapeLayer {
             name: "carve_test".into(),
             weight: 5.0,
@@ -873,7 +743,6 @@ mod tests {
 
     #[test]
     fn shape_layer_multiple_shapes_union() {
-
         let layer = ShapeLayer {
             name: "two".into(),
             weight: 1.0,
@@ -892,7 +761,6 @@ mod tests {
 
     #[test]
     fn shape_layer_surface_only_top() {
-
         let layer = ShapeLayer {
             name: "surf".into(),
             weight: 1.0,
@@ -915,7 +783,6 @@ mod tests {
 
     #[test]
     fn shape_layer_adaptive_surface() {
-
         let nh = NoiseHillShape {
             name: "nh".into(),
             center_x: 0,
@@ -954,7 +821,6 @@ mod tests {
 
     #[test]
     fn shape_layer_biome_override() {
-
         let mut ctx = TerrainContext {
             x: 0,
             y: 0,
@@ -1024,4 +890,4 @@ mod tests {
         let spec: PipelineSpec = serde_json::from_str(json).expect("parse all kinds");
         assert_eq!(spec.modules.len(), 1);
     }
-}
+}

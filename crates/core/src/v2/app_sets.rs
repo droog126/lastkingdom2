@@ -1,10 +1,7 @@
-
-
 use bevy::prelude::*;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SimSet {
-
     ReceiveNet,
 
     ReadInput,
@@ -32,7 +29,6 @@ pub enum SimSet {
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PresentationSet {
-
     CameraFollow,
 
     Animation,
@@ -70,7 +66,6 @@ mod tests {
 
     #[test]
     fn simset_labels_unique() {
-
         use std::collections::HashSet;
         let labels: HashSet<&'static str> = [
             "ReceiveNet",

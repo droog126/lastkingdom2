@@ -82,6 +82,14 @@ pub fn setup_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(UiFonts { cn: asset_server.load("fonts/NotoSansCJKsc-Regular.otf") });
 }
 
+fn ui_text_font(font: &Handle<Font>, size: f32) -> TextFont {
+    TextFont { font: FontSource::Handle(font.clone()), font_size: FontSize::Px(size), ..default() }
+}
+
+fn ui_text_layout(justify: Justify) -> TextLayout {
+    TextLayout::new(justify, LineBreak::AnyCharacter)
+}
+
 pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     commands.spawn((
         Node {
@@ -95,7 +103,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.62)),
         children![(
             Text::new("WANGUO ORIGINS loading..."),
-            TextFont { font: fonts.cn.clone(), font_size: 10.0, ..default() },
+            ui_text_font(&fonts.cn, 10.0),
+            ui_text_layout(Justify::Left),
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.96)),
             TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
             HudText,
@@ -142,7 +151,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
 
     commands.spawn((
         Text::new(""),
-        TextFont { font: fonts.cn.clone(), font_size: 10.0, ..default() },
+        ui_text_font(&fonts.cn, 10.0),
+        ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.95, 0.95, 0.7)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
         Node { position_type: PositionType::Absolute, bottom: px(12), left: px(12), ..default() },
@@ -154,9 +164,9 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             "WASD move | Mouse Left attack | E pick up\n\
              ECO: 5 rabbits eat 10 berry bushes, emit CO2, berries regrow fruit",
         ),
-        TextFont { font: fonts.cn.clone(), font_size: 10.0, ..default() },
+        ui_text_font(&fonts.cn, 10.0),
         TextColor(Color::srgba(0.95, 0.95, 0.95, 1.0)),
-        TextLayout::new_with_justify(Justify::Center),
+        ui_text_layout(Justify::Center),
         TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node {
             position_type: PositionType::Absolute,
@@ -181,7 +191,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         },
         children![(
             Text::new(""),
-            TextFont { font: fonts.cn.clone(), font_size: 12.0, ..default() },
+            ui_text_font(&fonts.cn, 12.0),
+            ui_text_layout(Justify::Center),
             TextColor(Color::srgba(1.0, 0.9, 0.4, 0.7)),
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
             AnimalIndicatorText,
@@ -200,7 +211,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         },
         children![(
             Text::new(""),
-            TextFont { font: fonts.cn.clone(), font_size: 10.0, ..default() },
+            ui_text_font(&fonts.cn, 10.0),
+            ui_text_layout(Justify::Center),
             TextColor(Color::srgba(1.0, 0.6, 0.4, 0.6)),
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
             NestIndicatorText,
@@ -209,7 +221,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
 
     commands.spawn((
         Text::new("HP 100/100"),
-        TextFont { font: fonts.cn.clone(), font_size: 16.0, ..default() },
+        ui_text_font(&fonts.cn, 16.0),
+        ui_text_layout(Justify::Left),
         TextColor(Color::srgb(1.0, 0.4, 0.4)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(12), right: px(12), ..default() },
@@ -218,7 +231,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new("STA 100/100"),
-        TextFont { font: fonts.cn.clone(), font_size: 12.0, ..default() },
+        ui_text_font(&fonts.cn, 12.0),
+        ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.4, 0.8, 1.0)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(38), right: px(12), ..default() },
@@ -226,7 +240,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new("Phase: --"),
-        TextFont { font: fonts.cn.clone(), font_size: 10.0, ..default() },
+        ui_text_font(&fonts.cn, 10.0),
+        ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.9, 0.9, 0.5)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(60), right: px(12), ..default() },
@@ -234,14 +249,16 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new("I/O=Light/Heavy  L=Thrust\nU=Block  Y=Parry"),
-        TextFont { font: fonts.cn.clone(), font_size: 10.0, ..default() },
+        ui_text_font(&fonts.cn, 10.0),
+        ui_text_layout(Justify::Left),
         TextColor(Color::srgba(0.85, 0.85, 0.85, 0.85)),
         TextShadow { offset: Vec2::new(1.0, 1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, bottom: px(56), right: px(12), ..default() },
     ));
     commands.spawn((
         Text::new("Objective: -"),
-        TextFont { font: fonts.cn.clone(), font_size: 12.0, ..default() },
+        ui_text_font(&fonts.cn, 12.0),
+        ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.85, 0.95, 1.0)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(106), left: px(12), ..default() },
@@ -249,7 +266,8 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new(""),
-        TextFont { font: fonts.cn.clone(), font_size: 28.0, ..default() },
+        ui_text_font(&fonts.cn, 28.0),
+        ui_text_layout(Justify::Center),
         TextColor(Color::srgba(1.0, 0.95, 0.4, 0.95)),
         TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
         Node {

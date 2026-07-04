@@ -4,36 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-# 默认 lib 入口�?src/lib.rs
 path = "src/lib.rs"
 
 [features]
-# 跟 client/server 对齐, 让 feature unification 把 bevy 也开 dynamic_linking.
-# 否则 lk2-core 用 static bevy, client 用 dyn bevy → 链接失败 (LNK2019)
 dev-dynamic-linking = ["bevy/dynamic_linking"]
+client-render = ["bevy/bevy_pbr", "bevy/bevy_render"]
 
 [dependencies]
-# bevy — sim crate 需要 ECS + 一些常用的 render types (Color / Transform / Mesh3d)
-# 暂时不剔 default features，留给后续 server binary (MinimalPlugins) 时再切到
-# default-features = false + 显式 features 列表
-bevy = { workspace = true }
-
-# 纯数据 / 序列化
+bevy = { version = "0.19", default-features = false, features = ["default_app", "serialize"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
-
-# networking (跨 server/client 共享的协议 + 输入抽象)
-# lightyear 0.26 没有 protocol! 宏 (0.27+ 才有), 走 Plugin + register_message /
-# register_component 风格 — 见 src/protocol.rs::ProtocolPlugin
-# 'leafwing' feature 启用 lightyear_inputs_leafwing (用 InputPlugin 接入 PlayerAction)
-lightyear = { workspace = true, features = ["leafwing"] }
-lightyear_inputs_leafwing = { workspace = true }
-# leafwing-input-manager 的 Actionlike 给 PlayerAction 用, 加上
-# lightyear_inputs_leafwing::InputPlugin 自动序列化输入到服务端
-leafwing-input-manager = { workspace = true }
-
-# **不引** avian3d / bevy_panorbit_camera / bevy-inspector-egui
-# (那些是 client / server 各自需要的, 不该污染 core)
+lightyear = { version = "0.28.0", default-features = false, features = ["std", "leafwing", "replication"] }
+lightyear_inputs_leafwing = { version = "0.28.0", default-features = false, features = ["std"] }
+leafwing-input-manager = { version = "0.21.0", default-features = false, features = ["keyboard"] }
 
 [dev-dependencies]

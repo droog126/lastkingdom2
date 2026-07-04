@@ -7,23 +7,30 @@ build:
     cargo run -q -p xtask -- dev build
 
 build-client:
-    cargo build -p lk2-client --features dev-dynamic-linking,lk2-core/dev-dynamic-linking
+    cargo build -p lk2-client
 
 server:
-    cargo run -p lk2-server --features dev-dynamic-linking
+    cargo run -p lk2-server
 
 client:
-    cargo run -p lk2-client --features dev-dynamic-linking,lk2-core/dev-dynamic-linking -- --connect=127.0.0.1:5000
+    $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --offline
+
+client-online:
+    $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --connect=127.0.0.1:5000
 
 offline:
-    cargo run -p lk2-client -- --offline
+    $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --offline
+
+offline-fast:
+    cargo run -q -p xtask -- dev stage-runtime
+    .\target\debug\lk2-client.exe --offline
 
 build-server:
-    cargo build -p lk2-server --features dev-dynamic-linking
+    cargo build -p lk2-server
 
 build-full:
-    cargo build -p lk2-client --features dev-dynamic-linking,lk2-core/dev-dynamic-linking
-    cargo build -p lk2-server --features dev-dynamic-linking
+    cargo build -p lk2-client
+    cargo build -p lk2-server
 
 release-client:
     cargo build --release -p lk2-client

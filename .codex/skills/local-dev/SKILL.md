@@ -83,6 +83,18 @@ cargo run -q -p xtask -- health
 
 Use dev dynamic linking only for local client/server development when the repo scripts expect it. Do not use it for release or CI validation.
 
+## Rust Build Performance
+
+Rust/Bevy builds can be slow in this workspace because Bevy, rendering, physics, networking, ECS generics, derive macros, and linking create a large dependency graph. On Windows/MSVC, linking large Bevy binaries is often a bottleneck, and `bevy/dynamic_linking` can fail with `bevy_dylib` linker limits such as `LNK1189`.
+
+Prefer the narrowest command that matches the change:
+
+- Use `cargo check -p <crate>` for type validation when a full binary is not needed.
+- Use package-specific commands such as `cargo check -p lk2-server` or `cargo check -p lk2-client` instead of workspace-wide builds.
+- Avoid switching feature sets repeatedly in the same target directory; toggling Bevy or Lightyear features can invalidate large parts of the cache.
+- Keep server builds headless and avoid enabling client render features unless the task needs them.
+- Do not enable `dev-dynamic-linking` by default on Windows; it may compile `bevy_dylib` and hit MSVC linker object limits.
+
 ## Worktree Rules
 
 - Never revert files you did not change unless explicitly asked.

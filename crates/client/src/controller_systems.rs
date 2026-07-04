@@ -1,8 +1,6 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
-use leafwing_input_manager::prelude::*;
-use lk2_core::controller::components::{GroundHit, PlayerCollider, PvPController};
-use lk2_core::world::World as GameWorld;
+use lk2_core::controller::components::{PlayerCollider, PvPController};
 
 pub fn ground_detection(
     time: Res<Time>,
@@ -185,41 +183,6 @@ pub fn knockback_decay(time: Res<Time>, mut controllers: Query<&mut PvPControlle
             controller.knockback_velocity = Vec3::ZERO;
         }
     }
-}
-
-pub fn collect_input(keys: Res<ButtonInput<KeyCode>>, mut controllers: Query<&mut PvPController>) {
-    for mut controller in controllers.iter_mut() {
-        let mut input = Vec2::ZERO;
-        if keys.pressed(KeyCode::KeyW) {
-            input.y += 1.0;
-        }
-        if keys.pressed(KeyCode::KeyS) {
-            input.y -= 1.0;
-        }
-        if keys.pressed(KeyCode::KeyA) {
-            input.x -= 1.0;
-        }
-        if keys.pressed(KeyCode::KeyD) {
-            input.x += 1.0;
-        }
-
-        if input.length() > 1.0 {
-            input = input.normalize();
-        }
-
-        controller.move_input = input;
-        controller.jump_requested = keys.just_pressed(KeyCode::Space);
-        controller.is_sprinting =
-            keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    }
-}
-
-pub fn spawn_voxel_colliders(
-    _commands: Commands,
-    _game_world: Res<GameWorld>,
-    _player: Query<&Transform, With<PvPController>>,
-    _existing_colliders: Query<&Transform, (With<Collider>, Without<PvPController>)>,
-) {
 }
 
 pub struct ControllerPlugin;

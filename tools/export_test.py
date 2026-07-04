@@ -14,11 +14,10 @@ m = mat("test_red", (1.0, 0.0, 0.0))
 
 cube("test_cube", (10.0, 0.0, 0.0), (0.3, 0.7, 0.5), m)
 
-import os
-out = r"F:\rustProject\lastkingdom2\assets\procedural\pretty\test_cube.glb"
+out = models_lib.OUT_DIR / "test_cube.glb"
 bpy.ops.object.select_all(action="SELECT")
 bpy.ops.export_scene.gltf(
-    filepath=out,
+    filepath=str(out),
     export_format="GLB",
     use_selection=True,
     export_apply=True,
