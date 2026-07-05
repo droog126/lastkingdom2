@@ -66,10 +66,6 @@ impl ClientRunMode {
         }
     }
 
-    pub fn state_role(self) -> &'static str {
-        self.snapshot_role().as_str()
-    }
-
     pub fn snapshot_role(self) -> SnapshotRole {
         match self {
             Self::Offline => SnapshotRole::ClientOffline,

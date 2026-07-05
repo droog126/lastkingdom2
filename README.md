@@ -1,6 +1,6 @@
 # Wanguo Origins: Last Kingdom Diamond
 
-Bevy 0.18.1 voxel simulation and rendering demo with a closed-loop AI iteration workflow.
+Bevy 0.19 voxel simulation and rendering demo with a closed-loop AI iteration workflow.
 
 The core workflow is: run the game, capture screenshots and state JSON, inspect the result, decide the next change, then build and run again. Read [AGENTS.md](./AGENTS.md) before making code changes.
 
@@ -84,7 +84,7 @@ Do not commit Python caches, Blender backup files, temporary exports, or local a
 
 ## Development Rules
 
-- Use Bevy 0.18.1 APIs such as `Mesh3d` and `MeshMaterial3d`.
+- Use Bevy 0.19 APIs such as `Mesh3d` and `MeshMaterial3d`.
 - Do not use deprecated `PbrBundle` or `MaterialMeshBundle`.
 - Share mesh and material handles for repeated block types.
 - Throttle logs in systems that run every tick.

@@ -7,6 +7,10 @@ edition = "2024"
 name = "lk2-server"
 path = "src/main.rs"
 
+[[example]]
+name = "simulate_authoritative_forward"
+path = "examples/simulate_authoritative_forward.rs"
+
 [dependencies]
 bevy = { version = "0.19", default-features = false, features = ["default_app", "serialize"] }
 avian3d = { version = "0.7.0", default-features = false, features = ["3d", "f32", "parry-f32", "parallel", "xpbd_joints"] }

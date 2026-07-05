@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use crate::constant::*;
-use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
+use crate::resource::{apply_transfer, ResourceKind, Transfer, TransferDst, TransferSrc};
 use crate::world::terrain::TerrainModule;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -667,6 +667,164 @@ pub fn visible_blocks(
     out
 }
 
+pub const PLAYER_BODY_CLEARANCE_BLOCKS: i32 = 2;
+pub const MAX_SMOOTH_DROP: f32 = 6.0;
+
+pub fn player_body_clear(world: &World, x: i32, foot_y: i32, z: i32) -> bool {
+    if foot_y < 0 || foot_y + PLAYER_BODY_CLEARANCE_BLOCKS > world.size {
+        return false;
+    }
+    for y in foot_y..(foot_y + PLAYER_BODY_CLEARANCE_BLOCKS) {
+        if world.get(x, y, z).is_solid() {
+            return false;
+        }
+    }
+    true
+}
+
+fn standable_foot_y(world: &World, x: i32, z: i32, near_y: f32, max_step_up: f32) -> Option<i32> {
+    let min_y = ((near_y - MAX_SMOOTH_DROP).floor() as i32).max(1);
+    let max_y = ((near_y + max_step_up).ceil() as i32).min(world.size - 2);
+    (min_y..=max_y)
+        .filter(|foot_y| {
+            world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
+        })
+        .min_by(|a, b| {
+            let da = (*a as f32 - near_y).abs();
+            let db = (*b as f32 - near_y).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+fn standable_foot_y_any_height(world: &World, x: i32, z: i32) -> Option<i32> {
+    (1..(world.size - 2)).rev().find(|foot_y| {
+        world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
+    })
+}
+
+pub fn player_stand_position_at(
+    world: &World,
+    x: i32,
+    z: i32,
+    near_y: f32,
+    max_step_up: f32,
+) -> Option<(Vec3, [i32; 3])> {
+    let foot_y = standable_foot_y(world, x, z, near_y, max_step_up)?;
+    Some((
+        Vec3::new(x as f32 + 0.5, foot_y as f32, z as f32 + 0.5),
+        [x, foot_y, z],
+    ))
+}
+
+pub fn player_spawn_position_at(world: &World, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
+    let foot_y = standable_foot_y_any_height(world, x, z)?;
+    Some((
+        Vec3::new(x as f32 + 0.5, foot_y as f32, z as f32 + 0.5),
+        [x, foot_y, z],
+    ))
+}
+
+pub fn player_spawn_position_near(
+    world: &World,
+    x: i32,
+    z: i32,
+    search_radius: i32,
+    clearance_radius: i32,
+) -> Option<(Vec3, [i32; 3])> {
+    let mut best: Option<(i32, Vec3, [i32; 3])> = None;
+    let radius = search_radius.max(0);
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            let dist2 = dx * dx + dz * dz;
+            if dist2 > radius * radius {
+                continue;
+            }
+            let sx = x + dx;
+            let sz = z + dz;
+            let Some((pos, block_pos)) = player_spawn_position_at(world, sx, sz) else {
+                continue;
+            };
+            if !spawn_clearance(world, block_pos, clearance_radius) {
+                continue;
+            }
+            match best {
+                None => best = Some((dist2, pos, block_pos)),
+                Some((best_dist2, _, _)) if dist2 < best_dist2 => {
+                    best = Some((dist2, pos, block_pos));
+                }
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, pos, block_pos)| (pos, block_pos))
+}
+
+fn spawn_clearance(world: &World, block_pos: [i32; 3], radius: i32) -> bool {
+    let radius = radius.max(0);
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx * dx + dz * dz > radius * radius {
+                continue;
+            }
+            let x = block_pos[0] + dx;
+            let z = block_pos[2] + dz;
+            if world.get(x, block_pos[1] - 1, z).is_solid()
+                && player_body_clear(world, x, block_pos[1], z)
+            {
+                continue;
+            }
+            return false;
+        }
+    }
+    true
+}
+
+pub fn install_huge_spawn_platform(world: &mut World) {
+    use terrain::{BoxShape, FillMode, ShapeLayer, ShapeSpec};
+
+    let cx = WORLD_SIZE / 2;
+    let cz = WORLD_SIZE / 2;
+    let top_y = SEA_LEVEL + 3;
+    let half_extent = 90;
+
+    world.push_geo_layer(ShapeLayer {
+        name: "huge_spawn_platform_base".into(),
+        weight: 50.0,
+        fill: FillMode::Replace(BlockType::Dirt),
+        shapes: vec![ShapeSpec::Box(BoxShape {
+            name: "huge_spawn_platform_base_box".into(),
+            min: [cx - half_extent, top_y - 3, cz - half_extent],
+            max: [cx + half_extent, top_y - 2, cz + half_extent],
+        })],
+        biome_override: None,
+        enabled: true,
+    });
+    world.push_geo_layer(ShapeLayer {
+        name: "huge_spawn_platform_grass_surface".into(),
+        weight: 52.0,
+        fill: FillMode::Replace(BlockType::Leaves),
+        shapes: vec![ShapeSpec::Box(BoxShape {
+            name: "huge_spawn_platform_grass_surface_box".into(),
+            min: [cx - half_extent, top_y - 1, cz - half_extent],
+            max: [cx + half_extent, top_y - 1, cz + half_extent],
+        })],
+        biome_override: None,
+        enabled: true,
+    });
+    world.push_geo_layer(ShapeLayer {
+        name: "huge_spawn_platform_air_clearance".into(),
+        weight: 51.0,
+        fill: FillMode::Carve,
+        shapes: vec![ShapeSpec::Box(BoxShape {
+            name: "huge_spawn_platform_clearance_box".into(),
+            min: [cx - half_extent, top_y, cz - half_extent],
+            max: [cx + half_extent, VERTICAL_SIZE - 1, cz + half_extent],
+        })],
+        biome_override: None,
+        enabled: true,
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,5 +942,82 @@ mod tests {
             BlockType::BerryThicket.yields(),
             Some((ResourceKind::Apple, 1))
         );
+    }
+
+    #[test]
+    fn player_spawn_position_uses_topmost_clear_standable_column() {
+        let mut w = World::new(8);
+        w.set(3, 1, 3, BlockType::Dirt);
+        w.set(3, 2, 3, BlockType::Wood);
+
+        let (pos, block_pos) = player_spawn_position_at(&w, 3, 3).unwrap();
+
+        assert_eq!(block_pos, [3, 3, 3]);
+        assert_eq!(pos, Vec3::new(3.5, 3.0, 3.5));
+        assert!(w.get(block_pos[0], block_pos[1] - 1, block_pos[2]).is_solid());
+        assert!(player_body_clear(
+            &w,
+            block_pos[0],
+            block_pos[1],
+            block_pos[2]
+        ));
+    }
+
+    #[test]
+    fn player_stand_position_rejects_blocked_body_clearance() {
+        let mut w = World::new(8);
+        w.set(2, 1, 2, BlockType::Dirt);
+        w.set(2, 3, 2, BlockType::Leaves);
+
+        assert!(player_stand_position_at(&w, 2, 2, 2.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn player_spawn_position_finds_default_procedural_surface() {
+        let pipeline = terrain::presets::by_name("default");
+        let w = World::with_pipeline(WORLD_SIZE, pipeline);
+        let x = WORLD_SIZE / 2;
+        let z = WORLD_SIZE / 2;
+
+        let (_pos, block_pos) = player_spawn_position_at(&w, x, z).unwrap();
+
+        assert_eq!([block_pos[0], block_pos[2]], [x, z]);
+        assert!(w.get(x, block_pos[1] - 1, z).is_solid());
+        assert!(player_body_clear(&w, x, block_pos[1], z));
+    }
+
+    #[test]
+    fn player_spawn_position_near_prefers_open_clearance() {
+        let mut w = World::new(12);
+        for z in 1..=7 {
+            for x in 1..=7 {
+                w.set(x, 1, z, BlockType::Dirt);
+            }
+        }
+        w.set(4, 2, 4, BlockType::Wood);
+        w.set(5, 2, 4, BlockType::Wood);
+
+        let (_pos, block_pos) = player_spawn_position_near(&w, 4, 4, 4, 1).unwrap();
+
+        assert_ne!(block_pos, [4, 2, 4]);
+        assert!(spawn_clearance(&w, block_pos, 1));
+    }
+
+    #[test]
+    fn huge_spawn_platform_is_grass_and_clear_above() {
+        let pipeline = terrain::presets::by_name("default");
+        let mut w = World::with_pipeline(WORLD_SIZE, pipeline);
+        install_huge_spawn_platform(&mut w);
+        let x = WORLD_SIZE / 2;
+        let z = WORLD_SIZE / 2;
+        let foot_y = SEA_LEVEL + 3;
+
+        assert_eq!(w.get(x, foot_y - 1, z), BlockType::Leaves);
+        for y in foot_y..VERTICAL_SIZE {
+            assert_eq!(w.get(x, y, z), BlockType::Air, "y={} must be clear", y);
+        }
+
+        let (_pos, block_pos) = player_spawn_position_near(&w, x, z, 14, 2).unwrap();
+        assert_eq!(block_pos, [x, foot_y, z]);
     }
 }

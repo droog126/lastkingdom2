@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn case_0_and_255_empty() {
-        let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2], origin: [0, 0, 0] };
+        let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2] };
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         assert!(v.is_empty());
         assert!(i.is_empty());
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn case_1_one_triangle() {
-        let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2], origin: [0, 0, 0] };
+        let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2] };
 
         field.data[0] = 1.0;
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);

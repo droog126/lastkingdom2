@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use lk2_core::controller::components::PvPController;
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::player::PlayerState;
-use lk2_core::world::{Biome, World as GameWorld};
+use lk2_core::world::World as GameWorld;
 
-use crate::render::CameraAngles;
 use crate::render::scalar_field::effective_ground_height;
+use crate::render::CameraAngles;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -19,12 +19,15 @@ pub struct PrettyConfig {
 
 impl Default for PrettyConfig {
     fn default() -> Self {
-        Self { show_water: true, show_player_avatar: true, show_monster_cubes: true }
+        Self { show_water: false, show_player_avatar: true, show_monster_cubes: true }
     }
 }
 
 #[derive(Component)]
 pub struct WaterMarker;
+
+#[derive(Component)]
+pub struct GrassPlatformMarker;
 
 #[derive(Component)]
 pub struct GroundDiscOuter;
@@ -55,6 +58,18 @@ pub fn follow_water(player: Res<PlayerState>, mut q: Query<&mut Transform, With<
     tf.translation.z = player.pos.z;
 }
 
+pub fn follow_grass_platform(
+    player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
+    mut q: Query<&mut Transform, With<GrassPlatformMarker>>,
+) {
+    let Ok(mut tf) = q.single_mut() else {
+        return;
+    };
+    let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+    tf.translation = Vec3::new(player.pos.x, ground_top + 0.035, player.pos.z);
+}
+
 #[derive(Component)]
 pub struct AvatarPart {
     pub offset: Vec3,
@@ -71,7 +86,6 @@ pub enum AvatarPartKind {
     Thigh,
     Shin,
     Hand,
-    Foot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +96,6 @@ pub enum SquashAxis {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SokpopAnim {
-    pub kind: AvatarPartKind,
     pub phase_offset: f32,
     pub bob_amp: Vec3,
     pub lean_factor: f32,
@@ -92,59 +105,45 @@ pub struct SokpopAnim {
 fn avatar_sokpop(kind: AvatarPartKind) -> SokpopAnim {
     match kind {
         AvatarPartKind::Head => SokpopAnim {
-            kind,
             phase_offset: 0.0,
             bob_amp: Vec3::new(0.02, 0.05, 0.0),
             lean_factor: 0.85,
             squash_axis: SquashAxis::None,
         },
         AvatarPartKind::Hair => SokpopAnim {
-            kind,
             phase_offset: 0.25,
             bob_amp: Vec3::new(0.02, 0.06, 0.0),
             lean_factor: 0.9,
             squash_axis: SquashAxis::None,
         },
         AvatarPartKind::HeadDetail => SokpopAnim {
-            kind,
             phase_offset: 0.15,
             bob_amp: Vec3::new(0.02, 0.045, 0.0),
             lean_factor: 0.95,
             squash_axis: SquashAxis::None,
         },
         AvatarPartKind::Torso => SokpopAnim {
-            kind,
             phase_offset: 0.0,
             bob_amp: Vec3::new(0.04, 0.06, 0.0),
             lean_factor: 1.0,
             squash_axis: SquashAxis::Y,
         },
         AvatarPartKind::Thigh => SokpopAnim {
-            kind,
             phase_offset: 0.0,
             bob_amp: Vec3::new(0.16, 0.09, 0.0),
             lean_factor: 0.25,
             squash_axis: SquashAxis::None,
         },
         AvatarPartKind::Shin => SokpopAnim {
-            kind,
             phase_offset: std::f32::consts::PI,
             bob_amp: Vec3::new(0.18, 0.05, 0.0),
             lean_factor: 0.15,
             squash_axis: SquashAxis::None,
         },
         AvatarPartKind::Hand => SokpopAnim {
-            kind,
             phase_offset: std::f32::consts::PI,
             bob_amp: Vec3::new(0.22, 0.06, 0.0),
             lean_factor: 0.7,
-            squash_axis: SquashAxis::None,
-        },
-        AvatarPartKind::Foot => SokpopAnim {
-            kind,
-            phase_offset: std::f32::consts::PI,
-            bob_amp: Vec3::new(0.10, 0.04, 0.0),
-            lean_factor: 0.05,
             squash_axis: SquashAxis::None,
         },
     }
@@ -325,6 +324,24 @@ pub fn spawn_pretty(
             "🌊 水面已 spawn (y={}, size={}, 跟随玩家 @ ({:.1}, {:.1}))",
             water_y, s, cx, cz
         );
+    }
+
+    {
+        let grass_size = 180.0_f32;
+        let ground_y =
+            effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+        commands.spawn((
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(grass_size, grass_size))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.22, 0.62, 0.18),
+                emissive: Color::srgb(0.03, 0.10, 0.02).into(),
+                perceptual_roughness: 0.96,
+                metallic: 0.0,
+                ..default()
+            })),
+            Transform::from_translation(Vec3::new(player.pos.x, ground_y + 0.035, player.pos.z)),
+            GrassPlatformMarker,
+        ));
     }
 
     {
@@ -846,56 +863,196 @@ fn spawn_kenney_landmarks(
     player_pos: Vec3,
     ground_y: f32,
 ) {
-    const LANDMARKS: &[(&str, &str, Vec3, f32)] = &[
+    const LANDMARKS: &[(&str, &str, Vec3, f32, f32)] = &[
         (
             "kenney_campfire_pit",
             "kenney/curated/survival_props/kenney_campfire_pit.glb",
-            Vec3::new(-1.4, -0.35, 3.2),
+            Vec3::new(-5.5, -0.35, -8.0),
             1.0,
+            0.0,
         ),
         (
             "kenney_tent",
             "kenney/curated/survival_props/kenney_tent.glb",
-            Vec3::new(1.2, -0.35, 4.0),
+            Vec3::new(-8.0, -0.35, -10.5),
             1.0,
+            0.4,
         ),
         (
             "kenney_workbench",
             "kenney/curated/survival_props/kenney_workbench.glb",
-            Vec3::new(0.0, -0.35, 2.6),
+            Vec3::new(-3.0, -0.35, -10.0),
             1.0,
+            -0.2,
+        ),
+        (
+            "kenney_resource_wood",
+            "kenney/curated/survival_props/kenney_resource_wood.glb",
+            Vec3::new(-2.0, -0.35, -6.0),
+            1.0,
+            0.2,
+        ),
+        (
+            "kenney_resource_stone",
+            "kenney/curated/survival_props/kenney_resource_stone.glb",
+            Vec3::new(-8.5, -0.35, -6.5),
+            1.0,
+            -0.3,
+        ),
+        (
+            "kenney_tool_axe",
+            "kenney/curated/survival_props/kenney_tool_axe.glb",
+            Vec3::new(-4.3, -0.20, -5.0),
+            1.0,
+            0.9,
+        ),
+        (
+            "kenney_tool_pickaxe",
+            "kenney/curated/survival_props/kenney_tool_pickaxe.glb",
+            Vec3::new(-5.8, -0.20, -5.2),
+            1.0,
+            0.7,
         ),
         (
             "kenney_row_boat_small",
             "kenney/curated/coastal_and_pirate/kenney_row_boat_small.glb",
-            Vec3::new(2.2, -0.35, 4.8),
+            Vec3::new(11.0, -0.30, 13.5),
             1.0,
+            -0.8,
+        ),
+        (
+            "kenney_dock_platform",
+            "kenney/curated/coastal_and_pirate/kenney_dock_platform.glb",
+            Vec3::new(8.0, -0.35, 12.0),
+            1.0,
+            0.0,
+        ),
+        (
+            "kenney_palm_straight",
+            "kenney/curated/coastal_and_pirate/kenney_palm_straight.glb",
+            Vec3::new(14.0, -0.35, 10.0),
+            1.0,
+            0.2,
+        ),
+        (
+            "kenney_ship_wreck",
+            "kenney/curated/coastal_and_pirate/kenney_ship_wreck.glb",
+            Vec3::new(17.0, -0.35, 15.0),
+            1.0,
+            -0.5,
+        ),
+        (
+            "kenney_pirate_flag",
+            "kenney/curated/coastal_and_pirate/kenney_pirate_flag.glb",
+            Vec3::new(6.0, -0.35, 13.0),
+            1.0,
+            0.0,
+        ),
+        (
+            "kenney_cannon",
+            "kenney/curated/coastal_and_pirate/kenney_cannon.glb",
+            Vec3::new(5.0, -0.35, 10.0),
+            1.0,
+            1.2,
+        ),
+        (
+            "kenney_villager_male_a",
+            "kenney/curated/characters/kenney_villager_male_a.glb",
+            Vec3::new(3.0, -0.35, -7.0),
+            1.0,
+            -0.4,
+        ),
+        (
+            "kenney_villager_female_a",
+            "kenney/curated/characters/kenney_villager_female_a.glb",
+            Vec3::new(5.0, -0.35, -9.0),
+            1.0,
+            0.6,
+        ),
+        (
+            "kenney_bunny",
+            "kenney/curated/animals/kenney_bunny.glb",
+            Vec3::new(8.0, -0.35, -4.0),
+            1.0,
+            -0.7,
+        ),
+        (
+            "kenney_deer",
+            "kenney/curated/animals/kenney_deer.glb",
+            Vec3::new(13.0, -0.35, -7.0),
+            1.0,
+            0.1,
+        ),
+        (
+            "kenney_cow",
+            "kenney/curated/animals/kenney_cow.glb",
+            Vec3::new(11.0, -0.35, -12.5),
+            1.0,
+            -0.6,
+        ),
+        (
+            "kenney_fox",
+            "kenney/curated/animals/kenney_fox.glb",
+            Vec3::new(15.5, -0.35, -2.5),
+            1.0,
+            0.8,
+        ),
+        (
+            "kenney_bear",
+            "kenney/curated/animals/kenney_bear.glb",
+            Vec3::new(18.0, -0.35, -9.0),
+            1.0,
+            -0.9,
+        ),
+        (
+            "kenney_block_grass_large",
+            "kenney/curated/terrain_and_pickups/kenney_block_grass_large.glb",
+            Vec3::new(0.0, -0.35, 8.0),
+            1.0,
+            0.0,
+        ),
+        (
+            "kenney_block_snow_large",
+            "kenney/curated/terrain_and_pickups/kenney_block_snow_large.glb",
+            Vec3::new(2.8, -0.35, 8.0),
+            1.0,
+            0.0,
         ),
         (
             "kenney_coin_gold",
             "kenney/curated/terrain_and_pickups/kenney_coin_gold.glb",
-            Vec3::new(-0.7, 0.25, 2.1),
+            Vec3::new(1.2, 0.25, 5.5),
             1.0,
+            0.0,
         ),
         (
             "kenney_heart",
             "kenney/curated/terrain_and_pickups/kenney_heart.glb",
-            Vec3::new(0.8, 0.35, 2.2),
+            Vec3::new(2.6, 0.35, 5.8),
             1.0,
+            0.0,
+        ),
+        (
+            "kenney_door_open",
+            "kenney/curated/terrain_and_pickups/kenney_door_open.glb",
+            Vec3::new(-1.5, -0.35, 7.0),
+            1.0,
+            0.0,
         ),
     ];
 
-    for (name, path, offset, scale) in LANDMARKS {
+    for (name, path, offset, scale, yaw) in LANDMARKS {
         let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(*path));
         let pos = Vec3::new(
             player_pos.x + offset.x,
             ground_y + offset.y,
-            player_pos.z - offset.z,
+            player_pos.z + offset.z,
         );
         commands.spawn((
             WorldAssetRoot(scene),
-            Transform::from_translation(pos).with_scale(Vec3::splat(*scale)),
-            KenneyLandmark { rel: *offset, y_offset: offset.y },
+            Transform::from_translation(pos)
+                .with_rotation(Quat::from_rotation_y(*yaw))
+                .with_scale(Vec3::splat(*scale)),
         ));
         info!("[kenney] spawned landmark {} at {:?}", name, pos);
     }

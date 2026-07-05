@@ -22,6 +22,9 @@ bevy-tnua = "0.32.0"
 bevy-tnua-avian3d = "0.12.0"
 lk2-core = { path = "crates/core" }
 
+[patch.crates-io]
+parley = { path = "third_party/parley-0.9.0" }
+
 [profile.dev]
 opt-level = 1
 incremental = true

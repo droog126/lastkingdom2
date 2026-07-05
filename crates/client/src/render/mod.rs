@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use avian3d::prelude::{Collider, RigidBody};
 
 use crate::pretty::PlayerAnimState;
+use crate::render::camera_math::compute_third_person_camera;
 use crate::render::scalar_field::effective_ground_height;
 use crate::ui::ClientRunMode;
 use lk2_core::constant;
@@ -13,11 +14,15 @@ use lk2_core::creature::Creature;
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
-use lk2_core::world::{Biome, BlockType, World as GameWorld};
+use lk2_core::world::{
+    Biome, BlockType, World as GameWorld, player_body_clear, player_spawn_position_near,
+    player_stand_position_at,
+};
 
 mod greedy_mesh;
 use greedy_mesh::build_all_terrain_meshes_aabb;
 
+pub mod camera_math;
 mod marching_cubes;
 pub mod scalar_field;
 mod smooth_mesh;
@@ -79,7 +84,10 @@ pub struct CameraAngles {
 
 impl Default for CameraAngles {
     fn default() -> Self {
-        Self { yaw: 0.0, pitch: -1.2 }
+        // iter_199: pitch=0 keeps first-person camera level on entry.
+        // auto_orbit rewrites pitch itself; first-person should default to
+        // horizontal gaze, not the legacy -1.05 (~60 deg down) value.
+        Self { yaw: std::f32::consts::FRAC_PI_2, pitch: 0.0 }
     }
 }
 
@@ -96,9 +104,8 @@ impl Default for CameraMode {
     }
 }
 
-const TP_DISTANCE: f32 = 6.0;
-const TP_HEIGHT: f32 = 4.0;
 const MANUAL_MOVE_SPEED: f32 = 4.5;
+const PLAYER_COLLISION_RADIUS: f32 = 0.34;
 
 #[derive(Resource)]
 pub struct FreeFlyState {
@@ -381,8 +388,10 @@ pub fn setup_atmosphere(
 }
 
 #[derive(Component)]
+#[allow(dead_code)]
 pub struct TerrainUnderlay;
 
+#[allow(dead_code)]
 pub fn setup_terrain_underlay(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -407,6 +416,7 @@ pub fn setup_terrain_underlay(
     info!("🟫 兜底盖板 100x100 plane 已 spawn（player 脚下 -5m 跟随）");
 }
 
+#[allow(dead_code)]
 pub fn underlay_follow_player(
     mut q: Query<&mut Transform, With<TerrainUnderlay>>,
     player: Res<PlayerState>,
@@ -467,8 +477,15 @@ pub fn mouse_look_system(
     mut angles: ResMut<CameraAngles>,
     cfg: Res<RenderConfig>,
     freefly: Res<FreeFlyState>,
+    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     if !cfg.mouse_look && !freefly.enabled {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    if !window.visible {
         return;
     }
     if motion.delta == Vec2::ZERO {
@@ -550,7 +567,7 @@ pub fn emergency_teleport(
     }
     let x = lk2_core::constant::WORLD_SIZE / 2;
     let z = lk2_core::constant::WORLD_SIZE / 2;
-    let Some((pos, block_pos)) = player_spawn_position_at(&game_world, x, z) else {
+    let Some((pos, block_pos)) = player_spawn_position_near(&game_world, x, z, 14, 2) else {
         warn!("🚨 F5 紧急传送失败：出生列没有可站位置");
         return;
     };
@@ -638,6 +655,27 @@ pub fn setup_cursor_grab(
         return;
     }
     if let Ok(mut cursor) = cursors.single_mut() {
+        cursor.grab_mode = CursorGrabMode::Locked;
+        cursor.visible = false;
+    }
+}
+
+pub fn maintain_cursor_grab(
+    motion: Res<AccumulatedMouseMotion>,
+    mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    cfg: Res<RenderConfig>,
+    freefly: Res<FreeFlyState>,
+) {
+    if !cfg.mouse_look && !freefly.enabled {
+        return;
+    }
+    if motion.delta == Vec2::ZERO {
+        return;
+    }
+    let Ok(mut cursor) = cursors.single_mut() else {
+        return;
+    };
+    if !matches!(cursor.grab_mode, CursorGrabMode::Locked) {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
     }
@@ -770,11 +808,11 @@ pub fn spawn_nest_markers(
     let pz = player.block_pos[2] as f32 + 0.5;
     let mut spawned = 0_u32;
 
-    for (kid, kingdom) in monsters.kingdoms.iter() {
+    for (_kid, kingdom) in monsters.kingdoms.iter() {
         if kingdom.destroyed {
             continue;
         }
-        for (nid, nest) in kingdom.nests.iter() {
+        for (_nid, nest) in kingdom.nests.iter() {
             let (base_r, base_g, base_b) = match nest.biome {
                 Biome::Desert => (1.0_f32, 0.85_f32, 0.5_f32),
                 Biome::Jungle => (0.4_f32, 0.7_f32, 0.3_f32),
@@ -913,36 +951,27 @@ pub fn player_input(
     mut angles: ResMut<CameraAngles>,
     mut nations: ResMut<NationRegistry>,
     mut monsters: ResMut<MonsterEcosystem>,
-    camera: Query<&Transform, With<Camera3d>>,
+    _camera: Query<&Transform, With<Camera3d>>,
     time: Res<Time>,
     freefly: Res<FreeFlyState>,
     cfg: Res<RenderConfig>,
 ) {
-    if *run_mode != ClientRunMode::Offline {
-        return;
-    }
+    let is_offline = *run_mode == ClientRunMode::Offline;
+    // iter_199: Online mode = server is single source of truth for player
+    // position. Stop running local predictive movement in player_input so the
+    // server's replicated PlayerPos can drive the first-person camera.
+    // MOVE intents still flow to the server via send_online_gameplay_commands.
+    let server_authoritative = !is_offline;
 
     let freefly_active = freefly.enabled;
 
-    let cam_tf = camera.single().ok();
-    let (forward, right) = if let Some(tf) = cam_tf {
-        let f = tf.forward();
-        let f_h = Vec3::new(f.x, 0.0, f.z);
-        let f_n = if f_h.length() > 0.01 {
-            f_h.normalize()
-        } else {
-            Vec3::new(1.0, 0.0, 0.0)
-        };
-
-        let r = f_n.cross(Vec3::Y);
-        (f_n, r)
-    } else {
-        (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -1.0))
-    };
+    let (sy, cy) = angles.yaw.sin_cos();
+    let forward = Vec3::new(sy, 0.0, -cy).normalize_or_zero();
+    let right = forward.cross(Vec3::Y).normalize_or_zero();
 
     let mut d = Vec3::ZERO;
     if !freefly_active {
-        if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
+        if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) || cfg.auto_walk {
             d += forward;
         }
         if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
@@ -954,10 +983,12 @@ pub fn player_input(
         if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
             d += right;
         }
-        if keys.just_pressed(KeyCode::Space) {
+        if is_offline && keys.just_pressed(KeyCode::Space) {
             d += Vec3::Y;
         }
-        if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) {
+        if is_offline
+            && (keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight))
+        {
             d -= Vec3::Y;
         }
     }
@@ -968,9 +999,21 @@ pub fn player_input(
         } else if keys.just_pressed(KeyCode::KeyE) {
             angles.yaw += YAW_QE_STEP;
         }
+        let pitch_step = 45.0_f32.to_radians() * time.delta_secs();
+        if keys.pressed(KeyCode::KeyR) || keys.pressed(KeyCode::PageUp) {
+            angles.pitch += pitch_step;
+        }
+        if keys.pressed(KeyCode::KeyT) || keys.pressed(KeyCode::PageDown) {
+            angles.pitch -= pitch_step;
+        }
+        angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
     }
 
-    if d.length() > 0.01 {
+    // iter_199: local PlayerState.pos prediction only happens in offline mode.
+    // Online mode: skip this block entirely; apply_networked_position writes the
+    // server-replicated PlayerPos into PlayerState.pos so the first-person
+    // camera follows the authoritative server snapshot.
+    if is_offline && d.length() > 0.01 {
         if d.y.abs() > 0.01 && d.x.abs() < 0.01 && d.z.abs() < 0.01 {
             try_player_move(
                 &mut player,
@@ -994,8 +1037,9 @@ pub fn player_input(
             );
         }
     }
+    let _ = server_authoritative; // documented intent only; unused elsewhere
 
-    if keys.just_pressed(KeyCode::KeyG) {
+    if is_offline && keys.just_pressed(KeyCode::KeyG) {
         let (x, y, z) = (
             player.block_pos[0],
             player.block_pos[1] - 1,
@@ -1021,7 +1065,7 @@ pub fn player_input(
         }
     }
 
-    if keys.just_pressed(KeyCode::KeyF) {
+    if is_offline && keys.just_pressed(KeyCode::KeyF) {
         if player.nation_id.is_some() {
             info!("🚩 你已经是一个国家的王了，不能再立旗");
         } else {
@@ -1046,7 +1090,7 @@ pub fn player_input(
         }
     }
 
-    if keys.just_pressed(KeyCode::KeyJ) {
+    if is_offline && keys.just_pressed(KeyCode::KeyJ) {
         let p = player.block_pos;
         let mut best: Option<(f32, u32, u32, u32)> = None;
         for (kid, k) in monsters.kingdoms.iter() {
@@ -1077,71 +1121,6 @@ pub fn player_input(
             info!("⚔ 2 格内没有怪物");
         }
     }
-}
-
-const PLAYER_BODY_CLEARANCE_BLOCKS: i32 = 2;
-const MAX_SMOOTH_DROP: f32 = 6.0;
-
-fn player_body_clear(world: &GameWorld, x: i32, foot_y: i32, z: i32) -> bool {
-    if foot_y < 0 || foot_y + PLAYER_BODY_CLEARANCE_BLOCKS > world.size {
-        return false;
-    }
-    for y in foot_y..(foot_y + PLAYER_BODY_CLEARANCE_BLOCKS) {
-        if world.get(x, y, z).is_solid() {
-            return false;
-        }
-    }
-    true
-}
-
-fn standable_foot_y(
-    world: &GameWorld,
-    x: i32,
-    z: i32,
-    near_y: f32,
-    max_step_up: f32,
-) -> Option<i32> {
-    let min_y = ((near_y - MAX_SMOOTH_DROP).floor() as i32).max(1);
-    let max_y = ((near_y + max_step_up).ceil() as i32).min(world.size - 2);
-    (min_y..=max_y)
-        .filter(|foot_y| {
-            world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
-        })
-        .min_by(|a, b| {
-            let da = (*a as f32 - near_y).abs();
-            let db = (*b as f32 - near_y).abs();
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        })
-}
-
-fn standable_foot_y_any_height(world: &GameWorld, x: i32, z: i32) -> Option<i32> {
-    (1..(world.size - 2)).rev().find(|foot_y| {
-        world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
-    })
-}
-
-pub fn player_stand_position_at(
-    world: &GameWorld,
-    x: i32,
-    z: i32,
-    near_y: f32,
-    max_step_up: f32,
-) -> Option<(Vec3, [i32; 3])> {
-    let foot_y = standable_foot_y(world, x, z, near_y, max_step_up)?;
-    Some((
-        Vec3::new(x as f32 + 0.5, foot_y as f32, z as f32 + 0.5),
-        [x, foot_y, z],
-    ))
-}
-
-pub fn player_spawn_position_at(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
-    let foot_y = standable_foot_y_any_height(world, x, z)?;
-
-    let sky_y = foot_y + 2;
-    Some((
-        Vec3::new(x as f32 + 0.5, sky_y as f32, z as f32 + 0.5),
-        [x, sky_y, z],
-    ))
 }
 
 fn set_player_position(player: &mut PlayerState, pos: Vec3, block_pos: [i32; 3]) {
@@ -1212,8 +1191,27 @@ fn try_player_move_continuous(
     if stand_pos.y - player.pos.y > threshold {
         return false;
     }
+    if !player_volume_clear_at(game_world, Vec3::new(next.x, stand_pos.y, next.z)) {
+        return false;
+    }
 
     set_player_position(player, Vec3::new(next.x, stand_pos.y, next.z), block_pos);
+    true
+}
+
+fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {
+    let foot_y = pos.y.floor() as i32;
+    for y in foot_y..=(foot_y + 1) {
+        for ox in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
+            for oz in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
+                let x = (pos.x + ox).floor() as i32;
+                let z = (pos.z + oz).floor() as i32;
+                if game_world.get(x, y, z).is_solid() {
+                    return false;
+                }
+            }
+        }
+    }
     true
 }
 
@@ -1406,18 +1404,6 @@ pub fn auto_demo(
     let before = player.block_pos;
 
     let moved = try_player_move(&mut player, &mut game_world, d, cfg.ground_step_threshold);
-    if !moved {
-        let nx = player.block_pos[0] + d[0];
-        let nz = player.block_pos[2] + d[2];
-        if game_world.in_bounds(nx, 1, nz) {
-            player.block_pos = [nx, player.block_pos[1], nz];
-            player.pos = Vec3::new(
-                nx as f32 + 0.5,
-                player.block_pos[1] as f32 + 0.85,
-                nz as f32 + 0.5,
-            );
-        }
-    }
     if moved || (player.block_pos != before) {
         let dx = (player.block_pos[0] - before[0]) as f32;
         let dz = (player.block_pos[2] - before[2]) as f32;
@@ -1544,13 +1530,15 @@ pub fn first_person_camera(
     }
 
     if *mode == CameraMode::ThirdPerson {
-        let (sy, cy) = angles.yaw.sin_cos();
-
-        let back = Vec3::new(-sy, 0.0, cy);
-        let target = player.pos + Vec3::Y * 1.4;
-        let cam_pos = target + back * TP_DISTANCE + Vec3::new(0.0, TP_HEIGHT, 0.0);
-        tf.translation = cam_pos;
-        tf.look_at(target, Vec3::Y);
+        let provisional = compute_third_person_camera(player.pos, angles.yaw, angles.pitch, 0.0);
+        let ground = effective_ground_height(
+            &world,
+            provisional.translation.x.floor() as i32,
+            provisional.translation.z.floor() as i32,
+        );
+        let camera = compute_third_person_camera(player.pos, angles.yaw, angles.pitch, ground);
+        tf.translation = camera.translation;
+        tf.look_at(camera.target, Vec3::Y);
         return;
     }
 
@@ -1562,7 +1550,7 @@ pub fn first_person_camera(
     let bob_x = (phase * 0.5).sin() * 0.04 * speed;
     let eye = eye_base + Vec3::new(bob_x, bob_y, 0.0);
 
-    let dir = if cfg.mouse_look {
+    let dir = if cfg.mouse_look || *mode == CameraMode::FirstPerson {
         let (sy, cy) = angles.yaw.sin_cos();
         let (sp, cp) = angles.pitch.sin_cos();
         Vec3::new(sy * cp, sp, -cy * cp)
@@ -1616,7 +1604,7 @@ pub fn first_person_camera(
             last.0.normalize()
         }
     };
-    let look_target = eye + dir * 5.0 - Vec3::new(0.0, 1.0, 0.0);
+    let look_target = eye + dir * 5.0;
     tf.translation = eye;
     tf.look_at(look_target, Vec3::Y);
 }

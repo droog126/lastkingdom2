@@ -4,11 +4,11 @@ use leafwing_input_manager::prelude::*;
 use lightyear::prelude::Controlled;
 use lightyear::prelude::Predicted;
 use lk2_core::combat::{AttackType, CombatIntent, InputBuffer};
-use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::Health;
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
-use lk2_core::pvp::FixedTick;
+use lk2_core::protocol::PlayerAction;
 use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
+use lk2_core::pvp::FixedTick;
 
 pub fn collect_local_input(
     tick: Res<FixedTick>,

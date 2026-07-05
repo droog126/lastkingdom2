@@ -87,13 +87,21 @@ pub fn tick_protection(
     for (e, mut prot) in q.iter_mut() {
         prot.remaining_secs -= dt;
         if prot.remaining_secs <= 0.0 {
-            debug!(
-                "[protection] expired for {:?} (source={})",
-                e,
-                prot.source.label()
-            );
             commands.entity(e).remove::<Protection>();
         }
+    }
+}
+
+fn audit_protection_removal(trigger: On<Remove, Protection>, q: Query<&Protection>) {
+    let entity = trigger.event_target();
+    if let Ok(prot) = q.get(entity) {
+        debug!(
+            "[protection] expired for {:?} (source={})",
+            entity,
+            prot.source.label()
+        );
+    } else {
+        debug!("[protection] expired for {:?}", entity);
     }
 }
 
@@ -128,7 +136,7 @@ pub struct ProtectionPlugin;
 
 impl Plugin for ProtectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_observer(audit_protection_removal).add_systems(
             FixedUpdate,
             (tick_protection, ensure_opening_protection).chain(),
         );
@@ -182,5 +190,34 @@ mod tests {
         let p = Protection::mid_join();
         assert_eq!(p.source, ProtectionSource::MidJoin);
         assert!((p.remaining_secs - 300.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn protection_remove_observer_fires_once_per_removal() {
+        use bevy::ecs::lifecycle::Remove;
+
+        #[derive(Resource, Default)]
+        struct Hits(u32);
+
+        let mut app = App::new();
+        app.init_resource::<Hits>().add_observer(
+            |trigger: On<Remove, Protection>, mut hits: ResMut<Hits>| {
+                hits.0 += 1;
+                let _ = trigger.event_target();
+            },
+        );
+
+        let e1 = app.world_mut().spawn(Protection::opening()).id();
+        let e2 = app.world_mut().spawn(Protection::mid_join()).id();
+
+        app.world_mut().entity_mut(e1).remove::<Protection>();
+        app.world_mut().entity_mut(e2).insert(Protection::opening());
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Hits>().0,
+            1,
+            "observer should fire only on plain removal, not on overwrite"
+        );
     }
 }

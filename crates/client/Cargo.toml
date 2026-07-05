@@ -11,6 +11,14 @@ path = "src/main.rs"
 name = "audit_player"
 path = "examples/audit_player.rs"
 
+[[example]]
+name = "simulate_forward"
+path = "examples/simulate_forward.rs"
+
+[[example]]
+name = "debug_camera_view"
+path = "examples/debug_camera_view.rs"
+
 [features]
 dev-dynamic-linking = ["bevy/dynamic_linking"]
 audit-pretty-models = []

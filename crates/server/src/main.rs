@@ -4,19 +4,17 @@
 use avian3d::prelude::PhysicsPlugins;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
-use lightyear::prelude::LocalAddr;
 use lightyear::prelude::server::ServerUdpIo;
+use lightyear::prelude::LocalAddr;
 
 use leafwing_input_manager::prelude::ActionState;
-use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
 };
+use lk2_core::protocol::PlayerAction;
 
 use lightyear::prelude::PeerMetadata;
-
-use lightyear::prelude::LinkStart;
 
 use std::time::Duration;
 
@@ -27,8 +25,8 @@ use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::creature::{
-    CREATURE_TRAINING_ATTACK_RANGE_SQ, Creature, CreatureAI, CreatureKind, CreatureSpawnerDone,
-    award_creature_drop, creature_attack_distance_sq,
+    award_creature_drop, creature_attack_distance_sq, Creature, CreatureAI, CreatureKind,
+    CreatureSpawnerDone, CREATURE_TRAINING_ATTACK_RANGE_SQ,
 };
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
@@ -37,13 +35,15 @@ use lk2_core::player::{PlayerState, PlayerTag};
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
+use lk2_core::sim::{advance_fixed_authority_tick, SimRole};
 use lk2_core::v2::app_sets::SimSet;
-use lk2_core::world::{World as GameWorld, WorldGenerator};
+use lk2_core::world::{
+    install_huge_spawn_platform, player_spawn_position_near, World as GameWorld, WorldGenerator,
+};
 
 use crate::pvp_systems::{
-    ServerPvPPlugin, apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
-    read_attack_inputs, record_position_history, tick_combat_cooldowns,
+    apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
+    read_attack_inputs, record_position_history, tick_combat_cooldowns, ServerPvPPlugin,
 };
 
 const PLACE_WOOD_COST: i64 = 1;
@@ -181,6 +181,10 @@ fn apply_gameplay_command(
 ) -> GameplayFeedback {
     let mut ok = true;
     let summary = match cmd.kind {
+        GameplayCommandKind::MoveWorld { .. } => {
+            ok = false;
+            "movement command was not routed to entity transform".to_string()
+        }
         GameplayCommandKind::GatherFootBlock => {
             let [x, y, z] = [
                 player.block_pos[0],
@@ -302,8 +306,27 @@ fn apply_gameplay_commands(
     mut feedback: MessageWriter<GameplayFeedback>,
     mut commands: Commands,
     creatures: Query<(Entity, &Creature, &CreatureAI)>,
+    mut player_q: Query<
+        (
+            &mut bevy::prelude::Transform,
+            &mut lk2_core::protocol::components::PlayerPos,
+        ),
+        With<lightyear::prelude::ControlledBy>,
+    >,
 ) {
     for cmd in reader.read() {
+        if let GameplayCommandKind::MoveWorld { dx_milli, dz_milli } = cmd.kind {
+            let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
+            let moved = if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
+                apply_world_move(&mut transform, &mut player_pos, &mut player, dir, 1.0 / 60.0)
+            } else {
+                false
+            };
+            if moved {
+                feedback.write(GameplayFeedback { ok: true, summary: "moved".to_string() });
+            }
+            continue;
+        }
         let nearest_creature = if matches!(cmd.kind, GameplayCommandKind::KillNearestCreature) {
             creatures
                 .iter()
@@ -338,6 +361,30 @@ fn apply_gameplay_commands(
         }
         feedback.write(result);
     }
+}
+
+fn apply_world_move(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    dir: Vec2,
+    dt: f32,
+) -> bool {
+    if dir.length_squared() <= 0.0001 {
+        return false;
+    }
+    let dir = dir.normalize_or_zero();
+    let speed = 4.0;
+    let delta = Vec3::new(dir.x, 0.0, dir.y) * speed * dt;
+    transform.translation += delta;
+    player_pos.0 = transform.translation;
+    player.pos = transform.translation;
+    player.block_pos = [
+        transform.translation.x.floor() as i32,
+        transform.translation.y.floor() as i32,
+        transform.translation.z.floor() as i32,
+    ];
+    true
 }
 
 fn sync_authoritative_snapshot_components(
@@ -526,33 +573,33 @@ fn spawn_server(mut commands: Commands) {
         ))
         .id();
 
-    info!(
-        "[net] triggering LinkStart on server entity {:?}",
-        server_id
-    );
-    commands.trigger(LinkStart { entity: server_id });
-
     info!("[net] triggering Start on server entity {:?}", server_id);
     commands.trigger(Start { entity: server_id });
-
-    info!(
-        "[net] manually inserting Started marker to server entity {:?}",
-        server_id
-    );
-    commands.entity(server_id).insert(lightyear_connection::server::Started);
 }
 
-fn spawn_player(mut commands: Commands, mut player: ResMut<PlayerState>) {
-    let spawn = bevy::math::Vec3::new(
-        constant::WORLD_SIZE as f32 / 2.0 + 0.5,
-        (constant::SEA_LEVEL + 2) as f32 + 0.5,
-        constant::WORLD_SIZE as f32 / 2.0 + 0.5,
-    );
-    let spawn_block = [
-        spawn.x.floor() as i32,
-        spawn.y.floor() as i32,
-        spawn.z.floor() as i32,
-    ];
+fn spawn_player(
+    mut commands: Commands,
+    mut player: ResMut<PlayerState>,
+    game_world: Res<GameWorld>,
+) {
+    let sx = constant::WORLD_SIZE / 2;
+    let sz = constant::WORLD_SIZE / 2;
+    let (spawn, spawn_block) = player_spawn_position_near(&game_world, sx, sz, 14, 2)
+        .unwrap_or_else(|| {
+            let fallback = bevy::math::Vec3::new(
+                sx as f32 + 0.5,
+                (constant::SEA_LEVEL + 2) as f32 + 0.5,
+                sz as f32 + 0.5,
+            );
+            (
+                fallback,
+                [
+                    fallback.x.floor() as i32,
+                    fallback.y.floor() as i32,
+                    fallback.z.floor() as i32,
+                ],
+            )
+        });
     player.pos = spawn;
     player.block_pos = spawn_block;
     info!(
@@ -634,17 +681,7 @@ fn apply_input_to_player(
         if local_dir.length() > 1.0 {
             local_dir = local_dir.normalize();
         }
-        let delta = bevy::math::Vec3::new(local_dir.x, 0.0, -local_dir.y) * speed * dt;
-        transform.translation += delta;
-
-        player_pos.0 = transform.translation;
-        player.pos = transform.translation;
-        player.block_pos = [
-            transform.translation.x.floor() as i32,
-            transform.translation.y.floor() as i32,
-            transform.translation.z.floor() as i32,
-        ];
-        if local_dir.length() > 0.01 {
+        if apply_world_move(&mut transform, &mut player_pos, &mut player, Vec2::new(local_dir.x, -local_dir.y), dt) {
             dir = local_dir;
             applied_count += 1;
         }
@@ -698,6 +735,7 @@ fn setup_world(
 ) {
     let pipeline = lk2_core::world::terrain::presets::by_name("default");
     *game_world = GameWorld::with_pipeline(constant::WORLD_SIZE, pipeline);
+    install_huge_spawn_platform(&mut game_world);
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     use lk2_core::resource::ResourceKind;

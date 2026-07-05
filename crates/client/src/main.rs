@@ -6,7 +6,6 @@ use avian3d::prelude::{Collider, Gravity, LinearVelocity, PhysicsPlugins, RigidB
 use std::path::PathBuf;
 
 mod capture;
-mod controller_systems;
 mod pretty;
 mod pvp_systems;
 mod render;
@@ -27,10 +26,9 @@ use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
-use lk2_core::world::World as GameWorld;
+use lk2_core::world::{World as GameWorld, install_huge_spawn_platform, player_spawn_position_at};
 
 use crate::capture::{TickRecorder, periodic_screenshot, tick_recorder};
-use crate::controller_systems::ControllerPlugin;
 use crate::pretty::{
     PlayerAnimState, PrettyConfig, animate_avatar, animate_cloud_puffs, animate_monsters,
     follow_ground_discs, follow_kenney_landmarks, follow_monster_cubes, follow_water,
@@ -44,11 +42,10 @@ use crate::pvp_systems::{
 use crate::render::{
     CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, NestMarkerCount, Player,
     RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle, cycle_terrain_preset,
-    emergency_teleport, first_person_camera, freefly_movement, freefly_toggle,
-    held_weapon_follow, mouse_look_system, player_input, player_spawn_position_at,
-    setup_atmosphere, setup_cursor_grab, spawn_nest_markers, spawn_terrain_around_player,
-    toggle_cursor_grab_on_esc, update_animal_indicator, update_nest_indicator,
-    update_nest_marker_positions,
+    emergency_teleport, first_person_camera, freefly_movement, freefly_toggle, held_weapon_follow,
+    maintain_cursor_grab, mouse_look_system, player_input, setup_atmosphere, setup_cursor_grab,
+    spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
+    update_animal_indicator, update_nest_indicator, update_nest_marker_positions,
 };
 use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
 
@@ -64,6 +61,19 @@ use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, Health, VoxelDelta};
 use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct OnlineCommandDiagnostics {
+    pub sender_entities: usize,
+    pub move_world_sent: u64,
+    pub last_dx_milli: i16,
+    pub last_dz_milli: i16,
+}
+
+#[derive(Resource)]
+struct OnlineGameplayUdp {
+    socket: std::net::UdpSocket,
+}
 
 #[derive(Resource, Default, Debug, Clone)]
 struct ReplicatedSnapshot {
@@ -132,6 +142,9 @@ fn main() {
     let offline_mode = args.iter().any(|a| a == "--offline");
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
     let first_person_mode = args.iter().any(|a| a == "--first-person");
+    let hold_forward_test = args.iter().any(|a| a == "--hold-forward-test");
+    let no_focus_window = args.iter().any(|a| a == "--no-focus-window");
+    let hidden_window = args.iter().any(|a| a == "--hidden-window");
 
     let connect_addr = lk2_core::transport::parse_connect_arg(&args);
     let network_mode = connect_addr.is_some() && !offline_mode;
@@ -204,6 +217,8 @@ fn main() {
                     resolution: WindowResolution::new(1280, 720),
 
                     present_mode: PresentMode::Immediate,
+                    focused: !no_focus_window && !hidden_window,
+                    visible: !hidden_window,
                     ..default()
                 }),
                 ..default()
@@ -226,6 +241,15 @@ fn main() {
 
     if network_mode {
         let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
+        if let Ok(socket) = std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], 0)))
+        {
+            let mut gameplay_addr = server_addr;
+            gameplay_addr.set_port(gameplay_addr.port().saturating_add(1));
+            if socket.connect(gameplay_addr).is_ok() {
+                let _ = socket.set_nonblocking(true);
+                app.insert_resource(OnlineGameplayUdp { socket });
+            }
+        }
         app.add_systems(Startup, move |commands: Commands| {
             let client_id_seed: u64 = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -235,30 +259,34 @@ fn main() {
         });
     }
 
-    app.init_resource::<RenderConfig>()
-        .init_resource::<CameraAngles>()
+    let mut render_config = RenderConfig::default();
+    render_config.smooth_terrain = smooth_terrain;
+    if auto_demo_mode {
+        render_config.auto_walk = true;
+        render_config.auto_keys = true;
+        render_config.mouse_look = false;
+    }
+    if first_person_mode {
+        render_config.auto_orbit = false;
+        render_config.auto_walk = false;
+        render_config.auto_keys = false;
+        render_config.mouse_look = true;
+        render_config.smooth_terrain = false;
+        tracing::info!("--first-person: CameraMode=FirstPerson, mouse_look=true");
+    }
+    if hold_forward_test {
+        render_config.auto_walk = true;
+        render_config.auto_keys = false;
+        tracing::info!("--hold-forward-test: simulating held W without OS input");
+    }
+
+    app.insert_resource(render_config)
+        .insert_resource(CameraAngles::default())
         .init_resource::<SwordSwing>()
-        .insert_resource(CameraMode::default())
-        .add_systems(
-            Startup,
-            move |mut mode: ResMut<CameraMode>, mut cfg: ResMut<RenderConfig>| {
-                if first_person_mode {
-                    *mode = CameraMode::FirstPerson;
-                    cfg.auto_orbit = false;
-                    cfg.auto_walk = false;
-                    cfg.auto_keys = false;
-                    cfg.mouse_look = true;
-                    tracing::info!("📷 --first-person: CameraMode=FirstPerson, mouse_look=true");
-                }
-            },
-        )
-        .add_systems(Startup, move |mut cfg: ResMut<RenderConfig>| {
-            if auto_demo_mode {
-                cfg.auto_walk = true;
-                cfg.auto_keys = true;
-                cfg.mouse_look = false;
-            }
-            cfg.smooth_terrain = smooth_terrain;
+        .insert_resource(if first_person_mode {
+            CameraMode::FirstPerson
+        } else {
+            CameraMode::default()
         })
         .init_resource::<SpawnedBlocks>()
         .init_resource::<PrettyConfig>()
@@ -279,6 +307,7 @@ fn main() {
         .init_resource::<NetworkSmoothingState>()
         .init_resource::<NestMarkerCount>()
         .init_resource::<PlayerAnimState>()
+        .init_resource::<OnlineCommandDiagnostics>()
         .insert_resource(if network_mode {
             ClientRunMode::Online
         } else {
@@ -294,8 +323,9 @@ fn main() {
         .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(lk2_core::objectives::ObjectivesPlugin)
-        .add_plugins(ClientPvPPlugin)
-        .add_plugins(ControllerPlugin);
+        .add_plugins(ClientPvPPlugin);
+    // ControllerPlugin used to write PvPController.move_input. That is now done
+    // directly in player_input so online first-person movement has one owner.
 
     app.add_systems(
         Startup,
@@ -311,12 +341,12 @@ fn main() {
             spawn_eco_visuals,
             spawn_creatures,
             setup_hud,
-            self_check,
             setup_player_pvp,
             lk2_core::objectives::setup_default_objectives,
         )
             .chain(),
     );
+    app.add_systems(Update, run_startup_self_check_once);
 
     app.add_systems(
         Update,
@@ -331,14 +361,27 @@ fn main() {
             debug_dump_replicated_entities,
             apply_authoritative_snapshot,
             apply_voxel_delta,
-            send_online_gameplay_commands,
+        )
+            .chain(),
+    );
+    app.add_systems(
+        Update,
+        (
             collect_keys_to_action_state,
             auto_demo.run_if(resource_equals(ClientRunMode::Offline)),
+            maintain_cursor_grab,
             mouse_look_system,
+            player_input,
+            send_online_gameplay_commands,
             first_person_camera,
             held_weapon_follow,
-            player_input,
             sync_player_combat_anchor,
+        )
+            .chain(),
+    );
+    app.add_systems(
+        Update,
+        (
             offline_player_attack_creatures.run_if(resource_equals(ClientRunMode::Offline)),
             animate_avatar,
             spawn_terrain_around_player,
@@ -448,6 +491,7 @@ fn spawn_networked_client(
     let client_id = commands
         .spawn((
             Name::new("Client"),
+            lightyear_connection::client::Client::default(),
             UdpIo::default(),
             LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
             PeerAddr(server_addr),
@@ -467,21 +511,29 @@ fn spawn_networked_client(
 }
 
 fn apply_networked_position(
-    mut q: Query<(&mut Transform, &lk2_core::protocol::components::PlayerPos)>,
+    run_mode: Res<ClientRunMode>,
+    mut q: Query<(&mut Transform, &lk2_core::protocol::components::PlayerPos), Without<Player>>,
+    mut player: ResMut<PlayerState>,
 ) {
     let mut count = 0;
-    let mut first_pos = bevy::math::Vec3::ZERO;
+    let mut last_pos = bevy::math::Vec3::ZERO;
     for (mut tf, pos) in q.iter_mut() {
         tf.translation = pos.0;
-        first_pos = pos.0;
+        last_pos = pos.0;
         count += 1;
     }
-    if count > 0 {
-        tracing::info!(
-            "[net] applied PlayerPos to {} player entity, pos={:?}",
-            count,
-            first_pos
-        );
+    if count > 0 && *run_mode == ClientRunMode::Online {
+        // iter_199: server is single source of truth in online mode. Mirror
+        // the replicated PlayerPos into PlayerState.pos so the first-person
+        // camera (which reads PlayerState.pos) tracks the authoritative
+        // server position. Block_pos is updated from the world coords so
+        // gather/place and other block-gridded systems still work.
+        player.pos = last_pos;
+        player.block_pos = [
+            last_pos.x.floor() as i32,
+            last_pos.y.floor() as i32,
+            last_pos.z.floor() as i32,
+        ];
     }
 }
 
@@ -535,26 +587,27 @@ fn apply_server_pos_update(
     >,
     mut player: ResMut<PlayerState>,
 ) {
+    let _ = &mut player;
     if *run_mode != ClientRunMode::Online {
         for mut receiver in receiver_q.iter_mut() {
             for _msg in receiver.receive() {}
         }
         return;
     }
-    let mut any = false;
     let mut last_pos = bevy::math::Vec3::ZERO;
     let mut last_tick: u32 = 0;
+    let mut count: u32 = 0;
     for mut receiver in receiver_q.iter_mut() {
         for msg in receiver.receive() {
             last_pos = msg.pos;
             last_tick = msg.server_tick;
-            any = true;
+            count = count.saturating_add(1);
         }
     }
-    if any {
-        player.pos = last_pos;
-        tracing::info!(
-            "[net] applied ServerPosUpdate tick={} pos={:?} → PlayerState.pos",
+    if count > 0 {
+        tracing::debug!(
+            "[net] drained {} ServerPosUpdate messages; last tick={} pos={:?}",
+            count,
             last_tick,
             last_pos
         );
@@ -602,8 +655,8 @@ fn apply_authoritative_snapshot(
     snapshot.status_line = hud.status_line.clone();
 
     clock.tick = hud.tick;
-    player.block_pos = hud.player_block_pos;
-    player.pos = Vec3::new(hud.player_pos[0], hud.player_pos[1], hud.player_pos[2]);
+    // The FPS camera follows client-side prediction. Server snapshots update
+    // replicated gameplay state, but stale snapshots must not snap the view back.
     player.monsters_killed = hud.monsters_killed;
     player.blocks_gathered = hud.blocks_gathered;
     player.nations_founded = hud.nations_founded;
@@ -662,21 +715,64 @@ fn apply_voxel_delta(
 
 fn send_online_gameplay_commands(
     run_mode: Res<ClientRunMode>,
+    cfg: Res<RenderConfig>,
     keys: Res<ButtonInput<KeyCode>>,
     player: Res<PlayerState>,
     clock: Res<SimClock>,
+    angles: Res<CameraAngles>,
+    mut diagnostics: ResMut<OnlineCommandDiagnostics>,
+    gameplay_udp: Option<Res<OnlineGameplayUdp>>,
     writer: Option<MessageWriter<GameplayCommand>>,
 ) {
     if *run_mode != ClientRunMode::Online {
         return;
     }
-    let Some(mut writer) = writer else {
-        return;
-    };
+    diagnostics.sender_entities = usize::from(writer.is_some());
+    let mut writer = writer;
 
     let mut send = |kind: GameplayCommandKind| {
-        writer.write(GameplayCommand { tick: clock.tick, player_block: player.block_pos, kind });
+        if let Some(writer) = writer.as_mut() {
+            writer.write(GameplayCommand {
+                tick: clock.tick,
+                player_block: player.block_pos,
+                kind,
+            });
+        }
     };
+
+    let mut move_input = Vec2::ZERO;
+    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) || cfg.auto_walk {
+        move_input.y += 1.0;
+    }
+    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
+        move_input.y -= 1.0;
+    }
+    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+        move_input.x -= 1.0;
+    }
+    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+        move_input.x += 1.0;
+    }
+    if move_input.length_squared() > 0.0001 {
+        let move_input = move_input.normalize_or_zero();
+        let (sy, cy) = angles.yaw.sin_cos();
+        let forward = Vec3::new(sy, 0.0, -cy).normalize_or_zero();
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        let sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        let sprint_factor = if sprint { 1.5 } else { 1.0 };
+        let world_dir =
+            (forward * move_input.y + right * move_input.x).normalize_or_zero() * sprint_factor;
+        let dx_milli = (world_dir.x * 1000.0).round() as i16;
+        let dz_milli = (world_dir.z * 1000.0).round() as i16;
+        diagnostics.move_world_sent = diagnostics.move_world_sent.saturating_add(1);
+        diagnostics.last_dx_milli = dx_milli;
+        diagnostics.last_dz_milli = dz_milli;
+        if let Some(udp) = gameplay_udp.as_deref() {
+            let _ = udp.socket.send(format!("MOVE {} {}\n", dx_milli, dz_milli).as_bytes());
+        } else {
+            send(GameplayCommandKind::MoveWorld { dx_milli, dz_milli });
+        }
+    }
 
     if keys.just_pressed(KeyCode::KeyG) {
         send(GameplayCommandKind::GatherFootBlock);
@@ -852,6 +948,7 @@ fn setup_world(
 ) {
     let pipeline = lk2_core::world::terrain::presets::by_name(preset_name_static());
     *game_world = lk2_core::world::World::with_pipeline(constant::WORLD_SIZE, pipeline);
+    install_huge_spawn_platform(&mut game_world);
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     for k in ResourceKind::ALL {
@@ -895,13 +992,43 @@ fn setup_world(
     );
 }
 
-fn sync_player_combat_anchor(mut q: Query<&mut Transform, With<Player>>, player: Res<PlayerState>) {
+fn sync_player_combat_anchor(
+    mut q: Query<&mut Transform, With<Player>>,
+    player: Res<PlayerState>,
+    run_mode: Res<ClientRunMode>,
+    cfg: Res<RenderConfig>,
+    diagnostics: Res<OnlineCommandDiagnostics>,
+    gameplay_udp: Option<Res<OnlineGameplayUdp>>,
+    time: Res<Time>,
+    mut last_probe: Local<f32>,
+) {
     for mut transform in q.iter_mut() {
         transform.translation = player.pos;
     }
+    if *run_mode == ClientRunMode::Online && time.elapsed_secs() - *last_probe >= 1.0 {
+        *last_probe = time.elapsed_secs();
+        let _ = std::fs::write(
+            "screenshots/online_local_probe.json",
+            serde_json::json!({
+                "wall_secs": time.elapsed_secs(),
+                "run_mode": format!("{:?}", *run_mode),
+                "auto_walk": cfg.auto_walk,
+                "mouse_look": cfg.mouse_look,
+                "online_udp": gameplay_udp.is_some(),
+                "sender_entities": diagnostics.sender_entities,
+                "move_world_sent": diagnostics.move_world_sent,
+                "last_dx_milli": diagnostics.last_dx_milli,
+                "last_dz_milli": diagnostics.last_dz_milli,
+                "player_pos": [player.pos.x, player.pos.y, player.pos.z],
+                "player_block_pos": player.block_pos,
+            })
+            .to_string(),
+        );
+    }
 }
 
-fn self_check(
+fn run_startup_self_check_once(
+    mut fired: Local<bool>,
     game_world: Res<GameWorld>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
@@ -909,7 +1036,11 @@ fn self_check(
     eco: Res<EcoCycle>,
     mut obs: ResMut<TickObserver>,
 ) {
-    info!(">>> 启动自检 100 tick ...");
+    if *fired {
+        return;
+    }
+    *fired = true;
+    info!(">>> running deferred startup self-check for 100 ticks");
     let report = lk2_core::diagnostics::run_self_check(
         &game_world,
         &pool,
@@ -924,11 +1055,13 @@ fn self_check(
         ],
         100,
     );
-    let violations = report.violations;
-    if violations.is_empty() {
-        info!(">>> 自检 ✅ 100 tick 全部通过");
+    if report.violations.is_empty() {
+        info!(">>> deferred startup self-check passed");
     } else {
-        error!(">>> 自检 ❌ {} 处违例", violations.len());
+        error!(
+            ">>> deferred startup self-check failed: {} violations",
+            report.violations.len()
+        );
     }
     info!("{}", obs.report());
 }
@@ -1002,11 +1135,6 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
             RigidBody::Kinematic,
             Collider::capsule(0.3, 0.9),
             LinearVelocity::default(),
-            lk2_core::controller::PvPController::new()
-                .with_speed(5.0)
-                .with_jump(8.0)
-                .with_knockback_resistance(0.1),
-            lk2_core::controller::PlayerCollider::default(),
             CombatState::default(),
             ActionState::<PlayerAction>::default(),
             WeaponStats {

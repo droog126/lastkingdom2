@@ -11,6 +11,7 @@ use lk2_core::player::PlayerState;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::world::World as GameWorld;
 
+use crate::render::{CameraAngles, CameraMode};
 use crate::ui::ClientRunMode;
 
 pub const FIRST_SCREENSHOT_MIN_FRAME: u64 = 500;
@@ -33,6 +34,8 @@ pub fn periodic_screenshot(
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
+    camera_angles: Res<CameraAngles>,
+    camera_mode: Res<CameraMode>,
 ) {
     let now = {
         use std::sync::OnceLock;
@@ -85,6 +88,8 @@ pub fn periodic_screenshot(
         &obs,
         &game_world,
         *run_mode,
+        &camera_angles,
+        *camera_mode,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
@@ -116,13 +121,20 @@ pub fn tick_recorder(
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
     run_mode: Res<ClientRunMode>,
+    camera_angles: Res<CameraAngles>,
+    camera_mode: Res<CameraMode>,
 ) {
-    if clock.tick == 0 || clock.tick % 5 != 0 || clock.tick == rec.last_dump_tick {
+    let sample_tick = if clock.tick > 0 {
+        clock.tick
+    } else {
+        clock.frame_tick / 60
+    };
+    if sample_tick == 0 || sample_tick % 5 != 0 || sample_tick == rec.last_dump_tick {
         return;
     }
-    rec.last_dump_tick = clock.tick;
-    rec.current_iter = clock.tick as u32;
-    let path = format!("screenshots/state_t{}.json", clock.tick);
+    rec.last_dump_tick = sample_tick;
+    rec.current_iter = sample_tick as u32;
+    let path = format!("screenshots/state_t{}.json", sample_tick);
     let state = build_state_json(
         &time,
         &clock,
@@ -134,6 +146,8 @@ pub fn tick_recorder(
         &obs,
         &game_world,
         *run_mode,
+        &camera_angles,
+        *camera_mode,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
@@ -152,8 +166,10 @@ fn build_state_json(
     obs: &TickObserver,
     game_world: &GameWorld,
     run_mode: ClientRunMode,
+    camera_angles: &CameraAngles,
+    camera_mode: CameraMode,
 ) -> serde_json::Value {
-    lk2_core::diagnostics::build_state_json(
+    let mut state = lk2_core::diagnostics::build_state_json(
         time,
         clock,
         player,
@@ -164,7 +180,58 @@ fn build_state_json(
         obs,
         game_world,
         run_mode.snapshot_role(),
-    )
+    );
+    if let Some(obj) = state.as_object_mut() {
+        let first_person_forward = first_person_forward(camera_angles.yaw, camera_angles.pitch);
+        let eye = player.pos + Vec3::Y * 1.7;
+        let hit = ray_voxel_first_hit(game_world, eye, first_person_forward, 160.0);
+        obj.insert(
+            "camera".to_string(),
+            serde_json::json!({
+                "mode": format!("{:?}", camera_mode),
+                "yaw": camera_angles.yaw,
+                "pitch": camera_angles.pitch,
+                "first_person_eye": [eye.x, eye.y, eye.z],
+                "first_person_forward": [first_person_forward.x, first_person_forward.y, first_person_forward.z],
+                "center_ray_hit": hit.map(|h| serde_json::json!({
+                    "block_pos": h.0,
+                    "point": [h.1.x, h.1.y, h.1.z],
+                    "distance": h.2,
+                    "block": format!("{:?}", h.3),
+                })),
+            }),
+        );
+    }
+    state
+}
+
+fn first_person_forward(yaw: f32, pitch: f32) -> Vec3 {
+    let (sy, cy) = yaw.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    Vec3::new(sy * cp, sp, -cy * cp).normalize_or_zero()
+}
+
+fn ray_voxel_first_hit(
+    world: &GameWorld,
+    origin: Vec3,
+    dir: Vec3,
+    max_dist: f32,
+) -> Option<([i32; 3], Vec3, f32, lk2_core::world::BlockType)> {
+    let step = 0.05;
+    let steps = (max_dist / step) as i32;
+    for i in 1..=steps {
+        let t = i as f32 * step;
+        let p = origin + dir * t;
+        let block = [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+        if !world.in_bounds(block[0], block[1], block[2]) {
+            continue;
+        }
+        let kind = world.get(block[0], block[1], block[2]);
+        if kind.is_solid() {
+            return Some((block, p, t, kind));
+        }
+    }
+    None
 }
 
 fn build_state_diff_for_iter(iter_id: u32, state: &serde_json::Value) -> Option<serde_json::Value> {

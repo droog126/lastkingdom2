@@ -2,7 +2,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::prelude::*;
 
-use super::marching_cubes::{McVertex, build_mesh as mc_build_mesh};
+use super::marching_cubes::{build_mesh as mc_build_mesh, McVertex};
 use super::scalar_field::build_density_field;
 use lk2_core::world::World as GameWorld;
 
