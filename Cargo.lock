@@ -5449,6 +5449,7 @@ dependencies = [
  "lightyear_connection",
  "lightyear_inputs_leafwing",
  "lightyear_netcode",
+ "lightyear_replication",
  "lk2-core",
  "ndshape",
  "serde",

@@ -441,7 +441,18 @@ fn iter_ready(iter: &Path) -> bool {
     let Ok(json) = serde_json::from_str::<Value>(&text) else {
         return false;
     };
-    if json.get("tick").and_then(Value::as_i64).unwrap_or(0) < 500 {
+    // iter_210: in online mode SimClock.tick stays at 0 (server runs the
+    // authoritative sim), so the tick >= 500 gate would never fire. Accept
+    // either an offline tick >= 500 OR an online iter that has run at least
+    // 4 wall seconds and produced a >= 30KB screenshot.
+    let role = json.get("role").and_then(Value::as_str).unwrap_or("");
+    let tick_ok = json.get("tick").and_then(Value::as_i64).unwrap_or(0) >= 500;
+    let wall_ok = json.get("wall_secs").and_then(Value::as_f64).unwrap_or(0.0) >= 4.0;
+    if role == "client_offline" {
+        if !tick_ok {
+            return false;
+        }
+    } else if !wall_ok {
         return false;
     }
     fs::read_dir(iter).ok().into_iter().flatten().filter_map(|e| e.ok()).any(|e| {

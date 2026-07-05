@@ -1,11 +1,10 @@
 use bevy::prelude::*;
-use lk2_core::controller::components::PvPController;
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::player::PlayerState;
 use lk2_core::world::World as GameWorld;
 
-use crate::render::scalar_field::effective_ground_height;
 use crate::render::CameraAngles;
+use crate::render::scalar_field::effective_ground_height;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -206,12 +205,17 @@ pub fn eco_fruit_marker_count(fruit: u32) -> u32 {
 
 const ECO_CO2_BUBBLE_COUNT: u32 = 6;
 
+// Animation-speed normalization baseline (PlayerState.pos delta m/s => smoothed_speed ~1.0).
+// Matches the offline walk speed used in render::player_input's MANUAL_MOVE_SPEED.
+const MANUAL_MOVE_ANIM_SPEED: f32 = 4.5;
+
 #[derive(Resource, Default)]
 pub struct PlayerAnimState {
     pub step_phase: f32,
     pub smoothed_speed: f32,
     pub smoothed_move_world: Vec2,
     pub last_pos_y: f32,
+    pub last_horizontal_pos_xz: Option<Vec2>,
     pub vertical_vel: f32,
     pub initialized: bool,
 }
@@ -219,31 +223,42 @@ pub struct PlayerAnimState {
 pub fn update_player_anim_state(
     time: Res<Time>,
     player: Res<PlayerState>,
-    ctrl: Query<&PvPController>,
-    camera_angles: Res<CameraAngles>,
     mut state: ResMut<PlayerAnimState>,
 ) {
     let dt = time.delta_secs().max(0.0001);
-    let Ok(ctrl) = ctrl.single() else {
-        return;
-    };
 
     if !state.initialized {
         state.last_pos_y = player.pos.y;
+        state.last_horizontal_pos_xz = Some(Vec2::new(player.pos.x, player.pos.z));
         state.initialized = true;
     }
 
     let smooth_k = 1.0 - (-dt * 8.0).exp();
 
-    let raw_speed = ctrl.move_input.length().min(1.0);
+    // Derive animation speed + direction from PlayerState.pos deltas.
+    // In offline mode, PlayerState.pos is updated by try_player_move_continuous.
+    // In online mode, PlayerState.pos mirrors the server-replicated PlayerPos
+    // (wired via apply_networked_position), so we still get a moving avatar.
+    let prev = state.last_horizontal_pos_xz.unwrap_or(Vec2::new(player.pos.x, player.pos.z));
+    let curr = Vec2::new(player.pos.x, player.pos.z);
+    let delta_h = (curr - prev) / dt;
+    state.last_horizontal_pos_xz = Some(curr);
+    state.last_pos_y = player.pos.y;
+
+    // Normalize to a unit vector for direction; speed is the magnitude scaled
+    // to roughly match the legacy 0..1 move_input range (manual walk ~4.5 m/s).
+    let raw_h = delta_h.length();
+    let direction = if raw_h > 0.0001 {
+        delta_h / raw_h
+    } else {
+        Vec2::ZERO
+    };
+    // 4.5 m/s baseline maps to 1.0 (sprint ~6.75 above is fine, clamped below).
+    let raw_speed = (raw_h / MANUAL_MOVE_ANIM_SPEED).min(1.5);
     state.smoothed_speed = state.smoothed_speed + (raw_speed - state.smoothed_speed) * smooth_k;
 
-    let yaw = camera_angles.yaw;
-    let (sy, cy) = yaw.sin_cos();
-    let (mx, mz) = (ctrl.move_input.x, ctrl.move_input.y);
-    let world_x = cy * mz + sy * mx;
-    let world_z = -sy * mz + cy * mx;
-    let target_move = Vec2::new(world_x, world_z);
+    // direction is in world (x,z); avatar facing tracks actual world movement.
+    let target_move = direction;
     state.smoothed_move_world = state.smoothed_move_world.lerp(target_move, smooth_k);
 
     let step_freq = 1.6 + 2.4 * state.smoothed_speed;
@@ -278,9 +293,15 @@ pub fn spawn_pretty(
     player: Res<PlayerState>,
     cfg: Res<PrettyConfig>,
     asset_server: Res<AssetServer>,
+    camera_mode: Res<crate::render::CameraMode>,
+    camera_angles: Res<CameraAngles>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // First-person hides only camera-obstructing presentation actors. Low
+    // ground props stay visible so the map does not look empty.
+    let first_person_mode = *camera_mode == crate::render::CameraMode::FirstPerson;
+
     #[cfg(feature = "audit-pretty-models")]
     #[allow(unused_variables, unreachable_code)]
     {
@@ -326,7 +347,7 @@ pub fn spawn_pretty(
         );
     }
 
-    {
+    if !first_person_mode {
         let grass_size = 180.0_f32;
         let ground_y =
             effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
@@ -344,7 +365,7 @@ pub fn spawn_pretty(
         ));
     }
 
-    {
+    if !first_person_mode {
         commands.spawn((
             Mesh3d(meshes.add(Cylinder::new(0.8, 0.05))),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -378,7 +399,7 @@ pub fn spawn_pretty(
         ));
     }
 
-    if cfg.show_player_avatar {
+    if cfg.show_player_avatar && !first_person_mode {
         let base = player.pos;
 
         // i=0 head
@@ -629,7 +650,7 @@ pub fn spawn_pretty(
         );
     }
 
-    if cfg.show_monster_cubes {
+    if cfg.show_monster_cubes && !first_person_mode {
         let monster_kinds = [
             (Color::srgb(0.5, 0.85, 0.2), "Snake"),
             (Color::srgb(0.3, 0.7, 0.95), "FrostElf"),
@@ -662,12 +683,21 @@ pub fn spawn_pretty(
         info!("👹 5 个怪物球体已 spawn (7.5-14.7m 圆周, 半径 1.3m, 朝 player 走)");
     }
 
-    let cloud_layouts: [(f32, f32, f32, f32, f32); 4] = [
-        (0.7, 22.0, 18.0, 1.0, 0.7),
-        (2.1, 18.0, 20.0, 0.8, 1.0),
-        (3.8, 25.0, 22.0, 1.2, 0.8),
-        (5.4, 16.0, 19.0, 0.7, 0.7),
-    ];
+    let cloud_layouts: [(f32, f32, f32, f32, f32); 4] = if first_person_mode {
+        [
+            (0.7, 42.0, 33.0, 1.0, 0.7),
+            (2.1, 48.0, 36.0, 0.8, 1.0),
+            (3.8, 56.0, 39.0, 1.2, 0.8),
+            (5.4, 46.0, 35.0, 0.7, 0.7),
+        ]
+    } else {
+        [
+            (0.7, 22.0, 18.0, 1.0, 0.7),
+            (2.1, 18.0, 20.0, 0.8, 1.0),
+            (3.8, 25.0, 22.0, 1.2, 0.8),
+            (5.4, 16.0, 19.0, 0.7, 0.7),
+        ]
+    };
     for (angle, r, base_y, ex, ez) in cloud_layouts.iter().copied() {
         let cx = player.pos.x + angle.cos() * r;
         let cz = player.pos.z + angle.sin() * r;
@@ -720,32 +750,54 @@ pub fn spawn_pretty(
 
     let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
 
-    for i in 0..8 {
-        let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
-        let r = 13.0;
-        let t_x = player.pos.x + angle.cos() * r;
-        let t_z = player.pos.z + angle.sin() * r;
-
-        for h in 0..3 {
-            spawn_cube(
+    if first_person_mode {
+        spawn_first_person_village(
+            &mut commands,
+            &asset_server,
+            &game_world,
+            player.pos,
+            camera_angles.yaw,
+        );
+        if kenney_enabled {
+            spawn_first_person_camp_props(
                 &mut commands,
-                &mut meshes,
-                &mut materials,
-                Vec3::new(t_x, ground_y + 1.10 + h as f32, t_z),
-                Vec3::new(1.10, 2.10, 1.10),
-                Color::srgb(0.45, 0.27, 0.10),
+                &asset_server,
+                &game_world,
+                player.pos,
+                camera_angles.yaw,
             );
         }
+        return;
+    }
 
-        for dy in 0..3 {
-            spawn_cube(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                Vec3::new(t_x, ground_y + 3.55 + dy as f32, t_z),
-                Vec3::new(2.40, 2.20, 2.40),
-                Color::srgb(0.25, 0.55, 0.20),
-            );
+    if !first_person_mode {
+        for i in 0..8 {
+            let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
+            let r = 13.0;
+            let t_x = player.pos.x + angle.cos() * r;
+            let t_z = player.pos.z + angle.sin() * r;
+
+            for h in 0..3 {
+                spawn_cube(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    Vec3::new(t_x, ground_y + 1.10 + h as f32, t_z),
+                    Vec3::new(1.10, 2.10, 1.10),
+                    Color::srgb(0.45, 0.27, 0.10),
+                );
+            }
+
+            for dy in 0..3 {
+                spawn_cube(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    Vec3::new(t_x, ground_y + 3.55 + dy as f32, t_z),
+                    Vec3::new(2.40, 2.20, 2.40),
+                    Color::srgb(0.25, 0.55, 0.20),
+                );
+            }
         }
     }
 
@@ -812,38 +864,70 @@ pub fn spawn_pretty(
         );
     }
 
-    let hill_distance = 28.0;
-    let hill_offsets: [(f32, f32); 4] = [
-        (hill_distance, hill_distance),
-        (-hill_distance, hill_distance),
-        (hill_distance, -hill_distance),
-        (-hill_distance, -hill_distance),
-    ];
-    for (hx, hz) in hill_offsets.iter() {
-        let h_x = player.pos.x + hx;
-        let h_z = player.pos.z + hz;
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(8.0, 4.5, 8.0))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.20, 0.42, 0.18),
-                emissive: Color::srgb(0.04, 0.08, 0.03).into(),
-                perceptual_roughness: 0.95,
-                metallic: 0.0,
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            })),
-            Transform::from_translation(Vec3::new(h_x, ground_y + 2.25, h_z)),
-        ));
+    for i in 0..28 {
+        let angle = i as f32 * 2.3999631;
+        let r = 4.0 + (i % 7) as f32 * 2.15;
+        let x = player.pos.x + angle.cos() * r;
+        let z = player.pos.z + angle.sin() * r;
+        let ground = effective_ground_height(&game_world, x as i32, z as i32);
+        let color = match i % 4 {
+            0 => Color::srgb(0.28, 0.55, 0.18),
+            1 => Color::srgb(0.36, 0.62, 0.22),
+            2 => Color::srgb(0.18, 0.45, 0.26),
+            _ => Color::srgb(0.52, 0.42, 0.24),
+        };
+        spawn_cube(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            Vec3::new(x, ground + 0.18, z),
+            Vec3::new(0.32, 0.36, 0.32),
+            color,
+        );
     }
+
+    // Kenney landmarks + decorative markers stay visible in first-person so the
+    // map does not look bare. Y is anchored to player.pos.y, NOT ground_y, so
+    // the props sit at the player's eye level even when the surrounding terrain
+    // has tall hills (ground_y at the offset (x, z) can be 35+ while player.pos.y
+    // is ~15 — that mismatch was the root cause of "kenney landmark Y=34.65, 19m
+    // above player's head, first-person cannot see").
+    let landmark_anchor_y = player.pos.y;
     spawn_v2_crown_season_markers(
         &mut commands,
         &mut meshes,
         &mut materials,
         player.pos,
-        ground_y,
+        landmark_anchor_y,
     );
     if kenney_enabled {
-        spawn_kenney_landmarks(&mut commands, &asset_server, player.pos, ground_y);
+        spawn_kenney_landmarks(&mut commands, &asset_server, player.pos, landmark_anchor_y);
+    }
+
+    if !first_person_mode {
+        let hill_distance = 28.0;
+        let hill_offsets: [(f32, f32); 4] = [
+            (hill_distance, hill_distance),
+            (-hill_distance, hill_distance),
+            (hill_distance, -hill_distance),
+            (-hill_distance, -hill_distance),
+        ];
+        for (hx, hz) in hill_offsets.iter() {
+            let h_x = player.pos.x + hx;
+            let h_z = player.pos.z + hz;
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(8.0, 4.5, 8.0))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.20, 0.42, 0.18),
+                    emissive: Color::srgb(0.04, 0.08, 0.03).into(),
+                    perceptual_roughness: 0.95,
+                    metallic: 0.0,
+                    alpha_mode: AlphaMode::Blend,
+                    ..default()
+                })),
+                Transform::from_translation(Vec3::new(h_x, ground_y + 2.25, h_z)),
+            ));
+        }
     }
 
     #[cfg(feature = "audit-pretty-models")]
@@ -857,11 +941,199 @@ pub fn spawn_pretty(
     );
 }
 
+fn local_offset_from_yaw(offset: Vec3, yaw: f32) -> Vec3 {
+    let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
+    let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
+    right * offset.x + Vec3::Y * offset.y + forward * offset.z
+}
+
+fn spawn_scene_asset(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    yaw: f32,
+    path: &'static str,
+    offset: Vec3,
+    scale: f32,
+    asset_yaw: f32,
+) {
+    let world_offset = local_offset_from_yaw(offset, yaw);
+    let x = player_pos.x + world_offset.x;
+    let z = player_pos.z + world_offset.z;
+    let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+    let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
+    commands.spawn((
+        WorldAssetRoot(scene),
+        Transform::from_translation(Vec3::new(x, ground_y + offset.y, z))
+            .with_rotation(Quat::from_rotation_y(yaw + asset_yaw))
+            .with_scale(Vec3::splat(scale)),
+    ));
+}
+
+fn spawn_first_person_village(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    yaw: f32,
+) {
+    const BUILDINGS: &[(&str, Vec3, f32, f32)] = &[
+        (
+            "procedural/pretty/house_small.glb",
+            Vec3::new(-7.0, 0.0, 20.0),
+            2.2,
+            0.20,
+        ),
+        (
+            "procedural/pretty/tavern.glb",
+            Vec3::new(7.0, 0.0, 23.0),
+            2.1,
+            -0.25,
+        ),
+        (
+            "procedural/pretty/well.glb",
+            Vec3::new(0.0, 0.0, 18.0),
+            1.7,
+            0.0,
+        ),
+        (
+            "procedural/pretty/barn.glb",
+            Vec3::new(-12.0, 0.0, 30.0),
+            2.3,
+            0.35,
+        ),
+        (
+            "procedural/pretty/windmill.glb",
+            Vec3::new(13.0, 0.0, 33.0),
+            2.2,
+            -0.45,
+        ),
+        (
+            "procedural/pretty/watchtower.glb",
+            Vec3::new(-18.0, 0.0, 38.0),
+            2.1,
+            0.10,
+        ),
+        (
+            "procedural/pretty/market_stall.glb",
+            Vec3::new(5.0, 0.0, 15.0),
+            1.8,
+            0.65,
+        ),
+        (
+            "procedural/pretty/fence.glb",
+            Vec3::new(-4.0, 0.0, 13.0),
+            2.0,
+            1.57,
+        ),
+        (
+            "procedural/pretty/fence.glb",
+            Vec3::new(10.0, 0.0, 17.0),
+            2.0,
+            1.57,
+        ),
+        (
+            "procedural/pretty/signpost.glb",
+            Vec3::new(-1.8, 0.0, 12.0),
+            1.4,
+            -0.35,
+        ),
+        (
+            "procedural/pretty/lantern_post.glb",
+            Vec3::new(3.2, 0.0, 12.0),
+            1.6,
+            0.0,
+        ),
+        (
+            "procedural/pretty/crate.glb",
+            Vec3::new(-8.5, 0.0, 14.0),
+            1.4,
+            0.4,
+        ),
+        (
+            "procedural/pretty/barrel.glb",
+            Vec3::new(8.8, 0.0, 14.5),
+            1.4,
+            -0.2,
+        ),
+    ];
+
+    for (path, offset, scale, asset_yaw) in BUILDINGS {
+        spawn_scene_asset(
+            commands,
+            asset_server,
+            game_world,
+            player_pos,
+            yaw,
+            path,
+            *offset,
+            *scale,
+            *asset_yaw,
+        );
+    }
+}
+
+fn spawn_first_person_camp_props(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    yaw: f32,
+) {
+    const PROPS: &[(&str, Vec3, f32, f32)] = &[
+        (
+            "kenney/curated/survival_props/kenney_tent.glb",
+            Vec3::new(-13.0, 0.0, 17.0),
+            1.4,
+            0.35,
+        ),
+        (
+            "kenney/curated/survival_props/kenney_campfire_pit.glb",
+            Vec3::new(-10.0, 0.0, 15.0),
+            1.3,
+            0.0,
+        ),
+        (
+            "kenney/curated/survival_props/kenney_workbench.glb",
+            Vec3::new(12.0, 0.0, 18.0),
+            1.3,
+            -0.45,
+        ),
+        (
+            "kenney/curated/characters/kenney_villager_male_a.glb",
+            Vec3::new(-2.8, 0.0, 16.0),
+            1.0,
+            0.15,
+        ),
+        (
+            "kenney/curated/characters/kenney_villager_female_a.glb",
+            Vec3::new(2.8, 0.0, 16.5),
+            1.0,
+            -0.15,
+        ),
+    ];
+
+    for (path, offset, scale, asset_yaw) in PROPS {
+        spawn_scene_asset(
+            commands,
+            asset_server,
+            game_world,
+            player_pos,
+            yaw,
+            path,
+            *offset,
+            *scale,
+            *asset_yaw,
+        );
+    }
+}
+
 fn spawn_kenney_landmarks(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     player_pos: Vec3,
-    ground_y: f32,
+    _ground_y: f32,
 ) {
     const LANDMARKS: &[(&str, &str, Vec3, f32, f32)] = &[
         (
@@ -1043,9 +1315,12 @@ fn spawn_kenney_landmarks(
 
     for (name, path, offset, scale, yaw) in LANDMARKS {
         let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(*path));
+        // Anchor Y to player.pos.y so kenney props sit at eye level in
+        // first-person view. The previous ground_y-based Y could be 19m+ above
+        // the player's head (see iter_200 task root cause C).
         let pos = Vec3::new(
             player_pos.x + offset.x,
-            ground_y + offset.y,
+            player_pos.y + offset.y,
             player_pos.z + offset.z,
         );
         commands.spawn((
@@ -1053,6 +1328,7 @@ fn spawn_kenney_landmarks(
             Transform::from_translation(pos)
                 .with_rotation(Quat::from_rotation_y(*yaw))
                 .with_scale(Vec3::splat(*scale)),
+            KenneyLandmark { rel: *offset, y_offset: offset.y },
         ));
         info!("[kenney] spawned landmark {} at {:?}", name, pos);
     }
@@ -1060,7 +1336,7 @@ fn spawn_kenney_landmarks(
 
 pub fn follow_kenney_landmarks(
     player: Res<PlayerState>,
-    game_world: Res<GameWorld>,
+    _game_world: Res<GameWorld>,
     camera_angles: Res<CameraAngles>,
     mut q: Query<(&mut Transform, &KenneyLandmark)>,
 ) {
@@ -1071,8 +1347,9 @@ pub fn follow_kenney_landmarks(
         let rel = right * landmark.rel.x + forward * landmark.rel.z;
         let x = player.pos.x + rel.x;
         let z = player.pos.z + rel.z;
-        let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
-        transform.translation = Vec3::new(x, ground_y + landmark.y_offset, z);
+        // Track player.pos.y instead of ground_y so props stay anchored to the
+        // player (which is what makes them visible in first-person).
+        transform.translation = Vec3::new(x, player.pos.y + landmark.y_offset, z);
     }
 }
 

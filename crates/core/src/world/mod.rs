@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use crate::constant::*;
-use crate::resource::{apply_transfer, ResourceKind, Transfer, TransferDst, TransferSrc};
+use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
 use crate::world::terrain::TerrainModule;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

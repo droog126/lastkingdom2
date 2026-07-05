@@ -3,6 +3,8 @@ use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
 
 use avian3d::prelude::{Collider, Gravity, LinearVelocity, PhysicsPlugins, RigidBody};
+use serde_json::json;
+use std::io::Write;
 use std::path::PathBuf;
 
 mod capture;
@@ -47,7 +49,9 @@ use crate::render::{
     spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
     update_animal_indicator, update_nest_indicator, update_nest_marker_positions,
 };
-use crate::ui::{ClientRunMode, setup_fonts, setup_hud, update_hud, update_tutorial_overlay};
+use crate::ui::{
+    ClientRunMode, setup_fonts, setup_hud, update_hud, update_nest_radar, update_tutorial_overlay,
+};
 
 const AUTO_DEMO_WAIT_TICKS: u64 = 120;
 
@@ -68,6 +72,41 @@ pub struct OnlineCommandDiagnostics {
     pub move_world_sent: u64,
     pub last_dx_milli: i16,
     pub last_dz_milli: i16,
+}
+
+#[derive(Resource)]
+pub(crate) struct OnlineMotionTrace {
+    pub(crate) enabled: bool,
+    file: Option<std::fs::File>,
+    sample_index: u64,
+    last_player_pos: Option<Vec3>,
+    last_camera_pos: Option<Vec3>,
+    last_server_pos: Option<Vec3>,
+    pub(crate) last_local_moved: bool,
+    pub(crate) last_local_attempted: bool,
+    pub(crate) last_local_reason: &'static str,
+    pub(crate) last_local_dir: [f32; 3],
+    pub(crate) last_local_distance: f32,
+    last_server_correction: f32,
+}
+
+impl Default for OnlineMotionTrace {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            file: None,
+            sample_index: 0,
+            last_player_pos: None,
+            last_camera_pos: None,
+            last_server_pos: None,
+            last_local_moved: false,
+            last_local_attempted: false,
+            last_local_reason: "none",
+            last_local_dir: [0.0, 0.0, 0.0],
+            last_local_distance: 0.0,
+            last_server_correction: 0.0,
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -271,7 +310,6 @@ fn main() {
         render_config.auto_walk = false;
         render_config.auto_keys = false;
         render_config.mouse_look = true;
-        render_config.smooth_terrain = false;
         tracing::info!("--first-person: CameraMode=FirstPerson, mouse_look=true");
     }
     if hold_forward_test {
@@ -305,6 +343,7 @@ fn main() {
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
         .init_resource::<NetworkSmoothingState>()
+        .init_resource::<OnlineMotionTrace>()
         .init_resource::<NestMarkerCount>()
         .init_resource::<PlayerAnimState>()
         .init_resource::<OnlineCommandDiagnostics>()
@@ -374,6 +413,7 @@ fn main() {
             player_input,
             send_online_gameplay_commands,
             first_person_camera,
+            record_online_motion_trace,
             held_weapon_follow,
             sync_player_combat_anchor,
         )
@@ -416,7 +456,10 @@ fn main() {
 
     app.add_systems(Update, freefly_movement.before(first_person_camera));
 
-    app.add_systems(Update, update_nest_marker_positions);
+    app.add_systems(
+        Update,
+        update_nest_marker_positions.run_if(resource_equals(CameraMode::ThirdPerson)),
+    );
 
     app.add_systems(
         Update,
@@ -442,6 +485,7 @@ fn main() {
             update_eco_visuals,
             end_tick_system.run_if(resource_equals(ClientRunMode::Offline)),
             update_hud,
+            update_nest_radar,
             update_tutorial_overlay,
             update_animal_indicator,
             update_nest_indicator,
@@ -523,17 +567,11 @@ fn apply_networked_position(
         count += 1;
     }
     if count > 0 && *run_mode == ClientRunMode::Online {
-        // iter_199: server is single source of truth in online mode. Mirror
-        // the replicated PlayerPos into PlayerState.pos so the first-person
-        // camera (which reads PlayerState.pos) tracks the authoritative
-        // server position. Block_pos is updated from the world coords so
-        // gather/place and other block-gridded systems still work.
-        player.pos = last_pos;
-        player.block_pos = [
-            last_pos.x.floor() as i32,
-            last_pos.y.floor() as i32,
-            last_pos.z.floor() as i32,
-        ];
+        // First-person camera feel is driven by local prediction in
+        // player_input. Keep replicated transforms current for debugging and
+        // remote entities, but do not snap PlayerState.pos back to the network
+        // echo every frame.
+        let _ = (&mut player, last_pos);
     }
 }
 
@@ -586,8 +624,8 @@ fn apply_server_pos_update(
         &mut lightyear::prelude::MessageReceiver<lk2_core::protocol::messages::ServerPosUpdate>,
     >,
     mut player: ResMut<PlayerState>,
+    mut trace: ResMut<OnlineMotionTrace>,
 ) {
-    let _ = &mut player;
     if *run_mode != ClientRunMode::Online {
         for mut receiver in receiver_q.iter_mut() {
             for _msg in receiver.receive() {}
@@ -605,8 +643,23 @@ fn apply_server_pos_update(
         }
     }
     if count > 0 {
+        // Keep the first-person camera on local prediction for normal movement.
+        // Packet echoes can be a few frames old; applying every one feels like a
+        // periodic hitch even when FPS is high. Only snap on a real desync.
+        let drift = player.pos.distance(last_pos);
+        trace.last_server_pos = Some(last_pos);
+        trace.last_server_correction = 0.0;
+        if drift > 1.5 {
+            player.pos = last_pos;
+            player.block_pos = [
+                last_pos.x.floor() as i32,
+                last_pos.y.floor() as i32,
+                last_pos.z.floor() as i32,
+            ];
+            trace.last_server_correction = drift;
+        }
         tracing::debug!(
-            "[net] drained {} ServerPosUpdate messages; last tick={} pos={:?}",
+            "[net] drained {} ServerPosUpdate messages; tick={} pos={:?}",
             count,
             last_tick,
             last_pos
@@ -711,6 +764,69 @@ fn apply_voxel_delta(
         snapshot.last_voxel_revision = delta.revision;
         spawned.last_player_block = [i32::MIN; 3];
     }
+}
+
+fn record_online_motion_trace(
+    run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
+    player: Res<PlayerState>,
+    camera_q: Query<&Transform, With<Camera3d>>,
+    mut trace: ResMut<OnlineMotionTrace>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    if !trace.enabled {
+        trace.enabled =
+            std::env::var("LK2_MOTION_TRACE").is_ok() || std::env::var("LK2_ONLINE_PROBE").is_ok();
+        if trace.enabled {
+            let _ = std::fs::create_dir_all("screenshots");
+            match std::fs::File::create("screenshots/online_motion_trace.jsonl") {
+                Ok(file) => trace.file = Some(file),
+                Err(err) => {
+                    warn!("[motion-trace] failed to create trace file: {err}");
+                    trace.enabled = false;
+                }
+            }
+        }
+    }
+    if !trace.enabled {
+        return;
+    }
+
+    let camera_pos = camera_q.single().ok().map(|tf| tf.translation);
+    let player_delta = trace.last_player_pos.map(|p| player.pos - p).unwrap_or(Vec3::ZERO);
+    let camera_delta = match (trace.last_camera_pos, camera_pos) {
+        (Some(prev), Some(curr)) => curr - prev,
+        _ => Vec3::ZERO,
+    };
+    let server_drift = trace.last_server_pos.map(|p| player.pos.distance(p)).unwrap_or(0.0);
+
+    let sample = json!({
+        "sample": trace.sample_index,
+        "wall_secs": time.elapsed_secs(),
+        "dt": time.delta_secs(),
+        "player_pos": [player.pos.x, player.pos.y, player.pos.z],
+        "player_block_pos": player.block_pos,
+        "player_delta": [player_delta.x, player_delta.y, player_delta.z],
+        "player_step_len": player_delta.length(),
+        "camera_pos": camera_pos.map(|p| [p.x, p.y, p.z]),
+        "camera_delta": [camera_delta.x, camera_delta.y, camera_delta.z],
+        "camera_step_len": camera_delta.length(),
+        "local_move_attempted": trace.last_local_attempted,
+        "local_move_moved": trace.last_local_moved,
+        "server_pos": trace.last_server_pos.map(|p| [p.x, p.y, p.z]),
+        "server_drift": server_drift,
+        "server_correction": trace.last_server_correction,
+    });
+
+    if let Some(file) = trace.file.as_mut() {
+        let _ = writeln!(file, "{sample}");
+    }
+    trace.sample_index = trace.sample_index.saturating_add(1);
+    trace.last_player_pos = Some(player.pos);
+    trace.last_camera_pos = camera_pos;
+    trace.last_server_correction = 0.0;
 }
 
 fn send_online_gameplay_commands(
@@ -964,14 +1080,29 @@ fn setup_world(
 
     let (sx, sz) =
         walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
+    // iter_210: fallback to SEA_LEVEL + 2 instead of an arbitrary 28m so that
+    // first-person view never spawns the player floating in the sky if
+    // standable_foot_y can't find a column (server's authoritative spawn uses
+    // the same SEA_LEVEL + 2 fallback at crates/server/src/main.rs:770).
+    let fallback_y = (constant::SEA_LEVEL + 2) as f32;
     let (spawn_pos, spawn) = player_spawn_position_at(&game_world, sx, sz).unwrap_or((
-        Vec3::new(sx as f32 + 0.5, 28.0, sz as f32 + 0.5),
-        [sx, 28, sz],
+        Vec3::new(sx as f32 + 0.5, fallback_y, sz as f32 + 0.5),
+        [sx, constant::SEA_LEVEL + 2, sz],
     ));
     player.block_pos = spawn;
     player.pos = spawn_pos;
 
-    if std::env::args().any(|a| a == "--auto-demo") {
+    // iter_210: --auto-demo previously hard-overrode player pos to (48.5, 16,
+    // 48.5) regardless of where the world actually has solid ground. With the
+    // default preset's SpawnHill plus install_huge_spawn_platform the real
+    // ground at (48, 48) is around y=15 (top of the platform leaves), so the
+    // legacy override was close but the spawn position computed from the
+    // world is now the authoritative answer. Keep the legacy override only
+    // when the auto-demo flag is set AND first-person is NOT active.
+    if std::env::args().any(|a| a == "--auto-demo")
+        && !std::env::args().any(|a| a == "--first-person")
+        && (spawn_pos - Vec3::new(48.5, 16.0, 48.5)).length() < 2.0
+    {
         player.block_pos = [48, 16, 48];
         player.pos = Vec3::new(48.5, 16.0, 48.5);
     }
@@ -998,6 +1129,7 @@ fn sync_player_combat_anchor(
     run_mode: Res<ClientRunMode>,
     cfg: Res<RenderConfig>,
     diagnostics: Res<OnlineCommandDiagnostics>,
+    trace: Res<OnlineMotionTrace>,
     gameplay_udp: Option<Res<OnlineGameplayUdp>>,
     time: Res<Time>,
     mut last_probe: Local<f32>,
@@ -1005,7 +1137,10 @@ fn sync_player_combat_anchor(
     for mut transform in q.iter_mut() {
         transform.translation = player.pos;
     }
-    if *run_mode == ClientRunMode::Online && time.elapsed_secs() - *last_probe >= 1.0 {
+    if *run_mode == ClientRunMode::Online
+        && std::env::var("LK2_ONLINE_PROBE").is_ok()
+        && time.elapsed_secs() - *last_probe >= 1.0
+    {
         *last_probe = time.elapsed_secs();
         let _ = std::fs::write(
             "screenshots/online_local_probe.json",
@@ -1019,6 +1154,13 @@ fn sync_player_combat_anchor(
                 "move_world_sent": diagnostics.move_world_sent,
                 "last_dx_milli": diagnostics.last_dx_milli,
                 "last_dz_milli": diagnostics.last_dz_milli,
+                "local_move_attempted": trace.last_local_attempted,
+                "local_move_moved": trace.last_local_moved,
+                "local_move_reason": trace.last_local_reason,
+                "local_move_dir": trace.last_local_dir,
+                "local_move_distance": trace.last_local_distance,
+                "motion_trace_enabled": trace.enabled,
+                "motion_trace_samples": trace.sample_index,
                 "player_pos": [player.pos.x, player.pos.y, player.pos.z],
                 "player_block_pos": player.block_pos,
             })

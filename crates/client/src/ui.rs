@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::pvp_systems::HealthHudMarker;
-use crate::render::{AnimalIndicatorText, NestIndicatorText, Player};
+use crate::render::{AnimalIndicatorText, CameraAngles, NestIndicatorText, Player};
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::combat::{
@@ -45,6 +45,11 @@ pub struct HudObjectiveText;
 pub struct HudObjectiveFlashText {
     pub shown_at_secs: f32,
     pub text: String,
+}
+
+#[derive(Component)]
+pub struct NestRadarDot {
+    pub slot: usize,
 }
 
 #[derive(Resource)]
@@ -235,6 +240,49 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         HudStaText,
     ));
     commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(82),
+            right: px(12),
+            width: px(86),
+            height: px(86),
+            border_radius: BorderRadius::all(px(43)),
+            border: UiRect::all(px(1)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.04, 0.06, 0.08, 0.46)),
+        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.22)),
+        children![
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(41),
+                    top: px(41),
+                    width: px(4),
+                    height: px(4),
+                    border_radius: BorderRadius::all(px(2)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.90)),
+            ),
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(40),
+                    top: px(8),
+                    width: px(6),
+                    height: px(6),
+                    border_radius: BorderRadius::all(px(3)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(1.0, 0.85, 0.25, 0.45)),
+            ),
+            radar_dot(0),
+            radar_dot(1),
+            radar_dot(2),
+        ],
+    ));
+    commands.spawn((
         Text::new("Phase: --"),
         ui_text_font(&fonts.cn, 10.0),
         ui_text_layout(Justify::Left),
@@ -276,6 +324,84 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         },
         HudObjectiveFlashText { shown_at_secs: -100.0, text: String::new() },
     ));
+}
+
+fn radar_dot(slot: usize) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(39),
+            top: px(39),
+            width: px(8),
+            height: px(8),
+            display: Display::None,
+            border_radius: BorderRadius::all(px(4)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(1.0, 0.35, 0.25, 0.90)),
+        NestRadarDot { slot },
+    )
+}
+
+pub fn update_nest_radar(
+    player: Res<PlayerState>,
+    angles: Res<CameraAngles>,
+    monsters: Res<MonsterEcosystem>,
+    mut q: Query<(&NestRadarDot, &mut Node, &mut BackgroundColor)>,
+) {
+    let player_x = player.pos.x;
+    let player_z = player.pos.z;
+    let (sy, cy) = angles.yaw.sin_cos();
+    let forward = Vec2::new(sy, -cy);
+    let right = Vec2::new(cy, sy);
+
+    let mut nests: Vec<(f32, Vec2, Color)> = Vec::new();
+    for kingdom in monsters.kingdoms.values() {
+        if kingdom.destroyed {
+            continue;
+        }
+        for nest in kingdom.nests.values() {
+            if nest.individuals.is_empty() {
+                continue;
+            }
+            let v = Vec2::new(
+                nest.center[0] as f32 + 0.5 - player_x,
+                nest.center[2] as f32 + 0.5 - player_z,
+            );
+            let color = match nest.biome {
+                lk2_core::world::Biome::Desert => Color::srgba(1.0, 0.78, 0.22, 0.92),
+                lk2_core::world::Biome::Jungle => Color::srgba(0.25, 0.95, 0.40, 0.92),
+                lk2_core::world::Biome::Tundra => Color::srgba(0.45, 0.82, 1.0, 0.92),
+            };
+            nests.push((v.length_squared(), v, color));
+        }
+    }
+    nests.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    for (dot, mut node, mut bg) in q.iter_mut() {
+        let Some((_, v, color)) = nests.get(dot.slot).copied() else {
+            node.display = Display::None;
+            continue;
+        };
+        let local = Vec2::new(v.dot(right), v.dot(forward));
+        let p = radar_project(local, 80.0, 34.0);
+        node.display = Display::Flex;
+        node.left = px(43.0 + p.x - 4.0);
+        node.top = px(43.0 - p.y - 4.0);
+        bg.0 = color;
+    }
+}
+
+fn radar_project(local: Vec2, max_world_dist: f32, radius_px: f32) -> Vec2 {
+    if local.length_squared() < 0.0001 {
+        return Vec2::ZERO;
+    }
+    let scaled = local * (radius_px / max_world_dist);
+    if scaled.length() > radius_px {
+        scaled.normalize() * radius_px
+    } else {
+        scaled
+    }
 }
 
 pub fn update_hud(
@@ -482,7 +608,8 @@ pub fn format_main_hud(
 
 #[cfg(test)]
 mod tests {
-    use super::format_main_hud;
+    use super::{format_main_hud, radar_project};
+    use bevy::prelude::Vec2;
 
     #[test]
     fn format_main_hud_includes_eco_cycle() {
@@ -494,5 +621,15 @@ mod tests {
         assert!(s.contains("berries 10/10"));
         assert!(s.contains("CO2 0.8"));
         assert!(s.contains("eat/grow 11/12"));
+    }
+
+    #[test]
+    fn radar_project_clamps_to_circle() {
+        let near = radar_project(Vec2::new(20.0, 0.0), 80.0, 34.0);
+        assert!((near.x - 8.5).abs() < 0.01);
+        assert!(near.y.abs() < 0.01);
+
+        let far = radar_project(Vec2::new(1000.0, 1000.0), 80.0, 34.0);
+        assert!(far.length() <= 34.01);
     }
 }

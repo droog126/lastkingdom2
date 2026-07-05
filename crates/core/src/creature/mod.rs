@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
+use crate::combat::Health as CombatHealth;
 #[cfg(feature = "client-render")]
 use crate::combat::{
     AttackState, BlockState, Downed, InputBuffer, Knockback, ParryWindow, Stamina, StunState,
 };
-use crate::combat::Health as CombatHealth;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;

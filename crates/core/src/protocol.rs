@@ -187,9 +187,22 @@ impl Plugin for ProtocolPlugin {
 
         app.init_resource::<MessageRegistry>();
 
-        app.add_plugins(lightyear_inputs_leafwing::prelude::InputPlugin::<
-            PlayerAction,
-        >::default());
+        // NOTE: do NOT add `lightyear_inputs_leafwing::prelude::InputPlugin`
+        // here. We send gameplay commands over a raw UDP socket
+        // (port = server_port + 1) instead of via lightyear's InputMessage
+        // channel. Registering InputPlugin<PlayerAction> on the server
+        // installs ServerInputPlugin, which adds a MessageReceiver<InputMessage<...>>
+        // to each client entity and tries to deserialize every incoming packet
+        // as an InputMessage. The client never sends lightyear InputMessages
+        // (its `MessageWriter<GameplayCommand>` only writes GameplayCommand),
+        // so every packet is misinterpreted, the embedded `InputTarget::Entity`
+        // references deserialize as 0 (PLACEHOLDER) and the server logs
+        // "Attempting to deserialize an invalid entity." ~5ms — flooding
+        // the log without affecting gameplay. Removing InputPlugin from the
+        // shared ProtocolPlugin drops that receiver and silences the storm.
+        // The client collects ActionState<PlayerAction> manually in
+        // `collect_keys_to_action_state`, so no leafwing InputManagerPlugin
+        // is required there either.
 
         app.register_message::<messages::AttackInput>()
             .add_direction(NetworkDirection::ClientToServer);

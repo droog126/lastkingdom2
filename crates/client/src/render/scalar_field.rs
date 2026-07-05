@@ -67,25 +67,29 @@ pub fn build_density_field(world: &GameWorld, min: [i32; 3], max: [i32; 3]) -> S
 }
 
 pub fn effective_ground_height(world: &GameWorld, x: i32, z: i32) -> f32 {
-    match world.pipeline.surface_f32(x, z) {
+    match find_highest_standable_top_y(world, x, z) {
         Some(h) => h,
-
-        None => find_first_solid_y(world, x, z) as f32,
+        None => world.pipeline.surface_f32(x, z).unwrap_or(world.size as f32),
     }
 }
 
-fn find_first_solid_y(world: &GameWorld, x: i32, z: i32) -> i32 {
-    for y in 0..world.size {
-        if world.get(x, y, z).is_solid() {
-            return y;
+fn find_highest_standable_top_y(world: &GameWorld, x: i32, z: i32) -> Option<f32> {
+    for y in (1..(world.size - 2)).rev() {
+        if world.get(x, y, z).is_solid()
+            && world.get(x, y - 1, z).is_solid()
+            && !world.get(x, y + 1, z).is_solid()
+            && !world.get(x, y + 2, z).is_solid()
+        {
+            return Some(y as f32 + 1.0);
         }
     }
-    world.size
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lk2_core::world::install_huge_spawn_platform;
     use lk2_core::world::terrain::presets;
 
     #[test]
@@ -95,18 +99,52 @@ mod tests {
         assert_eq!(field.shape, [41, 41, 41]);
 
         let max = field.data.iter().cloned().fold(0.0_f32, f32::max);
-        assert!(max < 0.5, "全 air 时角点最大 density 应 < 0.5, got {}", max);
+        assert!(
+            max < 0.5,
+            "鍏?air 鏃惰鐐规渶澶?density 搴?< 0.5, got {}",
+            max
+        );
     }
 
     #[test]
-    fn effective_ground_height_superflat_at_spawn_is_13() {
+    fn effective_ground_height_superflat_at_spawn_is_standable_top() {
         let pipeline = presets::superflat_preset();
         let world = GameWorld::with_pipeline(96, pipeline);
         let h = effective_ground_height(&world, 48, 48);
         assert!(
             (h - 13.0).abs() < 0.01,
-            "superflat at (48, 48) effective_ground_height 应等于 13, got {} \
-             — 若失败, 检查 pipeline.surface_f32 与 effective_ground_height 是否走通",
+            "effective_ground_height should return the top of the standable floor, got {}",
+            h
+        );
+    }
+
+    #[test]
+    fn effective_ground_height_ignores_overhead_tree_canopy() {
+        let mut world = GameWorld::new(32);
+        world.set(8, 3, 8, BlockType::Stone);
+        world.set(8, 4, 8, BlockType::Dirt);
+        world.set(8, 12, 8, BlockType::Leaves);
+
+        let h = effective_ground_height(&world, 8, 8);
+
+        assert!(
+            (h - 5.0).abs() < 0.01,
+            "ground height should use the standable floor, not overhead canopy: got {}",
+            h
+        );
+    }
+
+    #[test]
+    fn effective_ground_height_prefers_spawn_platform_over_pipeline_surface() {
+        let pipeline = presets::by_name("default");
+        let mut world = GameWorld::with_pipeline(96, pipeline);
+        install_huge_spawn_platform(&mut world);
+
+        let h = effective_ground_height(&world, 48, 48);
+
+        assert!(
+            (h - 15.0).abs() < 0.01,
+            "decor and props should sit on the spawn platform top, got {}",
             h
         );
     }

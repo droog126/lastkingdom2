@@ -598,7 +598,11 @@ mod tests {
         let mut errors = Vec::new();
         obs.check_tick_duration(Duration::from_millis(75), 12, &mut errors);
 
-        assert!(errors.is_empty(), "slow tick should not fail invariants: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "slow tick should not fail invariants: {:?}",
+            errors
+        );
         assert_eq!(obs.anomalies.len(), 1);
         assert_eq!(obs.anomalies[0].tick, 12);
         assert_eq!(obs.anomalies[0].kind, AnomalyKind::TickSpike);

@@ -10,6 +10,7 @@ const PLAYER_COLLISION_RADIUS: f32 = 0.34;
 const GROUND_STEP_THRESHOLD: f32 = 0.85;
 const MANUAL_MOVE_SPEED: f32 = 4.5;
 const DT: f32 = 1.0 / 60.0;
+const FIRST_PERSON_START_PITCH: f32 = -1.05;
 
 fn main() {
     let mut world = GameWorld::with_pipeline(
@@ -29,13 +30,44 @@ fn main() {
 
     let mut player = PlayerState { pos: spawn_pos, block_pos: spawn_block, ..Default::default() };
     let before = player.pos;
-    let before_block = player.block_pos;
+    let yaw = std::f32::consts::FRAC_PI_2;
+    let pitch = FIRST_PERSON_START_PITCH;
+    let (sy, cy) = yaw.sin_cos();
+    let forward = Vec3::new(sy, 0.0, -cy).normalize_or_zero();
+    let first_person_forward = first_person_forward(yaw, pitch);
+    let ray_hit = ray_voxel_first_hit(
+        &world,
+        spawn_pos + Vec3::Y * 1.7,
+        first_person_forward,
+        120.0,
+    )
+    .expect("first-person center ray should hit the spawn platform");
+    assert_eq!(
+        ray_hit.3,
+        lk2_core::world::BlockType::Leaves,
+        "first-person center ray should hit the visible green spawn platform"
+    );
+    assert!(
+        (1.5..=4.0).contains(&ray_hit.2),
+        "first-person center ray should hit ground near the player's feet: {:?}",
+        ray_hit
+    );
+    assert!(
+        (Vec3::new(first_person_forward.x, 0.0, first_person_forward.z).normalize_or_zero()
+            - forward)
+            .length()
+            < 0.001,
+        "W movement should follow the first-person yaw, independent of pitch: camera={:?} movement={:?}",
+        first_person_forward,
+        forward
+    );
+
     let mut moved_frames = 0;
     for _ in 0..120 {
         if try_player_move_continuous(
             &mut player,
             &world,
-            Vec3::new(0.0, 0.0, -1.0),
+            forward,
             MANUAL_MOVE_SPEED * DT,
             GROUND_STEP_THRESHOLD,
         ) {
@@ -45,19 +77,23 @@ fn main() {
 
     let delta = player.pos - before;
     println!(
-        "before_pos={:?} before_block={:?} after_pos={:?} after_block={:?} delta={:?} moved_frames={}",
-        before, before_block, player.pos, player.block_pos, delta, moved_frames
+        "online_first_person before={:?} after={:?} delta={:?} moved_frames={}",
+        before, player.pos, delta, moved_frames
     );
-
     assert!(
         moved_frames > 0,
-        "simulated W input never produced a successful movement frame"
+        "online first-person W input produced no movement"
     );
     assert!(
         delta.length() > 1.0,
-        "player did not advance far enough after simulated W input: delta={:?}",
-        delta
+        "online first-person local prediction did not move far enough: {delta:?}"
     );
+}
+
+fn first_person_forward(yaw: f32, pitch: f32) -> Vec3 {
+    let (sy, cy) = yaw.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    Vec3::new(sy * cp, sp, -cy * cp).normalize_or_zero()
 }
 
 fn try_player_move_continuous(
@@ -115,4 +151,27 @@ fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {
         }
     }
     true
+}
+
+fn ray_voxel_first_hit(
+    world: &GameWorld,
+    origin: Vec3,
+    dir: Vec3,
+    max_dist: f32,
+) -> Option<([i32; 3], Vec3, f32, lk2_core::world::BlockType)> {
+    let step = 0.05;
+    let steps = (max_dist / step) as i32;
+    for i in 1..=steps {
+        let t = i as f32 * step;
+        let p = origin + dir * t;
+        let block = [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+        if !world.in_bounds(block[0], block[1], block[2]) {
+            continue;
+        }
+        let kind = world.get(block[0], block[1], block[2]);
+        if kind.is_solid() {
+            return Some((block, p, t, kind));
+        }
+    }
+    None
 }

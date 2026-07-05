@@ -492,7 +492,7 @@ impl TerrainModule for TreeModule {
 
     fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
         let surface = ctx.surface_y?;
-        if ctx.y > surface {
+        if ctx.y <= surface {
             return None;
         }
 
@@ -510,7 +510,7 @@ impl TerrainModule for TreeModule {
             + (hash01(ctx.x, 0, ctx.z, (self.seed ^ 0x1234) as u32) as i32)
                 .rem_euclid(self.max_height - self.min_height + 1);
 
-        if ctx.y > surface && ctx.y <= surface + trunk_height {
+        if ctx.y <= surface + trunk_height {
             return Some(BlockType::Wood);
         }
 

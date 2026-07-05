@@ -11,10 +11,15 @@ use lk2_core::player::PlayerState;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::world::World as GameWorld;
 
+use crate::OnlineCommandDiagnostics;
 use crate::render::{CameraAngles, CameraMode};
 use crate::ui::ClientRunMode;
 
 pub const FIRST_SCREENSHOT_MIN_FRAME: u64 = 500;
+
+fn capture_enabled() -> bool {
+    std::env::var("LK2_CAPTURE").is_ok() || std::env::args().any(|a| a == "--auto-demo")
+}
 
 #[derive(Resource, Default)]
 pub struct TickRecorder {
@@ -36,7 +41,12 @@ pub fn periodic_screenshot(
     run_mode: Res<ClientRunMode>,
     camera_angles: Res<CameraAngles>,
     camera_mode: Res<CameraMode>,
+    online_commands: Res<OnlineCommandDiagnostics>,
 ) {
+    if !capture_enabled() {
+        return;
+    }
+
     let now = {
         use std::sync::OnceLock;
         static START: OnceLock<std::time::Instant> = OnceLock::new();
@@ -53,7 +63,15 @@ pub fn periodic_screenshot(
     }
 
     if clock.frame_tick < FIRST_SCREENSHOT_MIN_FRAME {
-        return;
+        // iter_210: in online mode SimClock.tick doesn't advance (server runs
+        // the authoritative sim), so the offline-only FIRST_SCREENSHOT_MIN_FRAME
+        // gate would block every screenshot forever. Fall back to wall-clock
+        // so online first-person can still produce a screenshot.
+        if *run_mode != ClientRunMode::Offline {
+            // (handled below by the wall-clock interval check; no early return)
+        } else {
+            return;
+        }
     }
 
     let interval = std::env::var("LK2_SCREENSHOT_INTERVAL")
@@ -90,6 +108,7 @@ pub fn periodic_screenshot(
         *run_mode,
         &camera_angles,
         *camera_mode,
+        &online_commands,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
@@ -123,11 +142,21 @@ pub fn tick_recorder(
     run_mode: Res<ClientRunMode>,
     camera_angles: Res<CameraAngles>,
     camera_mode: Res<CameraMode>,
+    online_commands: Res<OnlineCommandDiagnostics>,
 ) {
+    if !capture_enabled() {
+        return;
+    }
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LOCAL_FRAME_TICK: AtomicU64 = AtomicU64::new(0);
+    let local_frame_tick = LOCAL_FRAME_TICK.fetch_add(1, Ordering::Relaxed) + 1;
     let sample_tick = if clock.tick > 0 {
         clock.tick
-    } else {
+    } else if clock.frame_tick > 0 {
         clock.frame_tick / 60
+    } else {
+        local_frame_tick / 60
     };
     if sample_tick == 0 || sample_tick % 5 != 0 || sample_tick == rec.last_dump_tick {
         return;
@@ -148,6 +177,7 @@ pub fn tick_recorder(
         *run_mode,
         &camera_angles,
         *camera_mode,
+        &online_commands,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
@@ -168,6 +198,7 @@ fn build_state_json(
     run_mode: ClientRunMode,
     camera_angles: &CameraAngles,
     camera_mode: CameraMode,
+    online_commands: &OnlineCommandDiagnostics,
 ) -> serde_json::Value {
     let mut state = lk2_core::diagnostics::build_state_json(
         time,
@@ -199,6 +230,15 @@ fn build_state_json(
                     "distance": h.2,
                     "block": format!("{:?}", h.3),
                 })),
+            }),
+        );
+        obj.insert(
+            "network_command".to_string(),
+            serde_json::json!({
+                "sender_entities": online_commands.sender_entities,
+                "move_world_sent": online_commands.move_world_sent,
+                "last_dx_milli": online_commands.last_dx_milli,
+                "last_dz_milli": online_commands.last_dz_milli,
             }),
         );
     }

@@ -2,6 +2,7 @@ mod args;
 mod audit;
 mod health;
 mod loop_cmd;
+mod motion;
 mod tdd;
 
 use std::{env, path::PathBuf, process::ExitCode};
@@ -27,6 +28,7 @@ fn main() -> ExitCode {
     let result = match command.to_ascii_lowercase().as_str() {
         "loop" => loop_cmd::run(&root, &args),
         "health" => loop_cmd::health(&root, &args),
+        "motion-analyze" => motion::analyze(&root, &args),
         "scenario" | "run-scenario" => loop_cmd::scenario(&root, &args),
         "tdd" => tdd::run(&root, &args),
         "dev" => run_dev(&root, &args),
@@ -68,6 +70,7 @@ fn print_help() {
     println!("  tdd --scope core|changed|client|server|workspace|fmt|clippy|audit");
     println!("  dev build|stage-runtime|test|core|clippy|fmt|loop|health|help");
     println!("  health [iter_NN|path]");
+    println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
     println!("  scenario --json scenarios/*.json");
 }
 

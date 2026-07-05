@@ -84,9 +84,11 @@ pub struct CameraAngles {
 
 impl Default for CameraAngles {
     fn default() -> Self {
-        // iter_199: pitch=0 keeps first-person camera level on entry.
-        // auto_orbit rewrites pitch itself; first-person should default to
-        // horizontal gaze, not the legacy -1.05 (~60 deg down) value.
+        // iter_210: pitch=0 puts the first-person camera on a horizontal
+        // gaze on entry, like a normal FPS game. Looking straight ahead
+        // lets the player immediately see trees, animals, and the horizon,
+        // instead of staring straight down at their own feet (legacy pitch
+        // = -1.05 rad ≈ -60° down).
         Self { yaw: std::f32::consts::FRAC_PI_2, pitch: 0.0 }
     }
 }
@@ -159,6 +161,7 @@ pub fn spawn_terrain_around_player(
     cfg: Res<RenderConfig>,
     player: Res<PlayerState>,
     mut spawned: ResMut<SpawnedBlocks>,
+    mode: Res<CameraMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
@@ -168,20 +171,23 @@ pub fn spawn_terrain_around_player(
     mut last_mesh_wall: Local<f32>,
 ) {
     let now = time.elapsed_secs();
-    let moved = spawned.last_player_block != player.block_pos;
+    if *mode == CameraMode::FirstPerson
+        && !cfg.smooth_terrain
+        && !spawned.visual_entities.is_empty()
+    {
+        return;
+    }
     let moved_far = if let Some(last) = spawned.last_mesh_center {
-        last.distance(Vec3::new(
-            player.block_pos[0] as f32,
-            player.block_pos[1] as f32,
-            player.block_pos[2] as f32,
-        )) > cfg.ground_step_threshold * 6.0
+        let dx = player.block_pos[0] as f32 - last.x;
+        let dz = player.block_pos[2] as f32 - last.z;
+        Vec2::new(dx, dz).length() > (cfg.radius as f32 * 0.35).max(8.0)
     } else {
         true
     };
-    if !moved && !spawned.visual_entities.is_empty() {
+    if !moved_far && !spawned.visual_entities.is_empty() {
         return;
     }
-    if moved_far && now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
+    if now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
         return;
     }
 
@@ -303,7 +309,7 @@ pub fn spawn_terrain_around_player(
             StandardMaterial {
                 base_color: Color::srgba(c[0], c[1], c[2], c[3]),
                 emissive: emissive.into(),
-                unlit: true,
+                unlit: false,
                 perceptual_roughness: 0.85,
                 metallic: 0.0,
                 ..default()
@@ -800,10 +806,16 @@ pub fn spawn_nest_markers(
     mut commands: Commands,
     monsters: Res<MonsterEcosystem>,
     player: Res<PlayerState>,
+    mode: Res<CameraMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut count: ResMut<NestMarkerCount>,
 ) {
+    if *mode == CameraMode::FirstPerson {
+        count.0 = 0;
+        return;
+    }
+
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
     let mut spawned = 0_u32;
@@ -955,13 +967,9 @@ pub fn player_input(
     time: Res<Time>,
     freefly: Res<FreeFlyState>,
     cfg: Res<RenderConfig>,
+    mut motion_trace: ResMut<crate::OnlineMotionTrace>,
 ) {
     let is_offline = *run_mode == ClientRunMode::Offline;
-    // iter_199: Online mode = server is single source of truth for player
-    // position. Stop running local predictive movement in player_input so the
-    // server's replicated PlayerPos can drive the first-person camera.
-    // MOVE intents still flow to the server via send_online_gameplay_commands.
-    let server_authoritative = !is_offline;
 
     let freefly_active = freefly.enabled;
 
@@ -1009,18 +1017,27 @@ pub fn player_input(
         angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
     }
 
-    // iter_199: local PlayerState.pos prediction only happens in offline mode.
-    // Online mode: skip this block entirely; apply_networked_position writes the
-    // server-replicated PlayerPos into PlayerState.pos so the first-person
-    // camera follows the authoritative server snapshot.
-    if is_offline && d.length() > 0.01 {
+    // First-person controls must move immediately in online mode too. The
+    // server still receives the same input and can correct large desyncs, but
+    // the camera is driven by local prediction instead of waiting for packets.
+    motion_trace.last_local_attempted = d.length() > 0.01;
+    motion_trace.last_local_moved = false;
+    motion_trace.last_local_reason = "idle";
+    motion_trace.last_local_dir = [d.x, d.y, d.z];
+    motion_trace.last_local_distance = 0.0;
+    if d.length() > 0.01 {
         if d.y.abs() > 0.01 && d.x.abs() < 0.01 && d.z.abs() < 0.01 {
-            try_player_move(
+            motion_trace.last_local_moved = try_player_move(
                 &mut player,
                 &mut game_world,
                 [0, d.y.signum() as i32, 0],
                 cfg.ground_step_threshold,
             );
+            motion_trace.last_local_reason = if motion_trace.last_local_moved {
+                "moved_discrete"
+            } else {
+                "blocked_discrete"
+            };
         } else {
             let sprint = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
             let speed = if sprint {
@@ -1028,16 +1045,19 @@ pub fn player_input(
             } else {
                 MANUAL_MOVE_SPEED
             };
-            try_player_move_continuous(
+            let distance = speed * time.delta_secs();
+            motion_trace.last_local_distance = distance;
+            let (moved, reason) = try_player_move_continuous(
                 &mut player,
                 &game_world,
                 Vec3::new(d.x, 0.0, d.z),
-                speed * time.delta_secs(),
+                distance,
                 cfg.ground_step_threshold,
             );
+            motion_trace.last_local_moved = moved;
+            motion_trace.last_local_reason = reason;
         }
     }
-    let _ = server_authoritative; // documented intent only; unused elsewhere
 
     if is_offline && keys.just_pressed(KeyCode::KeyG) {
         let (x, y, z) = (
@@ -1173,10 +1193,10 @@ fn try_player_move_continuous(
     dir: Vec3,
     distance: f32,
     threshold: f32,
-) -> bool {
+) -> (bool, &'static str) {
     let horizontal = Vec3::new(dir.x, 0.0, dir.z);
     if horizontal.length_squared() < 0.0001 || distance <= 0.0 {
-        return false;
+        return (false, "no_horizontal_or_distance");
     }
 
     let next = player.pos + horizontal.normalize() * distance;
@@ -1185,18 +1205,18 @@ fn try_player_move_continuous(
     let Some((stand_pos, block_pos)) =
         player_stand_position_at(game_world, next_x, next_z, player.pos.y, threshold)
     else {
-        return false;
+        return (false, "no_standable_column");
     };
 
     if stand_pos.y - player.pos.y > threshold {
-        return false;
+        return (false, "step_too_high");
     }
     if !player_volume_clear_at(game_world, Vec3::new(next.x, stand_pos.y, next.z)) {
-        return false;
+        return (false, "volume_blocked");
     }
 
     set_player_position(player, Vec3::new(next.x, stand_pos.y, next.z), block_pos);
-    true
+    (true, "moved_continuous")
 }
 
 fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {

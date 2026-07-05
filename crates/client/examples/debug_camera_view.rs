@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use camera_math::compute_third_person_camera;
 use lk2_core::constant;
 use lk2_core::world::{
-    install_huge_spawn_platform, player_spawn_position_near, BlockType, World as GameWorld,
+    BlockType, World as GameWorld, install_huge_spawn_platform, player_spawn_position_near,
 };
 
 struct CameraAngles {
@@ -15,7 +15,7 @@ struct CameraAngles {
 
 impl Default for CameraAngles {
     fn default() -> Self {
-        Self { yaw: std::f32::consts::FRAC_PI_2, pitch: -0.75 }
+        Self { yaw: std::f32::consts::FRAC_PI_2, pitch: -1.05 }
     }
 }
 
@@ -35,6 +35,8 @@ fn main() {
     .expect("safe spawn should exist on grass platform");
 
     let angles = CameraAngles::default();
+    let first_person_start_angles =
+        CameraAngles { yaw: std::f32::consts::FRAC_PI_2, pitch: angles.pitch };
     let provisional = compute_third_person_camera(player_pos, angles.yaw, angles.pitch, 0.0);
     let ground_at_camera = effective_ground_height(
         &world,
@@ -90,9 +92,13 @@ fn main() {
     );
 
     let first_person_eye = player_pos + Vec3::Y * 1.7;
-    let first_person_forward = first_person_forward(angles.yaw, angles.pitch);
-    let first_person_hit = ray_voxel_first_hit(&world, first_person_eye, first_person_forward, 120.0)
-        .expect("first-person center ray should hit the grass platform");
+    let first_person_forward = first_person_forward(
+        first_person_start_angles.yaw,
+        first_person_start_angles.pitch,
+    );
+    let first_person_hit =
+        ray_voxel_first_hit(&world, first_person_eye, first_person_forward, 120.0)
+            .expect("first-person center ray should hit the grass platform");
     println!(
         "first_person eye={:?} forward={:?} hit={:?}",
         first_person_eye, first_person_forward, first_person_hit
@@ -101,6 +107,11 @@ fn main() {
         first_person_hit.3,
         BlockType::Leaves,
         "first-person center ray must hit visible grass platform"
+    );
+    assert!(
+        (1.5..=4.0).contains(&first_person_hit.2),
+        "first-person center ray should hit ground near the player's feet, not the horizon: {:?}",
+        first_person_hit
     );
     assert!(
         first_person_hit.0[0] >= constant::WORLD_SIZE / 2 - 90

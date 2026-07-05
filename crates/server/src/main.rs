@@ -1,18 +1,17 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use avian3d::prelude::PhysicsPlugins;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
-use lightyear::prelude::server::ServerUdpIo;
 use lightyear::prelude::LocalAddr;
+use lightyear::prelude::server::ServerUdpIo;
 
 use leafwing_input_manager::prelude::ActionState;
+use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
 };
-use lk2_core::protocol::PlayerAction;
 
 use lightyear::prelude::PeerMetadata;
 
@@ -25,8 +24,8 @@ use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::creature::{
-    award_creature_drop, creature_attack_distance_sq, Creature, CreatureAI, CreatureKind,
-    CreatureSpawnerDone, CREATURE_TRAINING_ATTACK_RANGE_SQ,
+    CREATURE_TRAINING_ATTACK_RANGE_SQ, Creature, CreatureAI, CreatureKind, CreatureSpawnerDone,
+    award_creature_drop, creature_attack_distance_sq,
 };
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
@@ -35,21 +34,43 @@ use lk2_core::player::{PlayerState, PlayerTag};
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{advance_fixed_authority_tick, SimRole};
+use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{
-    install_huge_spawn_platform, player_spawn_position_near, World as GameWorld, WorldGenerator,
+    World as GameWorld, WorldGenerator, install_huge_spawn_platform, player_body_clear,
+    player_spawn_position_near, player_stand_position_at,
 };
 
 use crate::pvp_systems::{
-    apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
-    read_attack_inputs, record_position_history, tick_combat_cooldowns, ServerPvPPlugin,
+    ServerPvPPlugin, apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
+    read_attack_inputs, record_position_history, tick_combat_cooldowns,
 };
 
 const PLACE_WOOD_COST: i64 = 1;
+const ONLINE_MOVE_SPEED: f32 = 4.5;
+const ONLINE_STEP_THRESHOLD: f32 = 0.85;
+const PLAYER_COLLISION_RADIUS: f32 = 0.34;
 
 #[derive(Resource, Default)]
 struct WorldRevision(u64);
+
+#[derive(Resource, Default)]
+pub struct ServerCommandDiagnostics {
+    pub receiver_entities: usize,
+    pub server_entities: usize,
+    pub started_servers: usize,
+    pub link_of_entities: usize,
+    pub move_world_received: u64,
+    pub last_dx_milli: i16,
+    pub last_dz_milli: i16,
+    pub last_move_applied: bool,
+    pub udp_commands_received: u64,
+}
+
+#[derive(Resource)]
+struct GameplayCommandUdp {
+    socket: std::net::UdpSocket,
+}
 
 #[derive(Resource, Clone)]
 struct LastVoxelDeltaState {
@@ -296,7 +317,6 @@ fn apply_gameplay_command(
 }
 
 fn apply_gameplay_commands(
-    mut reader: MessageReader<GameplayCommand>,
     mut world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut nations: ResMut<NationRegistry>,
@@ -306,84 +326,224 @@ fn apply_gameplay_commands(
     mut feedback: MessageWriter<GameplayFeedback>,
     mut commands: Commands,
     creatures: Query<(Entity, &Creature, &CreatureAI)>,
+    mut diagnostics: ResMut<ServerCommandDiagnostics>,
     mut player_q: Query<
         (
             &mut bevy::prelude::Transform,
             &mut lk2_core::protocol::components::PlayerPos,
         ),
-        With<lightyear::prelude::ControlledBy>,
+        With<lk2_core::protocol::components::PlayerPos>,
+    >,
+    mut receivers: Query<
+        &mut lightyear::prelude::MessageReceiver<GameplayCommand>,
+        With<lightyear_connection::client_of::ClientOf>,
     >,
 ) {
-    for cmd in reader.read() {
-        if let GameplayCommandKind::MoveWorld { dx_milli, dz_milli } = cmd.kind {
+    diagnostics.receiver_entities = receivers.iter().len();
+    for mut receiver in receivers.iter_mut() {
+        // Drain the receiver once. We deliberately keep ONLY the latest MoveWorld
+        // per tick — clients send at their frame rate (often 144Hz) while we
+        // tick at 60Hz, so a backlog of 2-3 MoveWorld commands per tick is
+        // normal. Applying every queued command teleports the player; applying
+        // only the latest gives us a clean per-tick movement step whose speed
+        // is decoupled from the client's frame rate.
+        let mut latest_move: Option<(i16, i16)> = None;
+        let mut other_cmds: Vec<GameplayCommand> = Vec::new();
+        for cmd in receiver.receive() {
+            match cmd.kind {
+                GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
+                    latest_move = Some((dx_milli, dz_milli));
+                }
+                _ => other_cmds.push(cmd),
+            }
+        }
+
+        if let Some((dx_milli, dz_milli)) = latest_move {
+            diagnostics.move_world_received = diagnostics.move_world_received.saturating_add(1);
+            diagnostics.last_dx_milli = dx_milli;
+            diagnostics.last_dz_milli = dz_milli;
+            // Magnitude is encoded by the client (1.0 walk / 1.5 sprint), so we
+            // pass the raw vector to apply_world_move without re-normalizing.
             let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
             let moved = if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-                apply_world_move(&mut transform, &mut player_pos, &mut player, dir, 1.0 / 60.0)
+                apply_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                )
             } else {
                 false
             };
+            diagnostics.last_move_applied = moved;
             if moved {
                 feedback.write(GameplayFeedback { ok: true, summary: "moved".to_string() });
             }
-            continue;
         }
-        let nearest_creature = if matches!(cmd.kind, GameplayCommandKind::KillNearestCreature) {
-            creatures
-                .iter()
-                .filter_map(|(entity, creature, _)| {
-                    let d2 = creature_attack_distance_sq(player.block_pos, creature.block_pos);
-                    (d2 <= CREATURE_TRAINING_ATTACK_RANGE_SQ).then_some((entity, d2, creature.kind))
-                })
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-        } else {
-            None
-        };
-        let nearest_kind = nearest_creature.map(|(_, _, kind)| kind);
-        let result = apply_gameplay_command(
-            cmd,
-            &mut world,
-            &mut pool,
-            &mut nations,
-            &mut player,
-            &mut revision,
-            &mut last_delta,
-            nearest_kind,
-        );
-        if result.ok {
-            if let Some((entity, _, _)) = nearest_creature {
-                commands.entity(entity).despawn();
+
+        for cmd in other_cmds {
+            let nearest_creature = if matches!(cmd.kind, GameplayCommandKind::KillNearestCreature) {
+                creatures
+                    .iter()
+                    .filter_map(|(entity, creature, _)| {
+                        let d2 = creature_attack_distance_sq(player.block_pos, creature.block_pos);
+                        (d2 <= CREATURE_TRAINING_ATTACK_RANGE_SQ).then_some((
+                            entity,
+                            d2,
+                            creature.kind,
+                        ))
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+            } else {
+                None
+            };
+            let nearest_kind = nearest_creature.map(|(_, _, kind)| kind);
+            let result = apply_gameplay_command(
+                &cmd,
+                &mut world,
+                &mut pool,
+                &mut nations,
+                &mut player,
+                &mut revision,
+                &mut last_delta,
+                nearest_kind,
+            );
+            if result.ok {
+                if let Some((entity, _, _)) = nearest_creature {
+                    commands.entity(entity).despawn();
+                }
             }
+            if result.ok {
+                info!("[gameplay] {}", result.summary);
+            } else {
+                warn!("[gameplay] {}", result.summary);
+            }
+            feedback.write(result);
         }
-        if result.ok {
-            info!("[gameplay] {}", result.summary);
-        } else {
-            warn!("[gameplay] {}", result.summary);
-        }
-        feedback.write(result);
     }
+}
+
+fn apply_udp_gameplay_commands(
+    udp: Option<Res<GameplayCommandUdp>>,
+    mut player: ResMut<PlayerState>,
+    world: Res<GameWorld>,
+    mut diagnostics: ResMut<ServerCommandDiagnostics>,
+    mut player_q: Query<
+        (
+            &mut bevy::prelude::Transform,
+            &mut lk2_core::protocol::components::PlayerPos,
+        ),
+        With<lk2_core::protocol::components::PlayerPos>,
+    >,
+) {
+    let Some(udp) = udp else {
+        return;
+    };
+    let mut buf = [0u8; 64];
+    let mut latest_move: Option<(i16, i16)> = None;
+    loop {
+        match udp.socket.recv_from(&mut buf) {
+            Ok((len, _)) => {
+                let Ok(line) = std::str::from_utf8(&buf[..len]) else {
+                    continue;
+                };
+                let mut parts = line.split_whitespace();
+                if parts.next() != Some("MOVE") {
+                    continue;
+                }
+                let Some(dx_milli) = parts.next().and_then(|s| s.parse::<i16>().ok()) else {
+                    continue;
+                };
+                let Some(dz_milli) = parts.next().and_then(|s| s.parse::<i16>().ok()) else {
+                    continue;
+                };
+                diagnostics.udp_commands_received =
+                    diagnostics.udp_commands_received.saturating_add(1);
+                latest_move = Some((dx_milli, dz_milli));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(_) => break,
+        }
+    }
+    let Some((dx_milli, dz_milli)) = latest_move else {
+        return;
+    };
+    diagnostics.last_dx_milli = dx_milli;
+    diagnostics.last_dz_milli = dz_milli;
+    let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
+    diagnostics.last_move_applied =
+        if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
+            apply_world_move(
+                &mut transform,
+                &mut player_pos,
+                &mut player,
+                &world,
+                dir,
+                1.0 / 60.0,
+            )
+        } else {
+            false
+        };
 }
 
 fn apply_world_move(
     transform: &mut Transform,
     player_pos: &mut PlayerPos,
     player: &mut PlayerState,
+    world: &GameWorld,
     dir: Vec2,
     dt: f32,
 ) -> bool {
     if dir.length_squared() <= 0.0001 {
         return false;
     }
-    let dir = dir.normalize_or_zero();
-    let speed = 4.0;
-    let delta = Vec3::new(dir.x, 0.0, dir.y) * speed * dt;
-    transform.translation += delta;
-    player_pos.0 = transform.translation;
-    player.pos = transform.translation;
-    player.block_pos = [
-        transform.translation.x.floor() as i32,
-        transform.translation.y.floor() as i32,
-        transform.translation.z.floor() as i32,
-    ];
+    // Magnitude is meaningful: the client sends 1.0 for walk and 1.5 for sprint,
+    // so we do NOT re-normalize here. Per-tick movement = dir * speed * dt, and
+    // we drop exactly one MoveWorld per tick on the caller side, so speed stays
+    // at ONLINE_MOVE_SPEED (× sprint factor) regardless of client frame rate.
+    let step = Vec3::new(dir.x, 0.0, dir.y) * ONLINE_MOVE_SPEED * dt;
+    let next = player.pos + step;
+    let next_x = next.x.floor() as i32;
+    let next_z = next.z.floor() as i32;
+    let Some((stand_pos, block_pos)) =
+        player_stand_position_at(world, next_x, next_z, player.pos.y, ONLINE_STEP_THRESHOLD)
+    else {
+        return false;
+    };
+    if stand_pos.y - player.pos.y > ONLINE_STEP_THRESHOLD {
+        return false;
+    }
+
+    let next_pos = Vec3::new(next.x, stand_pos.y, next.z);
+    if !player_volume_clear_at(world, next_pos) {
+        return false;
+    }
+
+    transform.translation = next_pos;
+    player_pos.0 = next_pos;
+    player.pos = next_pos;
+    player.block_pos = block_pos;
+    true
+}
+
+fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
+    let foot_y = pos.y.floor() as i32;
+    if !player_body_clear(world, pos.x.floor() as i32, foot_y, pos.z.floor() as i32) {
+        return false;
+    }
+    for y in foot_y..=(foot_y + 1) {
+        for ox in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
+            for oz in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
+                let x = (pos.x + ox).floor() as i32;
+                let z = (pos.z + oz).floor() as i32;
+                if world.get(x, y, z).is_solid() {
+                    return false;
+                }
+            }
+        }
+    }
     true
 }
 
@@ -430,6 +590,14 @@ fn main() {
         .init();
 
     let port: u16 = std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000);
+    if !server_ports_available(port) {
+        error!(
+            "[server] UDP port {} or {} is already in use. Stop the existing lk2-server process or set LK2_PORT to a free port.",
+            port,
+            port.saturating_add(1)
+        );
+        return;
+    }
     info!("[server] listening on UDP 0.0.0.0:{}", port);
 
     let args: Vec<String> = std::env::args().collect();
@@ -451,11 +619,20 @@ fn main() {
     let scenario_state = ScenarioState::from_scenario(scenario.clone());
 
     let _ = std::fs::create_dir_all("screenshots");
+    let gameplay_udp = {
+        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port.saturating_add(1)));
+        std::net::UdpSocket::bind(addr).ok().and_then(|socket| {
+            socket.set_nonblocking(true).ok()?;
+            Some(GameplayCommandUdp { socket })
+        })
+    };
 
-    App::new()
-        .add_plugins(MinimalPlugins)
+    let mut app = App::new();
+    if let Some(gameplay_udp) = gameplay_udp {
+        app.insert_resource(gameplay_udp);
+    }
+    app.add_plugins(MinimalPlugins)
         .add_plugins(bevy::state::app::StatesPlugin)
-        .add_plugins(PhysicsPlugins::default())
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
         .add_plugins(lk2_core::match_state::MatchStatePlugin)
@@ -490,15 +667,20 @@ fn main() {
         .init_resource::<ServerTickCounter>()
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
+        .init_resource::<ServerCommandDiagnostics>()
         .insert_resource(scenario_state)
         .add_systems(
             Startup,
             (
                 setup_world,
-                self_check,
                 dump_world_resources,
                 spawn_server,
                 spawn_player,
+                // self_check was here previously; it ran 100 sim ticks inside
+                // Startup, blocking the App::run loop and starving UDP packet
+                // processing for ~9s — which exactly matched the default
+                // client_timeout_secs and caused connection_request timeouts.
+                // Moved to first Update tick instead (see below).
             )
                 .chain(),
         )
@@ -506,6 +688,14 @@ fn main() {
         .configure_sets(
             FixedUpdate,
             (SimSet::Interaction, SimSet::ScoreAndAudit, SimSet::Snapshot).chain(),
+        )
+        .add_systems(
+            Update,
+            // Run startup self-check on first Update so it doesn't starve
+            // the UDP receiver. TickObserver invariants are still checked on
+            // every sim tick via end_tick_system, so this is just for the
+            // early "100 ticks all green" diagnostic.
+            run_startup_self_check_once,
         )
         .add_systems(
             FixedUpdate,
@@ -525,7 +715,7 @@ fn main() {
             FixedUpdate,
             (
                 apply_gameplay_commands,
-                apply_input_to_player,
+                apply_udp_gameplay_commands,
                 sync_authoritative_snapshot_components,
                 broadcast_player_pos,
                 read_attack_inputs,
@@ -537,6 +727,15 @@ fn main() {
                 .chain(),
         )
         .run();
+}
+
+fn server_ports_available(port: u16) -> bool {
+    let main = std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], port)));
+    let gameplay = std::net::UdpSocket::bind(std::net::SocketAddr::from((
+        [0, 0, 0, 0],
+        port.saturating_add(1),
+    )));
+    main.is_ok() && gameplay.is_ok()
 }
 
 fn dump_world_resources(world: &bevy::prelude::World) {
@@ -567,6 +766,7 @@ fn spawn_server(mut commands: Commands) {
     let server_id = commands
         .spawn((
             Name::new("Server"),
+            lightyear::prelude::Server::default(),
             ServerUdpIo::default(),
             LocalAddr(server_addr),
             netcode_server,
@@ -645,51 +845,6 @@ fn replicate_player_for_connected(
         info!(
             "[net] Replicate + ControlledBy attached to Player entity {:?} — owner={:?}, senders=[{:?}]",
             entity, client_of_entity, client_of_entity
-        );
-    }
-}
-
-fn apply_input_to_player(
-    mut q: Query<
-        (
-            &ActionState<PlayerAction>,
-            &mut bevy::prelude::Transform,
-            &mut lk2_core::protocol::components::PlayerPos,
-        ),
-        (With<Name>, With<lightyear::prelude::ControlledBy>),
-    >,
-    mut player: ResMut<PlayerState>,
-) {
-    let mut dir = bevy::math::Vec2::ZERO;
-    let speed = 4.0;
-    let dt = 1.0 / 30.0;
-    let mut applied_count = 0;
-    for (actions, mut transform, mut player_pos) in q.iter_mut() {
-        let mut local_dir = bevy::math::Vec2::ZERO;
-        if actions.pressed(&PlayerAction::MoveForward) {
-            local_dir.y += 1.0;
-        }
-        if actions.pressed(&PlayerAction::MoveBackward) {
-            local_dir.y -= 1.0;
-        }
-        if actions.pressed(&PlayerAction::MoveLeft) {
-            local_dir.x -= 1.0;
-        }
-        if actions.pressed(&PlayerAction::MoveRight) {
-            local_dir.x += 1.0;
-        }
-        if local_dir.length() > 1.0 {
-            local_dir = local_dir.normalize();
-        }
-        if apply_world_move(&mut transform, &mut player_pos, &mut player, Vec2::new(local_dir.x, -local_dir.y), dt) {
-            dir = local_dir;
-            applied_count += 1;
-        }
-    }
-    if applied_count > 0 {
-        info!(
-            "[player] apply_input_to_player: applied_count={}, dir={:?}, speed={}",
-            applied_count, dir, speed
         );
     }
 }
@@ -793,6 +948,45 @@ fn self_check(
     info!("{}", obs.report());
 }
 
+fn run_startup_self_check_once(
+    mut fired: Local<bool>,
+    game_world: Res<GameWorld>,
+    pool: Res<GlobalResourcePool>,
+    nations: Res<NationRegistry>,
+    monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
+    mut obs: ResMut<TickObserver>,
+) {
+    if *fired {
+        return;
+    }
+    *fired = true;
+    // Run the same body as `self_check` but lazily on first Update tick — that
+    // way Startup completes immediately and the UDP loop can drain packets from
+    // the moment we accept connections.
+    info!(">>> 服务端延迟自检 100 tick (deferred from Startup)");
+    let report = lk2_core::diagnostics::run_self_check(
+        &game_world,
+        &pool,
+        &nations,
+        &monsters,
+        &eco,
+        &mut obs,
+        [
+            constant::WORLD_SIZE / 2,
+            constant::SEA_LEVEL + 2,
+            constant::WORLD_SIZE / 2,
+        ],
+        100,
+    );
+    let violations = report.violations;
+    if violations.is_empty() {
+        info!(">>> 延迟自检 ✅ 100 tick 全部通过 (server)");
+    } else {
+        error!(">>> 延迟自检 ❌ {} 处违例", violations.len());
+    }
+}
+
 fn port_from_env() -> u16 {
     std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000)
 }
@@ -860,14 +1054,21 @@ fn tick_recorder(
     eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
+    diagnostics: Res<ServerCommandDiagnostics>,
+    server_q: Query<Entity, With<lightyear::prelude::Server>>,
+    started_q: Query<Entity, With<lightyear_connection::server::Started>>,
+    link_of_q: Query<Entity, With<lightyear::prelude::server::LinkOf>>,
 ) {
+    if std::env::var("LK2_CAPTURE").is_err() {
+        return;
+    }
     if clock.tick == 0 || clock.tick % 5 != 0 || clock.tick == rec.last_dump_tick {
         return;
     }
     rec.last_dump_tick = clock.tick;
     rec.current_iter = clock.tick as u32;
     let path = format!("screenshots/server_state_t{}.json", clock.tick);
-    let state = lk2_core::diagnostics::build_state_json(
+    let mut state = lk2_core::diagnostics::build_state_json(
         &time,
         &clock,
         &player,
@@ -879,6 +1080,22 @@ fn tick_recorder(
         &game_world,
         SimRole::ServerAuthority.into(),
     );
+    if let Some(obj) = state.as_object_mut() {
+        obj.insert(
+            "network_command".to_string(),
+            serde_json::json!({
+                "receiver_entities": diagnostics.receiver_entities,
+                "server_entities": server_q.iter().count(),
+                "started_servers": started_q.iter().count(),
+                "link_of_entities": link_of_q.iter().count(),
+                "move_world_received": diagnostics.move_world_received,
+                "udp_commands_received": diagnostics.udp_commands_received,
+                "last_dx_milli": diagnostics.last_dx_milli,
+                "last_dz_milli": diagnostics.last_dz_milli,
+                "last_move_applied": diagnostics.last_move_applied,
+            }),
+        );
+    }
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
     }

@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::constant;
 use lk2_core::player::PlayerState;
+use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::PlayerPos;
 use lk2_core::protocol::messages::GameplayCommandKind;
-use lk2_core::protocol::PlayerAction;
 use lk2_core::world::{
-    install_huge_spawn_platform, player_spawn_position_near, World as GameWorld,
+    World as GameWorld, install_huge_spawn_platform, player_spawn_position_near,
 };
 
 fn main() {
@@ -41,7 +41,13 @@ fn main() {
             }
             _ => action_dir(&actions),
         };
-        if apply_world_move(&mut transform, &mut player_pos, &mut player, dir, 1.0 / 30.0) {
+        if apply_world_move(
+            &mut transform,
+            &mut player_pos,
+            &mut player,
+            dir,
+            1.0 / 30.0,
+        ) {
             moved_frames += 1;
         }
     }
@@ -62,9 +68,7 @@ fn main() {
     );
 }
 
-fn action_dir(
-    actions: &ActionState<PlayerAction>,
-) -> Vec2 {
+fn action_dir(actions: &ActionState<PlayerAction>) -> Vec2 {
     let mut local_dir = Vec2::ZERO;
     if actions.pressed(&PlayerAction::MoveForward) {
         local_dir.y -= 1.0;

@@ -9,6 +9,12 @@ build:
 build-client:
     cargo build -p lk2-client
 
+kill:
+    Get-Process lk2-client,lk2-server -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+kill-build:
+    Get-Process lk2-client,lk2-server,cargo,rustc,rustdoc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
 server:
     cargo run -p lk2-server
 
@@ -16,7 +22,7 @@ client:
     $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --offline
 
 client-online:
-    $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --connect=127.0.0.1:5000
+    $env:BEVY_DISABLE_ACCESSIBILITY="1"; Get-Process lk2-server -ErrorAction SilentlyContinue | Stop-Process -Force; cargo build -p lk2-server -p lk2-client; Start-Process -FilePath .\target\debug\lk2-server.exe -WorkingDirectory (Get-Location) -WindowStyle Hidden; Start-Sleep -Seconds 2; .\target\debug\lk2-client.exe --connect=127.0.0.1:5000 --first-person
 
 offline:
     $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --offline
