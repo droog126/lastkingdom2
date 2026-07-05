@@ -5442,6 +5442,7 @@ dependencies = [
  "bevy-tnua",
  "bevy-tnua-avian3d",
  "bevy_panorbit_camera",
+ "bevy_world_serialization",
  "block-mesh",
  "leafwing-input-manager",
  "lightyear",

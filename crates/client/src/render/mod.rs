@@ -108,6 +108,21 @@ impl Default for CameraMode {
 
 const MANUAL_MOVE_SPEED: f32 = 4.5;
 const PLAYER_COLLISION_RADIUS: f32 = 0.34;
+const JUMP_TAKEOFF_SPEED: f32 = 7.2;
+const JUMP_GRAVITY: f32 = 28.0;
+const JUMP_TERMINAL_SPEED: f32 = -18.0;
+
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct JumpState {
+    pub velocity_y: f32,
+    pub grounded: bool,
+}
+
+impl Default for JumpState {
+    fn default() -> Self {
+        Self { velocity_y: 0.0, grounded: true }
+    }
+}
 
 #[derive(Resource)]
 pub struct FreeFlyState {
@@ -376,21 +391,42 @@ pub struct TerrainChunk;
 pub fn setup_atmosphere(
     mut commands: Commands,
     cfg: Res<RenderConfig>,
+    mut scattering_mediums: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
     _meshes: ResMut<Assets<Mesh>>,
     _materials: ResMut<Assets<StandardMaterial>>,
-    camera: Query<Entity, With<Camera3d>>,
+    _camera: Query<Entity, With<Camera3d>>,
 ) {
-    use bevy::pbr::DistanceFog;
-    commands.insert_resource(ClearColor(Color::srgb(0.20, 0.45, 0.78)));
+    use bevy::light::atmosphere::ScatteringMedium;
+    use bevy::light::{Atmosphere, FogVolume};
 
-    if let Ok(cam_entity) = camera.single() {
-        commands.entity(cam_entity).insert(DistanceFog {
-            color: cfg.fog_color,
-            directional_light_color: cfg.fog_color,
-            directional_light_exponent: 2.0,
-            falloff: bevy::pbr::FogFalloff::Linear { start: cfg.fog_start, end: cfg.fog_end },
-        });
-    }
+    // iter_456: clear color is now black-ish because the Atmosphere entity
+    // occupies the entire sky as a procedural scattering sphere. The
+    // `Atmosphere::earth` helper installs the right earth-radius defaults.
+    let earth_medium = scattering_mediums.add(ScatteringMedium::earth(192, 64));
+    let atm_entity = commands.spawn(Atmosphere::earth(earth_medium.clone())).id();
+    info!(
+        "🌌 iter_456: spawned Atmosphere entity {:?} (medium handle {:?})",
+        atm_entity, earth_medium
+    );
+
+    // iter_456: a thin, low-density FogVolume box anchored above the spawn hill
+    // so the VolumetricFog raymarch actually accumulates fog density. Default
+    // density_factor (0.1) makes the entire screen opaque; we scale it down
+    // so the player can see the sky + buildings clearly, with only a faint
+    // atmospheric haze on the horizon.
+    commands.spawn((
+        FogVolume { density_factor: 0.005, ..default() },
+        Transform::from_scale(Vec3::new(360.0, 60.0, 360.0))
+            .with_translation(Vec3::new(48.5, 20.0, 48.5)),
+    ));
+
+    // Keep a dark fallback clear color so any uncovered pixels stay neutral
+    // (Atmosphere covers the sky, but having a sane default helps debug).
+    commands.insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.10)));
+
+    // `cfg` reserved: the legacy DistanceFog settings are no longer used, but
+    // we leave them in RenderConfig for save-game / scenario compatibility.
+    let _ = cfg;
 }
 
 #[derive(Component)]
@@ -400,14 +436,18 @@ pub struct TerrainUnderlay;
 #[allow(dead_code)]
 pub fn setup_terrain_underlay(
     mut commands: Commands,
+    player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let plane_mesh = meshes.add(Plane3d::default().mesh().size(100.0, 100.0));
+    let plane_mesh = meshes.add(Plane3d::default().mesh().size(220.0, 220.0));
+    let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
 
     let mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.32, 0.30, 0.26),
-        emissive: Color::srgb(0.08, 0.07, 0.05).into(),
+        base_color: Color::srgba(0.18, 0.42, 0.16, 0.55),
+        emissive: Color::srgb(0.02, 0.05, 0.015).into(),
+        alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.95,
         metallic: 0.0,
         cull_mode: None,
@@ -416,7 +456,7 @@ pub fn setup_terrain_underlay(
     commands.spawn((
         Mesh3d(plane_mesh),
         MeshMaterial3d(mat),
-        Transform::from_translation(Vec3::new(0.0, -100.0, 0.0)),
+        Transform::from_translation(Vec3::new(player.pos.x, ground_y - 0.22, player.pos.z)),
         TerrainUnderlay,
     ));
     info!("🟫 兜底盖板 100x100 plane 已 spawn（player 脚下 -5m 跟随）");
@@ -426,11 +466,13 @@ pub fn setup_terrain_underlay(
 pub fn underlay_follow_player(
     mut q: Query<&mut Transform, With<TerrainUnderlay>>,
     player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
 ) {
     let Ok(mut tf) = q.single_mut() else {
         return;
     };
-    tf.translation = Vec3::new(player.pos.x, -100.0, player.pos.z);
+    let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+    tf.translation = Vec3::new(player.pos.x, ground_y - 0.22, player.pos.z);
 }
 
 #[derive(Component)]
@@ -968,6 +1010,7 @@ pub fn player_input(
     freefly: Res<FreeFlyState>,
     cfg: Res<RenderConfig>,
     mut motion_trace: ResMut<crate::OnlineMotionTrace>,
+    mut jump: ResMut<JumpState>,
 ) {
     let is_offline = *run_mode == ClientRunMode::Offline;
 
@@ -990,9 +1033,6 @@ pub fn player_input(
         }
         if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
             d += right;
-        }
-        if is_offline && keys.just_pressed(KeyCode::Space) {
-            d += Vec3::Y;
         }
         if is_offline
             && (keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight))
@@ -1047,16 +1087,48 @@ pub fn player_input(
             };
             let distance = speed * time.delta_secs();
             motion_trace.last_local_distance = distance;
-            let (moved, reason) = try_player_move_continuous(
-                &mut player,
-                &game_world,
-                Vec3::new(d.x, 0.0, d.z),
-                distance,
-                cfg.ground_step_threshold,
-            );
+            let (moved, reason) = if jump.grounded {
+                try_player_move_continuous(
+                    &mut player,
+                    &game_world,
+                    Vec3::new(d.x, 0.0, d.z),
+                    distance,
+                    cfg.ground_step_threshold,
+                )
+            } else {
+                try_player_air_move_continuous(
+                    &mut player,
+                    &game_world,
+                    Vec3::new(d.x, 0.0, d.z),
+                    distance,
+                )
+            };
             motion_trace.last_local_moved = moved;
             motion_trace.last_local_reason = reason;
         }
+    }
+
+    if !freefly_active {
+        let jumped = keys.just_pressed(KeyCode::Space) && jump.grounded;
+        if jumped {
+            jump.velocity_y = JUMP_TAKEOFF_SPEED;
+            jump.grounded = false;
+        }
+        let (jump_moved, jump_reason) = step_player_jump(
+            &mut player,
+            &game_world,
+            &mut jump,
+            time.delta_secs(),
+            cfg.ground_step_threshold,
+        );
+        if jumped || jump_moved {
+            motion_trace.last_local_attempted = true;
+            motion_trace.last_local_moved |= jump_moved;
+            motion_trace.last_local_reason = jump_reason;
+        }
+    } else {
+        jump.velocity_y = 0.0;
+        jump.grounded = true;
     }
 
     if is_offline && keys.just_pressed(KeyCode::KeyG) {
@@ -1219,6 +1291,34 @@ fn try_player_move_continuous(
     (true, "moved_continuous")
 }
 
+fn try_player_air_move_continuous(
+    player: &mut PlayerState,
+    game_world: &GameWorld,
+    dir: Vec3,
+    distance: f32,
+) -> (bool, &'static str) {
+    let horizontal = Vec3::new(dir.x, 0.0, dir.z);
+    if horizontal.length_squared() < 0.0001 || distance <= 0.0 {
+        return (false, "air_no_horizontal_or_distance");
+    }
+
+    let next = player.pos + horizontal.normalize() * distance;
+    if !player_volume_clear_at(game_world, next) {
+        return (false, "air_volume_blocked");
+    }
+
+    set_player_position(
+        player,
+        next,
+        [
+            next.x.floor() as i32,
+            player.block_pos[1],
+            next.z.floor() as i32,
+        ],
+    );
+    (true, "air_moved_continuous")
+}
+
 fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {
     let foot_y = pos.y.floor() as i32;
     for y in foot_y..=(foot_y + 1) {
@@ -1233,6 +1333,73 @@ fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {
         }
     }
     true
+}
+
+fn step_player_jump(
+    player: &mut PlayerState,
+    game_world: &GameWorld,
+    jump: &mut JumpState,
+    dt: f32,
+    step_threshold: f32,
+) -> (bool, &'static str) {
+    let dt = dt.clamp(0.0, 0.05);
+    let Some((stand_pos, stand_block)) = player_stand_position_at(
+        game_world,
+        player.pos.x.floor() as i32,
+        player.pos.z.floor() as i32,
+        player.pos.y,
+        step_threshold,
+    ) else {
+        jump.grounded = false;
+        jump.velocity_y = (jump.velocity_y - JUMP_GRAVITY * dt).max(JUMP_TERMINAL_SPEED);
+        return (false, "jump_no_floor");
+    };
+
+    let ground_y = stand_pos.y;
+    if player.pos.y <= ground_y + 0.02 && jump.velocity_y <= 0.0 {
+        if (player.pos.y - ground_y).abs() > 0.001 || player.block_pos != stand_block {
+            set_player_position(
+                player,
+                Vec3::new(player.pos.x, ground_y, player.pos.z),
+                stand_block,
+            );
+        }
+        jump.velocity_y = 0.0;
+        jump.grounded = true;
+        return (false, "grounded");
+    }
+
+    jump.grounded = false;
+    jump.velocity_y = (jump.velocity_y - JUMP_GRAVITY * dt).max(JUMP_TERMINAL_SPEED);
+    let next_y = player.pos.y + jump.velocity_y * dt;
+
+    if jump.velocity_y > 0.0 {
+        let next_pos = Vec3::new(player.pos.x, next_y, player.pos.z);
+        if player_volume_clear_at(game_world, next_pos) {
+            set_player_position(player, next_pos, stand_block);
+            return (true, "jump_rise");
+        }
+        jump.velocity_y = 0.0;
+        return (false, "jump_head_blocked");
+    }
+
+    if next_y <= ground_y {
+        set_player_position(
+            player,
+            Vec3::new(player.pos.x, ground_y, player.pos.z),
+            stand_block,
+        );
+        jump.velocity_y = 0.0;
+        jump.grounded = true;
+        return (true, "jump_landed");
+    }
+
+    set_player_position(
+        player,
+        Vec3::new(player.pos.x, next_y, player.pos.z),
+        stand_block,
+    );
+    (true, "jump_fall")
 }
 
 #[derive(Component)]
@@ -1572,7 +1739,8 @@ pub fn first_person_camera(
 
     let dir = if cfg.mouse_look || *mode == CameraMode::FirstPerson {
         let (sy, cy) = angles.yaw.sin_cos();
-        let (sp, cp) = angles.pitch.sin_cos();
+        let render_pitch = angles.pitch.clamp(-0.55, 0.35);
+        let (sp, cp) = render_pitch.sin_cos();
         Vec3::new(sy * cp, sp, -cy * cp)
     } else {
         let mut candidates: Vec<(f32, [i32; 3])> = Vec::new();
@@ -1627,4 +1795,82 @@ pub fn first_person_camera(
     let look_target = eye + dir * 5.0;
     tf.translation = eye;
     tf.look_at(look_target, Vec3::Y);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flat_test_world() -> GameWorld {
+        let mut world = GameWorld::new(8);
+        for x in 0..world.size {
+            for z in 0..world.size {
+                world.set(x, 0, z, BlockType::Stone);
+            }
+        }
+        world
+    }
+
+    #[test]
+    fn jump_is_short_weighty_and_regrounds() {
+        let world = flat_test_world();
+        let mut player =
+            PlayerState { pos: Vec3::new(3.5, 1.0, 3.5), block_pos: [3, 1, 3], ..default() };
+        let mut jump = JumpState { velocity_y: JUMP_TAKEOFF_SPEED, grounded: false };
+        let mut peak = player.pos.y;
+        let mut landed_at = None;
+
+        for frame in 1..=90 {
+            let (moved, _) = step_player_jump(&mut player, &world, &mut jump, 1.0 / 60.0, 0.85);
+            peak = peak.max(player.pos.y);
+            if !moved && jump.grounded {
+                landed_at = Some(frame);
+                break;
+            }
+        }
+
+        let landed_at = landed_at.expect("jump should land within the simulation window");
+        assert!(
+            (1.65..=2.15).contains(&peak),
+            "jump peak should feel snappy and grounded, got y={peak}"
+        );
+        assert!(
+            (25..=45).contains(&landed_at),
+            "jump should land quickly instead of floating, frame={landed_at}"
+        );
+        assert_eq!(player.pos.y, 1.0);
+        assert_eq!(jump.velocity_y, 0.0);
+        assert!(jump.grounded);
+    }
+
+    #[test]
+    fn jump_cannot_retrigger_until_grounded() {
+        let world = flat_test_world();
+        let mut player =
+            PlayerState { pos: Vec3::new(3.5, 1.0, 3.5), block_pos: [3, 1, 3], ..default() };
+        let mut jump = JumpState { velocity_y: JUMP_TAKEOFF_SPEED, grounded: false };
+
+        let _ = step_player_jump(&mut player, &world, &mut jump, 1.0 / 60.0, 0.85);
+        let mid_air_velocity = jump.velocity_y;
+        let attempted_retrigger = jump.grounded;
+        if attempted_retrigger {
+            jump.velocity_y = JUMP_TAKEOFF_SPEED;
+        }
+
+        assert!(!attempted_retrigger);
+        assert_eq!(jump.velocity_y, mid_air_velocity);
+    }
+
+    #[test]
+    fn air_move_preserves_jump_height() {
+        let world = flat_test_world();
+        let mut player =
+            PlayerState { pos: Vec3::new(3.5, 1.7, 3.5), block_pos: [3, 1, 3], ..default() };
+
+        let (moved, reason) = try_player_air_move_continuous(&mut player, &world, Vec3::X, 0.25);
+
+        assert!(moved, "{reason}");
+        assert!((player.pos.y - 1.7).abs() < 0.001);
+        assert!(player.pos.x > 3.5);
+    }
 }

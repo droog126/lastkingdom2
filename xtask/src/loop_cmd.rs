@@ -29,6 +29,7 @@ struct LoopArgs {
     audit_pretty_models: bool,
     no_kenney: bool,
     legacy_voxel: bool,
+    hold_forward_test: bool,
 }
 
 impl Default for LoopArgs {
@@ -49,6 +50,7 @@ impl Default for LoopArgs {
             audit_pretty_models: false,
             no_kenney: false,
             legacy_voxel: false,
+            hold_forward_test: false,
         }
     }
 }
@@ -137,6 +139,9 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     }
     if parsed.legacy_voxel {
         client_args.push("--legacy-voxel".to_string());
+    }
+    if parsed.hold_forward_test {
+        client_args.push("--hold-forward-test".to_string());
     }
 
     let mut server_proc = None;
@@ -293,6 +298,7 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
             }
             Some("nokenney") | Some("no-kenney") => parsed.no_kenney = true,
             Some("legacyvoxel") | Some("legacy-voxel") => parsed.legacy_voxel = true,
+            Some("holdforwardtest") | Some("hold-forward-test") => parsed.hold_forward_test = true,
             _ => {}
         }
         i += 1;

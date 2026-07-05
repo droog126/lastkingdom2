@@ -415,7 +415,7 @@ pub fn update_hud(
         Query<&mut Text, (With<HudObjectiveText>, Without<HudObjectiveFlashText>)>,
     )>,
     _clock: Res<SimClock>,
-    _player: Res<PlayerState>,
+    player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     eco: Res<EcoCycle>,
     nations: Res<NationRegistry>,
@@ -461,6 +461,8 @@ pub fn update_hud(
         **text = format_main_hud(
             run_mode.label(),
             fps,
+            player.pos,
+            player.block_pos,
             &phase_line,
             wood,
             food,
@@ -583,6 +585,8 @@ pub fn update_tutorial_overlay(
 pub fn format_main_hud(
     run_mode_label: &str,
     fps: i32,
+    player_pos: Vec3,
+    player_block_pos: [i32; 3],
     phase_line: &str,
     wood: i64,
     food: i64,
@@ -600,23 +604,48 @@ pub fn format_main_hud(
 ) -> String {
     format!(
         "> WANGUO ORIGINS v0.4 | {run_mode_label} | {fps} fps | {phase_line}\n\
+         > POS x {x:.1} y {y:.1} z {z:.1} | block {bx},{by},{bz}\n\
          > RES wood {wood} food {food} apple {apple} soul {soul}\n\
          > WORLD flags {flags}/{flag_cap} monsters {monsters}\n\
          > ECO rabbits {rabbits}/5 berries {berry_bushes}/10 fruit {fruit} CO2 {co2:.1} eat/grow {fruit_eaten}/{fruit_grown}",
+        x = player_pos.x,
+        y = player_pos.y,
+        z = player_pos.z,
+        bx = player_block_pos[0],
+        by = player_block_pos[1],
+        bz = player_block_pos[2],
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{format_main_hud, radar_project};
-    use bevy::prelude::Vec2;
+    use bevy::prelude::{Vec2, Vec3};
 
     #[test]
     fn format_main_hud_includes_eco_cycle() {
         let s = format_main_hud(
-            "OFFLINE", 60, "Phase: x", 1, 2, 3, 4, 1, 8, 60, 5, 10, 7, 0.8, 11, 12,
+            "OFFLINE",
+            60,
+            Vec3::new(48.5, 16.0, 48.5),
+            [48, 16, 48],
+            "Phase: x",
+            1,
+            2,
+            3,
+            4,
+            1,
+            8,
+            60,
+            5,
+            10,
+            7,
+            0.8,
+            11,
+            12,
         );
-        assert_eq!(s.matches('\n').count(), 3);
+        assert_eq!(s.matches('\n').count(), 4);
+        assert!(s.contains("POS x 48.5 y 16.0 z 48.5 | block 48,16,48"));
         assert!(s.contains("rabbits 5/5"));
         assert!(s.contains("berries 10/10"));
         assert!(s.contains("CO2 0.8"));

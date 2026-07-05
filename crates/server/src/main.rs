@@ -50,6 +50,21 @@ const PLACE_WOOD_COST: i64 = 1;
 const ONLINE_MOVE_SPEED: f32 = 4.5;
 const ONLINE_STEP_THRESHOLD: f32 = 0.85;
 const PLAYER_COLLISION_RADIUS: f32 = 0.34;
+const JUMP_TAKEOFF_SPEED: f32 = 7.2;
+const JUMP_GRAVITY: f32 = 28.0;
+const JUMP_TERMINAL_SPEED: f32 = -18.0;
+
+#[derive(Resource, Debug, Clone, Copy)]
+struct ServerJumpState {
+    velocity_y: f32,
+    grounded: bool,
+}
+
+impl Default for ServerJumpState {
+    fn default() -> Self {
+        Self { velocity_y: 0.0, grounded: true }
+    }
+}
 
 #[derive(Resource, Default)]
 struct WorldRevision(u64);
@@ -206,6 +221,10 @@ fn apply_gameplay_command(
             ok = false;
             "movement command was not routed to entity transform".to_string()
         }
+        GameplayCommandKind::Jump => {
+            ok = false;
+            "jump command was not routed to entity transform".to_string()
+        }
         GameplayCommandKind::GatherFootBlock => {
             let [x, y, z] = [
                 player.block_pos[0],
@@ -327,6 +346,7 @@ fn apply_gameplay_commands(
     mut commands: Commands,
     creatures: Query<(Entity, &Creature, &CreatureAI)>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
+    mut jump: ResMut<ServerJumpState>,
     mut player_q: Query<
         (
             &mut bevy::prelude::Transform,
@@ -348,14 +368,23 @@ fn apply_gameplay_commands(
         // only the latest gives us a clean per-tick movement step whose speed
         // is decoupled from the client's frame rate.
         let mut latest_move: Option<(i16, i16)> = None;
+        let mut jump_requested = false;
         let mut other_cmds: Vec<GameplayCommand> = Vec::new();
         for cmd in receiver.receive() {
             match cmd.kind {
                 GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
                     latest_move = Some((dx_milli, dz_milli));
                 }
+                GameplayCommandKind::Jump => {
+                    jump_requested = true;
+                }
                 _ => other_cmds.push(cmd),
             }
+        }
+
+        if jump_requested && jump.grounded {
+            jump.velocity_y = JUMP_TAKEOFF_SPEED;
+            jump.grounded = false;
         }
 
         if let Some((dx_milli, dz_milli)) = latest_move {
@@ -366,14 +395,25 @@ fn apply_gameplay_commands(
             // pass the raw vector to apply_world_move without re-normalizing.
             let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
             let moved = if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-                apply_world_move(
-                    &mut transform,
-                    &mut player_pos,
-                    &mut player,
-                    &world,
-                    dir,
-                    1.0 / 60.0,
-                )
+                if jump.grounded {
+                    apply_world_move(
+                        &mut transform,
+                        &mut player_pos,
+                        &mut player,
+                        &world,
+                        dir,
+                        1.0 / 60.0,
+                    )
+                } else {
+                    apply_air_world_move(
+                        &mut transform,
+                        &mut player_pos,
+                        &mut player,
+                        &world,
+                        dir,
+                        1.0 / 60.0,
+                    )
+                }
             } else {
                 false
             };
@@ -381,6 +421,17 @@ fn apply_gameplay_commands(
             if moved {
                 feedback.write(GameplayFeedback { ok: true, summary: "moved".to_string() });
             }
+        }
+
+        if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
+            let _ = step_authoritative_jump(
+                &mut transform,
+                &mut player_pos,
+                &mut player,
+                &world,
+                &mut jump,
+                1.0 / 60.0,
+            );
         }
 
         for cmd in other_cmds {
@@ -430,6 +481,7 @@ fn apply_udp_gameplay_commands(
     mut player: ResMut<PlayerState>,
     world: Res<GameWorld>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
+    jump: Res<ServerJumpState>,
     mut player_q: Query<
         (
             &mut bevy::prelude::Transform,
@@ -475,14 +527,25 @@ fn apply_udp_gameplay_commands(
     let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
     diagnostics.last_move_applied =
         if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-            apply_world_move(
-                &mut transform,
-                &mut player_pos,
-                &mut player,
-                &world,
-                dir,
-                1.0 / 60.0,
-            )
+            if jump.grounded {
+                apply_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                )
+            } else {
+                apply_air_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                )
+            }
         } else {
             false
         };
@@ -526,6 +589,107 @@ fn apply_world_move(
     player.pos = next_pos;
     player.block_pos = block_pos;
     true
+}
+
+fn apply_air_world_move(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    world: &GameWorld,
+    dir: Vec2,
+    dt: f32,
+) -> bool {
+    if dir.length_squared() <= 0.0001 {
+        return false;
+    }
+    let step = Vec3::new(dir.x, 0.0, dir.y) * ONLINE_MOVE_SPEED * dt;
+    let next_pos = player.pos + step;
+    if !player_volume_clear_at(world, next_pos) {
+        return false;
+    }
+
+    transform.translation = next_pos;
+    player_pos.0 = next_pos;
+    player.pos = next_pos;
+    player.block_pos = [
+        next_pos.x.floor() as i32,
+        player.block_pos[1],
+        next_pos.z.floor() as i32,
+    ];
+    true
+}
+
+fn step_authoritative_jump(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    world: &GameWorld,
+    jump: &mut ServerJumpState,
+    dt: f32,
+) -> (bool, &'static str) {
+    let dt = dt.clamp(0.0, 0.05);
+    let Some((stand_pos, stand_block)) = player_stand_position_at(
+        world,
+        player.pos.x.floor() as i32,
+        player.pos.z.floor() as i32,
+        player.pos.y,
+        ONLINE_STEP_THRESHOLD,
+    ) else {
+        jump.grounded = false;
+        jump.velocity_y = (jump.velocity_y - JUMP_GRAVITY * dt).max(JUMP_TERMINAL_SPEED);
+        return (false, "jump_no_floor");
+    };
+
+    let ground_y = stand_pos.y;
+    if player.pos.y <= ground_y + 0.02 && jump.velocity_y <= 0.0 {
+        if (player.pos.y - ground_y).abs() > 0.001 || player.block_pos != stand_block {
+            let pos = Vec3::new(player.pos.x, ground_y, player.pos.z);
+            transform.translation = pos;
+            player_pos.0 = pos;
+            player.pos = pos;
+            player.block_pos = stand_block;
+        }
+        jump.velocity_y = 0.0;
+        jump.grounded = true;
+        return (false, "grounded");
+    }
+
+    jump.grounded = false;
+    jump.velocity_y = (jump.velocity_y - JUMP_GRAVITY * dt).max(JUMP_TERMINAL_SPEED);
+    let next_y = player.pos.y + jump.velocity_y * dt;
+
+    if jump.velocity_y > 0.0 {
+        let next_pos = Vec3::new(player.pos.x, next_y, player.pos.z);
+        if player_volume_clear_at(world, next_pos) {
+            transform.translation = next_pos;
+            player_pos.0 = next_pos;
+            player.pos = next_pos;
+            player.block_pos = stand_block;
+            return (true, "jump_rise");
+        }
+        jump.velocity_y = 0.0;
+        return (false, "jump_head_blocked");
+    }
+
+    let next_pos = if next_y <= ground_y {
+        jump.velocity_y = 0.0;
+        jump.grounded = true;
+        Vec3::new(player.pos.x, ground_y, player.pos.z)
+    } else {
+        Vec3::new(player.pos.x, next_y, player.pos.z)
+    };
+    transform.translation = next_pos;
+    player_pos.0 = next_pos;
+    player.pos = next_pos;
+    player.block_pos = stand_block;
+    (
+        true,
+        if jump.grounded {
+            "jump_landed"
+        } else {
+            "jump_fall"
+        },
+    )
 }
 
 fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
@@ -668,6 +832,7 @@ fn main() {
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
         .init_resource::<ServerCommandDiagnostics>()
+        .init_resource::<ServerJumpState>()
         .insert_resource(scenario_state)
         .add_systems(
             Startup,

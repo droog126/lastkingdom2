@@ -71,6 +71,7 @@ pub mod messages {
     #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
     pub enum GameplayCommandKind {
         MoveWorld { dx_milli: i16, dz_milli: i16 },
+        Jump,
         GatherFootBlock,
         PlaceWoodFootBlock,
         Craft(BuildRecipe),

@@ -76,6 +76,9 @@ pub struct AvatarPart {
     pub sokpop: SokpopAnim,
 }
 
+#[derive(Component)]
+pub struct PlayerAvatarModel;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AvatarPartKind {
     Head,
@@ -322,6 +325,7 @@ pub fn spawn_pretty(
     let kenney_enabled = std::env::var("LK2_DISABLE_KENNEY")
         .map(|value| !matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(true);
+    let auto_demo_mode = std::env::args().any(|a| a == "--auto-demo");
 
     if cfg.show_water {
         let s = 14.0_f32;
@@ -400,6 +404,55 @@ pub fn spawn_pretty(
     }
 
     if cfg.show_player_avatar && !first_person_mode {
+        let ground_top =
+            effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+        commands.spawn((
+            WorldAssetRoot(asset_server.load(
+                GltfAssetLabel::Scene(0).from_asset("procedural/pretty/sokpop_gatherer.glb"),
+            )),
+            Transform::from_translation(Vec3::new(player.pos.x, ground_top + 0.24, player.pos.z))
+                .with_rotation(Quat::from_rotation_y(camera_angles.yaw))
+                .with_scale(Vec3::splat(0.62)),
+            PlayerAvatarModel,
+        ));
+        info!("spawned sokpop gatherer avatar at {:?}", player.pos);
+    }
+
+    if !first_person_mode {
+        let tree_offset = local_offset_from_yaw(Vec3::new(2.0, 0.0, 3.2), camera_angles.yaw);
+        let tree_x = player.pos.x + tree_offset.x;
+        let tree_z = player.pos.z + tree_offset.z;
+        let tree_ground =
+            effective_ground_height(&game_world, tree_x.floor() as i32, tree_z.floor() as i32);
+        commands.spawn((
+            WorldAssetRoot(
+                asset_server
+                    .load(GltfAssetLabel::Scene(0).from_asset("procedural/pretty/sokpop_tree.glb")),
+            ),
+            Transform::from_translation(Vec3::new(tree_x, tree_ground + 0.05, tree_z))
+                .with_rotation(Quat::from_rotation_y(camera_angles.yaw + 0.35))
+                .with_scale(Vec3::splat(1.8)),
+        ));
+
+        let stick_offset = local_offset_from_yaw(Vec3::new(1.1, 0.0, 2.1), camera_angles.yaw);
+        let stick_x = player.pos.x + stick_offset.x;
+        let stick_z = player.pos.z + stick_offset.z;
+        let stick_ground =
+            effective_ground_height(&game_world, stick_x.floor() as i32, stick_z.floor() as i32);
+        commands.spawn((
+            WorldAssetRoot(
+                asset_server.load(
+                    GltfAssetLabel::Scene(0).from_asset("procedural/pretty/fallen_stick.glb"),
+                ),
+            ),
+            Transform::from_translation(Vec3::new(stick_x, stick_ground + 0.08, stick_z))
+                .with_rotation(Quat::from_rotation_y(camera_angles.yaw - 0.7))
+                .with_scale(Vec3::splat(2.4)),
+        ));
+        info!("spawned sokpop tree and fallen stick near player");
+    }
+
+    if false && cfg.show_player_avatar && !first_person_mode {
         let base = player.pos;
 
         // i=0 head
@@ -650,7 +703,7 @@ pub fn spawn_pretty(
         );
     }
 
-    if cfg.show_monster_cubes && !first_person_mode {
+    if cfg.show_monster_cubes && !first_person_mode && !auto_demo_mode {
         let monster_kinds = [
             (Color::srgb(0.5, 0.85, 0.2), "Snake"),
             (Color::srgb(0.3, 0.7, 0.95), "FrostElf"),
@@ -751,14 +804,16 @@ pub fn spawn_pretty(
     let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
 
     if first_person_mode {
-        spawn_first_person_village(
-            &mut commands,
-            &asset_server,
-            &game_world,
-            player.pos,
-            camera_angles.yaw,
-        );
-        if kenney_enabled {
+        if !auto_demo_mode {
+            spawn_first_person_village(
+                &mut commands,
+                &asset_server,
+                &game_world,
+                player.pos,
+                camera_angles.yaw,
+            );
+        }
+        if kenney_enabled && !auto_demo_mode {
             spawn_first_person_camp_props(
                 &mut commands,
                 &asset_server,
@@ -770,7 +825,7 @@ pub fn spawn_pretty(
         return;
     }
 
-    if !first_person_mode {
+    if !first_person_mode && !auto_demo_mode {
         for i in 0..8 {
             let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
             let r = 13.0;
@@ -814,6 +869,9 @@ pub fn spawn_pretty(
         (-1.0, -4.8, 0.85),
     ];
     for (i, (rx, rz, scale)) in rock_positions.iter().enumerate() {
+        if auto_demo_mode {
+            break;
+        }
         let rock_color = match i % 3 {
             0 => Color::srgb(0.42, 0.42, 0.45),
             1 => Color::srgb(0.58, 0.55, 0.50),
@@ -851,6 +909,9 @@ pub fn spawn_pretty(
         Color::srgb(0.95, 0.30, 0.30),
     ];
     for (i, (fx, fz)) in flower_positions.iter().enumerate() {
+        if auto_demo_mode {
+            break;
+        }
         let f_color = flower_colors[i % flower_colors.len()];
         let f_x = player.pos.x + fx * 2.0;
         let f_z = player.pos.z + fz * 2.0;
@@ -865,6 +926,9 @@ pub fn spawn_pretty(
     }
 
     for i in 0..28 {
+        if auto_demo_mode {
+            break;
+        }
         let angle = i as f32 * 2.3999631;
         let r = 4.0 + (i % 7) as f32 * 2.15;
         let x = player.pos.x + angle.cos() * r;
@@ -893,14 +957,16 @@ pub fn spawn_pretty(
     // is ~15 — that mismatch was the root cause of "kenney landmark Y=34.65, 19m
     // above player's head, first-person cannot see").
     let landmark_anchor_y = player.pos.y;
-    spawn_v2_crown_season_markers(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        player.pos,
-        landmark_anchor_y,
-    );
-    if kenney_enabled {
+    if !auto_demo_mode {
+        spawn_v2_crown_season_markers(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            player.pos,
+            landmark_anchor_y,
+        );
+    }
+    if kenney_enabled && !auto_demo_mode {
         spawn_kenney_landmarks(&mut commands, &asset_server, player.pos, landmark_anchor_y);
     }
 
@@ -950,7 +1016,7 @@ fn local_offset_from_yaw(offset: Vec3, yaw: f32) -> Vec3 {
 fn spawn_scene_asset(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
-    game_world: &GameWorld,
+    _game_world: &GameWorld,
     player_pos: Vec3,
     yaw: f32,
     path: &'static str,
@@ -961,11 +1027,13 @@ fn spawn_scene_asset(
     let world_offset = local_offset_from_yaw(offset, yaw);
     let x = player_pos.x + world_offset.x;
     let z = player_pos.z + world_offset.z;
-    let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+    // Anchor Y to player_pos.y so first-person village buildings, camp props
+    // and kenney markers sit at eye level instead of 19m+ above the player on
+    // tall-hill terrain (root cause C of iter_200).
     let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
     commands.spawn((
         WorldAssetRoot(scene),
-        Transform::from_translation(Vec3::new(x, ground_y + offset.y, z))
+        Transform::from_translation(Vec3::new(x, player_pos.y + offset.y, z))
             .with_rotation(Quat::from_rotation_y(yaw + asset_yaw))
             .with_scale(Vec3::splat(scale)),
     ));
@@ -1740,6 +1808,7 @@ fn rabbit_part_pose(part: RabbitVisualPart, breath: f32) -> (Vec3, Vec3) {
 
 pub fn animate_avatar(
     mut q: Query<(&mut Transform, &AvatarPart)>,
+    mut model_q: Query<&mut Transform, (With<PlayerAvatarModel>, Without<AvatarPart>)>,
     player: Res<PlayerState>,
     game_world: Res<GameWorld>,
     state: Res<PlayerAnimState>,
@@ -1760,6 +1829,18 @@ pub fn animate_avatar(
 
     let vy = state.vertical_vel;
     let stretch = (1.0 + vy * 0.06).clamp(0.85, 1.15);
+
+    for mut transform in &mut model_q {
+        let bob = (phase * 0.5).sin() * 0.035 * speed.max(0.15);
+        let yaw = if state.smoothed_move_world.length_squared() > 0.001 {
+            state.smoothed_move_world.x.atan2(state.smoothed_move_world.y)
+        } else {
+            transform.rotation.to_euler(EulerRot::YXZ).0
+        };
+        transform.translation = Vec3::new(base_x, ground_top + 0.24 + bob, base_z);
+        transform.rotation = Quat::from_rotation_y(yaw);
+        transform.scale = Vec3::splat(0.62);
+    }
 
     for (mut transform, part) in q.iter_mut() {
         let p = phase + part.sokpop.phase_offset;

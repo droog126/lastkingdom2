@@ -139,8 +139,10 @@ fn likely_cause(stats: &MotionStats) -> &'static str {
         "ground-height or block-position snapping; inspect player_stand_position_at inputs"
     } else if stats.blocked_moves > stats.move_attempts / 10 && stats.move_attempts > 30 {
         "collision/step rejection during movement; inspect volume clearance and step threshold"
+    } else if stats.max_dt > 0.10 && stats.max_player_step > 0.5 {
+        "frame-time spike caused a single-frame movement jump; inspect terrain mesh rebuilds, screenshot capture, logging, or asset work"
     } else if stats.frame_spikes > stats.samples / 20 && stats.max_dt > 0.05 {
-        "frame-time spikes; inspect mesh rebuilds, logging, or asset work during movement"
+        "frequent frame-time spikes; inspect mesh rebuilds, logging, or asset work during movement"
     } else if stats.camera_jumps > stats.samples / 20 {
         "camera-only jitter; inspect camera bob/follow source rather than authoritative movement"
     } else {

@@ -21,6 +21,24 @@ server:
 client:
     $env:BEVY_DISABLE_ACCESSIBILITY="1"; cargo run -p lk2-client -- --offline
 
+model-preview:
+    cargo run -p lk2-client -- --model-preview
+
+model-preview-all:
+    cargo run -p lk2-client -- --model-preview --model-preview-all
+
+model-preview-one MODEL:
+    cargo run -p lk2-client -- --model-preview --model-preview-one={{MODEL}}
+
+model-preview-shot MODEL:
+    cargo run -p lk2-client -- --model-preview --model-preview-one={{MODEL}} --model-preview-shot
+
+terrain-preview:
+    cargo run -p lk2-client -- --terrain-preview
+
+terrain-preview-shot:
+    cargo run -p lk2-client -- --terrain-preview --terrain-preview-shot
+
 client-online:
     $env:BEVY_DISABLE_ACCESSIBILITY="1"; Get-Process lk2-server -ErrorAction SilentlyContinue | Stop-Process -Force; cargo build -p lk2-server -p lk2-client; Start-Process -FilePath .\target\debug\lk2-server.exe -WorkingDirectory (Get-Location) -WindowStyle Hidden; Start-Sleep -Seconds 2; .\target\debug\lk2-client.exe --connect=127.0.0.1:5000 --first-person
 

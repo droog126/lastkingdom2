@@ -1,4 +1,10 @@
+use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::camera::Exposure;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::{IntoScheduleConfigs, common_conditions::resource_equals};
+use bevy::light::{AtmosphereEnvironmentMapLight, VolumetricFog, VolumetricLight};
+use bevy::pbr::{AtmosphereSettings, ScreenSpaceReflections};
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
 
@@ -8,9 +14,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 mod capture;
+mod model_preview;
 mod pretty;
 mod pvp_systems;
 mod render;
+mod terrain_preview;
 mod ui;
 
 use lk2_core::ai::TickObserver;
@@ -42,12 +50,13 @@ use crate::pvp_systems::{
     trigger_visual_effects,
 };
 use crate::render::{
-    CameraAngles, CameraMode, FreeFlyState, LastMoveDirection, NestMarkerCount, Player,
+    CameraAngles, CameraMode, FreeFlyState, JumpState, LastMoveDirection, NestMarkerCount, Player,
     RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle, cycle_terrain_preset,
     emergency_teleport, first_person_camera, freefly_movement, freefly_toggle, held_weapon_follow,
     maintain_cursor_grab, mouse_look_system, player_input, setup_atmosphere, setup_cursor_grab,
-    spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
-    update_animal_indicator, update_nest_indicator, update_nest_marker_positions,
+    setup_terrain_underlay, spawn_nest_markers, spawn_terrain_around_player,
+    toggle_cursor_grab_on_esc, underlay_follow_player, update_animal_indicator,
+    update_nest_indicator, update_nest_marker_positions,
 };
 use crate::ui::{
     ClientRunMode, setup_fonts, setup_hud, update_hud, update_nest_radar, update_tutorial_overlay,
@@ -184,6 +193,21 @@ fn main() {
     let hold_forward_test = args.iter().any(|a| a == "--hold-forward-test");
     let no_focus_window = args.iter().any(|a| a == "--no-focus-window");
     let hidden_window = args.iter().any(|a| a == "--hidden-window");
+    let model_preview_mode = args.iter().any(|a| a == "--model-preview");
+    let terrain_preview_mode = args.iter().any(|a| a == "--terrain-preview");
+
+    if model_preview_mode {
+        // --model-preview takes a separate code path: no physics, no network,
+        // no terrain / creatures / HUD. Just lay every GLB in assets/ out on
+        // a grid, render one screenshot through the real atmosphere + bloom +
+        // SSR + TAA pipeline, then exit. See crates/client/src/model_preview.rs.
+        model_preview::run_model_preview();
+        return;
+    }
+    if terrain_preview_mode {
+        terrain_preview::run_terrain_preview();
+        return;
+    }
 
     let connect_addr = lk2_core::transport::parse_connect_arg(&args);
     let network_mode = connect_addr.is_some() && !offline_mode;
@@ -267,6 +291,13 @@ fn main() {
 
     app.insert_resource(bevy::winit::WinitSettings::continuous());
 
+    // iter_456: switch to the deferred opaque renderer. The deferred pipeline is
+    // required for bevy 0.19's volumetric fog raymarch to sample the G-buffer
+    // properly. The forward path renders fog as a flat color. Atmosphere
+    // scattering itself works either way; we just want volumetric god rays to
+    // work too.
+    app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+
     app.add_plugins(PhysicsPlugins::default()).insert_resource(Gravity::default());
 
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
@@ -339,6 +370,7 @@ fn main() {
         .init_resource::<TickRecorder>()
         .init_resource::<LastMoveDirection>()
         .init_resource::<FreeFlyState>()
+        .init_resource::<JumpState>()
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
@@ -373,6 +405,7 @@ fn main() {
             setup_camera,
             setup_light,
             setup_atmosphere,
+            setup_terrain_underlay,
             setup_cursor_grab,
             setup_world,
             spawn_nest_markers,
@@ -465,6 +498,7 @@ fn main() {
         Update,
         (
             follow_ground_discs,
+            underlay_follow_player,
             follow_water,
             follow_kenney_landmarks,
             follow_monster_cubes,
@@ -815,6 +849,9 @@ fn record_online_motion_trace(
         "camera_step_len": camera_delta.length(),
         "local_move_attempted": trace.last_local_attempted,
         "local_move_moved": trace.last_local_moved,
+        "local_move_reason": trace.last_local_reason,
+        "local_move_dir": trace.last_local_dir,
+        "local_move_distance": trace.last_local_distance,
         "server_pos": trace.last_server_pos.map(|p| [p.x, p.y, p.z]),
         "server_drift": server_drift,
         "server_correction": trace.last_server_correction,
@@ -890,6 +927,9 @@ fn send_online_gameplay_commands(
         }
     }
 
+    if keys.just_pressed(KeyCode::Space) {
+        send(GameplayCommandKind::Jump);
+    }
     if keys.just_pressed(KeyCode::KeyG) {
         send(GameplayCommandKind::GatherFootBlock);
     }
@@ -974,22 +1014,45 @@ impl Default for TimeOfDay {
 }
 
 fn setup_camera(mut commands: Commands) {
+    // iter_456: wire the bevy 0.19 atmosphere + post-process stack onto the camera
+    // so the rendered scene actually uses atmospheric scattering, volumetric fog,
+    // bloom, screen-space reflections, and TAA instead of a flat clear color.
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // AtmosphereSettings is required so the renderer actually reads the nearest
+        // Atmosphere entity. Default uses the lookup-texture path (cheap).
+        AtmosphereSettings::default(),
+        // Lets the atmosphere drive ambient lighting + IBL for this view.
+        AtmosphereEnvironmentMapLight::default(),
+        // RAW_SUNLIGHT + Atmospheric scattering requires a higher exposure than the
+        // standard 13.0 EV recommended by the official atmosphere example.
+        Exposure { ev100: 13.0 },
+        Tonemapping::AcesFitted,
+        Bloom::NATURAL,
+        // ambient_intensity 0 so the fog isn't tinted by ambient light; the scene
+        // already has a global ambient light setup, we just want the god-ray tint.
+        VolumetricFog { ambient_intensity: 0.0, ..default() },
+        Msaa::Off,
+        TemporalAntiAliasing::default(),
+        ScreenSpaceReflections { min_perceptual_roughness: 0.0..0.0, ..default() },
     ));
 }
 
 fn setup_light(mut commands: Commands) {
+    // iter_456: Sun must use `lux::RAW_SUNLIGHT` + the `VolumetricLight` marker for
+    // bevy 0.19's atmospheric scattering to compute the sun's contribution to the
+    // sky and to cast volumetric god-rays through the volumetric fog.
     commands.spawn((
         DirectionalLight {
-            illuminance: 22000.0,
+            illuminance: bevy::light::light_consts::lux::RAW_SUNLIGHT,
             shadow_maps_enabled: true,
             color: Color::srgb(1.0, 0.96, 0.88),
             ..default()
         },
         Transform::from_xyz(40.0, 80.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
         Sun,
+        VolumetricLight,
     ));
 
     commands.spawn((
@@ -1014,8 +1077,12 @@ pub fn day_night_cycle(
     mut tod: ResMut<TimeOfDay>,
     mut sun: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut fill: Query<&mut DirectionalLight, (Without<Sun>, With<DirectionalLight>)>,
-    mut clear: ResMut<ClearColor>,
 ) {
+    // iter_456: the legacy `mut clear: ResMut<ClearColor>` is gone. Bevy 0.19's
+    // `Atmosphere` entity computes the sky color procedurally from the sun
+    // direction, so the clear color is no longer the sky. We still drive the
+    // sun's transform + intensity, which lets the atmosphere produce sunset /
+    // dawn colors automatically (Rayleigh + Mie scattering).
     if std::env::args().any(|a| a == "--auto-demo") {
         tod.0 = 0.42;
     } else {
@@ -1029,7 +1096,10 @@ pub fn day_night_cycle(
     let sun_pos = Vec3::new((t - 0.5) * 2.0 * dist, dayness * dist + 5.0, 0.0);
     if let Ok((mut tf, mut l)) = sun.single_mut() {
         *tf = Transform::from_translation(sun_pos).looking_at(Vec3::ZERO, Vec3::Y);
-        l.illuminance = 1500.0 + 30000.0 * dayness;
+        // RAW_SUNLIGHT at full day; ramp down to near-moonless at night so the
+        // Atmosphere's Mie phase renders the sun correctly without blowing out
+        // the camera exposure.
+        l.illuminance = bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * dayness);
         l.color = Color::srgb(
             1.0 - 0.15 * sunset_glow,
             0.95 - 0.35 * sunset_glow,
@@ -1039,19 +1109,6 @@ pub fn day_night_cycle(
     if let Ok(mut l) = fill.single_mut() {
         l.illuminance = 3000.0 * dayness + 150.0;
     }
-
-    let day = (0.55, 0.78, 0.98);
-    let dusk = (0.95, 0.55, 0.30);
-    let night = (0.18, 0.25, 0.45);
-
-    let w_dusk = sunset_glow * 0.35;
-    let w_night = (1.0 - dayness).max(0.0) * (1.0 - sunset_glow * 0.5);
-    let w_day = 1.0 - w_dusk - w_night;
-    clear.0 = Color::srgb(
-        day.0 * w_day + dusk.0 * w_dusk + night.0 * w_night,
-        day.1 * w_day + dusk.1 * w_dusk + night.1 * w_night,
-        day.2 * w_day + dusk.2 * w_dusk + night.2 * w_night,
-    );
 }
 
 #[allow(clippy::too_many_arguments)]

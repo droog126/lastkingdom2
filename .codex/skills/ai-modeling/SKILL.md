@@ -9,6 +9,19 @@ description: Reproducible AI 3D modeling workflow for lastkingdom2 assets. Use w
 
 Create and modify 3D models through reproducible scripts under `tools/`. Do not make unrepeatable manual Blender edits and commit only the exported result.
 
+## Style Guardrails
+
+For the Sokpop-style target, keep models simple, grounded, and structurally readable before adding detail.
+
+- Start with the primary silhouette and proportions: head/body/limb scale, contact points, centerline, and stance must read correctly from the game camera before adding accessories.
+- Prefer a few clear primitive forms over many small decorative pieces. If a model needs many small parts to communicate the idea, simplify the idea first.
+- Ensure connected body parts visibly connect or deliberately overlap. Avoid floating heads, exposed gaps, hidden sockets, or large primitives intersecting in ways that look like something is stuffed inside the model.
+- Use short, chunky, toy-like forms for characters. Avoid long thin necks, dangling limbs, overly tall torsos, or realistic anatomy that fights the simple style.
+- Add identity details only after the base form works: one clear prop, one color accent, or one readable accessory is better than layered small features.
+- Keep colors matte, moderately saturated, and separated by role. Do not rely on bright lighting, tiny texture-like marks, or subtle shading to make a form readable.
+- When iterating after screenshot feedback, fix the structural problem directly instead of compensating with unrelated details.
+- Generate a preview render or use the model preview system after export, and self-check for scale, alignment, visible gaps, unwanted intersections, over-brightness, and whether the model still reads when viewed small.
+
 ## Blender
 
 Cross-platform command shape:

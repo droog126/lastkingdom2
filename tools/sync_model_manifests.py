@@ -17,6 +17,7 @@ PRETTY_GROUPS = {
         "monster_aether_wraith",
         "cloud_puff",
         "sokpop_gatherer",
+        "sokpop_tree",
         "tree",
         "fallen_stick",
         "rock_dark",
