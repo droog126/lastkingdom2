@@ -1,7 +1,6 @@
 pub mod clock;
 pub mod combat;
 pub mod constant;
-pub mod controller;
 pub mod creature;
 pub mod diagnostics;
 pub mod eco_cycle;
