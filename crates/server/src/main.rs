@@ -8,7 +8,7 @@ use lightyear::prelude::server::ServerUdpIo;
 
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::PlayerAction;
-use lk2_core::protocol::components::{GameplayHudState, PlayerPos, VoxelDelta};
+use lk2_core::protocol::components::{EcoSnapshot, GameplayHudState, PlayerPos, VoxelDelta};
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
 };
@@ -717,13 +717,16 @@ fn sync_authoritative_snapshot_components(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
+    eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
     last_delta: Res<LastVoxelDeltaState>,
-    mut q: Query<(&mut GameplayHudState, &mut VoxelDelta), With<PlayerPos>>,
+    mut q: Query<(&mut GameplayHudState, &mut EcoSnapshot, &mut VoxelDelta), With<PlayerPos>>,
 ) {
     let hud = build_gameplay_hud_state(&clock, &player, &pool, &nations, &monsters, &obs);
-    for (mut hud_state, mut delta) in q.iter_mut() {
+    let eco_snapshot = eco.to_snapshot(clock.tick);
+    for (mut hud_state, mut eco_state, mut delta) in q.iter_mut() {
         *hud_state = hud.clone();
+        *eco_state = eco_snapshot.clone();
         if last_delta.revision > 0 {
             *delta = VoxelDelta {
                 revision: last_delta.revision,
@@ -978,6 +981,7 @@ fn spawn_player(
         lk2_core::protocol::components::PlayerPos(spawn),
         ActionState::<PlayerAction>::default(),
         empty_gameplay_hud_state(),
+        EcoCycle::default().to_snapshot(0),
         empty_voxel_delta(),
     ));
 }

@@ -18,7 +18,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, args, audit};
+use crate::{Result, args};
 
 const DEV_DYNAMIC_FEATURES: &[&str] = &["dev-dynamic-linking", "lk2-core/dev-dynamic-linking"];
 const OUTPUT_DIR: &str = "screenshots/model_preview";
@@ -54,6 +54,7 @@ pub struct ModelSummary {
 pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let mut only: Option<String> = None;
     let mut skip_build = false;
+    let mut skip_render = false;
     let mut limit: Option<usize> = None;
     let mut i = 0;
     while i < raw.len() {
@@ -70,8 +71,13 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
                 }
             }
             Some("skipbuild") | Some("skip-build") => skip_build = true,
+            Some("skiprender") | Some("skip-render") | Some("reevaluate") | Some("re-eval") => {
+                skip_render = true
+            }
             Some("help") | Some("h") | Some("?") => {
-                println!("xtask model-preview-all [--only=<stem>] [--limit=N] [--skip-build]");
+                println!(
+                    "xtask model-preview-all [--only=<stem>] [--limit=N] [--skip-build] [--skip-render]"
+                );
                 return Ok(());
             }
             _ => {}
@@ -80,10 +86,18 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     }
 
     fs::create_dir_all(root.join(OUTPUT_DIR)).map_err(|e| e.to_string())?;
-    let envs = runtime_env(root)?;
     let client_exe = exe_path(root, "lk2-client");
-    if !skip_build || !client_exe.exists() {
+    let envs = runtime_env(root)?;
+    if !client_exe.exists() {
+        // No binary at all → must build. Build with the same features the rest
+        // of the project uses; this path is rare on a hot dev loop.
         cargo_build(root, &envs)?;
+    } else if !skip_build {
+        println!(
+            ">>> using existing {} ({} MB); pass --skip-build to skip rebuild",
+            client_exe.display(),
+            fs::metadata(&client_exe).map(|m| m.len() / 1024 / 1024).unwrap_or(0)
+        );
     }
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
@@ -93,13 +107,30 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let mut glbs = collect_glbs(&asset_root);
     if let Some(filter) = only.as_deref() {
         let needle = filter.to_ascii_lowercase();
+        let needle_stem = needle
+            .rsplit('/')
+            .next()
+            .unwrap_or(&needle)
+            .trim_end_matches(".glb")
+            .to_string();
+        let needle_no_ext = needle.trim_end_matches(".glb").to_string();
         glbs.retain(|(rel, _)| {
             let lower = rel.to_ascii_lowercase();
             let stem = lower.rsplit('/').next().unwrap_or("").trim_end_matches(".glb");
-            stem == needle.trim_end_matches(".glb")
-                || lower.ends_with(&format!("/{needle}"))
+            // Match: exact relative path, exact stem, path-ending, or the
+            // unique asset path under `assets/`. We do NOT keep all models
+            // that share a stem — that's too loose when several packs share
+            // a name (e.g. two `rabbit.glb` files).
+            lower == needle_no_ext
                 || lower == needle
+                || stem == needle_stem
+                || lower.ends_with(&format!("/{needle_no_ext}"))
         });
+        if glbs.is_empty() {
+            return Err(format!(
+                "no GLB matched --only='{filter}' (try stem or assets-relative path)"
+            ));
+        }
     }
     if glbs.is_empty() {
         return Err(format!(
@@ -133,14 +164,20 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         );
         let png_rel = format!("{OUTPUT_DIR}/{stem}.png");
         let png_abs = root.join(&png_rel);
-        let _ = fs::remove_file(&png_abs);
-        match run_one(root, &client_exe, &envs, &stem, &png_abs) {
-            Ok(()) => {}
-            Err(err) => {
-                eprintln!("  ! run error: {err}");
-            }
+        if !skip_render {
+            let _ = fs::remove_file(&png_abs);
         }
-        let entry = evaluate_png(root, &stem, asset_path, category, &png_abs);
+        let entry = if skip_render {
+            evaluate_png(root, &stem, asset_path, category, &png_abs)
+        } else {
+            match run_one(root, &client_exe, &envs, &stem, &png_abs) {
+                Ok(()) => evaluate_png(root, &stem, asset_path, category, &png_abs),
+                Err(err) => {
+                    eprintln!("  ! run error: {err}");
+                    evaluate_png(root, &stem, asset_path, category, &png_abs)
+                }
+            }
+        };
         println!(
             "  verdict={} bytes={} problems={:?}",
             entry.verdict, entry.png_bytes, entry.problems
@@ -292,79 +329,141 @@ struct PngInspection {
 }
 
 fn inspect_png(_root: &Path, png_abs: &Path) -> Option<PngInspection> {
-    // Decode PNG via a tiny inline approach: shell out to a known tool that
-    // Bevy/Rust assets already provide. Avoid adding image deps just for this.
-    // We use `python` if available because it ships everywhere on Windows dev
-    // boxes and `Pillow` is often preinstalled in the env we tested.
-    let probe = std::process::Command::new("python")
-        .arg("-c")
-        .arg(
-            r#"
-import sys, json
-try:
-    from PIL import Image
-except Exception as e:
-    print(json.dumps({"error": f"pillow-missing:{e}"}))
-    sys.exit(0)
-p = sys.argv[1]
-img = Image.open(p).convert("RGB")
-w, h = img.size
-px = img.load()
-# sample every 4th pixel for speed
-from collections import Counter
-cnt = Counter()
-sat_sum = 0
-n = 0
-for y in range(0, h, 4):
-    for x in range(0, w, 4):
-        r, g, b = px[x, y]
-        cnt[(r >> 4, g >> 4, b >> 4)] += 1
-        mx, mn = max(r, g, b), min(r, g, b)
-        sat = 0 if mx == 0 else (mx - mn) / mx
-        sat_sum += sat
-        n += 1
-top_color, top_count = cnt.most_common(1)[0]
-top_ratio = top_count / max(n, 1)
-mean_sat = sat_sum / max(n, 1)
-# silhouette: pixels that differ from a guessed background
-bg = px[2, 2]
-def diff(p):
-    return abs(p[0]-bg[0]) + abs(p[1]-bg[1]) + abs(p[2]-bg[2])
-xs, ys = [], []
-for y in range(0, h, 2):
-    for x in range(0, w, 2):
-        if diff(px[x, y]) > 18:
-            xs.append(x); ys.append(y)
-sw = (max(xs) - min(xs)) if xs else 0
-sh = (max(ys) - min(ys)) if ys else 0
-print(json.dumps({
-    "w": w, "h": h,
-    "top_ratio": top_ratio,
-    "mean_sat": mean_sat,
-    "sw": sw, "sh": sh,
-}))
-"#,
-        )
-        .arg(png_abs)
-        .output();
-    let out = probe.ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).to_string();
-    let line = text.lines().filter(|l| l.trim().starts_with('{')).last()?;
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    if v.get("error").is_some() {
+    use std::io::BufReader;
+
+    let file = fs::File::open(png_abs).ok()?;
+    let reader = BufReader::new(file);
+    let decoder = png::Decoder::new(reader);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(info.buffer_size());
+    let bytes = &buf[..];
+    let w = info.width;
+    let h = info.height;
+    let color = info.color_type;
+
+    let rgb: Vec<u8> = match color {
+        png::ColorType::Rgb => bytes.to_vec(),
+        png::ColorType::Rgba => bytes
+            .chunks(4)
+            .flat_map(|c| [c[0], c[1], c[2]])
+            .collect(),
+        png::ColorType::Grayscale => bytes.iter().flat_map(|v| [*v, *v, *v]).collect(),
+        png::ColorType::GrayscaleAlpha => {
+            let mut out = Vec::with_capacity(bytes.len() / 2 * 3);
+            for px in bytes.chunks(2) {
+                out.extend_from_slice(&[px[0], px[0], px[0]]);
+            }
+            out
+        }
+        _ => return None,
+    };
+
+    // The model preview always puts the model near the center of the frame
+    // on a small grey disc, with the green ground filling the rest. To stop
+    // counting the ground + horizon as "the model silhouette", we restrict
+    // all inspection to a 60% central crop that contains the model + disc.
+    let cx = w as i32 / 2;
+    let cy = h as i32 / 2;
+    let half_w = (w as i32 * 30) / 100;
+    let half_h = (h as i32 * 30) / 100;
+    let x0 = (cx - half_w).max(0) as usize;
+    let y0 = (cy - half_h).max(0) as usize;
+    let x1 = (cx + half_w).min(w as i32) as usize;
+    let y1 = (cy + half_h).min(h as i32) as usize;
+
+    let stride = w as usize * 3;
+    let mut sat_sum: f32 = 0.0;
+    let mut n: u32 = 0;
+    // The disc is roughly `Color::srgb(0.52, 0.54, 0.48)` and the ground is
+    // `Color::srgb(0.48, 0.55, 0.42)`. They're almost identical, so we use a
+    // very strict deviation threshold (vs. local mean) to find model pixels.
+    let mut local_r: u32 = 0;
+    let mut local_g: u32 = 0;
+    let mut local_b: u32 = 0;
+    let mut local_n: u32 = 0;
+    let mut y = y0;
+    while y < y1 {
+        let row = &rgb[y * stride..(y + 1) * stride];
+        let mut x = x0;
+        while x < x1 {
+            local_r += row[x * 3] as u32;
+            local_g += row[x * 3 + 1] as u32;
+            local_b += row[x * 3 + 2] as u32;
+            local_n += 1;
+            x += 2;
+        }
+        y += 2;
+    }
+    if local_n == 0 {
         return None;
     }
-    let top_ratio = v.get("top_ratio").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
-    let mean_sat = v.get("mean_sat").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
-    let sw = v.get("sw").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
-    let sh = v.get("sh").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+    let mean_r = (local_r / local_n) as i32;
+    let mean_g = (local_g / local_n) as i32;
+    let mean_b = (local_b / local_n) as i32;
+
+    let mut xs: Vec<u32> = Vec::new();
+    let mut ys: Vec<u32> = Vec::new();
+    let mut model_pixels: u32 = 0;
+    y = y0;
+    while y < y1 {
+        let row = &rgb[y * stride..(y + 1) * stride];
+        let mut x = x0;
+        while x < x1 {
+            let r = row[x * 3] as i32;
+            let g = row[x * 3 + 1] as i32;
+            let b = row[x * 3 + 2] as i32;
+            let d = (r - mean_r).abs() + (g - mean_g).abs() + (b - mean_b).abs();
+            if d > 30 {
+                model_pixels += 1;
+                xs.push(x as u32);
+                ys.push(y as u32);
+                let mx = r.max(g).max(b) as f32;
+                let mn = r.min(g).min(b) as f32;
+                let sat = if mx == 0.0 { 0.0 } else { (mx - mn) / mx };
+                sat_sum += sat;
+                n += 1;
+            }
+            x += 2;
+        }
+        y += 2;
+    }
+    let mean_sat = if n == 0 { 0.0 } else { sat_sum / n as f32 };
+
+    let sw = if xs.is_empty() {
+        0
+    } else {
+        xs.iter().copied().max().unwrap() - xs.iter().copied().min().unwrap()
+    };
+    let sh = if ys.is_empty() {
+        0
+    } else {
+        ys.iter().copied().max().unwrap() - ys.iter().copied().min().unwrap()
+    };
+
+    // "Blank / no materials": we rendered the disc and the green ground but
+    // nothing distinct from the local mean. Tuned so that tiny but visible
+    // props (a single flower, a fallen stick, a brown bear against a green
+    // field) still count as rendered — those warm tones look close to the
+    // ground in HSV, so we only flag a model as missing when the crop is
+    // essentially uniform AND shows no model-colored pixels at all.
+    let crop_pixels = ((x1 - x0) as u32) * ((y1 - y0) as u32);
+    let model_ratio = model_pixels as f32 / crop_pixels.max(1) as f32;
+    let is_blank = model_pixels < 80 || (model_ratio < 0.0015 && mean_sat < 0.025);
+    let low_saturation = mean_sat < 0.015;
+    // "Lying down": model silhouette is much wider than tall. Require both a
+    // minimum width (so we don't fire on tiny / round sprites) and a real
+    // aspect ratio.
+    let flat_or_lying = sw >= 80 && sh >= 40 && sw as f32 / sh as f32 > 2.4;
+
     Some(PngInspection {
-        is_blank: top_ratio > 0.86,
-        low_saturation: mean_sat < 0.12,
-        flat_or_lying: sw > 0 && sh > 0 && sw as f32 / sh as f32 > 1.8,
+        is_blank,
+        low_saturation,
+        flat_or_lying,
         silhouette_w: sw,
         silhouette_h: sh,
-        top_color_ratio: top_ratio,
+        top_color_ratio: 1.0 - model_ratio,
     })
 }
 
@@ -528,7 +627,7 @@ fn collect_glbs(asset_root: &Path) -> Vec<(String, String)> {
                 walk(&path, asset_root, out);
                 continue;
             }
-            if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_case("glb"))
+            if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("glb"))
                 != Some(true)
             {
                 continue;
@@ -562,18 +661,27 @@ fn runtime_env(root: &Path) -> Result<Vec<(String, String)>> {
         Err(_) => String::new(),
     };
     let sep = if cfg!(windows) { ";" } else { ":" };
-    let mut path = [root.join("target/debug/deps"), root.join("target/debug")]
+    // Keep the inherited PATH so things like `sccache` keep working, and
+    // prepend our target/debug helpers so the spawned `lk2-client.exe` finds
+    // its dynamic-link deps.
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let inherited_str = inherited.to_string_lossy().to_string();
+    let mut prepend: Vec<String> = [root.join("target/debug/deps"), root.join("target/debug")]
         .into_iter()
         .filter(|p| p.exists())
         .map(|p| p.display().to_string())
-        .collect::<Vec<_>>();
+        .collect();
     if !sysroot.is_empty() {
         let sysroot_bin = PathBuf::from(&sysroot).join("bin");
         if sysroot_bin.exists() {
-            path.push(sysroot_bin.display().to_string());
+            prepend.push(sysroot_bin.display().to_string());
         }
     }
-    let path_str = path.join(sep);
+    let path_str = if inherited_str.is_empty() {
+        prepend.join(sep)
+    } else {
+        format!("{}{sep}{inherited_str}", prepend.join(sep))
+    };
     Ok(vec![
         ("BEVY_DISABLE_ACCESSIBILITY".to_string(), "1".to_string()),
         ("BEVY_ASSET_ROOT".to_string(), root.display().to_string()),
@@ -611,10 +719,4 @@ fn exe_path(root: &Path, package: &str) -> PathBuf {
     root.join("target/debug").join(name)
 }
 
-// Make `audit` reachable for future helpers without an unused-import warning.
-#[allow(dead_code)]
-fn _audit_anchor(_: &Path) -> std::result::Result<(), String> {
-    audit::rel(std::path::Path::new("."), std::path::Path::new(".""))
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
+// (no dead-code anchor)

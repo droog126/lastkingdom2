@@ -9,7 +9,6 @@ PROCEDURAL = ROOT / "assets" / "procedural"
 
 PRETTY_GROUPS = {
     "pretty": [
-        "player_avatar",
         "monster_snake",
         "monster_frost_elf",
         "monster_sand_wurm",
@@ -88,7 +87,6 @@ PRETTY_GROUPS = {
         "sword",
     ],
     "creatures": ["villager", "wolf", "bear"],
-    "test": ["test_cube"],
 }
 
 ECO_ASSETS = ["rabbit", "berry_bush", "berry_fruit", "co2_bubble"]

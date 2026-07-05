@@ -24,8 +24,16 @@ client:
 model-preview:
     cargo run -p lk2-client -- --model-preview
 
+# Iterate every GLB under assets/, screenshot each individually, and write a
+# self-evaluation summary to screenshots/model_preview/decision.md. Use this
+# when you want to spot-check the whole catalog without manually clicking
+# through every featured model.
 model-preview-all:
-    cargo run -p lk2-client -- --model-preview --model-preview-all
+    cargo run -q -p xtask -- model-preview-all
+
+# Same as model-preview-all but only renders the named model (stem or path).
+model-preview-all-only MODEL:
+    cargo run -q -p xtask -- model-preview-all --only={{MODEL}}
 
 model-preview-one MODEL:
     cargo run -p lk2-client -- --model-preview --model-preview-one={{MODEL}}

@@ -175,6 +175,36 @@ pub struct World {
 
 pub mod terrain;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldConfig {
+    pub size: i32,
+    pub preset: String,
+    pub seed: u64,
+    pub install_spawn_platform: bool,
+}
+
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            size: WORLD_SIZE,
+            preset: "default".to_string(),
+            seed: 0xDEADBEEF,
+            install_spawn_platform: true,
+        }
+    }
+}
+
+pub fn generate_world(config: &WorldConfig) -> World {
+    let mut pipeline = terrain::presets::by_name(&config.preset);
+    pipeline.seed = config.seed;
+    let mut world = World::with_pipeline(config.size, pipeline);
+    world.seed = config.seed;
+    if config.install_spawn_platform {
+        install_huge_spawn_platform(&mut world);
+    }
+    world
+}
+
 impl World {
     pub fn new(size: i32) -> Self {
         let n = (size * size * size) as usize;
@@ -984,6 +1014,27 @@ mod tests {
         assert_eq!([block_pos[0], block_pos[2]], [x, z]);
         assert!(w.get(x, block_pos[1] - 1, z).is_solid());
         assert!(player_body_clear(&w, x, block_pos[1], z));
+    }
+
+    #[test]
+    fn generate_world_uses_shared_config_and_spawn_platform() {
+        let config = WorldConfig::default();
+
+        let a = generate_world(&config);
+        let b = generate_world(&config);
+        let x = WORLD_SIZE / 2;
+        let z = WORLD_SIZE / 2;
+        let foot_y = SEA_LEVEL + 3;
+
+        assert_eq!(a.size, config.size);
+        assert_eq!(a.seed, config.seed);
+        assert_eq!(a.pipeline.name, config.preset);
+        assert_eq!(a.get(x, foot_y - 1, z), BlockType::Leaves);
+        assert_eq!(b.get(x, foot_y - 1, z), BlockType::Leaves);
+
+        for (x, y, z) in [(4, 4, 4), (48, 15, 48), (83, 12, 21), (16, 30, 64)] {
+            assert_eq!(a.get(x, y, z), b.get(x, y, z), "voxel mismatch at {x},{y},{z}");
+        }
     }
 
     #[test]

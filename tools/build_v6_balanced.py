@@ -14,10 +14,43 @@ from models_lib import (
     clear_scene, cube, cone, cylinder, export_glb, ico_sphere, mat, uv_sphere,
 )
 
-def glow_mat(name, color, glow_strength=0.4, roughness=0.5):
-    return mat(name, color, roughness=roughness, emissive=color)
+_cube = cube
+_cone = cone
+_cylinder = cylinder
+_ico_sphere = ico_sphere
+_uv_sphere = uv_sphere
 
-def make_player_avatar_v6() -> None:
+
+def _loc_y_up(loc):
+    return (loc[0], loc[2], loc[1])
+
+
+def _scale_y_up(scale):
+    return (scale[0], scale[2], scale[1])
+
+
+def cube(name, loc, scale, material):
+    return _cube(name, _loc_y_up(loc), _scale_y_up(scale), material)
+
+
+def cone(name, loc, radius1, radius2, depth, material, vertices=8):
+    return _cone(name, _loc_y_up(loc), radius1, radius2, depth, material, vertices=vertices)
+
+
+def cylinder(name, loc, radius, depth, material, vertices=24):
+    return _cylinder(name, _loc_y_up(loc), radius, depth, material, vertices=vertices)
+
+
+def ico_sphere(name, loc, scale, material, subdivisions=1):
+    return _ico_sphere(name, _loc_y_up(loc), _scale_y_up(scale), material, subdivisions=subdivisions)
+
+
+def uv_sphere(name, loc, scale, material, segments=16, rings=8):
+    return _uv_sphere(name, _loc_y_up(loc), _scale_y_up(scale), material, segments=segments, rings=rings)
+
+def glow_mat(name, color, glow_strength=0.4, roughness=0.5):
+    return mat(name, color, roughness=max(roughness, 0.82))
+
     clear_scene()
     skin = glow_mat("cute_skin_warm", (1.0, 0.85, 0.75), glow_strength=0.4)
     shirt_red = glow_mat("cute_shirt_red", (1.0, 0.45, 0.45), glow_strength=0.5)
@@ -59,33 +92,52 @@ def make_player_avatar_v6() -> None:
 
     uv_sphere("hand_l", (-0.16, 0.20, 0.0), (0.05, 0.05, 0.05), skin, 10, 8)
     uv_sphere("hand_r", ( 0.16, 0.20, 0.0), (0.05, 0.05, 0.05), skin, 10, 8)
-    export_glb("player_avatar")
 
 def make_monster_v6(name, body_color, horn_color, eye_color=(0.05, 0.02, 0.04)) -> None:
     clear_scene()
-    body = glow_mat(f"{name}_body", body_color, glow_strength=0.5)
-    horn = glow_mat(f"{name}_horn", horn_color, glow_strength=0.6)
-    eye = glow_mat(f"{name}_eye", eye_color, glow_strength=0.2)
-    eye_shine = glow_mat(f"{name}_shine", (1.0, 1.0, 1.0), glow_strength=0.9)
-    mouth = glow_mat(f"{name}_mouth", (0.85, 0.30, 0.40), glow_strength=0.4)
+    body = glow_mat(f"{name}_body", body_color, roughness=0.92)
+    dark = glow_mat(f"{name}_dark", tuple(max(c * 0.55, 0.05) for c in body_color), roughness=0.95)
+    accent = glow_mat(f"{name}_accent", horn_color, roughness=0.9)
+    eye = glow_mat(f"{name}_eye", eye_color, roughness=0.9)
 
-    uv_sphere("body", (0.0, 0.30, 0.0), (0.28, 0.22, 0.26), body, 12, 9)
-
-    uv_sphere("head", (0.0, 0.45, 0.0), (0.22, 0.20, 0.22), body, 12, 9)
-
-    uv_sphere("eye_l", (-0.10, 0.48, 0.16), (0.05, 0.07, 0.04), eye, 12, 10)
-    uv_sphere("eye_r", ( 0.10, 0.48, 0.16), (0.05, 0.07, 0.04), eye, 12, 10)
-
-    uv_sphere("shine_l", (-0.080, 0.51, 0.19), (0.020, 0.025, 0.012), eye_shine, 8, 6)
-    uv_sphere("shine_r", ( 0.120, 0.51, 0.19), (0.020, 0.025, 0.012), eye_shine, 8, 6)
-
-    uv_sphere("mouth", (0.0, 0.40, 0.22), (0.030, 0.020, 0.015), mouth, 10, 6)
-
-    cone("horn_l", (-0.08, 0.62, 0.0), 0.05, 0.0, 0.18, horn, vertices=6)
-    cone("horn_r", ( 0.08, 0.62, 0.0), 0.05, 0.0, 0.18, horn, vertices=6)
-
-    uv_sphere("leg_l", (-0.12, 0.05, 0.0), (0.08, 0.06, 0.10), body, 10, 8)
-    uv_sphere("leg_r", ( 0.12, 0.05, 0.0), (0.08, 0.06, 0.10), body, 10, 8)
+    if name == "monster_snake":
+        cube("body", (0.0, 0.22, 0.0), (0.60, 0.18, 0.18), body)
+        cube("head", (0.44, 0.28, 0.0), (0.22, 0.22, 0.22), body)
+        cube("tail", (-0.42, 0.24, 0.0), (0.22, 0.12, 0.12), dark)
+        cube("eye_l", (0.56, 0.32, 0.09), (0.035, 0.035, 0.025), eye)
+        cube("eye_r", (0.56, 0.32, -0.09), (0.035, 0.035, 0.025), eye)
+        cube("stripe_1", (-0.18, 0.37, 0.0), (0.045, 0.035, 0.20), accent)
+        cube("stripe_2", (0.08, 0.37, 0.0), (0.045, 0.035, 0.20), accent)
+    elif name == "monster_frost_elf":
+        cube("body", (0.0, 0.34, 0.0), (0.24, 0.42, 0.18), body)
+        uv_sphere("head", (0.0, 0.72, 0.0), (0.18, 0.16, 0.17), body, 8, 5)
+        cone("hat", (0.0, 0.98, 0.0), 0.18, 0.0, 0.30, accent, vertices=5)
+        cube("arm_l", (-0.22, 0.44, 0.0), (0.08, 0.28, 0.08), dark)
+        cube("arm_r", (0.22, 0.44, 0.0), (0.08, 0.28, 0.08), dark)
+        cube("eye_l", (-0.06, 0.75, 0.145), (0.030, 0.030, 0.018), eye)
+        cube("eye_r", (0.06, 0.75, 0.145), (0.030, 0.030, 0.018), eye)
+    elif name == "monster_sand_wurm":
+        for i, x in enumerate([-0.42, -0.20, 0.02, 0.24]):
+            uv_sphere(f"segment_{i}", (x, 0.18 + i * 0.02, 0.0), (0.18, 0.14, 0.16), body if i % 2 else dark, 8, 5)
+        cube("head", (0.48, 0.28, 0.0), (0.22, 0.20, 0.20), body)
+        cube("jaw", (0.58, 0.18, 0.0), (0.10, 0.08, 0.18), dark)
+        cube("eye_l", (0.58, 0.33, 0.08), (0.030, 0.030, 0.020), eye)
+        cube("eye_r", (0.58, 0.33, -0.08), (0.030, 0.030, 0.020), eye)
+    elif name == "monster_treant":
+        cube("trunk", (0.0, 0.38, 0.0), (0.24, 0.55, 0.20), body)
+        cube("crown", (0.0, 0.78, 0.0), (0.40, 0.24, 0.34), accent)
+        cube("root_l", (-0.22, 0.10, 0.08), (0.22, 0.08, 0.08), dark)
+        cube("root_r", (0.22, 0.10, -0.08), (0.22, 0.08, 0.08), dark)
+        cube("branch_l", (-0.26, 0.56, 0.0), (0.24, 0.08, 0.08), dark)
+        cube("branch_r", (0.26, 0.60, 0.0), (0.24, 0.08, 0.08), dark)
+        cube("eye_l", (-0.06, 0.48, 0.105), (0.030, 0.030, 0.018), eye)
+        cube("eye_r", (0.06, 0.48, 0.105), (0.030, 0.030, 0.018), eye)
+    else:
+        cube("cloak", (0.0, 0.36, 0.0), (0.34, 0.54, 0.22), body)
+        cone("hood", (0.0, 0.78, 0.0), 0.28, 0.12, 0.34, dark, vertices=6)
+        cube("face_void", (0.0, 0.74, 0.145), (0.16, 0.12, 0.025), eye)
+        cube("wisp_l", (-0.28, 0.30, 0.0), (0.16, 0.10, 0.08), accent)
+        cube("wisp_r", (0.28, 0.42, 0.0), (0.16, 0.10, 0.08), accent)
     export_glb(name)
 
 def make_cloud_puff_v6() -> None:
@@ -102,27 +154,26 @@ def make_cloud_puff_v6() -> None:
 
 def make_tree_v6() -> None:
     clear_scene()
-    bark = glow_mat("tree_bark", (0.70, 0.45, 0.30), glow_strength=0.2)
-    leaf = glow_mat("tree_leaf", (0.40, 0.95, 0.45), glow_strength=0.4)
-    leaf_dark = glow_mat("tree_leaf_dark", (0.25, 0.75, 0.35), glow_strength=0.4)
+    bark = glow_mat("tree_bark", (0.42, 0.25, 0.12), roughness=0.96)
+    leaf = glow_mat("tree_leaf", (0.22, 0.58, 0.24), roughness=0.96)
+    leaf_dark = glow_mat("tree_leaf_dark", (0.12, 0.38, 0.18), roughness=0.96)
 
-    uv_sphere("canopy_1", (0.0, 0.80, 0.0), (0.50, 0.40, 0.50), leaf, 12, 9)
-    uv_sphere("canopy_2", (-0.25, 0.85, 0.10), (0.30, 0.30, 0.30), leaf_dark, 12, 9)
-    uv_sphere("canopy_3", ( 0.25, 0.85, -0.10), (0.30, 0.30, 0.30), leaf, 12, 9)
-    uv_sphere("canopy_4", (0.10, 0.95, 0.0), (0.25, 0.20, 0.25), leaf_dark, 12, 9)
-
-    cylinder("trunk", (0.0, 0.20, 0.0), 0.12, 0.40, bark, vertices=10)
-
-    uv_sphere("root", (0.0, 0.05, 0.0), (0.18, 0.10, 0.18), bark, 12, 8)
+    cylinder("trunk", (0.0, 0.42, 0.0), 0.14, 0.84, bark, vertices=7)
+    cube("root_l", (-0.16, 0.08, 0.05), (0.22, 0.08, 0.08), bark)
+    cube("root_r", (0.16, 0.08, -0.05), (0.22, 0.08, 0.08), bark)
+    uv_sphere("canopy_center", (0.0, 1.10, 0.0), (0.46, 0.36, 0.42), leaf, 9, 5)
+    uv_sphere("canopy_l", (-0.28, 0.98, 0.02), (0.28, 0.24, 0.26), leaf_dark, 8, 5)
+    uv_sphere("canopy_r", (0.26, 1.02, -0.02), (0.28, 0.24, 0.26), leaf, 8, 5)
     export_glb("tree")
 
 def make_rock_v6(name, color) -> None:
     clear_scene()
-    body = glow_mat(f"rock_{name}", color, glow_strength=0.2)
+    body = glow_mat(f"rock_{name}", color, roughness=0.98)
+    dark = glow_mat(f"rock_{name}_dark", tuple(max(c * 0.70, 0.08) for c in color), roughness=0.98)
 
-    uv_sphere("rock_1", (0.0, 0.14, 0.0), (0.22, 0.16, 0.22), body, 12, 9)
-    uv_sphere("rock_2", (0.12, 0.18, 0.05), (0.12, 0.12, 0.12), body, 10, 8)
-    uv_sphere("rock_3", (-0.10, 0.16, -0.05), (0.10, 0.10, 0.10), body, 10, 8)
+    ico_sphere("main", (0.0, 0.14, 0.0), (0.28, 0.18, 0.22), body, subdivisions=1)
+    ico_sphere("side", (0.18, 0.11, -0.05), (0.15, 0.11, 0.12), dark, subdivisions=1)
+    cube("flat_base", (0.0, 0.025, 0.0), (0.38, 0.05, 0.26), dark)
     export_glb(f"rock_{name}")
 
 def make_flower_v6(idx, color) -> None:
@@ -147,38 +198,37 @@ def make_flower_v6(idx, color) -> None:
 
 def make_hill_v6() -> None:
     clear_scene()
-    body = glow_mat("hill_green", (0.45, 0.85, 0.45), glow_strength=0.35)
-    body_top = glow_mat("hill_green_dark", (0.30, 0.70, 0.40), glow_strength=0.3)
+    body = glow_mat("hill_grass", (0.32, 0.62, 0.30), roughness=0.98)
+    dirt = glow_mat("hill_dirt", (0.42, 0.27, 0.14), roughness=0.98)
+    grass_dark = glow_mat("hill_grass_shadow", (0.20, 0.42, 0.22), roughness=0.98)
 
-    uv_sphere("hill_main", (0.0, 0.15, 0.0), (0.80, 0.40, 0.80), body, 12, 9)
-    uv_sphere("hill_top", (0.15, 0.40, -0.15), (0.40, 0.24, 0.40), body_top, 12, 9)
-    uv_sphere("flower_dot", (0.40, 0.50, 0.25), (0.06, 0.05, 0.06),
-              glow_mat("flower_dot_pink", (1.0, 0.65, 0.85), glow_strength=0.6), 10, 8)
+    cone("mound", (0.0, 0.20, 0.0), 0.78, 0.18, 0.40, body, vertices=9)
+    cube("front_cut", (0.0, 0.08, 0.42), (0.58, 0.12, 0.08), dirt)
+    cube("ridge", (-0.08, 0.38, -0.04), (0.46, 0.06, 0.08), grass_dark)
     export_glb("hill")
 
 def make_poi_pillar_v6(name, body_color, glow_color) -> None:
     clear_scene()
-    body = glow_mat(f"poi_{name}_body", body_color, glow_strength=0.4)
-    glow = glow_mat(f"poi_{name}_glow", glow_color, glow_strength=0.85)
-    glow_inner = glow_mat(f"poi_{name}_inner", glow_color, glow_strength=1.0)
+    stone = glow_mat(f"poi_{name}_stone", (0.46, 0.42, 0.34), roughness=0.98)
+    stone_dark = glow_mat(f"poi_{name}_stone_dark", (0.28, 0.25, 0.20), roughness=0.98)
+    accent = glow_mat(f"poi_{name}_accent", body_color, roughness=0.92)
 
-    cylinder("pillar", (0.0, 0.30, 0.0), 0.20, 0.50, body, vertices=10)
-
-    uv_sphere("base", (0.0, 0.05, 0.0), (0.28, 0.06, 0.28), body, 12, 8)
-
-    uv_sphere("top_glow", (0.0, 0.70, 0.0), (0.22, 0.22, 0.22), glow, 12, 9)
-    uv_sphere("top_inner", (0.0, 0.70, 0.0), (0.12, 0.12, 0.12), glow_inner, 12, 9)
-
-    for sx, sz in ((-0.12, -0.12), (0.12, -0.12), (-0.12, 0.12), (0.12, 0.12)):
-        cone(f"spike_{sx}_{sz}", (sx, 0.82, sz), 0.05, 0.0, 0.10, glow, vertices=4)
+    cube("base", (0.0, 0.10, 0.0), (0.38, 0.20, 0.34), stone_dark)
+    cube("shaft", (0.0, 0.42, 0.0), (0.22, 0.52, 0.20), stone)
+    cube("cap", (0.0, 0.72, 0.0), (0.34, 0.12, 0.30), stone_dark)
+    cube("rune", (0.0, 0.43, 0.105), (0.12, 0.18, 0.018), accent)
+    cone("marker", (0.0, 0.88, 0.0), 0.10, 0.0, 0.16, accent, vertices=4)
     export_glb(f"poi_pillar_{name}")
 
 def make_ground_disc_v6(name, color, glow) -> None:
     clear_scene()
-    body = glow_mat(f"disc_{name}_body", color, glow_strength=0.45, roughness=0.6)
-    body_emissive = glow_mat(f"disc_{name}_glow", glow, glow_strength=0.5)
-    cylinder("disc", (0.0, 0.02, 0.0), 0.25, 0.04, body, vertices=12)
-    cylinder("disc_glow", (0.0, 0.045, 0.0), 0.15, 0.01, body_emissive, vertices=10)
+    body = glow_mat(f"disc_{name}_soil", (0.30, 0.40, 0.22), roughness=0.98)
+    rim = glow_mat(f"disc_{name}_rim", (0.18, 0.28, 0.15), roughness=0.98)
+    grass = glow_mat(f"disc_{name}_grass", color, roughness=0.98)
+    radius = 0.48 if name == "outer" else 0.30
+    cylinder("soil_patch", (0.0, 0.025, 0.0), radius, 0.05, body, vertices=12)
+    cylinder("grass_top", (0.0, 0.060, 0.0), radius * 0.84, 0.03, grass, vertices=12)
+    cube("edge_notch", (radius * 0.35, 0.080, radius * 0.55), (radius * 0.22, 0.035, radius * 0.08), rim)
     export_glb(f"ground_disc_{name}")
 
 def make_rabbit_v6() -> None:
@@ -301,8 +351,6 @@ def main() -> None:
     make_co2_bubble_v6()
 
     print("\n--- pretty/ ---")
-    print("[1/23] player_avatar (0.35m, 缩小, 4 色)")
-    make_player_avatar_v6()
 
     print("[2-6/23] monsters x5 (0.55m, 3 色)")
     make_monster_v6("monster_snake",     (0.55, 0.95, 0.30), (0.95, 1.0, 0.30))
@@ -351,7 +399,6 @@ def main() -> None:
         "spec": "v6-balanced: 1-3 色配色 + 比例人小他大",
         "format": "glb",
         "scale": {
-            "player_avatar": "0.35m 高 (缩小)",
             "monster": "0.55m 直径 (放大)",
             "tree": "1.0m 高 (放大)",
             "rock": "0.28m 直径 (放大)",

@@ -375,11 +375,11 @@ pub enum TransferDst {
 pub fn apply_transfer(pool: &mut GlobalResourcePool, t: Transfer) -> Result<i64, PoolError> {
     debug_assert!(t.amount > 0, "transfer amount must be > 0");
     match t.src {
-        TransferSrc::Regen
-        | TransferSrc::Init
-        | TransferSrc::PlayerGather(_)
-        | TransferSrc::MonsterDrop(_) => {
+        TransferSrc::Init => {
             pool.force_add(t.kind, t.amount);
+        }
+        TransferSrc::Regen | TransferSrc::PlayerGather(_) | TransferSrc::MonsterDrop(_) => {
+            pool.try_add(t.kind, t.amount)?;
         }
         TransferSrc::Nation(nation_id) => {
             pool.try_sub(t.kind, t.amount)?;
@@ -538,6 +538,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p.get(ResourceKind::Apple), 5);
+    }
+
+    #[test]
+    fn gathered_transfer_cannot_exceed_resource_cap() {
+        let mut p = GlobalResourcePool::new();
+        p.try_add(ResourceKind::Apple, ResourceKind::Apple.max()).unwrap();
+
+        let err = apply_transfer(
+            &mut p,
+            Transfer {
+                kind: ResourceKind::Apple,
+                amount: 1,
+                src: TransferSrc::PlayerGather(7),
+                dst: TransferDst::PlayerUse(7),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            PoolError::WouldExceedMax { kind: ResourceKind::Apple, .. }
+        ));
+        assert_eq!(p.get(ResourceKind::Apple), ResourceKind::Apple.max());
     }
 
     #[test]

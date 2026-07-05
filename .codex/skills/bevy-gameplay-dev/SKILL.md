@@ -52,6 +52,9 @@ Handle only one to three strongly related issues per task. Record additional fin
 - Resource drops and manual kills should share rule logic, not duplicate matches.
 - A better screenshot with unchanged `diff.json` may be presentation-only.
 - Changed state with unchanged screenshot often means player, camera, or entity visibility is wrong.
+- Legacy gameplay visuals can hide new ECS systems. If a screenshot does not prove a new loop, inspect nearby old systems such as creatures, nest markers, landmarks, or demo props before changing core rules.
+- Auto-demo timing must be validated against `SimClock.tick`, not frame count or wall-clock intuition. The closed-loop health gate currently requires offline tick >= 500.
+- For ecology/client-server work, make the same core tick run in offline client and server authority, then replicate an explicit snapshot to online clients. Do not let online clients invent authoritative ecology state locally.
 
 ## Completion
 

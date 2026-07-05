@@ -110,3 +110,9 @@ Prefer the narrowest command that matches the change:
 - Do not rely on local environment variables, current time, or random ordering to pass tests.
 - Throttle per-tick logs with a local counter or equivalent dedupe.
 - Return clear errors; do not silently ignore failure.
+
+## Recent Lessons
+
+- Treat a dirty worktree as normal in this repo. Scope status/diffs to the files involved in the task and ignore unrelated asset/tool churn unless it blocks the change.
+- When a loop run uses `--skip-build`, build the affected binary first. Otherwise screenshots may come from an old executable even though source changes and tests look correct.
+- On Windows, `lk2-client.exe` can be locked by stale `lk2-client`, `cargo`, or model-preview processes. Check command lines before stopping anything, and only clear processes that are clearly from this workspace/task.

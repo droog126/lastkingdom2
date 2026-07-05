@@ -1,5 +1,7 @@
 # `crates/core/src/protocol.rs` — lightyear 0.26 API drift report
 
+> ⚠️ **过时文档**：此报告针对 Lightyear 0.26.4，当前项目使用 Lightyear 0.28.0。API 细节可能已变化。仅供历史参考。
+
 Date: 2026-06-09
 Source of truth (read directly, not web search):
 - `D:\cargo\registry\src\rsproxy.cn-e3de039b2554c837\lightyear-0.26.4\src\{client,server,lib,protocol}.rs`

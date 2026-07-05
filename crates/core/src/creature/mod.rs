@@ -215,18 +215,18 @@ fn try_spawn_training_creature_near_spawn(
     rng: &mut StdRng,
 ) -> bool {
     const OFFSETS: &[(i32, i32)] = &[
-        (0, -1),
-        (1, 0),
-        (-1, 0),
-        (0, 1),
-        (0, -2),
-        (2, 0),
-        (-2, 0),
-        (0, 2),
-        (1, -1),
-        (-1, -1),
+        (3, -3),
+        (3, -2),
+        (2, -3),
+        (3, 2),
+        (2, 3),
         (1, 1),
         (-1, 1),
+        (1, 0),
+        (0, 1),
+        (-1, 0),
+        (0, -1),
+        (-1, -1),
     ];
     for (dx, dz) in OFFSETS {
         if try_spawn_creature(
@@ -259,9 +259,9 @@ fn spawn_debug_training_creature(
         commands,
         meshes,
         materials,
-        spawn_cx,
+        spawn_cx + 3,
         crate::constant::SEA_LEVEL + 4,
-        spawn_cz - 2,
+        spawn_cz - 3,
         CreatureKind::Cow,
         9999.0,
     )

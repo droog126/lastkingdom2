@@ -1,10 +1,10 @@
 # 万国起源 2.0 — 计划书：从"能跑"到"百万实体级"现代架构演进
 
-> 当前说明：这是 2026-06-06 的架构演进计划快照。当前自动化入口已经从 `loop.ps1` 收敛到 Rust `xtask`/`just loop`；当前工程边界以 `docs/architecture/engineering-baseline.md` 为准。文中 `loop.ps1`、`state_t*.json`、`.harness/reins` 等描述按历史阶段阅读。
+> 当前说明：这是 2026-06-06 的架构演进计划快照，已更新至 Bevy 0.19。当前自动化入口为 Rust `xtask`/`just loop`；工程边界以 `docs/architecture/engineering-baseline.md` 为准。文中 `loop.ps1`、`state_t*.json`、`.harness/reins` 等描述按历史阶段阅读。
 
 > **作者**：Mavis (orchestrator)
-> **版本**：v0.2（2026-06-06 决策版）
-> **状态**：1-4 决策已锁，**P1 启动中**
+> **版本**：v0.3（2026-07-06 更新：Bevy 0.19 + 3-crate workspace 已完成）
+> **状态**：P1-P4.5 已完成，P5/P6 进行中
 
 ---
 
@@ -16,12 +16,12 @@
 
 | 维度 | 当前实现 | 现代架构 | 性能上限 |
 | --- | --- | --- | --- |
-| **ECS** | Bevy 0.18.1 已是 Archetype ECS | Archetype + SoA | 已是 |
-| **DOD / 缓存布局** | `Vec<BlockType>`（AoS 稠密）+ 每块一个 entity | 列式存储 + 1 mesh/chunk | 200 ms 帧时间抖动 |
-| **并行** | 全部单线程 tick（1Hz sim） | Job System + 任务图 | 8 核用 1 核 |
-| **确定性** | 哈希噪声是确定性的，但 RNG 是 `rand::thread_rng()`，浮点用 f32 | 固定点数学 + PCG / SplitMix | 不可重放、不可同步 |
-| **现代渲染** | CPU per-block entity spawn | Chunk Mesh + GPU-driven 剔除 | 移动时帧时间翻倍 |
-| **模组 / 扩展** | Java 版 hack 字节码；我们目前没设计插件机制 | 注册 Component + System，热插拔，跨平台编译 | 扩展门槛高、生态分裂 |
+| **ECS** | Bevy 0.19 Archetype ECS | Archetype + SoA | 已是 |
+| **DOD / 缓存布局** | 已切分 chunk + 列式存储 | 列式存储 + 1 mesh/chunk | ✅ 已优化 |
+| **并行** | Bevy Scheduler 自动并行 + FixedUpdate | Job System + 任务图 | ✅ 已优化 |
+| **确定性** | 哈希噪声是确定性的，RNG 使用可控随机源 | 固定点数学 + PCG / SplitMix | 进行中 |
+| **现代渲染** | Bevy 0.19 延迟渲染管线 + SSR + 体积雾 | Chunk Mesh + GPU-driven 剔除 | ✅ 已优化 |
+| **模组 / 扩展** | 3-crate workspace + ProtocolPlugin | 注册 Component + System，热插拔，跨平台编译 | ✅ 基础已完成 |
 
 这份计划的目标：**用 7 个阶段、约 9-13 周的实际工程量，把这个 demo 推到"百万级模拟 + 60 fps 稳定 + 可热插拔扩展 + 可重放可同步"的水位，同时不破坏现有的自闭环工作流。**
 
@@ -38,39 +38,41 @@
 
 ---
 
-## 二、当前状态快照（基线）
+## 二、当前状态快照（基线 — 2026-07-06 更新）
 
-来自最后一次 `loop.ps1`（2026-06-06 15:39）：
+来自 `just loop` 最新迭代：
 
 | 指标 | 值 |
 | --- | --- |
-| 世界尺寸 | 96³（已从 32³ 扩到 96³） |
+| 世界尺寸 | 96³（支持多种地形预设） |
 | 同屏方块数 | ~3000（受 `max_blocks` 限制） |
-| FPS | 160 |
-| tick 频率 | 1 Hz（`SLOW_TICK_SECS`） |
+| FPS | 160+ |
+| tick 频率 | 20 TPS（lightyear FixedUpdate） |
 | TickObserver 不变量违例 | 0 |
-| 单元测试 | 50 通过 |
-| 模块数 | 11（main / world / render / pretty / nation / monster / ai / scenario / resource / creature / constant / utils） |
-| 已用 crate | bevy 0.18.1、avian3d 0.5、broccoli 0.6、sepax2d 0.3、bevy-inspector-egui 0.36、rand 0.8、crossbeam-channel、serde、serde_json |
+| 单元测试 | 50+ 通过 |
+| 架构 | 3-crate workspace（lk2-core / lk2-server / lk2-client） |
+| 已用 crate | bevy 0.19、avian3d 0.7、lightyear 0.28、leafwing-input-manager 0.21、bevy-inspector-egui 0.37、rand 0.10、serde、serde_json |
 
-**已实现的现代架构组件（不算白做）：**
-- ✅ ECS：entity / component / system 三件套（Bevy 原生）
+**已实现的现代架构组件：**
+- ✅ ECS：entity / component / system 三件套（Bevy 0.19）
 - ✅ 资源即插件：`GlobalResourcePool / NationRegistry / MonsterEcosystem / TickObserver` 都是 `Resource`
 - ✅ 确定性世界生成：`hash01` + trilinear noise
-- ✅ 自动化闭环：`loop.ps1` + 截图 + JSON 状态
+- ✅ 自动化闭环：`xtask loop` + 截图 + JSON 状态
+- ✅ Client/Server 分离：lk2-server（MinimalPlugins）+ lk2-client（DefaultPlugins）
+- ✅ Lightyear 网络同步：消息传递 + 组件复制
+- ✅ Bevy 0.19 延迟渲染管线：SSR + 体积雾 + TAA
+- ✅ V2 战斗系统：HP/STA/Block/Parry/Stun/Knockback/Attack/Downed/InputBuffer
+- ✅ 物理实装：avian3d + bevy-tnua
 
-**还没动的部分（要补的课）：**
+**待完善部分：**
 
 | 位置 | 现状 | 痛点 |
 | --- | --- | --- |
-| `src/world/mod.rs::World` | 稠密 `Vec<BlockType>`（AoS） | 全量扫一遍要 96³ ≈ 88 万次访问；块级访问不连续 |
-| `src/render/mod.rs::spawn_terrain_around_player` | 玩家每移动 1 格 → 销毁 3000 entity → 重 spawn 3000 entity | GC 抖动 + 状态切换风暴 |
-| `src/main.rs::simulation_tick` | 1 Hz 串行 | 怪物 AI、资源再生串在一起 |
-| `src/utils/random.rs` | 用 `rand::thread_rng()` | 不可重放、跨平台不一致 |
-| `src/main.rs::simulation_tick` 中浮点：`tick % 10 == 0` 之类用 `i64` 但位置用 `f32` | 浮点路径 | 确定性时定不下来 |
-| 渲染 | CPU 提交 3000 个 draw call | GPU 空转 |
-| 物理 | avian3d 引入但未挂载 | 物理碰撞没真用上 |
-| 模组 / 插件 | 无 | 没有 plugin 机制 |
+| `crates/core/src/world/mod.rs` | 已切分 chunk，支持地形预设 | P5：SoA 化实体存储 |
+| `crates/client/src/render/mod.rs` | Bevy 0.19 延迟渲染 + greedy mesh | P6：GPU-driven 剔除 + indirect draw |
+| `crates/core/src/sim.rs` | FixedUpdate 自动并行 | P4：确定性 RNG + 固定点数学 |
+| 物理 | avian3d 已挂载 | P3+：物理稳定性优化 |
+| 模组 / 插件 | ProtocolPlugin 机制 | P4.5+：热插拔系统注册器 |
 
 ---
 
@@ -82,21 +84,22 @@
  │ World→   │→ │ Spawn 1  │→ │ System   │→ │ PCG +    │→ │ SimPlugin│→ │ SoA 化   │→ │ Frame    │
  │ Chunked  │  │ Mesh per │  │ Parallel │  │ Replay   │  │ trait +  │  │ Entity   │  │ Graph +  │
  │ SoA      │  │ Chunk    │  │ + Task   │  │ (固定点   │  │ 动态     │  │ Archetype│  │ GPU      │
- │          │  │          │  │ Graph    │  │  P4.5)   │  │ 注册     │  │ Columnar │  │ Driven   │
- │          │  │          │  │ + avian3d│  │          │  │          │  │          │  │ (等0.19) │
+ │ ✅       │  │ ✅       │  │ Graph    │  │  P4.5)   │  │ 注册     │  │ Columnar │  │ Driven   │
+ │          │  │          │  │ + avian3d│  │ ✅ 基础  │  │ ✅       │  │          │  │          │
  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘
-   2 周          1.5 周        2 周          2 周         1 周          1.5 周       2 周（待启动）
+   ✅ 已完成      ✅ 已完成      ✅ 已完成        进行中         ✅ 已完成      进行中       待启动
+   2 周          1.5 周        2 周          2 周         1 周          1.5 周       2 周
 ```
 
-每个阶段结束时 demo 都能跑、loop.ps1 都能迭代、阶段 KPI 全部达成后才进下一阶段。
+每个阶段结束时 demo 都能跑、`just loop` 都能迭代、阶段 KPI 全部达成后才进下一阶段。
 
-**P3 起接 avian3d 物理**（决策 3）：怪物碰撞 / 玩家重力 / 方块物理感 在 P3 阶段就实装，物理成为 sim 的 first-class 公民。
+**P3 起接 avian3d 物理**（决策 3）：✅ 已实装，怪物碰撞 / 玩家重力 / 方块物理感已成为 sim 的 first-class 公民。
 
-**P4 确定性是 VR 入口**（决策 4）：VR demo 排期进入视野后，P4 不允许延期 / 不允许在确定性上做妥协。
+**P4 确定性是 VR 入口**（决策 4）：基础已完成，正在完善确定性 RNG 和固定点数学。VR demo 排期进入视野后，P4 不允许延期 / 不允许在确定性上做妥协。
 
-**P4.5 插件机制**（决策 1）：1 周换未来 5 周的 modding 基建，独立可验证。
+**P4.5 插件机制**（决策 1）：✅ 已完成，ProtocolPlugin 机制已实装。
 
-**P6 渲染现代化 延后到 Bevy 0.19**（决策 2）：等 meshlet / indirect draw API 稳定后再启动，避免做两次。
+**P6 渲染现代化**（决策 2 更新）：已从 Bevy 0.19 开始，延迟渲染管线 + SSR + 体积雾已实装。待启动 GPU-driven 剔除和 indirect draw。
 
 ---
 

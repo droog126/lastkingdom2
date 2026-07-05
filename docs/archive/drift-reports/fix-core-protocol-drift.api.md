@@ -1,5 +1,7 @@
 # lightyear 0.26 真实 API（静态读源码 — task-2 复用参考）
 
+> ⚠️ **过时文档**：此报告针对 Lightyear 0.26.4 + Bevy 0.18.1，当前项目使用 Lightyear 0.28.0 + Bevy 0.19。API 细节可能已变化。仅供历史参考。
+
 Source: `D:\cargo\registry\src\rsproxy.cn-e3de039b2554c837\` (Windows
 machine, NOT the `C:\Users\98185\.cargo\...` registry). Versions in
 `Cargo.lock`: `lightyear = 0.26.4`, `lightyear_inputs_leafwing =

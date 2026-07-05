@@ -13,6 +13,8 @@ The loop is observe -> decide -> act -> build -> re-run. A loop is not complete 
 
 Use this skill for visual, gameplay, client UX, offline demo, scenario, screenshot, and automated observation changes. Use `$screenshot-scoring` whenever inspecting PNGs or writing the score section of `decision.md`.
 
+For model or visual asset work, do not treat successful generation, file validation, or build success as visual completion. Inspect the rendered preview or target runtime view before calling the iteration done.
+
 ## Run
 
 ```sh
@@ -42,11 +44,25 @@ Always inspect in this order:
 5. Use `$screenshot-scoring` to assign evidence-backed category scores.
 6. Write or update `decision.md`.
 
+For asset-only iterations, use the same observe -> decide -> act discipline with a rendered preview as the visual artifact. Record concrete visual problems such as placeholder-looking geometry, poor material readability, wrong orientation, disconnected parts, or production manifests containing non-production assets.
+
 ## Health Meaning
 
 - `PASS`: screenshot readable, final state parseable, tick threshold reached, observer invariants pass, auto-demo made basic progress.
 - `PARTIAL`: process ran but did not meet the full loop contract, usually tick/progression shortfall.
 - `FAIL`: hard failure such as black screen, bad image, missing state, observer error, invariant failure, out of bounds, or unreadable visual.
+
+## Timing And Executables
+
+- A source change is not present in the loop if `--skip-build` runs an old `target/debug/lk2-client.exe`. Build the client first after gameplay or presentation changes.
+- If offline health is `PARTIAL` only because `tick < 500`, inspect whether auto-demo scenario completion or another exit path stops the app before the authority sim reaches the completion tick.
+- Do not tune auto-demo duration by frame count alone. Compare `final_state.json.tick`, `frame_tick`, and `wall_secs`; the health contract is based on simulation tick.
+- When a loop exits early but still writes PNG/state, write `decision.md` for that partial iteration before rerunning.
+
+## State Vs Pixels
+
+- Do not call gameplay done because JSON contains entities. For T0-like systems, require state proof, resource deltas, and a screenshot that makes the loop inspectable.
+- For finite resource loops, look for depletion/cap evidence such as source pool decreasing to zero, destination pool increasing only within cap, and production stopping when inputs are exhausted.
 
 ## Decision Template
 
@@ -89,6 +105,6 @@ If three consecutive iterations do not improve, stop the current direction and r
 - Sky: not black or white; sky is readable.
 - Player: visible, with orientation and height cues.
 - Terrain: voxel terrain is legible and spawn is standable.
-- Decor: trees, water, animals, monsters, or props have visible layering.
+- Decor: props and environment elements have visible layering and read as intentional in-world assets rather than debug or calibration objects.
 - HUD: readable and not blocking critical view.
 - Gameplay: auto-demo moves; resources and actor state changes are explainable; no out-of-bounds, voxel spam, or log spam.

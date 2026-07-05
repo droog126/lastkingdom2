@@ -1,10 +1,13 @@
 use bevy::prelude::*;
 use lk2_core::eco_cycle::EcoCycle;
+use lk2_core::ecology::{
+    ecology_entry, EcologyKind, ResourceDropKind, ResourceNodeKind, TreeKind, WildlifeKind,
+};
 use lk2_core::player::PlayerState;
 use lk2_core::world::World as GameWorld;
 
-use crate::render::CameraAngles;
 use crate::render::scalar_field::effective_ground_height;
+use crate::render::CameraAngles;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -14,11 +17,17 @@ pub struct PrettyConfig {
     pub show_water: bool,
     pub show_player_avatar: bool,
     pub show_monster_cubes: bool,
+    pub show_legacy_debug_props: bool,
 }
 
 impl Default for PrettyConfig {
     fn default() -> Self {
-        Self { show_water: false, show_player_avatar: true, show_monster_cubes: true }
+        Self {
+            show_water: false,
+            show_player_avatar: true,
+            show_monster_cubes: false,
+            show_legacy_debug_props: false,
+        }
     }
 }
 
@@ -187,19 +196,12 @@ pub struct MonsterCube {
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EcoVisual {
-    Rabbit { id: u32, part: RabbitVisualPart },
+    Rabbit { id: u32 },
+    Wildlife { id: u32 },
     BerryBush { id: u32 },
     BerryFruit { id: u32, index: u32 },
+    PlantNode { id: u32 },
     Co2Bubble { index: u32 },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RabbitVisualPart {
-    Body,
-    Head,
-    EarLeft,
-    EarRight,
-    Tail,
 }
 
 pub fn eco_fruit_marker_count(fruit: u32) -> u32 {
@@ -367,6 +369,15 @@ pub fn spawn_pretty(
             Transform::from_translation(Vec3::new(player.pos.x, ground_y + 0.035, player.pos.z)),
             GrassPlatformMarker,
         ));
+
+        spawn_playable_village_diorama(
+            &mut commands,
+            &game_world,
+            player.pos,
+            &asset_server,
+            &mut meshes,
+            &mut materials,
+        );
     }
 
     if !first_person_mode {
@@ -418,20 +429,22 @@ pub fn spawn_pretty(
         info!("spawned sokpop gatherer avatar at {:?}", player.pos);
     }
 
-    if !first_person_mode {
-        let tree_offset = local_offset_from_yaw(Vec3::new(2.0, 0.0, 3.2), camera_angles.yaw);
+    if cfg.show_legacy_debug_props && !first_person_mode {
+        let tree_offset = local_offset_from_yaw(Vec3::new(4.8, 0.0, 9.0), camera_angles.yaw);
         let tree_x = player.pos.x + tree_offset.x;
         let tree_z = player.pos.z + tree_offset.z;
         let tree_ground =
             effective_ground_height(&game_world, tree_x.floor() as i32, tree_z.floor() as i32);
         commands.spawn((
             WorldAssetRoot(
-                asset_server
-                    .load(GltfAssetLabel::Scene(0).from_asset("procedural/pretty/sokpop_tree.glb")),
+                asset_server.load(
+                    GltfAssetLabel::Scene(0)
+                        .from_asset(ecology_entry(EcologyKind::Tree(TreeKind::Sokpop)).model_path),
+                ),
             ),
             Transform::from_translation(Vec3::new(tree_x, tree_ground + 0.05, tree_z))
                 .with_rotation(Quat::from_rotation_y(camera_angles.yaw + 0.35))
-                .with_scale(Vec3::splat(1.8)),
+                .with_scale(ecology_entry(EcologyKind::Tree(TreeKind::Sokpop)).visual_scale),
         ));
 
         let stick_offset = local_offset_from_yaw(Vec3::new(1.1, 0.0, 2.1), camera_angles.yaw);
@@ -441,13 +454,13 @@ pub fn spawn_pretty(
             effective_ground_height(&game_world, stick_x.floor() as i32, stick_z.floor() as i32);
         commands.spawn((
             WorldAssetRoot(
-                asset_server.load(
-                    GltfAssetLabel::Scene(0).from_asset("procedural/pretty/fallen_stick.glb"),
-                ),
+                asset_server.load(GltfAssetLabel::Scene(0).from_asset(
+                    ecology_entry(EcologyKind::Tree(TreeKind::FallenStick)).model_path,
+                )),
             ),
             Transform::from_translation(Vec3::new(stick_x, stick_ground + 0.08, stick_z))
                 .with_rotation(Quat::from_rotation_y(camera_angles.yaw - 0.7))
-                .with_scale(Vec3::splat(2.4)),
+                .with_scale(ecology_entry(EcologyKind::Tree(TreeKind::FallenStick)).visual_scale),
         ));
         info!("spawned sokpop tree and fallen stick near player");
     }
@@ -825,7 +838,7 @@ pub fn spawn_pretty(
         return;
     }
 
-    if !first_person_mode && !auto_demo_mode {
+    if cfg.show_legacy_debug_props && !first_person_mode && !auto_demo_mode {
         for i in 0..8 {
             let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
             let r = 13.0;
@@ -869,7 +882,7 @@ pub fn spawn_pretty(
         (-1.0, -4.8, 0.85),
     ];
     for (i, (rx, rz, scale)) in rock_positions.iter().enumerate() {
-        if auto_demo_mode {
+        if auto_demo_mode || !cfg.show_legacy_debug_props {
             break;
         }
         let rock_color = match i % 3 {
@@ -909,7 +922,7 @@ pub fn spawn_pretty(
         Color::srgb(0.95, 0.30, 0.30),
     ];
     for (i, (fx, fz)) in flower_positions.iter().enumerate() {
-        if auto_demo_mode {
+        if auto_demo_mode || !cfg.show_legacy_debug_props {
             break;
         }
         let f_color = flower_colors[i % flower_colors.len()];
@@ -926,7 +939,7 @@ pub fn spawn_pretty(
     }
 
     for i in 0..28 {
-        if auto_demo_mode {
+        if auto_demo_mode || !cfg.show_legacy_debug_props {
             break;
         }
         let angle = i as f32 * 2.3999631;
@@ -957,7 +970,7 @@ pub fn spawn_pretty(
     // is ~15 — that mismatch was the root cause of "kenney landmark Y=34.65, 19m
     // above player's head, first-person cannot see").
     let landmark_anchor_y = player.pos.y;
-    if !auto_demo_mode {
+    if cfg.show_legacy_debug_props && !auto_demo_mode {
         spawn_v2_crown_season_markers(
             &mut commands,
             &mut meshes,
@@ -966,7 +979,7 @@ pub fn spawn_pretty(
             landmark_anchor_y,
         );
     }
-    if kenney_enabled && !auto_demo_mode {
+    if cfg.show_legacy_debug_props && kenney_enabled && !auto_demo_mode {
         spawn_kenney_landmarks(&mut commands, &asset_server, player.pos, landmark_anchor_y);
     }
 
@@ -1523,6 +1536,207 @@ fn spawn_v2_cube(
         .id()
 }
 
+fn spawn_playable_village_diorama(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    asset_server: &Res<AssetServer>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let grass_dark = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.18, 0.50, 0.16),
+        perceptual_roughness: 0.92,
+        metallic: 0.0,
+        ..default()
+    });
+    let road = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.62, 0.58, 0.49),
+        perceptual_roughness: 0.86,
+        metallic: 0.0,
+        ..default()
+    });
+    let field = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.82, 0.66, 0.26),
+        perceptual_roughness: 0.88,
+        metallic: 0.0,
+        ..default()
+    });
+    let soil = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.36, 0.24, 0.14),
+        perceptual_roughness: 0.9,
+        metallic: 0.0,
+        ..default()
+    });
+    let rock = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.45, 0.47, 0.42),
+        perceptual_roughness: 0.84,
+        metallic: 0.0,
+        ..default()
+    });
+
+    let road_mesh = meshes.add(Cuboid::new(1.0, 0.05, 1.0));
+    for (ox, oz, sx, sz) in [
+        (0.0, -5.0, 2.0, 34.0),
+        (-10.0, -5.0, 1.4, 28.0),
+        (10.0, -5.0, 1.4, 28.0),
+        (0.0, -13.0, 28.0, 1.7),
+        (0.0, 4.0, 28.0, 1.7),
+    ] {
+        let pos = grounded_world_pos(game_world, player_pos, ox, oz, 0.03);
+        commands.spawn((
+            Mesh3d(road_mesh.clone()),
+            MeshMaterial3d(road.clone()),
+            Transform::from_translation(pos).with_scale(Vec3::new(sx, 1.0, sz)),
+        ));
+    }
+
+    let patch_mesh = meshes.add(Cuboid::new(1.0, 0.03, 1.0));
+    for i in 0..46 {
+        let ox = -22.0 + pretty_hash01(i, 11) * 44.0;
+        let oz = -24.0 + pretty_hash01(i, 17) * 38.0;
+        if ox.abs() < 3.0 || (oz + 13.0).abs() < 2.0 || (oz - 4.0).abs() < 2.0 {
+            continue;
+        }
+        let pos = grounded_world_pos(game_world, player_pos, ox, oz, 0.04);
+        commands.spawn((
+            Mesh3d(patch_mesh.clone()),
+            MeshMaterial3d(grass_dark.clone()),
+            Transform::from_translation(pos)
+                .with_rotation(Quat::from_rotation_y(pretty_hash01(i, 23) * std::f32::consts::TAU))
+                .with_scale(Vec3::new(
+                    0.7 + pretty_hash01(i, 29) * 1.5,
+                    1.0,
+                    0.5 + pretty_hash01(i, 31) * 1.3,
+                )),
+        ));
+    }
+
+    let farm_mesh = meshes.add(Cuboid::new(1.0, 0.05, 1.0));
+    let wheat_mesh = meshes.add(Cuboid::new(0.15, 0.58, 0.15));
+    for (cx, cz, sx, sz) in [(-15.0, 8.0, 7.0, 6.0), (15.0, 8.0, 7.0, 6.0)] {
+        let pos = grounded_world_pos(game_world, player_pos, cx, cz, 0.04);
+        commands.spawn((
+            Mesh3d(farm_mesh.clone()),
+            MeshMaterial3d(soil.clone()),
+            Transform::from_translation(pos).with_scale(Vec3::new(sx, 1.0, sz)),
+        ));
+        for ix in -4..=4 {
+            for iz in -3..=3 {
+                if (ix + iz) % 2 != 0 {
+                    continue;
+                }
+                let wheat_pos = grounded_world_pos(
+                    game_world,
+                    player_pos,
+                    cx + ix as f32 * 0.62,
+                    cz + iz as f32 * 0.62,
+                    0.30,
+                );
+                commands.spawn((
+                    Mesh3d(wheat_mesh.clone()),
+                    MeshMaterial3d(field.clone()),
+                    Transform::from_translation(wheat_pos),
+                ));
+            }
+        }
+    }
+
+    for (path, ox, oz, scale, yaw) in [
+        ("procedural/pretty/house_small.glb", -6.0, -16.0, 0.62, 0.35),
+        ("procedural/pretty/house_small.glb", 6.5, -16.0, 0.58, -0.2),
+        ("procedural/pretty/house_small.glb", 15.5, -4.0, 0.56, 0.15),
+        ("procedural/pretty/chapel.glb", -15.0, -3.0, 0.56, 0.1),
+        ("procedural/pretty/well.glb", -8.0, -8.5, 0.44, 0.0),
+        ("procedural/pretty/market_stall.glb", 7.0, 2.0, 0.56, 0.7),
+    ] {
+        spawn_grounded_scene(commands, game_world, player_pos, asset_server, path, ox, oz, 0.03, scale, yaw);
+    }
+
+    for (ox, oz, scale) in [
+        (-23.0, -20.0, 0.52),
+        (-20.0, -12.0, 0.48),
+        (-22.0, -2.0, 0.50),
+        (-18.0, 11.0, 0.46),
+        (-12.0, 16.0, 0.44),
+        (20.0, -19.0, 0.48),
+        (22.0, -10.0, 0.46),
+        (21.0, 2.0, 0.44),
+        (20.0, 14.0, 0.42),
+    ] {
+        spawn_grounded_scene(
+            commands,
+            game_world,
+            player_pos,
+            asset_server,
+            ecology_entry(EcologyKind::Tree(TreeKind::Sokpop)).model_path,
+            ox,
+            oz,
+            0.03,
+            scale,
+            0.0,
+        );
+    }
+
+    let rock_mesh = meshes.add(Cuboid::new(0.35, 0.20, 0.30));
+    for i in 0..70 {
+        let ox = -23.0 + pretty_hash01(i, 41) * 46.0;
+        let oz = -22.0 + pretty_hash01(i, 43) * 42.0;
+        let pos = grounded_world_pos(game_world, player_pos, ox, oz, 0.12);
+        commands.spawn((
+            Mesh3d(rock_mesh.clone()),
+            MeshMaterial3d(rock.clone()),
+            Transform::from_translation(pos)
+                .with_rotation(Quat::from_rotation_y(pretty_hash01(i, 47) * std::f32::consts::TAU))
+                .with_scale(Vec3::splat(0.55 + pretty_hash01(i, 53) * 0.75)),
+        ));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_grounded_scene(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    asset_server: &Res<AssetServer>,
+    path: &'static str,
+    ox: f32,
+    oz: f32,
+    y_offset: f32,
+    scale: f32,
+    yaw: f32,
+) {
+    commands.spawn((
+        WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(path))),
+        Transform::from_translation(grounded_world_pos(game_world, player_pos, ox, oz, y_offset))
+            .with_rotation(Quat::from_rotation_y(yaw))
+            .with_scale(Vec3::splat(scale)),
+        Name::new(path),
+    ));
+}
+
+fn grounded_world_pos(
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    ox: f32,
+    oz: f32,
+    y_offset: f32,
+) -> Vec3 {
+    let x = player_pos.x + ox;
+    let z = player_pos.z + oz;
+    let y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32) + y_offset;
+    Vec3::new(x, y, z)
+}
+
+fn pretty_hash01(i: usize, salt: usize) -> f32 {
+    let mut x = (i as u32)
+        .wrapping_mul(1_664_525)
+        .wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
+    x ^= x >> 16;
+    x = x.wrapping_mul(2_246_822_519);
+    ((x >> 8) as f32) / ((u32::MAX >> 8) as f32)
+}
+
 fn spawn_cube(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -1550,49 +1764,11 @@ fn spawn_cube(
 pub fn spawn_eco_visuals(
     mut commands: Commands,
     eco: Res<EcoCycle>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let rabbit_body_mesh = meshes.add(Sphere::new(0.5));
-    let rabbit_head_mesh = meshes.add(Sphere::new(0.5));
-    let rabbit_ear_mesh = meshes.add(Cuboid::new(0.12, 0.48, 0.08));
-    let rabbit_tail_mesh = meshes.add(Sphere::new(0.5));
-    let bush_mesh = meshes.add(Sphere::new(0.5));
-    let fruit_mesh = meshes.add(Sphere::new(0.5));
     let bubble_mesh = meshes.add(Sphere::new(0.5));
-
-    let rabbit_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.92, 0.82),
-        emissive: Color::srgb(0.70, 0.55, 0.38).into(),
-        unlit: true,
-        perceptual_roughness: 0.72,
-        metallic: 0.0,
-        ..default()
-    });
-    let rabbit_inner_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.55, 0.68),
-        emissive: Color::srgb(0.75, 0.18, 0.28).into(),
-        unlit: true,
-        perceptual_roughness: 0.72,
-        metallic: 0.0,
-        ..default()
-    });
-    let bush_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.20, 0.72, 0.22),
-        emissive: Color::srgb(0.10, 0.38, 0.06).into(),
-        unlit: true,
-        perceptual_roughness: 0.88,
-        metallic: 0.0,
-        ..default()
-    });
-    let fruit_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.05, 0.18),
-        emissive: Color::srgb(1.0, 0.12, 0.20).into(),
-        unlit: true,
-        perceptual_roughness: 0.42,
-        metallic: 0.0,
-        ..default()
-    });
     let bubble_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(0.45, 0.90, 1.0, 0.62),
         emissive: Color::srgb(0.25, 0.75, 1.0).into(),
@@ -1603,68 +1779,64 @@ pub fn spawn_eco_visuals(
         ..default()
     });
 
+    let rabbit_entry = ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit));
+    let bush_entry = ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush));
+    let fruit_entry = ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit));
+
     for rabbit in &eco.rabbits {
-        spawn_eco_visual_part(
+        spawn_eco_scene_visual(
             &mut commands,
-            rabbit_body_mesh.clone(),
-            rabbit_mat.clone(),
-            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::Body },
+            &asset_server,
+            rabbit_entry.model_path,
+            EcoVisual::Rabbit { id: rabbit.id },
             Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
-            Vec3::new(0.70, 0.42, 0.95),
+            rabbit_entry.visual_scale,
         );
-        spawn_eco_visual_part(
+    }
+
+    for animal in &eco.wildlife {
+        let entry = ecology_entry(EcologyKind::Wildlife(animal.kind));
+        spawn_eco_scene_visual(
             &mut commands,
-            rabbit_head_mesh.clone(),
-            rabbit_mat.clone(),
-            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::Head },
-            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
-            Vec3::new(0.42, 0.38, 0.42),
-        );
-        spawn_eco_visual_part(
-            &mut commands,
-            rabbit_ear_mesh.clone(),
-            rabbit_inner_mat.clone(),
-            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::EarLeft },
-            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
-            Vec3::ONE,
-        );
-        spawn_eco_visual_part(
-            &mut commands,
-            rabbit_ear_mesh.clone(),
-            rabbit_inner_mat.clone(),
-            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::EarRight },
-            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
-            Vec3::ONE,
-        );
-        spawn_eco_visual_part(
-            &mut commands,
-            rabbit_tail_mesh.clone(),
-            rabbit_mat.clone(),
-            EcoVisual::Rabbit { id: rabbit.id, part: RabbitVisualPart::Tail },
-            Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
-            Vec3::splat(0.26),
+            &asset_server,
+            entry.model_path,
+            EcoVisual::Wildlife { id: animal.id },
+            Vec3::new(animal.pos.x, 0.0, animal.pos.y),
+            entry.visual_scale,
         );
     }
 
     for berry in &eco.berries {
-        spawn_eco_visual_part(
+        spawn_eco_scene_visual(
             &mut commands,
-            bush_mesh.clone(),
-            bush_mat.clone(),
+            &asset_server,
+            bush_entry.model_path,
             EcoVisual::BerryBush { id: berry.id },
             Vec3::new(berry.pos.x, 0.0, berry.pos.y),
-            Vec3::new(0.95, 0.58, 0.95),
+            bush_entry.visual_scale,
         );
         for index in 0..3 {
-            spawn_eco_visual_part(
+            spawn_eco_scene_visual(
                 &mut commands,
-                fruit_mesh.clone(),
-                fruit_mat.clone(),
+                &asset_server,
+                fruit_entry.model_path,
                 EcoVisual::BerryFruit { id: berry.id, index },
                 Vec3::new(berry.pos.x, 0.0, berry.pos.y),
-                Vec3::splat(0.18),
+                fruit_entry.visual_scale,
             );
         }
+    }
+
+    for plant in &eco.plants {
+        let entry = ecology_entry(EcologyKind::ResourceNode(plant.kind));
+        spawn_eco_scene_visual(
+            &mut commands,
+            &asset_server,
+            entry.model_path,
+            EcoVisual::PlantNode { id: plant.id },
+            Vec3::new(plant.pos.x, 0.0, plant.pos.y),
+            entry.visual_scale,
+        );
     }
 
     for index in 0..ECO_CO2_BUBBLE_COUNT {
@@ -1684,6 +1856,21 @@ pub fn spawn_eco_visuals(
         eco.berries.len(),
         ECO_CO2_BUBBLE_COUNT
     );
+}
+
+fn spawn_eco_scene_visual(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    path: &'static str,
+    visual: EcoVisual,
+    pos: Vec3,
+    scale: Vec3,
+) {
+    commands.spawn((
+        WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(path))),
+        Transform::from_translation(pos).with_scale(scale),
+        visual,
+    ));
 }
 
 fn spawn_eco_visual_part(
@@ -1711,7 +1898,7 @@ pub fn update_eco_visuals(
     let t = time.elapsed_secs();
     for (visual, mut transform) in &mut q {
         match *visual {
-            EcoVisual::Rabbit { id, part } => {
+            EcoVisual::Rabbit { id } => {
                 let Some(rabbit) = eco.rabbits.iter().find(|rabbit| rabbit.id == id) else {
                     transform.scale = Vec3::ZERO;
                     continue;
@@ -1721,11 +1908,25 @@ pub fn update_eco_visuals(
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let phase = t * 5.0 + id as f32 * 0.9;
                 let hop = phase.sin().max(0.0) * 0.28;
-                let breath = (t * 2.2 + id as f32).sin() * 0.025;
-                let (offset, scale) = rabbit_part_pose(part, breath);
-                transform.translation = Vec3::new(x, ground_y, z) + offset + Vec3::Y * hop;
-                transform.scale = scale;
+                let breath = (t * 2.2 + id as f32).sin() * 0.03;
+                transform.translation = Vec3::new(x, ground_y + 0.08 + hop + breath, z);
+                transform.scale =
+                    ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit)).visual_scale;
                 transform.rotation = Quat::from_rotation_y((t * 0.4 + id as f32).sin() * 0.35);
+            }
+            EcoVisual::Wildlife { id } => {
+                let Some(animal) = eco.wildlife.iter().find(|animal| animal.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                let x = animal.pos.x;
+                let z = animal.pos.y;
+                let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+                let entry = ecology_entry(EcologyKind::Wildlife(animal.kind));
+                let bob = (t * 1.8 + id as f32).sin() * 0.045;
+                transform.translation = Vec3::new(x, ground_y + 0.08 + bob, z);
+                transform.scale = entry.visual_scale;
+                transform.rotation = Quat::from_rotation_y((t * 0.22 + id as f32).sin() * 0.45);
             }
             EcoVisual::BerryBush { id } => {
                 let Some(berry) = eco.berries.iter().find(|berry| berry.id == id) else {
@@ -1735,9 +1936,12 @@ pub fn update_eco_visuals(
                 let x = berry.pos.x;
                 let z = berry.pos.y;
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
-                let sway = (t * 1.4 + id as f32).sin() * 0.035;
-                transform.translation = Vec3::new(x, ground_y + 0.50 + sway, z);
-                transform.scale = Vec3::new(1.25, 0.82 + sway.abs(), 1.25);
+                let sway = (t * 1.4 + id as f32).sin() * 0.015;
+                transform.translation = Vec3::new(x, ground_y + 0.08 + sway, z);
+                transform.scale =
+                    ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush))
+                        .visual_scale
+                        + Vec3::Y * sway.abs();
             }
             EcoVisual::BerryFruit { id, index } => {
                 let Some(berry) = eco.berries.iter().find(|berry| berry.id == id) else {
@@ -1754,12 +1958,27 @@ pub fn update_eco_visuals(
                 let angle = index as f32 * std::f32::consts::TAU / 3.0 + id as f32 * 0.35;
                 let bob = (t * 3.0 + index as f32).sin() * 0.035;
                 transform.translation = Vec3::new(
-                    x + angle.cos() * 0.46,
-                    ground_y + 0.92 + bob,
-                    z + angle.sin() * 0.46,
+                    x + angle.cos() * 0.24,
+                    ground_y + 0.42 + bob,
+                    z + angle.sin() * 0.24,
                 );
-                let fruit_scale = if berry.fruit == 0 { 0.16 } else { 0.30 };
-                transform.scale = Vec3::splat(fruit_scale);
+                transform.scale =
+                    ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit))
+                        .visual_scale;
+            }
+            EcoVisual::PlantNode { id } => {
+                let Some(plant) = eco.plants.iter().find(|plant| plant.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                let x = plant.pos.x;
+                let z = plant.pos.y;
+                let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
+                let entry = ecology_entry(EcologyKind::ResourceNode(plant.kind));
+                let sway = (t * 1.1 + id as f32 * 0.7).sin() * 0.025;
+                transform.translation = Vec3::new(x, ground_y + 0.06 + sway, z);
+                transform.scale = entry.visual_scale * if plant.stock == 0 { 0.65 } else { 1.0 };
+                transform.rotation = Quat::from_rotation_y(id as f32 * 0.71);
             }
             EcoVisual::Co2Bubble { index } => {
                 if eco.rabbits.is_empty() {
@@ -1781,28 +2000,6 @@ pub fn update_eco_visuals(
                 transform.scale = Vec3::splat((0.34 + index as f32 * 0.04) * alpha_scale);
             }
         }
-    }
-}
-
-fn rabbit_part_pose(part: RabbitVisualPart, breath: f32) -> (Vec3, Vec3) {
-    match part {
-        RabbitVisualPart::Body => (
-            Vec3::new(0.0, 0.48 + breath, 0.0),
-            Vec3::new(1.05, 0.62, 1.30),
-        ),
-        RabbitVisualPart::Head => (
-            Vec3::new(0.0, 0.86 + breath, -0.62),
-            Vec3::new(0.64, 0.56, 0.64),
-        ),
-        RabbitVisualPart::EarLeft => (
-            Vec3::new(-0.24, 1.42 + breath, -0.68),
-            Vec3::new(1.6, 1.7, 1.6),
-        ),
-        RabbitVisualPart::EarRight => (
-            Vec3::new(0.24, 1.42 + breath, -0.68),
-            Vec3::new(1.6, 1.7, 1.6),
-        ),
-        RabbitVisualPart::Tail => (Vec3::new(0.0, 0.62 + breath, 0.68), Vec3::splat(0.38)),
     }
 }
 

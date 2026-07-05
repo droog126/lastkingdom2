@@ -21,9 +21,43 @@ from models_lib import (  # noqa: E402
     clear_scene, cone, cube, cylinder, export_glb, ico_sphere, mat, uv_sphere,
 )
 
+_cube = cube
+_cone = cone
+_cylinder = cylinder
+_ico_sphere = ico_sphere
+_uv_sphere = uv_sphere
+
+
+def _loc_y_up(loc):
+    return (loc[0], loc[2], loc[1])
+
+
+def _scale_y_up(scale):
+    return (scale[0], scale[2], scale[1])
+
+
+def cube(name, loc, scale, material):
+    return _cube(name, _loc_y_up(loc), _scale_y_up(scale), material)
+
+
+def cone(name, loc, radius1, radius2, depth, material, vertices=8):
+    return _cone(name, _loc_y_up(loc), radius1, radius2, depth, material, vertices=vertices)
+
+
+def cylinder(name, loc, radius, depth, material, vertices=24):
+    return _cylinder(name, _loc_y_up(loc), radius, depth, material, vertices=vertices)
+
+
+def ico_sphere(name, loc, scale, material, subdivisions=1):
+    return _ico_sphere(name, _loc_y_up(loc), _scale_y_up(scale), material, subdivisions=subdivisions)
+
+
+def uv_sphere(name, loc, scale, material, segments=16, rings=8):
+    return _uv_sphere(name, _loc_y_up(loc), _scale_y_up(scale), material, segments=segments, rings=rings)
+
 
 def glow_mat(name, color, glow_strength=0.4, roughness=0.6):
-    return mat(name, color, roughness=roughness, emissive=color)
+    return mat(name, color, roughness=max(roughness, 0.82))
 
 
 def mat_only(name, color, roughness=0.9):

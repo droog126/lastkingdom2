@@ -14,27 +14,6 @@ from models_lib import (
     clear_scene, cube, cone, cylinder, export_glb, ico_sphere, mat, uv_sphere,
 )
 
-def make_player_avatar_flat() -> None:
-    
-    clear_scene()
-    body_brown = mat("body_brown", (0.62, 0.42, 0.25))
-    skin = mat("skin_warm", (0.95, 0.78, 0.65))
-    hat_straw = mat("hat_straw", (0.78, 0.62, 0.32))
-    eye_blue = mat("eye_blue", (0.25, 0.50, 0.85))
-    pants = mat("pants_grey", (0.45, 0.40, 0.32))
-
-    cube("feet", (0.0, 0.05, 0.0), (0.4, 0.10, 0.4), pants)
-
-    cube("torso", (0.0, 0.20, 0.0), (0.5, 0.20, 0.3), body_brown)
-
-    cube("head", (0.0, 0.375, 0.0), (0.30, 0.15, 0.25), skin)
-
-    cube("eye_l", (-0.08, 0.385, 0.13), (0.05, 0.05, 0.04), eye_blue)
-    cube("eye_r", ( 0.08, 0.385, 0.13), (0.05, 0.05, 0.04), eye_blue)
-
-    cylinder("hat", (0.0, 0.50, 0.0), 0.20, 0.05, hat_straw, vertices=10)
-    export_glb("player_avatar")
-
 def make_monster_flat(name: str, base_color, glow_color) -> None:
     
     clear_scene()
@@ -121,8 +100,6 @@ def make_ground_disc_flat(name: str, radius: float, color, glow) -> None:
 def main() -> None:
     print("=== building pretty/ v4-flat (超平坦贴地) ===")
 
-    print("[1/9] player_avatar (≤0.5m 蘑菇人)")
-    make_player_avatar_flat()
 
     print("[2/9] monsters x5 (扁球身 ≤0.5m)")
     make_monster_flat("monster_snake",     (0.50, 0.85, 0.20), (0.70, 1.0, 0.30))
@@ -171,7 +148,6 @@ def main() -> None:
         "spec": "flat (all y ≤ 0.5m, 贴地, no fall/no upside-down)",
         "format": "glb",
         "assets": [
-            "player_avatar", "monster_snake", "monster_frost_elf", "monster_sand_wurm",
             "monster_treant", "monster_aether_wraith", "cloud_puff", "tree",
             "rock_dark", "rock_mid", "rock_moss", "flower_0", "flower_1", "flower_2",
             "flower_3", "flower_4", "hill", "poi_pillar_red", "poi_pillar_cyan",

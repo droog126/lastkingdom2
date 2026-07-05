@@ -13,14 +13,20 @@ Create and modify 3D models through reproducible scripts under `tools/`. Do not 
 
 For the Sokpop-style target, keep models simple, grounded, and structurally readable before adding detail.
 
+- Treat the first pass as a silhouette test, not as asset completion. A model is not acceptable just because it exports; it must read as the intended object in a preview at the target viewing scale.
 - Start with the primary silhouette and proportions: head/body/limb scale, contact points, centerline, and stance must read correctly from the game camera before adding accessories.
 - Prefer a few clear primitive forms over many small decorative pieces. If a model needs many small parts to communicate the idea, simplify the idea first.
 - Ensure connected body parts visibly connect or deliberately overlap. Avoid floating heads, exposed gaps, hidden sockets, or large primitives intersecting in ways that look like something is stuffed inside the model.
-- Use short, chunky, toy-like forms for characters. Avoid long thin necks, dangling limbs, overly tall torsos, or realistic anatomy that fights the simple style.
+- Use short, chunky, toy-like forms for characters. Give humanoids a visible, short neck or clear overlap between head and torso; avoid long thin necks, dangling limbs, overly tall torsos, or realistic anatomy that fights the simple style.
 - Add identity details only after the base form works: one clear prop, one color accent, or one readable accessory is better than layered small features.
 - Keep colors matte, moderately saturated, and separated by role. Do not rely on bright lighting, tiny texture-like marks, or subtle shading to make a form readable.
+- For environment props, avoid generic display bases unless the asset is explicitly a marker or UI object. Use a footprint, volume, and local details that make the asset feel placeable in the world.
+- Do not leave sample, placeholder, debug, or calibration assets in production manifests. Keep formal asset lists limited to assets intended for actual use.
 - When iterating after screenshot feedback, fix the structural problem directly instead of compensating with unrelated details.
-- Generate a preview render or use the model preview system after export, and self-check for scale, alignment, visible gaps, unwanted intersections, over-brightness, and whether the model still reads when viewed small.
+- Generate a preview render or use the model preview system after export, and self-check for scale, alignment, visible gaps, unwanted intersections, material readability, and whether the model still reads at target size.
+- If an old generator can recreate a retired asset, update or disable that entry point in the same change. Removing only the GLB is not enough.
+- When generated animals or ecology props are wired into gameplay, judge them in the actual game camera corridor. A model that reads in isolation can still fail if another legacy creature, marker, tree, or prop occludes it in the closed-loop screenshot.
+- Prefer asset scale and placement that proves gameplay state: rabbits, wildlife, berry fruit, plant/resource nodes, and drops should remain identifiable at normal screenshot scale without relying only on HUD counts.
 
 ## Blender
 
@@ -45,8 +51,9 @@ On this Windows workstation, Blender is available as `F:\BLENDER\blender-launche
 2. Add or update a deterministic Python generator in `tools/`.
 3. Generate assets with Blender in background mode.
 4. Validate exported GLBs and poly budgets.
-5. Wire assets in code only after filenames and manifest entries are stable.
-6. Run a closed-loop iteration when the change affects visible game output.
+5. Render or open a contact sheet/model preview and critique the actual pixels for placeholder feel, material readability, proportions, orientation, missing materials, and disconnected parts.
+6. Wire assets in code only after filenames and manifest entries are stable.
+7. Run a closed-loop iteration when the change affects visible game output.
 
 ## Validation
 

@@ -230,3 +230,175 @@ pub mod components {
         VisualEffectEvent, WeaponEntry, WeaponId, WeaponStats,
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combat_state_default_is_idle() {
+        let c = CombatState::default();
+        assert!(!c.is_attacking);
+        assert_eq!(c.attack_cooldown_timer, 0.0);
+        assert_eq!(c.combo_count, 0);
+        assert_eq!(c.last_attack_tick, 0);
+    }
+
+    #[test]
+    fn weapon_stats_cooldown_matches_speed() {
+        let w = WeaponStats {
+            reach: 3.0,
+            damage: 5.0,
+            knockback: 0.3,
+            attack_speed: 2.0,
+            sweep_angle_deg: 60.0,
+            sweep_range: 3.0,
+        };
+        assert!((w.cooldown_secs() - 0.5).abs() < 0.001);
+
+        let w2 = WeaponStats { attack_speed: 1.0, ..w };
+        assert!((w2.cooldown_secs() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn hitbox_default_has_reasonable_size() {
+        let h = Hitbox::default();
+        assert_eq!(h.half_extents.x, 0.3);
+        assert_eq!(h.half_extents.y, 0.9);
+        assert_eq!(h.half_extents.z, 0.3);
+        assert_eq!(h.offset.y, 0.9);
+    }
+
+    #[test]
+    fn position_history_default_size_60() {
+        let ph = PositionHistory::default();
+        assert_eq!(ph.max_size, 60);
+        assert_eq!(ph.snapshots.len(), 0);
+    }
+
+    #[test]
+    fn position_history_push_and_query() {
+        let mut ph = PositionHistory::new(5);
+
+        for i in 0..3 {
+            ph.push(PositionSnapshot {
+                tick: i * 10,
+                translation: Vec3::new(i as f32, 0.0, 0.0),
+                rotation: Quat::IDENTITY,
+                velocity: Vec3::ZERO,
+            });
+        }
+
+        assert_eq!(ph.snapshots.len(), 3);
+
+        let snap = ph.query(15).unwrap();
+        assert_eq!(snap.tick, 10);
+        assert!((snap.translation.x - 1.0).abs() < 0.001);
+
+        assert!(ph.query(5).is_none());
+
+        let latest = ph.query(100).unwrap();
+        assert_eq!(latest.tick, 20);
+    }
+
+    #[test]
+    fn position_history_evicts_old_when_full() {
+        let mut ph = PositionHistory::new(3);
+
+        for i in 0..5 {
+            ph.push(PositionSnapshot {
+                tick: i,
+                translation: Vec3::ZERO,
+                rotation: Quat::IDENTITY,
+                velocity: Vec3::ZERO,
+            });
+        }
+
+        assert_eq!(ph.snapshots.len(), 3);
+        assert_eq!(ph.oldest_tick(), Some(2));
+        assert_eq!(ph.snapshots.back().unwrap().tick, 4);
+    }
+
+    #[test]
+    fn position_history_oldest_tick() {
+        let mut ph = PositionHistory::new(10);
+        assert_eq!(ph.oldest_tick(), None);
+
+        ph.push(PositionSnapshot {
+            tick: 42,
+            translation: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            velocity: Vec3::ZERO,
+        });
+        assert_eq!(ph.oldest_tick(), Some(42));
+    }
+
+    #[test]
+    fn weapon_id_from_u8_known_values() {
+        assert_eq!(WeaponId::from_u8(0), Some(WeaponId::Fists));
+        assert_eq!(WeaponId::from_u8(1), Some(WeaponId::WoodenSword));
+        assert_eq!(WeaponId::from_u8(2), Some(WeaponId::StoneSword));
+        assert_eq!(WeaponId::from_u8(3), Some(WeaponId::IronSword));
+        assert_eq!(WeaponId::from_u8(4), Some(WeaponId::DiamondSword));
+        assert_eq!(WeaponId::from_u8(5), Some(WeaponId::GoldSword));
+    }
+
+    #[test]
+    fn weapon_id_from_u8_out_of_range() {
+        assert_eq!(WeaponId::from_u8(6), None);
+        assert_eq!(WeaponId::from_u8(255), None);
+    }
+
+    #[test]
+    fn weapon_stats_match_weapon_table() {
+        let fists = WeaponId::Fists.stats();
+        assert_eq!(fists.name, "Fists");
+        assert!((fists.damage - 1.0).abs() < 0.001);
+        assert!((fists.reach - 2.5).abs() < 0.001);
+
+        let iron = WeaponId::IronSword.stats();
+        assert_eq!(iron.name, "Iron Sword");
+        assert!((iron.damage - 6.0).abs() < 0.001);
+        assert!((iron.attack_speed - 1.6).abs() < 0.001);
+
+        let gold = WeaponId::GoldSword.stats();
+        assert!((gold.attack_speed - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn fixed_tick_increment_wraps() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.insert_resource(FixedTick(0));
+        app.add_systems(Update, increment_fixed_tick);
+        app.update();
+        assert_eq!(app.world().resource::<FixedTick>().0, 1);
+    }
+
+    #[test]
+    fn fixed_tick_wraps_at_max() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.insert_resource(FixedTick(u32::MAX));
+        app.add_systems(Update, increment_fixed_tick);
+        app.update();
+        assert_eq!(app.world().resource::<FixedTick>().0, 0);
+    }
+
+    #[test]
+    fn ping_wraps_value() {
+        let p = Ping(42.5);
+        assert_eq!(p.0, 42.5);
+    }
+
+    #[test]
+    fn all_six_weapons_have_stats() {
+        for i in 0..6u8 {
+            let wid = WeaponId::from_u8(i).expect(&format!("weapon {} should exist", i));
+            let stats = wid.stats();
+            assert!(stats.damage > 0.0, "weapon {} should have positive damage", i);
+            assert!(stats.reach > 0.0, "weapon {} should have positive reach", i);
+            assert!(stats.attack_speed > 0.0, "weapon {} should have positive attack speed", i);
+        }
+    }
+}

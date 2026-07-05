@@ -73,7 +73,7 @@ Check horizon, background color, fog, lighting direction, overexposure, and unde
 - 8: player is clear, well framed, and has orientation/height context.
 - 10: player is visually expressive, readable at a glance, and compositionally placed.
 
-Check silhouette, contrast, camera framing, occlusion, feet/contact with ground, and direction cue.
+Check silhouette, contrast, camera framing, occlusion, feet/contact with ground, direction cue, head/body alignment, neck or overlap, and whether limbs look connected rather than floating or stuffed into the body.
 
 ### Terrain
 
@@ -83,7 +83,7 @@ Check silhouette, contrast, camera framing, occlusion, feet/contact with ground,
 - 8: terrain has clear shapes, height variation, paths/landmarks, and depth.
 - 10: terrain is polished, varied, navigable, and supports the intended fantasy.
 
-Check voxel readability, spawn platform, cliffs/holes, water edges, pathing, and scale.
+Check terrain readability, spawn platform, cliffs/holes, edges, pathing, and scale. For environment props or model previews, penalize generic display-base presentation when the asset should read as an in-world object; prefer a convincing footprint, layered forms, and local detail that reads at target scale.
 
 ### Decor
 
@@ -93,7 +93,8 @@ Check voxel readability, spawn platform, cliffs/holes, water edges, pathing, and
 - 8: decor creates layered composition and makes the world feel inhabited.
 - 10: decor is varied, well placed, thematic, and reinforces gameplay readability.
 
-Check props, vegetation, water, animals, monsters, buildings, object scale, and repetition.
+Check props, vegetation, water, actors, buildings, object scale, repetition, material assignment, and whether any asset still reads as placeholder, sample, debug, or calibration geometry instead of intentional content.
+For ecology screenshots, verify variety is visually inspectable, not only counted in HUD/state. Penalize large foreground animals, blocks, trees, signs, or demo props that hide the player or the animal/plant/resource band.
 
 ### HUD
 
@@ -116,6 +117,7 @@ Use screenshot plus `health.json`, `final_state.json`, and `diff.json`.
 - 10: screenshot and artifacts show compelling, stable, self-explanatory gameplay.
 
 Check movement, actor visibility, monster/animal/player state, resource changes, scenario progress, and observer assertions.
+For finite ecology/resource loops, score higher only when artifacts show an explainable conversion chain, such as fruit eaten, food produced, regrowth consuming an input pool, and production stopping or capping when inputs are exhausted.
 
 ## Total Score
 
@@ -162,9 +164,12 @@ next:
 ## Decision Rules
 
 - Fix hard gates before polishing.
+- For generated assets, fix structural readability before adding decorative detail.
+- If a screenshot or preview shows placeholder assets, poor material readability, wrong orientation, disconnected parts, or generic display-base presentation, score that as a concrete visual regression even when the asset is technically valid.
 - If player is below 5, prioritize camera/player visibility over decor.
 - If terrain is below 5, prioritize spawn framing, navigation readability, or camera placement.
 - If HUD is below 5, prioritize legibility and non-overlap.
 - If gameplay is below 5 with visual scores above 5, inspect state artifacts before changing visuals.
 - If decor is below 5 but terrain/player/HUD are good, add or reposition visible props, animals, buildings, or water.
 - If sky is below 5 and the scene is otherwise readable, tune lighting/fog/background after gameplay readability is stable.
+- If state proves entities exist but the screenshot reads as "only berries" or "only one creature", prioritize camera corridor, spawn placement, scale, or occlusion fixes before adding more content.

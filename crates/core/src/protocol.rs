@@ -170,6 +170,57 @@ pub mod components {
         pub status_line: String,
     }
 
+    pub const ECO_SNAPSHOT_MAX_RABBITS: usize = 8;
+    pub const ECO_SNAPSHOT_MAX_WILDLIFE: usize = 16;
+    pub const ECO_SNAPSHOT_MAX_BERRIES: usize = 16;
+    pub const ECO_SNAPSHOT_MAX_PLANTS: usize = 24;
+
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct EcoRabbitNet {
+        pub id: u32,
+        pub x: f32,
+        pub z: f32,
+        pub energy: f32,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct EcoWildlifeNet {
+        pub id: u32,
+        pub kind: u8,
+        pub x: f32,
+        pub z: f32,
+        pub energy: f32,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct EcoBerryNet {
+        pub id: u32,
+        pub x: f32,
+        pub z: f32,
+        pub fruit: u32,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct EcoPlantNet {
+        pub id: u32,
+        pub kind: u8,
+        pub x: f32,
+        pub z: f32,
+        pub stock: u32,
+    }
+
+    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+    pub struct EcoSnapshot {
+        pub tick: u64,
+        pub co2: f32,
+        pub fruit_eaten: u64,
+        pub fruit_grown: u64,
+        pub rabbits: Vec<EcoRabbitNet>,
+        pub wildlife: Vec<EcoWildlifeNet>,
+        pub berries: Vec<EcoBerryNet>,
+        pub plants: Vec<EcoPlantNet>,
+    }
+
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct VoxelDelta {
         pub revision: u64,
@@ -234,6 +285,148 @@ impl Plugin for ProtocolPlugin {
         app.component::<components::MonsterKind>().replicate();
         app.component::<components::MonsterHealth>().replicate();
         app.component::<components::GameplayHudState>().replicate();
+        app.component::<components::EcoSnapshot>().replicate();
         app.component::<components::VoxelDelta>().replicate();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn player_action_variants_count() {
+        use strum::IntoEnumIterator;
+        let count = [
+            PlayerAction::MoveForward,
+            PlayerAction::MoveBackward,
+            PlayerAction::MoveLeft,
+            PlayerAction::MoveRight,
+            PlayerAction::Jump,
+            PlayerAction::Sprint,
+            PlayerAction::Attack,
+            PlayerAction::Block,
+            PlayerAction::Gather,
+            PlayerAction::Place,
+            PlayerAction::Craft,
+            PlayerAction::FoundNation,
+            PlayerAction::KillCreature,
+        ].len();
+        assert_eq!(count, 13);
+    }
+
+    #[test]
+    fn build_recipe_variants() {
+        use messages::BuildRecipe;
+        assert_eq!(BuildRecipe::PlankPack as u8, 0);
+        assert_eq!(BuildRecipe::Campfire as u8, 1);
+    }
+
+    #[test]
+    fn gameplay_command_kind_variants() {
+        use messages::GameplayCommandKind;
+        let move_cmd = GameplayCommandKind::MoveWorld { dx_milli: 100, dz_milli: -50 };
+        match move_cmd {
+            GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
+                assert_eq!(dx_milli, 100);
+                assert_eq!(dz_milli, -50);
+            }
+            _ => panic!("expected MoveWorld"),
+        }
+        assert!(matches!(GameplayCommandKind::Jump, GameplayCommandKind::Jump));
+        assert!(matches!(GameplayCommandKind::GatherFootBlock, GameplayCommandKind::GatherFootBlock));
+        assert!(matches!(GameplayCommandKind::PlaceWoodFootBlock, GameplayCommandKind::PlaceWoodFootBlock));
+        assert!(matches!(
+            GameplayCommandKind::Craft(messages::BuildRecipe::PlankPack),
+            GameplayCommandKind::Craft(messages::BuildRecipe::PlankPack)
+        ));
+        assert!(matches!(GameplayCommandKind::FoundNation, GameplayCommandKind::FoundNation));
+        assert!(matches!(GameplayCommandKind::KillNearestCreature, GameplayCommandKind::KillNearestCreature));
+    }
+
+    #[test]
+    fn attack_input_json_roundtrip() {
+        use messages::AttackInput;
+        let input = AttackInput {
+            tick: 42,
+            input_dir: Vec3::new(1.0, 0.0, 0.0),
+            is_falling: true,
+            combo_count: 3,
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        let decoded: AttackInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.tick, 42);
+        assert_eq!(decoded.is_falling, true);
+        assert_eq!(decoded.combo_count, 3);
+        assert!((decoded.input_dir.x - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn gameplay_command_json_roundtrip() {
+        use messages::{GameplayCommand, GameplayCommandKind};
+        let cmd = GameplayCommand {
+            tick: 1000,
+            player_block: [16, 8, 32],
+            kind: GameplayCommandKind::FoundNation,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let decoded: GameplayCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.tick, 1000);
+        assert_eq!(decoded.player_block, [16, 8, 32]);
+        assert!(matches!(decoded.kind, GameplayCommandKind::FoundNation));
+    }
+
+    #[test]
+    fn kill_feed_entry_json_roundtrip() {
+        use messages::KillFeedEntry;
+        let entry = KillFeedEntry {
+            killer_name: "Alice".into(),
+            victim_name: "Bob".into(),
+            weapon_id: 3,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let decoded: KillFeedEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.killer_name, "Alice");
+        assert_eq!(decoded.victim_name, "Bob");
+        assert_eq!(decoded.weapon_id, 3);
+    }
+
+    #[test]
+    fn components_wrap_values() {
+        use components::*;
+        assert_eq!(Health(100.0).0, 100.0);
+        assert_eq!(EquippedWeapon(2).0, 2);
+        assert_eq!(KnockbackImmunity(0.5).0, 0.5);
+        assert_eq!(MonsterKind(1).0, 1);
+        assert_eq!(MonsterHealth(50.0).0, 50.0);
+        assert_eq!(PlayerPos(Vec3::ONE).0, Vec3::ONE);
+        assert_eq!(PlayerRot(90.0).0, 90.0);
+    }
+
+    #[test]
+    fn eco_snapshot_constants_are_reasonable() {
+        use components::*;
+        assert_eq!(ECO_SNAPSHOT_MAX_RABBITS, 8);
+        assert_eq!(ECO_SNAPSHOT_MAX_WILDLIFE, 16);
+        assert_eq!(ECO_SNAPSHOT_MAX_BERRIES, 16);
+        assert_eq!(ECO_SNAPSHOT_MAX_PLANTS, 24);
+    }
+
+    #[test]
+    fn voxel_delta_fields() {
+        use components::VoxelDelta;
+        let d = VoxelDelta {
+            revision: 123,
+            x: 5,
+            y: 10,
+            z: -3,
+            block: 7,
+        };
+        assert_eq!(d.revision, 123);
+        assert_eq!(d.x, 5);
+        assert_eq!(d.y, 10);
+        assert_eq!(d.z, -3);
+        assert_eq!(d.block, 7);
     }
 }

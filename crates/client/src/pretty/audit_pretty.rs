@@ -5,7 +5,6 @@ use lk2_core::world::World as GameWorld;
 use crate::render::scalar_field::effective_ground_height;
 
 const RING_PATHS: &[(&str, &str)] = &[
-    ("player_avatar", "procedural/pretty/player_avatar.glb"),
     ("monster_snake", "procedural/pretty/monster_snake.glb"),
     (
         "monster_frost_elf",
@@ -134,7 +133,6 @@ pub fn spawn_audit_ring(
     ground_y: f32,
 ) {
     let inner_names = [
-        "player_avatar",
         "monster_snake",
         "monster_frost_elf",
         "monster_sand_wurm",

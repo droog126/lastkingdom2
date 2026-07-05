@@ -1,17 +1,29 @@
 # 万国起源 · 完整架构总纲
-## 三套架构文档索引与快速导航
+## 架构文档索引与快速导航
 
 ---
 
 ## 文档结构
 
-本项目架构分为**三套独立但关联**的文档，分别服务于不同的设计层面：
+本项目文档按层次组织，服务于不同的开发层面：
 
-| 文档 | 文件名 | 关注层面 | 读者 |
-|------|--------|---------|------|
-| **玩法架构** | `01_Play_Architecture.md` | "做什么" | 策划、制作人 |
-| **服务器/客户端架构** | `02_Server_Client_Architecture.md` | "怎么连" | 后端、网络工程师 |
-| **系统内容架构** | `03_System_Content_Architecture.md` | "怎么算" | 客户端、系统工程师 |
+| 文档 | 文件路径 | 关注层面 | 状态 |
+|------|---------|---------|------|
+| **工程基准** | `docs/architecture/engineering-baseline.md` | 当前事实源 | ✅ 活跃 |
+| **架构总览** | `docs/architecture/architecture.md` | 3-crate 架构 | ✅ 活跃 |
+| **架构演进** | `docs/architecture/architecture_plan_v2.md` | 阶段计划 | ✅ 活跃 |
+| **游戏架构** | `docs/architecture/game.md` | "做什么" | ✅ 活跃 |
+| **服务器架构** | `docs/architecture/server.md` | "怎么连" | ✅ 活跃 |
+| **设计总纲** | `docs/design/overview.md` | 本文档 | ✅ 活跃 |
+| **内容架构** | `docs/design/content.md` | MVP + 远期目标 | ✅ 活跃 |
+| **玩法设计** | `docs/design/gameplay-v1.md` | 设计哲学 | ✅ 参考 |
+| **ECS 实现** | `docs/design/kimi-gameplay.md` | 技术实现方案 | ✅ 参考 |
+| **开发计划** | `docs/plans/doc-todo.md` | 待实现功能路线图 | ✅ 活跃 |
+| **闭环迭代** | `docs/plans/closed-loop-iteration.md` | AI 闭环计划 | ✅ 活跃 |
+| **客户端分离** | `docs/archive/client-server-split.md` | 已完成计划 | 📦 归档 |
+| **启动指南** | `docs/STARTING.md` | 运行入口 | ✅ 活跃 |
+| **TDD 入口** | `docs/notes/tdd.md` | 测试方案 | ✅ 活跃 |
+| **开发笔记** | `docs/notes/dev-notes.md` | 日常笔记 | ✅ 活跃 |
 
 ---
 
@@ -86,14 +98,15 @@
 
 ## 关键技术选型
 
-| 层面 | 技术 | 理由 |
-|------|------|------|
-| **游戏引擎** | Bevy (Rust) | ECS 原生、性能、确定性 |
-| **网络库** | lightyear | Bevy 原生、客户端预测、回滚 |
-| **序列化** | bincode | 零拷贝、跨平台一致 |
-| **数据库** | sled | 嵌入式、高性能、适合游戏 |
-| **压缩** | zstd | 高压缩比、快速解压 |
-| **容器化** | Docker | 部署标准化、水平扩展 |
+| 层面 | 技术 | 版本 | 理由 |
+|------|------|------|------|
+| **游戏引擎** | Bevy (Rust) | 0.19 | ECS 原生、性能、确定性 |
+| **网络库** | lightyear | 0.28 | Bevy 原生、客户端预测、回滚 |
+| **物理引擎** | avian3d | 0.7 | 轻量、Bevy 集成 |
+| **输入管理** | leafwing-input-manager | 0.21 | 声明式输入映射 |
+| **角色控制** | bevy-tnua | 0.32 | 统一角色控制器接口 |
+| **序列化** | serde + serde_json | 1.x | 状态序列化、JSON 可读 |
+| **调试工具** | bevy-inspector-egui | 0.37 | 运行时实体检查 |
 
 ---
 
@@ -101,68 +114,82 @@
 
 ### 开发环境搭建
 
-```bash
-# 1. 安装 Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```powershell
+# 1. 安装 Rust (需要 1.75+)
+# 参考 https://www.rust-lang.org/tools/install
 
-# 2. 克隆项目
-git clone https://github.com/your-org/wanguo.git
-cd wanguo
+# 2. 进入项目目录
+cd F:\rustProject\lastkingdom2
 
 # 3. 构建
-cargo build --release
+just build
 
 # 4. 启动服务端
-cargo run --bin wanguo-server -- --dimension overworld
+cargo run -p lk2-server
 
-# 5. 启动客户端
-cargo run --bin wanguo-client -- --connect localhost:7777
+# 5. 启动客户端（在线模式）
+cargo run -p lk2-client -- --connect=127.0.0.1:5000
+
+# 5. 启动客户端（离线模式，推荐开发用）
+cargo run -p lk2-client -- --offline
+
+# 6. 闭环迭代
+just loop
 ```
 
 ### 项目结构
 
 ```
-wanguo/
-├── Cargo.toml              # Workspace 定义
-├── shared/                 # 共享代码（协议 + ECS 组件 + 系统逻辑）
-│   ├── src/
-│   │   ├── components/     # ECS 组件定义
-│   │   ├── systems/        # 共享系统逻辑
-│   │   ├── resources/      # 全局资源池等
-│   │   ├── net/            # 网络协议
-│   │   └── world/          # 世界生成、区块管理
-│   └── Cargo.toml
-├── server/                 # Headless 服务端
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── tick_engine.rs  # Tick 调度
-│   │   ├── persistence.rs  # 异步持久化
-│   │   └── authority.rs    # 服务端权威验证
-│   └── Cargo.toml
-├── client/                 # 渲染客户端
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── render/         # 体素渲染
-│   │   ├── prediction.rs   # 客户端预测
-│   │   ├── rewind.rs       # 时间倒带
-│   │   └── ui/             # 游戏 UI
-│   └── Cargo.toml
-└── docs/                   # 架构文档
-    ├── 01_Play_Architecture.md
-    ├── 02_Server_Client_Architecture.md
-    └── 03_System_Content_Architecture.md
+F:\rustProject\lastkingdom2\
+├── Cargo.toml                  # Workspace 根
+├── crates/
+│   ├── core/                   # lk2-core (lib) — 共享游戏状态、规则、协议
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs          # re-export 所有模块
+│   │       ├── world/          # 世界生成、区块管理
+│   │       ├── resource/       # 全局资源池
+│   │       ├── combat/         # V2 战斗系统
+│   │       ├── pvp/            # PvP 组件
+│   │       ├── protocol/       # lightyear 网络协议
+│   │       ├── monster/        # 怪物生态系统
+│   │       ├── nation/         # 国家系统
+│   │       ├── creature/       # 动物系统
+│   │       ├── ai/             # TickObserver 不变量检测
+│   │       └── scenario/       # 场景脚本状态机
+│   ├── server/                 # lk2-server (bin) — Headless 服务端
+│   │   ├── Cargo.toml
+│   │   └── src/main.rs         # MinimalPlugins + lightyear ServerPlugins
+│   └── client/                 # lk2-client (bin) — 渲染客户端
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs         # DefaultPlugins + lightyear ClientPlugins
+│           ├── render/         # 体素渲染、相机
+│           ├── pretty/         # 装饰物（水、树、云、旗帜）
+│           └── ui.rs           # HUD 界面
+├── xtask/                      # 自动化任务（闭环迭代、测试、审计）
+├── assets/                     # 资源文件（字体、精灵图）
+├── scenarios/                  # 场景 JSON
+├── screenshots/               # 截图输出
+├── run-logs/                  # 运行日志
+└── docs/                      # 架构文档
+    ├── architecture/          # 架构文档（engineering-baseline.md, game.md, server.md）
+    ├── design/               # 设计文档（content.md, overview.md）
+    ├── plans/                # 计划文档
+    └── archive/              # 归档文档（过时的 drift-reports）
 ```
 
 ---
 
 ## 里程碑
 
-| 阶段 | 周期 | 目标 | 可玩性 |
-|------|------|------|--------|
-| **MVP** | 4 周 | 基础世界 + 玩家移动 + 方块操作 + 网络连接 | 可探索 |
-| **Alpha** | 8 周 | + 生态系统 + 国家系统 + 经济系统 | 可建国 |
-| **Beta** | 12 周 | + 完整职业 + 外交战争 + 终局内容 | 可国战 |
-| **Release** | 16 周 | + 王冠世界 + 社交系统 + 运营工具 | 可长线 |
+| 阶段 | 目标 | 可玩性 | 状态 |
+|------|------|--------|------|
+| **MVP** | 基础世界 + 玩家移动 + 方块操作 + 网络连接 | 可探索 | ✅ 已完成 |
+| **Alpha** | 生态系统 + 国家系统 + 战斗 V2 + 资源守恒 | 可建国 | ✅ 已完成 |
+| **Alpha+** | 客户端分离 + 闭环迭代 + TickObserver | 可迭代 | ✅ 已完成 |
+| **Beta** | 无限世界 + 地形预设 + 商队物流 + 外交战争 | 可国战 | 📋 计划中 |
+| **Release** | 以太界 + 神器 + 终局内容 | 可长线 | 📋 计划中 |
 
 ---
 

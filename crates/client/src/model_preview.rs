@@ -75,6 +75,7 @@ pub struct PreviewEntry {
     pub path: String,
     pub display_name: String,
     pub category: String,
+    pub file_size_kb: u64,
     pub cell: [usize; 2],
     pub world_pos: [f32; 3],
 }
@@ -89,6 +90,9 @@ pub struct PreviewBaseDisc;
 
 #[derive(Component)]
 struct PreviewCameraMarker;
+
+#[derive(Component)]
+struct PreviewOverlayText;
 
 pub fn run_model_preview() {
     let args: Vec<String> = std::env::args().collect();
@@ -171,7 +175,14 @@ pub fn run_model_preview() {
     );
     app.add_systems(
         Update,
-        (camera_controls, focus_controls, rotate_focused_model, maybe_take_screenshot, exit_model_preview)
+        (
+            camera_controls,
+            focus_controls,
+            rotate_focused_model,
+            update_overlay,
+            maybe_take_screenshot,
+            exit_model_preview,
+        )
             .chain(),
     );
 
@@ -353,10 +364,14 @@ fn spawn_models(
             .unwrap_or(asset_path)
             .trim_end_matches(".glb")
             .to_string();
+        let file_size_kb = std::fs::metadata(state.asset_root.join(asset_path))
+            .map(|m| (m.len() + 1023) / 1024)
+            .unwrap_or(0);
         state.models.push(PreviewEntry {
             path: asset_path.clone(),
             display_name,
             category: category.clone(),
+            file_size_kb,
             cell: [col, row],
             world_pos: [pos.x, pos.y, pos.z],
         });
@@ -429,15 +444,38 @@ fn setup_overlay(mut commands: Commands, state: Res<ModelPreviewState>) {
         },
         BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.62)),
         children![(
-            Text::new(
-                format!(
-                    "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\n[/] focus model  Space autorotate  J/L rotate model\nFocused: {focused}"
-                ),
-            ),
+            Text::new(preview_overlay_text(&state, focused)),
             TextFont { font_size: FontSize::Px(15.0), ..default() },
             TextColor(Color::WHITE),
+            PreviewOverlayText,
         )],
     ));
+}
+
+fn preview_overlay_text(state: &ModelPreviewState, fallback: &str) -> String {
+    match state.models.get(state.focused_index) {
+        Some(model) => format!(
+            "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\n[/] focus model  Space autorotate  J/L rotate model\nFocused: {}\nPath: {}\nCategory: {}  Size: {} KB  Index: {}/{}",
+            model.display_name,
+            model.path,
+            model.category,
+            model.file_size_kb,
+            state.focused_index + 1,
+            state.models.len()
+        ),
+        None => format!(
+            "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\n[/] focus model  Space autorotate  J/L rotate model\nFocused: {fallback}"
+        ),
+    }
+}
+
+fn update_overlay(state: Res<ModelPreviewState>, mut q: Query<&mut Text, With<PreviewOverlayText>>) {
+    if !state.is_changed() {
+        return;
+    }
+    if let Ok(mut text) = q.single_mut() {
+        text.0 = preview_overlay_text(&state, "none");
+    }
 }
 
 fn camera_pos(camera: &PreviewCamera) -> Vec3 {

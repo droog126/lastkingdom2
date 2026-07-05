@@ -13,6 +13,26 @@ just build
 
 > Rust edition 2024，需要 Rust 1.75+。`Cargo.toml` 已固定 `compt = ">=1.9, <1.10"`（broccoli 0.6 配套版本）— **不要 bump 它**。
 
+### 国内镜像加速（可选）
+
+如果访问 crates.io 慢，配置 rsproxy 镜像：
+
+```powershell
+# 用户环境变量
+$env:RUSTUP_DIST_SERVER = "https://rsproxy.cn"
+$env:RUSTUP_UPDATE_ROOT = "https://rsproxy.cn/rustup"
+```
+
+`~/.cargo/config.toml`：
+
+```toml
+[source.crates-io]
+replace-with = 'mirror'
+
+[source.mirror]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+```
+
 ## 1. 三种运行姿势
 
 ### 1a. 手动玩（离线客户端）

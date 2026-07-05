@@ -100,9 +100,7 @@ def make_sword() -> None:
     export_glb("sword")
 
 if __name__ == "__main__":
-    print("=== building v2 player + sword ===")
-    print("[1/2] player_avatar (v2 knight)")
-    make_player_avatar_v2()
-    print("[2/2] sword (独立武器)")
+    print("=== building sword only ===")
+    print("player_avatar.glb is retired; use sokpop_gatherer.glb instead.")
     make_sword()
     print("=== done ===")

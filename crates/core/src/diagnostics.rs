@@ -70,8 +70,7 @@ pub fn run_self_check(
     for tick in 0..ticks {
         obs.begin_tick();
         monsters.tick(&mut pool);
-        eco.tick();
-        let _ = pool.try_add(ResourceKind::Food, 2);
+        eco.tick(&mut pool);
         if let Err(errors) = obs.end_tick(
             tick,
             game_world,
@@ -132,13 +131,17 @@ pub fn build_state_json(
             "nests": monsters.kingdoms.values().map(|k| k.nests.len() as u32).sum::<u32>(),
         },
         "creatures": {
-            "passive_current": eco.rabbit_count(),
+            "passive_current": eco.rabbit_count() + eco.wildlife_count(),
             "rabbit_count": eco.rabbit_count(),
+            "wildlife": eco.wildlife_count(),
             "berry_bushes": eco.berry_count(),
+            "plant_nodes": eco.plant_count(),
         },
         "eco_cycle": {
             "rabbits": eco.rabbit_count(),
+            "wildlife": eco.wildlife_count(),
             "berry_bushes": eco.berry_count(),
+            "plant_nodes": eco.plant_count(),
             "fruit": eco.total_fruit(),
             "co2": eco.co2,
             "fruit_eaten": eco.fruit_eaten,
@@ -234,10 +237,14 @@ mod tests {
         assert!(assert_has_path(&json, &["monsters", "current"]).is_number());
         assert_eq!(
             assert_has_path(&json, &["creatures", "passive_current"]).as_u64(),
-            Some(5)
+            Some(9)
         );
+        assert_eq!(assert_has_path(&json, &["creatures", "wildlife"]).as_u64(), Some(4));
         assert!(assert_has_path(&json, &["creatures", "berry_bushes"]).is_number());
+        assert!(assert_has_path(&json, &["creatures", "plant_nodes"]).is_number());
         assert!(assert_has_path(&json, &["eco_cycle", "rabbits"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "wildlife"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "plant_nodes"]).is_number());
         assert!(assert_has_path(&json, &["observer", "anomalies"]).is_number());
         assert_eq!(
             assert_has_path(&json, &["world", "size"]).as_i64(),

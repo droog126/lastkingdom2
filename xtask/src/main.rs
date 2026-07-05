@@ -2,6 +2,7 @@ mod args;
 mod audit;
 mod health;
 mod loop_cmd;
+mod model_iter;
 mod motion;
 mod tdd;
 
@@ -34,6 +35,9 @@ fn main() -> ExitCode {
         "dev" => run_dev(&root, &args),
         "audit-tdd" => audit::tdd(&root),
         "audit-architecture" => audit::architecture(&root),
+        "model-preview-all" | "model-preview-iterate" => {
+            model_iter::run(&root, &args)
+        }
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -72,6 +76,7 @@ fn print_help() {
     println!("  health [iter_NN|path]");
     println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
     println!("  scenario --json scenarios/*.json");
+    println!("  model-preview-all [--only=<stem>] [--limit=N] [--skip-build]");
 }
 
 fn run_dev(root: &std::path::Path, args: &[String]) -> Result<()> {

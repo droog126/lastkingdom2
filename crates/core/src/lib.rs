@@ -4,6 +4,7 @@ pub mod constant;
 pub mod creature;
 pub mod diagnostics;
 pub mod eco_cycle;
+pub mod ecology;
 pub mod equipment;
 pub mod hint;
 pub mod match_state;

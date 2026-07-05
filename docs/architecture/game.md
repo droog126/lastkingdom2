@@ -1,12 +1,12 @@
-﻿# 万国起源：最后一国 钻石版 — 游戏架构文档
+# 万国起源：最后一国 钻石版 — 游戏架构文档
 
-> 当前说明：这是 2026-06-06 的游戏架构快照。当前工程边界以 `docs/architecture/engineering-baseline.md` 为准；当前运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。文中旧 `loop.ps1`、平铺截图和直接 `cargo test --workspace` 口径按历史背景阅读。
+> 当前说明：这是更新后的游戏架构文档（2026-07-06），反映 Bevy 0.19 + 3-crate workspace 结构。工程边界以 `docs/architecture/engineering-baseline.md` 为准；运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。
 
 > **项目名称**：万国起源：最后一国 钻石版
 > **游戏类型**：体素沙盒 + 策略模拟
-> **技术栈**：Rust + Bevy 0.19 + ECS 架构
-> **文档版本**：v1.0
-> **更新日期**：2026-06-06
+> **技术栈**：Rust + Bevy 0.19 + Lightyear 0.28 + ECS 架构
+> **文档版本**：v1.1（2026-07-06 更新）
+> **架构模式**：3-crate workspace（lk2-core / lk2-server / lk2-client）
 
 ---
 
@@ -768,14 +768,20 @@ P4.5 热插拔         P5 实体规模        P6 渲染现代化
 | 依赖 | 版本 | 用途 | 备注 |
 |------|------|------|------|
 | bevy | 0.19 | 游戏引擎 | ECS + 渲染 + 输入 |
-| avian3d | 0.7 | 物理引擎 | 未启用，待 P3 |
-| broccoli | 0.6 | 碰撞检测 | **注意**: compt < 1.10 |
-| rand | 0.8.5 | 随机数 | 待替换为 PcgRng |
-| sepax2d | 0.3 | 2D 碰撞 | |
-| bevy-inspector-egui | 0.37 | 调试工具 | |
+| avian3d | 0.7.0 | 物理引擎 | ✅ 已启用 |
+| lightyear | 0.28.0 | 网络同步 | 消息 + 组件复制 |
+| lightyear_avian3d | 0.28.0 | 物理同步 | |
+| lightyear_inputs_leafwing | 0.28.0 | 输入同步 | |
+| leafwing-input-manager | 0.21.0 | 输入管理 | |
+| bevy-tnua | 0.32.0 | 角色控制器 | |
+| bevy-tnua-avian3d | 0.12.0 | TNUA 物理集成 | |
+| rand | 0.10.1 | 随机数 | |
+| bevy-inspector-egui | 0.37.0 | 调试工具 | |
 | serde | 1.x | 序列化 | |
 | serde_json | 1.x | JSON | |
-| crossbeam-channel | 0.5 | 并发 | |
+| block-mesh | 0.2.0 | 体素网格生成 | |
+| ndshape | 0.3.0 | 多维数组形状 | |
+| bevy_panorbit_camera | 0.35.0 | 环绕相机 | |
 
 ### 8.2 Cargo.toml 约束
 
@@ -898,16 +904,22 @@ fn self_check(...) {
 ```powershell
 # 编译
 $env:BEVY_DISABLE_ACCESSIBILITY = "1"
-cargo build
+cargo build --workspace
 
-# 运行 (自动演示模式)
-cargo run -- --auto-demo
+# 运行客户端（离线模式，推荐开发用）
+cargo run -p lk2-client -- --offline
+
+# 运行客户端（在线模式）
+cargo run -p lk2-client -- --connect=127.0.0.1:5000
+
+# 运行服务端
+cargo run -p lk2-server
 
 # 闭环迭代
-.\loop.ps1
+just loop
 
 # 测试
-cargo test --workspace
+just test-changed
 
 # 代码检查
 cargo clippy --workspace
@@ -922,32 +934,45 @@ cargo fmt
 
 ```
 f:\rustProject\lastkingdom2\
-├── src/
-│   ├── main.rs              # 入口，App 构建，系统注册
-│   ├── ai/                  # AI 观察系统
-│   ├── constant/            # 常量定义
-│   ├── creature/            # 动物系统
-│   ├── monster/            # 怪物系统
-│   ├── nation/             # 国家系统
-│   ├── pretty/             # 装饰系统
-│   ├── render/             # 渲染系统
-│   ├── resource/           # 资源系统
-│   ├── scenario/           # 场景系统
-│   ├── world/              # 世界系统
-│   └── utils/              # 工具函数
-├── assets/                 # 资源文件
-│   ├── fonts/             # 字体
-│   ├── sprite/            # 精灵图
-│   └── world/             # 世界资源
-├── document/               # 设计文档
-│   └── 笔记/              # Obsidian 笔记
-├── scenarios/              # 场景 JSON
-├── screenshots/           # 截图输出
-├── docs/                  # 架构文档
-├── Cargo.toml
-├── rustfmt.toml
-├── loop.ps1
-└── run_scenario.ps1
+├── Cargo.toml                  # Workspace 根
+├── crates/
+│   ├── core/                   # lk2-core (lib) — 共享游戏状态、规则、协议
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs          # re-export 所有模块
+│   │       ├── ai/             # AI 观察系统
+│   │       ├── constant/       # 常量定义
+│   │       ├── combat/         # V2 战斗系统
+│   │       ├── creature/       # 动物系统
+│   │       ├── monster/        # 怪物系统
+│   │       ├── nation/         # 国家系统
+│   │       ├── pvp/            # PvP 组件
+│   │       ├── protocol/       # lightyear 协议定义
+│   │       ├── resource/       # 资源系统
+│   │       ├── scenario/       # 场景系统
+│   │       ├── world/          # 世界系统
+│   │       └── ...
+│   ├── server/                 # lk2-server (bin) — 无头权威服务器
+│   │   ├── Cargo.toml
+│   │   └── src/main.rs         # MinimalPlugins + lightyear ServerPlugins
+│   └── client/                 # lk2-client (bin) — 渲染客户端
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs         # DefaultPlugins + lightyear ClientPlugins
+│           ├── render/         # 渲染系统
+│           ├── pretty/         # 装饰系统
+│           └── ui.rs           # HUD 系统
+├── xtask/                      # 自动化任务（闭环迭代、测试、审计）
+├── assets/                     # 资源文件
+│   ├── fonts/                 # 字体
+│   ├── sprite/                # 精灵图
+│   └── world/                 # 世界资源
+├── scenarios/                  # 场景 JSON
+├── screenshots/               # 截图输出
+├── run-logs/                  # 运行日志
+├── docs/                      # 架构文档
+├── justfile                   # 命令别名
+└── rustfmt.toml
 ```
 
 ---

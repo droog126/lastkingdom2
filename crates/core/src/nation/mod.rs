@@ -658,6 +658,6 @@ mod tests {
             reg.tick_upkeep(&mut pool, (i as u64 + 1) * NATION_UPKEEP_INTERVAL_TICKS);
         }
         assert!(!reg.nations.contains_key(&id_a));
-        assert_eq!(reg.flag_count, 1);
+        assert_eq!(reg.flag_count, 0);
     }
 }

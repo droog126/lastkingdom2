@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-glb = pygltflib.GLTF2.load(str(ROOT / "assets" / "procedural" / "pretty" / "player_avatar.glb"))
+glb = pygltflib.GLTF2.load(str(ROOT / "assets" / "procedural" / "pretty" / "sokpop_gatherer.glb"))
 print("scenes:", [(i, s.name) for i, s in enumerate(glb.scenes or [])])
 print("nodes:")
 for i, n in enumerate(glb.nodes or []):

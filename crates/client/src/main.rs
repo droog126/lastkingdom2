@@ -36,7 +36,7 @@ use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
-use lk2_core::world::{World as GameWorld, install_huge_spawn_platform, player_spawn_position_at};
+use lk2_core::world::{World as GameWorld, WorldConfig, generate_world, player_spawn_position_at};
 
 use crate::capture::{TickRecorder, periodic_screenshot, tick_recorder};
 use crate::pretty::{
@@ -62,7 +62,7 @@ use crate::ui::{
     ClientRunMode, setup_fonts, setup_hud, update_hud, update_nest_radar, update_tutorial_overlay,
 };
 
-const AUTO_DEMO_WAIT_TICKS: u64 = 120;
+const AUTO_DEMO_WAIT_TICKS: u64 = 5_500;
 
 fn workspace_asset_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("assets")
@@ -71,7 +71,7 @@ fn workspace_asset_root() -> PathBuf {
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
 use lk2_core::protocol::PlayerAction;
-use lk2_core::protocol::components::{GameplayHudState, Health, VoxelDelta};
+use lk2_core::protocol::components::{EcoSnapshot, GameplayHudState, Health, VoxelDelta};
 use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
 
@@ -147,6 +147,10 @@ struct ReplicatedSnapshot {
     observer_anomalies: u64,
     observer_invariant_violations: u64,
     status_line: String,
+    eco_rabbits: usize,
+    eco_wildlife: usize,
+    eco_berries: usize,
+    eco_plants: usize,
     last_voxel_revision: u64,
 }
 
@@ -228,8 +232,19 @@ fn main() {
         .find(|a| a.starts_with("--preset="))
         .map(|a| a.trim_start_matches("--preset=").to_string())
         .unwrap_or_else(|| "default".to_string());
-    let _ = PRESET_NAME.set(preset_name.clone());
-    println!("[terrain] preset = {}", preset_name);
+    let effective_preset_name = if network_mode {
+        if preset_name != "default" {
+            println!(
+                "[terrain] online mode ignores local --preset={} and uses server preset default",
+                preset_name
+            );
+        }
+        "default".to_string()
+    } else {
+        preset_name
+    };
+    let _ = PRESET_NAME.set(effective_preset_name.clone());
+    println!("[terrain] preset = {}", effective_preset_name);
 
     let smooth_terrain = !args.iter().any(|a| a == "--legacy-voxel");
     println!("[render] smooth_terrain = {}", smooth_terrain);
@@ -704,12 +719,14 @@ fn apply_server_pos_update(
 fn apply_authoritative_snapshot(
     run_mode: Res<ClientRunMode>,
     hud_q: Query<&GameplayHudState>,
+    eco_q: Query<&EcoSnapshot>,
     mut snapshot: ResMut<ReplicatedSnapshot>,
     mut clock: ResMut<SimClock>,
     mut player: ResMut<PlayerState>,
     mut pool: ResMut<GlobalResourcePool>,
     mut nations: ResMut<NationRegistry>,
     mut monsters: ResMut<MonsterEcosystem>,
+    mut eco: ResMut<EcoCycle>,
 ) {
     if *run_mode != ClientRunMode::Online {
         return;
@@ -759,6 +776,14 @@ fn apply_authoritative_snapshot(
     pool.current.insert(ResourceKind::Soul, hud.pool_soul);
     nations.flag_count = hud.flag_count;
     monsters.current_individuals = hud.monster_count;
+
+    if let Some(eco_state) = eco_q.iter().next() {
+        eco.apply_snapshot(eco_state);
+        snapshot.eco_rabbits = eco_state.rabbits.len();
+        snapshot.eco_wildlife = eco_state.wildlife.len();
+        snapshot.eco_berries = eco_state.berries.len();
+        snapshot.eco_plants = eco_state.plants.len();
+    }
 }
 
 fn block_type_from_u8(value: u8) -> lk2_core::world::BlockType {
@@ -1119,9 +1144,10 @@ fn setup_world(
     mut monsters: ResMut<MonsterEcosystem>,
     mut player: ResMut<PlayerState>,
 ) {
-    let pipeline = lk2_core::world::terrain::presets::by_name(preset_name_static());
-    *game_world = lk2_core::world::World::with_pipeline(constant::WORLD_SIZE, pipeline);
-    install_huge_spawn_platform(&mut game_world);
+    *game_world = generate_world(&WorldConfig {
+        preset: preset_name_static().to_string(),
+        ..WorldConfig::default()
+    });
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     for k in ResourceKind::ALL {

@@ -77,6 +77,7 @@ def make_player_avatar_v3() -> None:
     export_glb("player_avatar")
 
 if __name__ == "__main__":
-    print("=== building v3 player (Z-up correct) ===")
-    make_player_avatar_v3()
-    print("=== done ===")
+    raise SystemExit(
+        "player_avatar.glb is retired. Use tools/build_sokpop_gathering_models.py "
+        "for sokpop_gatherer.glb instead."
+    )

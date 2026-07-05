@@ -4,7 +4,6 @@
   "format": "glb",
   "assets": {
     "pretty": [
-      "player_avatar",
       "monster_snake",
       "monster_frost_elf",
       "monster_sand_wurm",
@@ -86,9 +85,6 @@
       "villager",
       "wolf",
       "bear"
-    ],
-    "test": [
-      "test_cube"
     ]
   }
 }

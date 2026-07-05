@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 NAMES = [
-    ("player_avatar", "pretty"),
+    ("sokpop_gatherer", "pretty"),
     ("rabbit", "eco"),
     ("monster_snake", "pretty"),
     ("tree", "pretty"),
@@ -21,11 +21,11 @@ for name, sub in NAMES:
             for prim in m.primitives:
                 pos = glb.accessors[prim.attributes.POSITION]
                 mn, mx = pos.min, pos.max
-                if name == "player_avatar":
+                if name == "sokpop_gatherer":
                     print(f"{name}: min={[round(x,2) for x in mn]} max={[round(x,2) for x in mx]}")
                 else:
                     print(f"{name}: min={[round(x,2) for x in mn]} max={[round(x,2) for x in mx]}")
                     break
-            if name != "player_avatar": break
+            if name != "sokpop_gatherer": break
     except Exception as e:
         print(f"{name}: ERR {e}")

@@ -24,53 +24,6 @@ from models_lib import (
     ROOT,
 )
 
-def make_player_avatar() -> None:
-    
-    clear_scene()
-    skin = mat("avatar_skin", (0.98, 0.82, 0.68))
-    helm = mat("avatar_helmet", (0.25, 0.27, 0.32))
-    torso = mat("avatar_torso_red", (0.95, 0.30, 0.30))
-    arm = mat("avatar_arm_dark_red", (0.78, 0.22, 0.22))
-    belt = mat("avatar_belt_gold", (0.85, 0.65, 0.25), metallic=0.6)
-    leg = mat("avatar_leg_dark", (0.30, 0.32, 0.38))
-    accent = mat("avatar_buckle", (0.95, 0.80, 0.30), metallic=0.7)
-
-    uv_sphere("head", (0.0, 2.55, 0.0), (0.40, 0.40, 0.40), skin, 12, 8)
-
-    cone("helmet_crown", (0.0, 2.97, 0.0), 0.30, 0.25, 0.16, helm, vertices=8)
-
-    cube("helmet_side_l", (-0.27, 2.70, 0.0), (0.10, 0.20, 0.30), helm)
-    cube("helmet_side_r", (0.27, 2.70, 0.0), (0.10, 0.20, 0.30), helm)
-
-    cube("torso", (0.0, 1.0, 0.0), (1.0, 2.0, 0.7), torso)
-
-    cube("chest_cross_h", (0.0, 1.20, 0.36), (0.30, 0.08, 0.02), accent)
-    cube("chest_cross_v", (0.0, 1.20, 0.36), (0.08, 0.30, 0.02), accent)
-
-    cube("shoulder_l", (-0.62, 1.85, 0.0), (0.40, 0.40, 0.50), helm)
-    cube("shoulder_r", (0.62, 1.85, 0.0), (0.40, 0.40, 0.50), helm)
-
-    uv_sphere("pauldron_l", (-0.72, 1.95, 0.0), (0.10, 0.10, 0.10), accent, 8, 6)
-    uv_sphere("pauldron_r", (0.72, 1.95, 0.0), (0.10, 0.10, 0.10), accent, 8, 6)
-
-    cube("arm_l", (-0.62, 1.05, 0.0), (0.35, 1.4, 0.35), arm)
-    cube("arm_r", (0.62, 1.05, 0.0), (0.35, 1.4, 0.35), arm)
-
-    uv_sphere("hand_l", (-0.62, 0.30, 0.0), (0.18, 0.16, 0.18), skin, 10, 6)
-    uv_sphere("hand_r", (0.62, 0.30, 0.0), (0.18, 0.16, 0.18), skin, 10, 6)
-
-    cube("belt", (0.0, 0.07, 0.0), (0.85, 0.15, 0.7), belt)
-
-    cube("belt_buckle", (0.0, 0.07, 0.36), (0.18, 0.18, 0.04), accent)
-
-    cube("leg_l", (-0.20, -0.6, 0.0), (0.35, 1.2, 0.35), leg)
-    cube("leg_r", (0.20, -0.6, 0.0), (0.35, 1.2, 0.35), leg)
-
-    cube("boot_l", (-0.20, -1.30, 0.05), (0.38, 0.20, 0.50), helm)
-    cube("boot_r", (0.20, -1.30, 0.05), (0.38, 0.20, 0.50), helm)
-
-    export_glb("player_avatar")
-
 def make_monster(name: str, base_color, glow_color, kind: str) -> None:
     clear_scene()
     body = mat(f"{name}_body", base_color, roughness=0.6,
@@ -261,8 +214,6 @@ def make_ground_disc(name: str, radius: float, depth: float,
 def main() -> None:
     print("=== building pretty/ models ===")
 
-    print("[1/9] player_avatar")
-    make_player_avatar()
 
     print("[2/9] monsters (5)")
     make_monster("monster_snake",
@@ -333,12 +284,6 @@ def build_manifest() -> dict:
         "shading": "flat (mesh non-sphere) / smooth (sphere)",
         "animation": "none (static glb, animation in Rust)",
         "assets": {
-            "player_avatar": {
-                "path": "procedural/pretty/player_avatar.glb",
-                "approx_height_m": 3.0,
-                "anchor": "feet (y=0)",
-                "spawn_as": "single SceneRoot, then Rust positions child meshes by offset",
-            },
             "monster_snake": {
                 "path": "procedural/pretty/monster_snake.glb",
                 "approx_size_m": 1.0,

@@ -45,11 +45,9 @@ pub fn advance_demo_tick(
 
     clock.last_tick_wall = now;
     clock.tick += 1;
-    let _ = pool.try_add(ResourceKind::Apple, 1);
-    let _ = pool.try_add(ResourceKind::Food, 2);
     obs.begin_tick();
     monsters.tick(pool);
-    eco.tick();
+    eco.tick(pool);
 
     if clock.tick % 10 == 0 {
         info!(
@@ -84,11 +82,9 @@ pub fn advance_fixed_authority_tick(
     clock.slow_tick_accum -= constant::SLOW_TICK_SECS;
     clock.tick += 1;
     clock.last_sim_step_ran = true;
-    let _ = pool.try_add(ResourceKind::Apple, 1);
-    let _ = pool.try_add(ResourceKind::Food, 2);
     obs.begin_tick();
     monsters.tick(pool);
-    eco.tick();
+    eco.tick(pool);
 
     if clock.tick % 10 == 0 {
         info!(
@@ -112,7 +108,15 @@ mod tests {
         let mut clock = SimClock::default();
         let mut pool = GlobalResourcePool::default();
         let mut monsters = MonsterEcosystem::default();
-        let mut eco = EcoCycle::default();
+        let mut eco = EcoCycle {
+            rabbits: Vec::new(),
+            berries: Vec::new(),
+            wildlife: Vec::new(),
+            plants: Vec::new(),
+            co2: 0.0,
+            fruit_eaten: 0,
+            fruit_grown: 0,
+        };
         let mut obs = TickObserver::default();
 
         let initial_food = pool.get(ResourceKind::Food);
@@ -146,6 +150,6 @@ mod tests {
         assert!(ran_slow);
         assert_eq!(clock.frame_tick, 30);
         assert_eq!(clock.tick, 1);
-        assert_eq!(pool.get(ResourceKind::Food), initial_food + 2);
+        assert_eq!(pool.get(ResourceKind::Food), initial_food);
     }
 }

@@ -1,6 +1,11 @@
 # 万国起源 · 服务器/客户端架构
 ## N 客户端 + 1 服务端 / 每维度 1 服务端
 
+> **当前实现**：Bevy 0.19 + Lightyear 0.28 + 3-crate workspace（lk2-core / lk2-server / lk2-client）
+> **服务端**：lk2-server 使用 MinimalPlugins + lightyear ServerPlugins
+> **客户端**：lk2-client 使用 DefaultPlugins + lightyear ClientPlugins
+> **共享层**：lk2-core 包含协议定义、游戏状态、规则逻辑
+
 ---
 
 ## 一、总体架构
@@ -52,7 +57,7 @@
 ### 2.2 服务端进程结构
 
 ```
-wanguo-server (单进程，多线程)
+lk2-server (单进程，多线程)
 │
 ├─ Main Thread (主线程)
 │   ├─ Tick Scheduler (Tick 调度器)
@@ -63,11 +68,11 @@ wanguo-server (单进程，多线程)
 │   ├─ World Tick Thread (世界 Tick 线程)
 │   │   └─ ECS System Execution (ECS 系统执行)
 │   ├─ Physics Thread (物理线程)
-│   │   └─ Collision Detection, Movement
+│   │   └─ Collision Detection, Movement (avian3d)
 │   ├─ AI Thread (AI 线程)
-│   │   └─ Pathfinding, Behavior Trees
+│   │   └─ Pathfinding, Behavior Trees, TickObserver
 │   └─ Ecology Thread (生态线程)
-│       └─ Plant Growth, Animal Migration
+│       └─ Monster/Creature Spawning, Despawning
 │
 ├─ Network Threads (网络线程池)
 │   ├─ Connection Handler (连接处理)
@@ -282,7 +287,7 @@ impl DimensionPortal {
 ### 3.2 客户端进程结构
 
 ```
-wanguo-client
+lk2-client
 │
 ├─ Main Thread
 │   ├─ Game Loop (游戏循环)

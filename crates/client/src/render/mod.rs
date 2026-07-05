@@ -67,7 +67,7 @@ impl Default for RenderConfig {
             auto_walk: false,
             auto_walk_interval_secs: 0.1,
             auto_keys: false,
-            mouse_look: true,
+            mouse_look: false,
 
             smooth_terrain: true,
             smooth_passes: 4,
