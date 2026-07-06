@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde_json::Value;
+use serde_json::json;
 
 use crate::{Result, args, audit, health as rust_health};
 
@@ -41,7 +42,7 @@ impl Default for LoopArgs {
                 "info,lightyear_replication=debug,lightyear_connection=debug,lightyear_send=debug,lightyear_receive=debug".to_string()
             }),
             skip_build: false,
-            dynamic: true,
+            dynamic: !cfg!(windows),
             online: false,
             offline: false,
             no_server: false,
@@ -87,10 +88,10 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let client_exe = exe_path(root, "lk2-client");
     let server_exe = exe_path(root, "lk2-server");
     if !parsed.skip_build || !client_exe.exists() {
-        cargo_build(root, "lk2-client", &features, &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", &features, &envs)?;
     }
     if !use_offline && !parsed.no_server && (!parsed.skip_build || !server_exe.exists()) {
-        cargo_build(root, "lk2-server", &features, &envs)?;
+        cargo_build_with_fallback(root, "lk2-server", &features, &envs)?;
     }
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
@@ -176,8 +177,16 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     thread::sleep(Duration::from_secs(1));
 
     print_latest(root)?;
-    run_latest_health(root)?;
+    let health_result = run_latest_health(root);
     write_decision_template(root)?;
+    if let Err(err) = health_result {
+        write_loop_diagnosis(
+            root,
+            &diagnosis_json("health", "health_verdict_fail", &err, ""),
+        )?;
+        write_auto_decision(root, "health", &err)?;
+        return Err(err);
+    }
     println!(
         "\n>>> Done. AI: read latest health.json first; if PARTIAL/FAIL, read assertions.json before PNG/state."
     );
@@ -232,7 +241,7 @@ pub fn scenario(root: &Path, raw: &[String]) -> Result<()> {
     )?;
     let client_exe = exe_path(root, "lk2-client");
     if !skip_build || !client_exe.exists() {
-        cargo_build(root, "lk2-client", DEV_DYNAMIC_FEATURES, &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", DEV_DYNAMIC_FEATURES, &envs)?;
     }
     stage_windows_runtime_files(root)?;
     let files = expand_pattern(root, &json)?;
@@ -348,12 +357,55 @@ fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
     ])
 }
 
-fn cargo_build(
+#[derive(Debug, Clone)]
+struct BuildFailure {
+    package: String,
+    text: String,
+}
+
+fn cargo_build_with_fallback(
     root: &Path,
     package: &str,
     features: &[&str],
     envs: &[(String, String)],
 ) -> Result<()> {
+    match cargo_build_once(root, package, features, envs) {
+        Ok(()) => Ok(()),
+        Err(first) if !features.is_empty() && is_dynamic_link_failure(&first.text) => {
+            println!(
+                ">>> dynamic-link build failed for {package}; retrying static build without dynamic features"
+            );
+            write_loop_diagnosis(root, &build_diagnosis(&first, "retry_static_build"))?;
+            match cargo_build_once(root, package, &[], envs) {
+                Ok(()) => Ok(()),
+                Err(second) => {
+                    write_loop_diagnosis(
+                        root,
+                        &build_diagnosis(&second, "fix_compile_before_loop"),
+                    )?;
+                    write_auto_decision(root, "build", &second.text)?;
+                    Err(format!(
+                        ">>> BUILD FAILED for {package}; see run-logs/loop_diagnosis.json"
+                    ))
+                }
+            }
+        }
+        Err(failure) => {
+            write_loop_diagnosis(root, &build_diagnosis(&failure, "fix_compile_before_loop"))?;
+            write_auto_decision(root, "build", &failure.text)?;
+            Err(format!(
+                ">>> BUILD FAILED for {package}; see run-logs/loop_diagnosis.json"
+            ))
+        }
+    }
+}
+
+fn cargo_build_once(
+    root: &Path,
+    package: &str,
+    features: &[&str],
+    envs: &[(String, String)],
+) -> std::result::Result<(), BuildFailure> {
     let mut cmd = Command::new("cargo");
     cmd.args(["build", "-p", package]).current_dir(root);
     let joined;
@@ -365,16 +417,19 @@ fn cargo_build(
         cmd.env(k, v);
     }
     println!(">>> {:?}", cmd);
-    let output = cmd.output().map_err(|e| e.to_string())?;
+    let output = cmd
+        .output()
+        .map_err(|e| BuildFailure { package: package.to_string(), text: e.to_string() })?;
     let mut text = String::from_utf8_lossy(&output.stdout).to_string();
     text.push_str(&String::from_utf8_lossy(&output.stderr));
     let _ = fs::create_dir_all(root.join("run-logs"));
-    fs::write(root.join("run-logs/build_loop.log"), &text).map_err(|e| e.to_string())?;
+    fs::write(root.join("run-logs/build_loop.log"), &text)
+        .map_err(|e| BuildFailure { package: package.to_string(), text: e.to_string() })?;
     for line in text.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev() {
         println!("{line}");
     }
     if !output.status.success() {
-        return Err(format!(">>> BUILD FAILED for {package}"));
+        return Err(BuildFailure { package: package.to_string(), text });
     }
     Ok(())
 }
@@ -404,6 +459,117 @@ fn spawn_logged(
     }
     println!(">>> Running: {:?}", cmd);
     cmd.spawn().map_err(|e| format!("failed to start {}: {e}", exe.display()))
+}
+
+fn is_dynamic_link_failure(text: &str) -> bool {
+    text.contains("LNK1189") || text.contains("bevy_dylib")
+}
+
+fn classify_build_failure(text: &str) -> (&'static str, Vec<String>, Vec<String>) {
+    let mut errors = Vec::new();
+    let mut files = Vec::new();
+    for line in text.lines() {
+        if let Some(pos) = line.find("error[E") {
+            let code = line[pos + "error[".len()..].split(']').next().unwrap_or("").to_string();
+            if !code.is_empty() && !errors.contains(&code) {
+                errors.push(code);
+            }
+        }
+        if line.contains("--> ") {
+            if let Some(path) = line.split("-->").nth(1).and_then(|s| s.trim().split(':').next()) {
+                let path = path.replace('\\', "/");
+                if !path.is_empty() && !files.contains(&path) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    let kind = if is_dynamic_link_failure(text) {
+        "windows_dynamic_link_failure"
+    } else if !errors.is_empty() {
+        "rust_compile_error"
+    } else {
+        "build_failed"
+    };
+    (kind, errors, files)
+}
+
+fn build_diagnosis(failure: &BuildFailure, next_action: &str) -> Value {
+    let (kind, errors, primary_files) = classify_build_failure(&failure.text);
+    json!({
+        "stage": "build",
+        "kind": kind,
+        "package": failure.package,
+        "errors": errors,
+        "primary_files": primary_files,
+        "next_action": next_action,
+        "message": failure.text.lines().rev().take(20).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"),
+    })
+}
+
+fn diagnosis_json(stage: &str, kind: &str, message: &str, next_action: &str) -> Value {
+    json!({
+        "stage": stage,
+        "kind": kind,
+        "message": message,
+        "next_action": next_action,
+    })
+}
+
+fn write_loop_diagnosis(root: &Path, diagnosis: &Value) -> Result<()> {
+    let dir = root.join("run-logs");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::write(
+        dir.join("loop_diagnosis.json"),
+        serde_json::to_string_pretty(diagnosis).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn write_auto_decision(root: &Path, stage: &str, message: &str) -> Result<()> {
+    let name = latest_iter(root)
+        .and_then(|iter| iter.file_name().and_then(OsStr::to_str).map(str::to_string))
+        .unwrap_or_else(|| "loop".to_string());
+    let clipped = message.lines().rev().take(12).collect::<Vec<_>>();
+    let mut clipped = clipped.into_iter().rev().collect::<Vec<_>>().join("\n");
+    if clipped.is_empty() {
+        clipped = "no additional message".to_string();
+    }
+    let body = format!(
+        "# {name} decision\n\n\
+task: closed-loop automation failure\n\
+result: fail\n\n\
+score:\n\
+- sky: blocked - {stage} failed before visual scoring could complete\n\
+- player: blocked - {stage} failed before visual scoring could complete\n\
+- terrain: blocked - {stage} failed before visual scoring could complete\n\
+- decor: blocked - {stage} failed before visual scoring could complete\n\
+- hud: blocked - {stage} failed before visual scoring could complete\n\
+- gameplay: blocked - {stage} failed before loop completion\n\
+- total: 0.0/10\n\n\
+vs_prev:\n\
+- visual: not compared - loop failed at {stage}\n\
+- state: not compared\n\n\
+problems:\n\
+- loop failed during {stage}\n\
+- {clipped}\n\n\
+tests:\n\
+- xtask loop attempted\n\
+- result: failed during {stage}\n\n\
+next:\n\
+- fix the {stage} failure reported in run-logs/loop_diagnosis.json before visual iteration\n"
+    );
+    let run_logs = root.join("run-logs");
+    fs::create_dir_all(&run_logs).map_err(|e| e.to_string())?;
+    fs::write(run_logs.join("loop_decision.md"), &body).map_err(|e| e.to_string())?;
+
+    if let Some(iter) = latest_iter(root) {
+        let decision = iter.join("decision.md");
+        if !decision.exists() {
+            fs::write(decision, body).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn wait_for_iter(
@@ -537,18 +703,55 @@ fn enforce_decision_gate(root: &Path) -> Result<()> {
     let Some(prev) = latest_iter(root) else {
         return Ok(());
     };
+    let prev_name = prev.file_name().and_then(OsStr::to_str).unwrap_or("iter");
+
+    // gate 1: decision.md 必须存在
     if !prev.join("decision.md").exists() {
         return Err(format!(
-            "\n=============================================\n  FAIL: {}/decision.md MISSING\n=============================================\n Previous loop has no decision.md; refusing next loop.\n Template: {}",
-            prev.file_name().and_then(OsStr::to_str).unwrap_or("iter"),
+            "\n=============================================\n  FAIL: {prev_name}/decision.md MISSING\n=============================================\n Previous loop has no decision.md; refusing next loop.\n Template: {}",
             prev.join("decision.template.md").display()
         ));
     }
-    println!(
-        ">>> [OK] previous {}/decision.md exists -- decision gate green",
-        prev.file_name().and_then(OsStr::to_str).unwrap_or("iter")
-    );
+    println!(">>> [OK] previous {prev_name}/decision.md exists -- decision gate green");
+
+    // gate 2: health.json 必须存在, FAIL 阻断, PARTIAL warn, PASS 放行
+    let health_path = prev.join("health.json");
+    if !health_path.exists() {
+        println!(
+            ">>> [warn] previous {prev_name}/health.json MISSING -- verdict gate bypassed (legacy iter)"
+        );
+        return Ok(());
+    }
+    match read_health_verdict(&health_path).as_deref() {
+        Some("PASS") => {
+            println!(
+                ">>> [OK] previous {prev_name}/health.json verdict = PASS -- verdict gate green"
+            );
+        }
+        Some("PARTIAL") => {
+            println!(
+                ">>> [warn] previous {prev_name}/health.json verdict = PARTIAL -- not blocking, but address in this iter's decision.md problems:"
+            );
+        }
+        Some("FAIL") | None => {
+            return Err(format!(
+                "\n=============================================\n  FAIL: previous {prev_name}/health.json verdict = FAIL\n=============================================\n Previous loop FAILED health check; refusing next loop.\n 1. Read {decision_md} for what failed\n 2. Fix the failures\n 3. Re-run `cargo run -q -p xtask -- health {prev_name}` to confirm PASS\n 4. Then re-run `cargo run -q -p xtask -- loop`",
+                decision_md = prev.join("decision.md").display(),
+            ));
+        }
+        Some(other) => {
+            println!(
+                ">>> [warn] previous {prev_name}/health.json verdict UNKNOWN ({other}) -- bypassing verdict gate"
+            );
+        }
+    }
     Ok(())
+}
+
+fn read_health_verdict(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let json: Value = serde_json::from_str(&text).ok()?;
+    json.get("verdict").and_then(Value::as_str).map(str::to_string)
 }
 
 fn latest_iter(root: &Path) -> Option<PathBuf> {
@@ -815,6 +1018,39 @@ mod tests {
     }
 
     #[test]
+    fn default_loop_disables_dynamic_on_windows() {
+        assert_eq!(LoopArgs::default().dynamic, !cfg!(windows));
+    }
+
+    #[test]
+    fn classifies_windows_dynamic_link_failure() {
+        let (kind, errors, files) = classify_build_failure(
+            "LINK : fatal error LNK1189: exceeded library limit\nbevy_dylib",
+        );
+
+        assert_eq!(kind, "windows_dynamic_link_failure");
+        assert!(errors.is_empty());
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn classifies_rust_compile_errors_and_primary_files() {
+        let text = "error[E0004]: non-exhaustive patterns\n   --> crates\\client\\src\\pretty\\mod.rs:1295:15\nerror[E0599]: no method named chain\n   --> crates\\client\\src\\main.rs:563:66\n";
+
+        let (kind, errors, files) = classify_build_failure(text);
+
+        assert_eq!(kind, "rust_compile_error");
+        assert_eq!(errors, vec!["E0004", "E0599"]);
+        assert_eq!(
+            files,
+            vec![
+                "crates/client/src/pretty/mod.rs",
+                "crates/client/src/main.rs"
+            ]
+        );
+    }
+
+    #[test]
     fn next_ready_iter_waits_when_no_new_iter_exists() {
         let root = temp_root("xtask_no_new_iter");
         fs::create_dir_all(root.join("screenshots")).unwrap();
@@ -838,5 +1074,91 @@ mod tests {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn seed_prev_iter(root: &Path, decision: bool, health_verdict: Option<&str>) -> PathBuf {
+        let iter = root.join("screenshots/iter_10");
+        fs::create_dir_all(&iter).unwrap();
+        if decision {
+            fs::write(
+                iter.join("decision.md"),
+                "# iter_10 decision\nresult: pass\n",
+            )
+            .unwrap();
+        }
+        if let Some(verdict) = health_verdict {
+            let payload = serde_json::json!({"verdict": verdict, "score": 0.0}).to_string();
+            fs::write(iter.join("health.json"), payload).unwrap();
+        }
+        iter
+    }
+
+    #[test]
+    fn gate_rejects_when_prev_decision_md_missing() {
+        let root = temp_root("xtask_gate_no_decision");
+        seed_prev_iter(&root, false, Some("PASS"));
+        let err = enforce_decision_gate(&root).unwrap_err();
+        assert!(err.contains("decision.md MISSING"), "got: {err}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gate_rejects_when_prev_health_verdict_is_fail() {
+        let root = temp_root("xtask_gate_health_fail");
+        seed_prev_iter(&root, true, Some("FAIL"));
+        let err = enforce_decision_gate(&root).unwrap_err();
+        assert!(err.contains("verdict = FAIL"), "got: {err}");
+        assert!(
+            err.contains("Refusing") || err.contains("FAIL"),
+            "expected FAIL gate message, got: {err}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gate_rejects_when_prev_health_verdict_is_unparseable() {
+        let root = temp_root("xtask_gate_health_garbage");
+        let iter = seed_prev_iter(&root, true, None);
+        fs::write(iter.join("health.json"), "not json").unwrap();
+        let err = enforce_decision_gate(&root).unwrap_err();
+        assert!(err.contains("verdict = FAIL"), "got: {err}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gate_passes_when_prev_health_verdict_is_pass() {
+        let root = temp_root("xtask_gate_health_pass");
+        seed_prev_iter(&root, true, Some("PASS"));
+        assert!(enforce_decision_gate(&root).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gate_passes_with_warn_when_prev_health_missing() {
+        let root = temp_root("xtask_gate_health_missing");
+        seed_prev_iter(&root, true, None);
+        assert!(enforce_decision_gate(&root).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gate_passes_with_warn_when_prev_health_partial() {
+        let root = temp_root("xtask_gate_health_partial");
+        seed_prev_iter(&root, true, Some("PARTIAL"));
+        assert!(enforce_decision_gate(&root).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_health_verdict_extracts_string() {
+        let dir = env::temp_dir().join(format!("xtask_rhv_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("health.json");
+        fs::write(&path, r#"{"verdict":"PASS","score":10.0}"#).unwrap();
+        assert_eq!(read_health_verdict(&path).as_deref(), Some("PASS"));
+        fs::write(&path, "garbage").unwrap();
+        assert_eq!(read_health_verdict(&path), None);
+        let _ = fs::remove_dir_all(dir);
     }
 }
