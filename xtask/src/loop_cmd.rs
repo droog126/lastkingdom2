@@ -31,6 +31,7 @@ struct LoopArgs {
     no_kenney: bool,
     legacy_voxel: bool,
     hold_forward_test: bool,
+    refresh_after_fail: bool,
 }
 
 impl Default for LoopArgs {
@@ -52,19 +53,22 @@ impl Default for LoopArgs {
             no_kenney: false,
             legacy_voxel: false,
             hold_forward_test: false,
+            refresh_after_fail: false,
         }
     }
 }
 
 pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
-        println!("xtask loop --offline --seconds 12 --skip-build --no-dynamic --first-person");
+        println!(
+            "xtask loop --offline --seconds 12 --skip-build --no-dynamic --first-person --refresh-after-fail"
+        );
         return Ok(());
     }
     let parsed = parse_loop(raw);
     fs::create_dir_all(root.join("run-logs")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("screenshots")).map_err(|e| e.to_string())?;
-    enforce_decision_gate(root)?;
+    enforce_decision_gate(root, parsed.refresh_after_fail)?;
 
     let use_offline = parsed.offline || (!parsed.online && !parsed.no_server);
     let mut envs = runtime_env(root, &parsed.rust_log)?;
@@ -175,6 +179,22 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         stop_child(&mut child);
     }
     thread::sleep(Duration::from_secs(1));
+
+    if ready.is_none() {
+        let message = runtime_failure_message(&client_log);
+        write_loop_diagnosis(
+            root,
+            &diagnosis_json(
+                "runtime",
+                "no_new_capture",
+                &message,
+                "fix_client_startup_or_capture_before_visual_iteration",
+            ),
+        )?;
+        write_auto_decision(root, "runtime", &message)?;
+        print_latest(root)?;
+        return Err(message);
+    }
 
     print_latest(root)?;
     let health_result = run_latest_health(root);
@@ -308,6 +328,9 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
             Some("nokenney") | Some("no-kenney") => parsed.no_kenney = true,
             Some("legacyvoxel") | Some("legacy-voxel") => parsed.legacy_voxel = true,
             Some("holdforwardtest") | Some("hold-forward-test") => parsed.hold_forward_test = true,
+            Some("refreshafterfail") | Some("refresh-after-fail") => {
+                parsed.refresh_after_fail = true
+            }
             _ => {}
         }
         i += 1;
@@ -354,6 +377,7 @@ fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
         ("RUST_LOG".to_string(), rust_log.to_string()),
         ("CARGO_MANIFEST_DIR".to_string(), root.display().to_string()),
         ("PATH".to_string(), path_str),
+        ("WGPU_BACKEND".to_string(), "dx12".to_string()),
     ])
 }
 
@@ -572,6 +596,24 @@ next:\n\
     Ok(())
 }
 
+fn runtime_failure_message(client_log: &Path) -> String {
+    let stdout_tail = read_tail(client_log, 40);
+    let stderr_tail = read_tail(&PathBuf::from(format!("{}.err", client_log.display())), 80);
+    format!(
+        "client exited or timed out before producing a ready iter\nstdout tail:\n{stdout_tail}\nstderr tail:\n{stderr_tail}"
+    )
+}
+
+fn read_tail(path: &Path, lines: usize) -> String {
+    fs::read_to_string(path)
+        .map(|text| {
+            let mut tail = text.lines().rev().take(lines).collect::<Vec<_>>();
+            tail.reverse();
+            tail.join("\n")
+        })
+        .unwrap_or_else(|err| format!("{}: {err}", path.display()))
+}
+
 fn wait_for_iter(
     root: &Path,
     child: &mut Child,
@@ -620,6 +662,11 @@ fn iter_ready(iter: &Path) -> bool {
     let role = json.get("role").and_then(Value::as_str).unwrap_or("");
     let tick_ok = json.get("tick").and_then(Value::as_i64).unwrap_or(0) >= 500;
     let wall_ok = json.get("wall_secs").and_then(Value::as_f64).unwrap_or(0.0) >= 4.0;
+    if json.pointer("/visual/movement_probe/first_player_pos").is_none()
+        || json.pointer("/visual/movement_probe/current_player_pos").is_none()
+    {
+        return false;
+    }
     if role == "client_offline" {
         if !tick_ok {
             return false;
@@ -641,8 +688,7 @@ fn next_ready_iter(root: &Path, before: u32) -> Option<PathBuf> {
 }
 
 fn evaluate_health(root: &Path, iter: &Path, prev: Option<&Path>, quiet: bool) -> Result<String> {
-    let _ = root;
-    let evaluation = rust_health::evaluate_iter(iter, prev)?;
+    let evaluation = rust_health::evaluate_iter(root, iter, prev)?;
     if !quiet {
         println!("  {}", evaluation.summary);
     }
@@ -699,7 +745,7 @@ fn write_decision_template(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn enforce_decision_gate(root: &Path) -> Result<()> {
+fn enforce_decision_gate(root: &Path, refresh_after_fail: bool) -> Result<()> {
     let Some(prev) = latest_iter(root) else {
         return Ok(());
     };
@@ -707,10 +753,21 @@ fn enforce_decision_gate(root: &Path) -> Result<()> {
 
     // gate 1: decision.md 必须存在
     if !prev.join("decision.md").exists() {
-        return Err(format!(
+        let message = format!(
             "\n=============================================\n  FAIL: {prev_name}/decision.md MISSING\n=============================================\n Previous loop has no decision.md; refusing next loop.\n Template: {}",
             prev.join("decision.template.md").display()
-        ));
+        );
+        write_loop_diagnosis(
+            root,
+            &diagnosis_json(
+                "gate",
+                "previous_decision_missing",
+                &message,
+                "inspect_previous_health_and_fix_before_next_loop",
+            ),
+        )?;
+        write_auto_decision(root, "gate", &message)?;
+        return Err(message);
     }
     println!(">>> [OK] previous {prev_name}/decision.md exists -- decision gate green");
 
@@ -734,10 +791,27 @@ fn enforce_decision_gate(root: &Path) -> Result<()> {
             );
         }
         Some("FAIL") | None => {
-            return Err(format!(
+            if refresh_after_fail {
+                println!(
+                    ">>> [warn] previous {prev_name}/health.json verdict = FAIL -- --refresh-after-fail set, running a replacement loop"
+                );
+                return Ok(());
+            }
+            let message = format!(
                 "\n=============================================\n  FAIL: previous {prev_name}/health.json verdict = FAIL\n=============================================\n Previous loop FAILED health check; refusing next loop.\n 1. Read {decision_md} for what failed\n 2. Fix the failures\n 3. Re-run `cargo run -q -p xtask -- health {prev_name}` to confirm PASS\n 4. Then re-run `cargo run -q -p xtask -- loop`",
                 decision_md = prev.join("decision.md").display(),
-            ));
+            );
+            write_loop_diagnosis(
+                root,
+                &diagnosis_json(
+                    "gate",
+                    "previous_health_failed",
+                    &message,
+                    "fix_previous_health_or_rerun_health_after_rule_change",
+                ),
+            )?;
+            write_auto_decision(root, "gate", &message)?;
+            return Err(message);
         }
         Some(other) => {
             println!(
@@ -1051,6 +1125,17 @@ mod tests {
     }
 
     #[test]
+    fn read_tail_keeps_latest_lines() {
+        let root = temp_root("xtask_tail");
+        let path = root.join("log.txt");
+        fs::write(&path, "a\nb\nc\nd\n").unwrap();
+
+        assert_eq!(read_tail(&path, 2), "c\nd");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn next_ready_iter_waits_when_no_new_iter_exists() {
         let root = temp_root("xtask_no_new_iter");
         fs::create_dir_all(root.join("screenshots")).unwrap();
@@ -1065,6 +1150,28 @@ mod tests {
         fs::create_dir_all(&iter).unwrap();
         fs::write(iter.join("final_state.json"), r#"{"tick":499}"#).unwrap();
         assert!(next_ready_iter(&root, 1).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn next_ready_iter_requires_movement_probe_schema() {
+        let root = temp_root("xtask_missing_probe_iter");
+        let iter = root.join("screenshots/iter_2");
+        fs::create_dir_all(&iter).unwrap();
+        fs::write(
+            iter.join("final_state.json"),
+            r#"{"role":"client_offline","tick":500,"wall_secs":5.0}"#,
+        )
+        .unwrap();
+        fs::write(iter.join("iter_2.png"), vec![1u8; 40 * 1024]).unwrap();
+        assert!(next_ready_iter(&root, 1).is_none());
+
+        fs::write(
+            iter.join("final_state.json"),
+            r#"{"role":"client_offline","tick":500,"wall_secs":5.0,"visual":{"movement_probe":{"first_player_pos":[1,2,3],"current_player_pos":[2,2,3]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(next_ready_iter(&root, 1), Some(iter));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1097,7 +1204,7 @@ mod tests {
     fn gate_rejects_when_prev_decision_md_missing() {
         let root = temp_root("xtask_gate_no_decision");
         seed_prev_iter(&root, false, Some("PASS"));
-        let err = enforce_decision_gate(&root).unwrap_err();
+        let err = enforce_decision_gate(&root, false).unwrap_err();
         assert!(err.contains("decision.md MISSING"), "got: {err}");
         let _ = fs::remove_dir_all(root);
     }
@@ -1106,7 +1213,7 @@ mod tests {
     fn gate_rejects_when_prev_health_verdict_is_fail() {
         let root = temp_root("xtask_gate_health_fail");
         seed_prev_iter(&root, true, Some("FAIL"));
-        let err = enforce_decision_gate(&root).unwrap_err();
+        let err = enforce_decision_gate(&root, false).unwrap_err();
         assert!(err.contains("verdict = FAIL"), "got: {err}");
         assert!(
             err.contains("Refusing") || err.contains("FAIL"),
@@ -1116,11 +1223,19 @@ mod tests {
     }
 
     #[test]
+    fn gate_can_refresh_after_failed_health_when_explicit() {
+        let root = temp_root("xtask_gate_health_fail_refresh");
+        seed_prev_iter(&root, true, Some("FAIL"));
+        assert!(enforce_decision_gate(&root, true).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn gate_rejects_when_prev_health_verdict_is_unparseable() {
         let root = temp_root("xtask_gate_health_garbage");
         let iter = seed_prev_iter(&root, true, None);
         fs::write(iter.join("health.json"), "not json").unwrap();
-        let err = enforce_decision_gate(&root).unwrap_err();
+        let err = enforce_decision_gate(&root, false).unwrap_err();
         assert!(err.contains("verdict = FAIL"), "got: {err}");
         let _ = fs::remove_dir_all(root);
     }
@@ -1129,7 +1244,7 @@ mod tests {
     fn gate_passes_when_prev_health_verdict_is_pass() {
         let root = temp_root("xtask_gate_health_pass");
         seed_prev_iter(&root, true, Some("PASS"));
-        assert!(enforce_decision_gate(&root).is_ok());
+        assert!(enforce_decision_gate(&root, false).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1137,7 +1252,7 @@ mod tests {
     fn gate_passes_with_warn_when_prev_health_missing() {
         let root = temp_root("xtask_gate_health_missing");
         seed_prev_iter(&root, true, None);
-        assert!(enforce_decision_gate(&root).is_ok());
+        assert!(enforce_decision_gate(&root, false).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1145,7 +1260,7 @@ mod tests {
     fn gate_passes_with_warn_when_prev_health_partial() {
         let root = temp_root("xtask_gate_health_partial");
         seed_prev_iter(&root, true, Some("PARTIAL"));
-        assert!(enforce_decision_gate(&root).is_ok());
+        assert!(enforce_decision_gate(&root, false).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 

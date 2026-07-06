@@ -30,6 +30,12 @@ ownership:
 - world_static: [ground/decor/nest/terrain/cloud evidence from final_state visual.static_world]
 - debug_visuals: none / listed
 
+claims:
+- [claim being validated, e.g. clouds drive rain -> plants -> small animals -> wildlife]
+- state_evidence: [health/assertions/final_state/diff paths and values proving or disproving it]
+- screenshot_evidence: [PNG observation showing whether the state is visible/readable]
+- verdict: proven / disproven / not_observable
+
 carryover:
 - source: read .harness/KNOWN_ISSUES.md "Open" section BEFORE writing
 - addressed_this_iter:
@@ -278,6 +284,18 @@ mod tests {
             out.contains("newly_opened"),
             "missing newly_opened line:\n{out}"
         );
+    }
+
+    #[test]
+    fn decision_template_forces_claim_evidence_section() {
+        let out = decision_template("iter_201", None);
+        assert!(out.contains("claims:"), "missing claims section:\n{out}");
+        assert!(out.contains("state_evidence"), "missing state evidence line:\n{out}");
+        assert!(
+            out.contains("screenshot_evidence"),
+            "missing screenshot evidence line:\n{out}"
+        );
+        assert!(out.contains("verdict:"), "missing claim verdict line:\n{out}");
     }
 
     #[test]

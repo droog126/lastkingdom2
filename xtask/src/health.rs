@@ -19,6 +19,21 @@ const SAMPLE_SIZE: usize = 64;
 const PNG_MIN_W: u32 = 640;
 const PNG_MIN_H: u32 = 360;
 const TOP_COLOR_BUCKET_WARN_PCT: f64 = 92.0;
+const FRAME_DT_MAX_WARN_MS: f64 = 80.0;
+const FRAME_DT_OVER_50MS_WARN: i64 = 2;
+const SMOOTH_MESH_MAX_WARN_MS: f64 = 60.0;
+const SMOOTH_MESH_BUILDS_WARN: i64 = 3;
+const TERRAIN_DESPAWNS_WARN: i64 = 6;
+const FIRST_PERSON_EYE_MAX_Y: f64 = 80.0;
+const RESOURCE_DELTAS_MIN_NONTICK: usize = 1;
+const MONSTERS_DROP_PARTIAL_RATIO: f64 = 0.50;
+
+const STDERR_KW_DESERIALIZE_INVALID: &str = "Attempting to deserialize an invalid entity";
+const STDERR_KW_OUT_OF_BOUNDS: &str = "OUT OF BOUNDS";
+const STDERR_KW_VOXEL_OVERFLOW: &str = "体素过多";
+const STDERR_DESER_INVALID_FAIL_THRESHOLD: i64 = 1;
+const STDERR_OUT_OF_BOUNDS_FAIL_THRESHOLD: i64 = 5;
+const STDERR_VOXEL_OVERFLOW_FAIL_THRESHOLD: i64 = 5;
 
 pub struct Evaluation {
     pub verdict: String,
@@ -55,7 +70,7 @@ impl Assertion {
     }
 }
 
-pub fn evaluate_iter(iter_dir: &Path, prev_dir: Option<&Path>) -> Result<Evaluation> {
+pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> Result<Evaluation> {
     let png_path = primary_png(iter_dir);
     let png = if let Some(path) = png_path {
         analyze_png(&path)
@@ -67,7 +82,15 @@ pub fn evaluate_iter(iter_dir: &Path, prev_dir: Option<&Path>) -> Result<Evaluat
         .and_then(|dir| fs::read_to_string(dir.join("final_state.json")).ok())
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
     let (sim, state) = analyze_sim(&iter_dir.join("final_state.json"), prev_state.as_ref());
-    let assertions = built_in_assertions(&png, &sim, state.as_ref());
+    let stderr = scan_stderr_logs(root);
+    let assertions = built_in_assertions(
+        &png,
+        &sim,
+        state.as_ref(),
+        prev_state.as_ref(),
+        &stderr,
+        iter_dir,
+    );
     let combo = combine(&png, &sim, &assertions);
     let name = iter_dir.file_name().and_then(OsStr::to_str).unwrap_or("iter");
     let summary = summarize(name, &png, &sim, &combo);
@@ -79,6 +102,12 @@ pub fn evaluate_iter(iter_dir: &Path, prev_dir: Option<&Path>) -> Result<Evaluat
         "iter": name,
         "png": png,
         "sim": sim,
+        "stderr": {
+            "deserialize_invalid_count": stderr.deserialize_invalid_count,
+            "out_of_bounds_count": stderr.out_of_bounds_count,
+            "voxel_overflow_count": stderr.voxel_overflow_count,
+            "files_scanned": stderr.files_scanned,
+        },
         "assertions": {
             "total": assertions.len(),
             "failed": failed,
@@ -105,7 +134,122 @@ pub fn evaluate_iter(iter_dir: &Path, prev_dir: Option<&Path>) -> Result<Evaluat
     )
     .map_err(|e| e.to_string())?;
     fs::write(iter_dir.join("health.txt"), summary.as_bytes()).map_err(|e| e.to_string())?;
+
+    write_regression_json(iter_dir, prev_dir, &assertions)?;
+
     Ok(Evaluation { verdict: combo["verdict"].as_str().unwrap_or("FAIL").to_string(), summary })
+}
+
+#[derive(Default, Clone, Debug)]
+struct StderrScan {
+    deserialize_invalid_count: i64,
+    out_of_bounds_count: i64,
+    voxel_overflow_count: i64,
+    files_scanned: usize,
+}
+
+fn scan_stderr_logs(root: &Path) -> StderrScan {
+    let mut scan = StderrScan::default();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for rel in ["screenshots", "run-logs", ".harness/scratch"] {
+        let p = root.join(rel);
+        if p.exists() {
+            dirs.push(p);
+        }
+    }
+    for dir in dirs {
+        scan_stderr_dir(&dir, &mut scan);
+    }
+    scan
+}
+
+fn scan_stderr_dir(dir: &Path, scan: &mut StderrScan) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_stderr_dir(&path, scan);
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        let is_err_log = name.ends_with(".err.log") || name.ends_with(".log.err");
+        if !is_err_log {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        scan.files_scanned += 1;
+        for line in text.lines() {
+            if line.contains(STDERR_KW_DESERIALIZE_INVALID) {
+                scan.deserialize_invalid_count += 1;
+            }
+            if line.contains(STDERR_KW_OUT_OF_BOUNDS) {
+                scan.out_of_bounds_count += 1;
+            }
+            if line.contains(STDERR_KW_VOXEL_OVERFLOW) {
+                scan.voxel_overflow_count += 1;
+            }
+        }
+    }
+}
+
+fn write_regression_json(
+    iter_dir: &Path,
+    prev_dir: Option<&Path>,
+    current: &[Assertion],
+) -> Result<()> {
+    let Some(prev_dir) = prev_dir else {
+        return Ok(());
+    };
+    let prev_path = prev_dir.join("assertions.json");
+    let Ok(text) = fs::read_to_string(&prev_path) else {
+        return Ok(());
+    };
+    let Ok(prev_json) = serde_json::from_str::<Value>(&text) else {
+        return Ok(());
+    };
+    let Some(prev_assertions) = prev_json.get("assertions").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let prev_failed: std::collections::HashSet<String> = prev_assertions
+        .iter()
+        .filter_map(|a| {
+            let id = a.get("id").and_then(Value::as_str)?;
+            let ok = a.get("ok").and_then(Value::as_bool).unwrap_or(true);
+            if !ok { Some(id.to_string()) } else { None }
+        })
+        .collect();
+    let mut newly_failed: Vec<&Assertion> = Vec::new();
+    let mut newly_passed: Vec<&Assertion> = Vec::new();
+    let mut still_failing: Vec<&Assertion> = Vec::new();
+    for a in current {
+        if !a.ok {
+            if prev_failed.contains(&a.id) {
+                still_failing.push(a);
+            } else {
+                newly_failed.push(a);
+            }
+        } else if prev_failed.contains(&a.id) {
+            newly_passed.push(a);
+        }
+    }
+    let regression = json!({
+        "iter": iter_dir.file_name().and_then(OsStr::to_str).unwrap_or("iter"),
+        "newly_failed": newly_failed.iter().map(|a| json!({"id": a.id, "severity": a.severity, "message": a.message})).collect::<Vec<_>>(),
+        "still_failing": still_failing.iter().map(|a| json!({"id": a.id, "severity": a.severity, "message": a.message})).collect::<Vec<_>>(),
+        "newly_passed": newly_passed.iter().map(|a| json!({"id": a.id})).collect::<Vec<_>>(),
+    });
+    fs::write(
+        iter_dir.join("regression.json"),
+        serde_json::to_string_pretty(&regression).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn primary_png(iter_dir: &Path) -> Option<PathBuf> {
@@ -262,7 +406,14 @@ fn analyze_sim(state_path: &Path, prev_state: Option<&Value>) -> (Value, Option<
     (out, Some(state))
 }
 
-fn built_in_assertions(png: &Value, sim: &Value, state: Option<&Value>) -> Vec<Assertion> {
+fn built_in_assertions(
+    png: &Value,
+    sim: &Value,
+    state: Option<&Value>,
+    prev_state: Option<&Value>,
+    stderr: &StderrScan,
+    iter_dir: &Path,
+) -> Vec<Assertion> {
     let mut a = vec![
         assertion(
             "png.readable",
@@ -354,7 +505,45 @@ fn built_in_assertions(png: &Value, sim: &Value, state: Option<&Value>) -> Vec<A
             "simulation invariant violations were reported",
             Some("observer.invariant_violations"),
         ),
+        assertion(
+            "stderr.deserialize_invalid",
+            &json!(stderr.deserialize_invalid_count),
+            "<",
+            json!(STDERR_DESER_INVALID_FAIL_THRESHOLD),
+            "fail",
+            "stderr reported invalid entity deserialization",
+            Some("run logs"),
+        ),
+        assertion(
+            "stderr.out_of_bounds",
+            &json!(stderr.out_of_bounds_count),
+            "<",
+            json!(STDERR_OUT_OF_BOUNDS_FAIL_THRESHOLD),
+            "fail",
+            "stderr reported repeated out-of-bounds events",
+            Some("run logs"),
+        ),
+        assertion(
+            "stderr.voxel_overflow",
+            &json!(stderr.voxel_overflow_count),
+            "<",
+            json!(STDERR_VOXEL_OVERFLOW_FAIL_THRESHOLD),
+            "fail",
+            "stderr reported repeated voxel overflow events",
+            Some("run logs"),
+        ),
     ];
+    if stderr.files_scanned == 0 {
+        a.push(assertion(
+            "stderr.logs_scanned",
+            &json!(0),
+            ">",
+            json!(0),
+            "partial",
+            "no .err.log files found under screenshots/, run-logs/, or .harness/scratch/; cannot detect runtime errors. Run loop or check log redirect.",
+            Some("stderr"),
+        ));
+    }
     if let Some(state) = state {
         let player_block = path_value(state, "player.block_pos");
         let world_size = path_i64(state, "world.size");
@@ -396,8 +585,511 @@ fn built_in_assertions(png: &Value, sim: &Value, state: Option<&Value>) -> Vec<A
             "auto-demo did not create or observe a nation",
             Some("nations.total_nations"),
         ));
+        a.extend(network_command_assertions(state));
+        a.extend(camera_assertions(state));
+        a.extend(resource_deltas_assertions(iter_dir));
+        a.extend(eco_cycle_assertions(state));
+        if let Some(prev) = prev_state {
+            a.extend(regression_assertions(state, prev));
+            let drift = static_world_visual_follow_drift(prev, state);
+            a.push(assertion(
+                "visual.static_world_not_player_following",
+                &json!(drift.ok),
+                "==",
+                json!(true),
+                drift.severity,
+                &drift.message,
+                Some("visual.static_world"),
+            ));
+        }
+        let probe = movement_probe_drift(state);
+        a.push(assertion(
+            "visual.movement_probe_static_world",
+            &json!(probe.ok),
+            "==",
+            json!(true),
+            probe.severity,
+            &probe.message,
+            Some("visual.movement_probe"),
+        ));
+        a.extend(render_telemetry_assertions(state));
     }
     a
+}
+
+fn network_command_assertions(state: &Value) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    let role = state.get("role").and_then(Value::as_str).unwrap_or("");
+    let move_sent = path_i64(state, "network_command.move_world_sent").unwrap_or(0);
+    if role == "client_online" {
+        out.push(assertion(
+            "network.move_world_sent_advances",
+            &json!(move_sent),
+            ">",
+            json!(0),
+            "fail",
+            "online mode running but move_world_sent stayed at 0; WASD pipeline is dead (iter_200 Root Cause B regression)",
+            Some("network_command.move_world_sent"),
+        ));
+    } else if move_sent > 0 {
+        out.push(assertion(
+            "network.move_world_sent_offline_leak",
+            &json!(move_sent),
+            "==",
+            json!(0),
+            "partial",
+            "offline mode recorded move_world_sent > 0; network state is leaking into offline iter",
+            Some("network_command.move_world_sent"),
+        ));
+    }
+    out
+}
+
+fn camera_assertions(state: &Value) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    let mode =
+        state.get("camera").and_then(|c| c.get("mode")).and_then(Value::as_str).map(str::to_string);
+    match mode {
+        Some(m) if !m.is_empty() => {
+            out.push(assertion(
+                "camera.mode_present",
+                &json!(m),
+                "!=",
+                json!(""),
+                "fail",
+                "camera.mode must be a non-empty string (ThirdPerson / FirstPerson)",
+                Some("camera.mode"),
+            ));
+        }
+        Some(_) | None => {
+            out.push(assertion(
+                "camera.mode_present",
+                &json!(false),
+                "==",
+                json!(true),
+                "fail",
+                "final_state.json missing camera.mode; harness cannot verify first-person task alignment",
+                Some("camera.mode"),
+            ));
+        }
+    }
+    if let Some(eye_y) = state
+        .get("camera")
+        .and_then(|c| c.get("first_person_eye"))
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.get(1))
+        .and_then(Value::as_f64)
+    {
+        out.push(assertion(
+            "camera.first_person_eye_y_in_range",
+            &json!(round1(eye_y)),
+            "<=",
+            json!(FIRST_PERSON_EYE_MAX_Y),
+            "fail",
+            "first_person_eye.y is suspiciously high; pretty landmarks may have spawned at the wrong Y (iter_200 Root Cause C regression)",
+            Some("camera.first_person_eye"),
+        ));
+    }
+    out
+}
+
+fn resource_deltas_assertions(iter_dir: &Path) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    let path = iter_dir.join("diff.json");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return out;
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&text) else {
+        return out;
+    };
+    let Some(deltas) = json.get("resource_deltas").and_then(Value::as_array) else {
+        return out;
+    };
+    let nontick_count = deltas
+        .iter()
+        .filter(|d| {
+            let p = d.get("path").and_then(Value::as_str).unwrap_or("");
+            p != "tick"
+        })
+        .count();
+    out.push(assertion(
+        "state.resource_deltas_have_nontick_motion",
+        &json!(nontick_count),
+        ">=",
+        json!(RESOURCE_DELTAS_MIN_NONTICK),
+        "partial",
+        "diff.json resource_deltas only contain tick; sim state is not advancing on resource/actor counters",
+        Some("diff.json"),
+    ));
+    out
+}
+
+fn regression_assertions(state: &Value, prev: &Value) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    let monsters_curr = path_f64(state, "monsters.current").unwrap_or(0.0);
+    let monsters_prev = path_f64(prev, "monsters.current").unwrap_or(0.0);
+    if monsters_prev > 0.0 {
+        let ratio = monsters_curr / monsters_prev;
+        out.push(assertion(
+            "regression.monsters_not_collapsed",
+            &json!(round1(ratio * 100.0) / 100.0),
+            ">=",
+            json!(MONSTERS_DROP_PARTIAL_RATIO),
+            "partial",
+            &format!(
+                "monsters.current dropped from {monsters_prev:.0} to {monsters_curr:.0} (ratio {ratio:.2}); over-kill or despawn bug"
+            ),
+            Some("monsters.current"),
+        ));
+    }
+    let nations_curr = path_i64(state, "nations.total_nations").unwrap_or(0);
+    let nations_prev = path_i64(prev, "nations.total_nations").unwrap_or(0);
+    if nations_prev > 0 {
+        out.push(assertion(
+            "regression.nations_total_non_decreasing",
+            &json!(nations_curr),
+            ">=",
+            json!(nations_prev),
+            "fail",
+            &format!(
+                "nations.total_nations dropped from {nations_prev} to {nations_curr}; nations must not be destroyed across iters"
+            ),
+            Some("nations.total_nations"),
+        ));
+    }
+    out
+}
+
+struct StaticWorldDrift {
+    ok: bool,
+    severity: &'static str,
+    message: String,
+}
+
+fn static_world_visual_follow_drift(prev: &Value, current: &Value) -> StaticWorldDrift {
+    let Some(prev_player) = path_vec3(prev, "player.pos") else {
+        return StaticWorldDrift {
+            ok: true,
+            severity: "partial",
+            message: "previous player position missing; static-world drift check skipped"
+                .to_string(),
+        };
+    };
+    let Some(current_player) = path_vec3(current, "player.pos") else {
+        return StaticWorldDrift {
+            ok: true,
+            severity: "partial",
+            message: "current player position missing; static-world drift check skipped"
+                .to_string(),
+        };
+    };
+    let prev_visuals = static_world_visual_positions(prev);
+    let current_visuals = static_world_visual_positions(current);
+    static_world_drift_from_maps(prev_player, current_player, &prev_visuals, &current_visuals)
+}
+
+fn movement_probe_drift(state: &Value) -> StaticWorldDrift {
+    let Some(first_player) = path_vec3(state, "visual.movement_probe.first_player_pos") else {
+        return StaticWorldDrift {
+            ok: false,
+            severity: "partial",
+            message: "movement probe missing first player position; closed-loop cannot prove static world visuals are stable".to_string(),
+        };
+    };
+    let Some(current_player) = path_vec3(state, "visual.movement_probe.current_player_pos") else {
+        return StaticWorldDrift {
+            ok: false,
+            severity: "partial",
+            message: "movement probe missing current player position; closed-loop cannot prove static world visuals are stable".to_string(),
+        };
+    };
+    let first_visuals =
+        static_world_positions_at(state, "visual.movement_probe.first_static_world");
+    let current_visuals =
+        static_world_positions_at(state, "visual.movement_probe.current_static_world");
+    if first_visuals.is_empty() {
+        return StaticWorldDrift {
+            ok: false,
+            severity: "partial",
+            message: "movement probe captured no first static-world anchors; register fixed terrain/marker anchors before scoring stability".to_string(),
+        };
+    }
+    if current_visuals.is_empty() {
+        return StaticWorldDrift {
+            ok: false,
+            severity: "partial",
+            message: "movement probe captured no current static-world anchors; register fixed terrain/marker anchors before scoring stability".to_string(),
+        };
+    }
+    static_world_drift_from_maps(
+        first_player,
+        current_player,
+        &first_visuals,
+        &current_visuals,
+    )
+}
+
+fn static_world_visual_positions(value: &Value) -> std::collections::HashMap<String, [f64; 3]> {
+    static_world_positions_at(value, "visual.static_world")
+}
+
+fn static_world_positions_at(
+    value: &Value,
+    path: &str,
+) -> std::collections::HashMap<String, [f64; 3]> {
+    let mut out = std::collections::HashMap::new();
+    let Some(obj) = path_value(value, path).and_then(Value::as_object) else {
+        return out;
+    };
+    for (name, pos_value) in obj {
+        if let Some(pos) = vec3_value(pos_value) {
+            out.insert(name.clone(), pos);
+        }
+    }
+    out
+}
+
+fn static_world_drift_from_maps(
+    prev_player: [f64; 3],
+    current_player: [f64; 3],
+    prev_visuals: &std::collections::HashMap<String, [f64; 3]>,
+    current_visuals: &std::collections::HashMap<String, [f64; 3]>,
+) -> StaticWorldDrift {
+    const PLAYER_MOVE_MIN: f64 = 1.0;
+    const STATIC_MOVE_MAX: f64 = 0.25;
+    const FOLLOW_RATIO_MIN: f64 = 0.70;
+
+    let player_delta = vec3_sub(current_player, prev_player);
+    let player_move = vec3_len_xz(player_delta);
+    if player_move < PLAYER_MOVE_MIN {
+        return StaticWorldDrift {
+            ok: true,
+            severity: "partial",
+            message: format!(
+                "player moved {player_move:.2}m; below {PLAYER_MOVE_MIN:.2}m threshold"
+            ),
+        };
+    }
+
+    let mut worst: Option<(String, f64, f64)> = None;
+    for (name, prev_pos) in prev_visuals {
+        let Some(current_pos) = current_visuals.get(name).copied() else {
+            continue;
+        };
+        let visual_delta = vec3_sub(current_pos, *prev_pos);
+        let visual_move = vec3_len_xz(visual_delta);
+        let follow_alignment = if player_move > 0.0 {
+            dot_xz(visual_delta, player_delta) / (visual_move.max(0.0001) * player_move)
+        } else {
+            0.0
+        };
+        if visual_move > STATIC_MOVE_MAX && follow_alignment >= FOLLOW_RATIO_MIN {
+            let replace =
+                worst.as_ref().map(|(_, worst_move, _)| visual_move > *worst_move).unwrap_or(true);
+            if replace {
+                worst = Some((name.clone(), visual_move, follow_alignment));
+            }
+        }
+    }
+
+    if let Some((name, visual_move, follow_alignment)) = worst {
+        StaticWorldDrift {
+            ok: false,
+            severity: "fail",
+            message: format!(
+                "{name} moved {visual_move:.2}m with player movement {player_move:.2}m (alignment {follow_alignment:.2}); static world visuals must not follow the player"
+            ),
+        }
+    } else {
+        StaticWorldDrift {
+            ok: true,
+            severity: "partial",
+            message: format!(
+                "static world visuals stayed fixed while player moved {player_move:.2}m"
+            ),
+        }
+    }
+}
+
+fn render_telemetry_assertions(state: &Value) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    if let Some(value) = path_f64(state, "render.frame.dt_max_ms") {
+        out.push(assertion(
+            "render.frame_dt_max",
+            &json!(value),
+            "<=",
+            json!(FRAME_DT_MAX_WARN_MS),
+            "partial",
+            "frame-time spike detected during loop",
+            Some("render.frame.dt_max_ms"),
+        ));
+    }
+    if let Some(value) = path_i64(state, "render.frame.dt_over_50ms") {
+        out.push(assertion(
+            "render.frame_spikes",
+            &json!(value),
+            "<=",
+            json!(FRAME_DT_OVER_50MS_WARN),
+            "partial",
+            "too many frames exceeded 50ms",
+            Some("render.frame.dt_over_50ms"),
+        ));
+    }
+    if let Some(value) = path_i64(state, "render.terrain.smooth_mesh_builds") {
+        out.push(assertion(
+            "render.smooth_mesh_builds",
+            &json!(value),
+            "<=",
+            json!(SMOOTH_MESH_BUILDS_WARN),
+            "partial",
+            "smooth terrain mesh rebuilt too often during loop",
+            Some("render.terrain.smooth_mesh_builds"),
+        ));
+    }
+    if let Some(value) = path_f64(state, "render.terrain.smooth_mesh_max_ms") {
+        out.push(assertion(
+            "render.smooth_mesh_max_ms",
+            &json!(value),
+            "<=",
+            json!(SMOOTH_MESH_MAX_WARN_MS),
+            "partial",
+            "smooth terrain mesh rebuild was slow enough to be player-visible",
+            Some("render.terrain.smooth_mesh_max_ms"),
+        ));
+    }
+    if let Some(value) = path_i64(state, "render.terrain.terrain_despawns") {
+        out.push(assertion(
+            "render.terrain_despawns",
+            &json!(value),
+            "<=",
+            json!(TERRAIN_DESPAWNS_WARN),
+            "partial",
+            "terrain entities were replaced too often during loop",
+            Some("render.terrain.terrain_despawns"),
+        ));
+    }
+    out
+}
+
+fn eco_cycle_assertions(state: &Value) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    push_optional_i64_assertion(
+        &mut out,
+        state,
+        "eco.clouds_exist",
+        "eco_cycle.clouds",
+        ">",
+        json!(0),
+        "fail",
+        "eco cycle has no authoritative clouds",
+    );
+    push_optional_f64_assertion(
+        &mut out,
+        state,
+        "eco.clouds_produce_rain",
+        "eco_cycle.rainfall",
+        ">",
+        json!(0.0),
+        "fail",
+        "clouds did not produce rainfall",
+    );
+    push_optional_i64_assertion(
+        &mut out,
+        state,
+        "eco.rain_grows_plants",
+        "eco_cycle.plants_grown",
+        ">",
+        json!(0),
+        "partial",
+        "rain did not grow grass or flowers",
+    );
+    push_optional_i64_assertion(
+        &mut out,
+        state,
+        "eco.plants_support_small_animals",
+        "eco_cycle.rabbits_born",
+        ">",
+        json!(0),
+        "partial",
+        "plants did not support new small animals",
+    );
+    push_optional_i64_assertion(
+        &mut out,
+        state,
+        "eco.small_animals_support_wildlife",
+        "eco_cycle.wildlife_born",
+        ">",
+        json!(0),
+        "partial",
+        "small animals did not support larger wildlife",
+    );
+    out
+}
+
+fn push_optional_i64_assertion(
+    out: &mut Vec<Assertion>,
+    state: &Value,
+    id: &str,
+    path: &str,
+    op: &str,
+    expected: Value,
+    severity: &str,
+    message: &str,
+) {
+    if let Some(value) = path_i64(state, path) {
+        out.push(assertion(
+            id,
+            &json!(value),
+            op,
+            expected,
+            severity,
+            message,
+            Some(path),
+        ));
+    } else {
+        out.push(assertion(
+            &format!("{id}.metric_present"),
+            &json!(false),
+            "==",
+            json!(true),
+            "partial",
+            &format!("missing metric {path}; cannot evaluate: {message}"),
+            Some(path),
+        ));
+    }
+}
+
+fn push_optional_f64_assertion(
+    out: &mut Vec<Assertion>,
+    state: &Value,
+    id: &str,
+    path: &str,
+    op: &str,
+    expected: Value,
+    severity: &str,
+    message: &str,
+) {
+    if let Some(value) = path_f64(state, path) {
+        out.push(assertion(
+            id,
+            &json!(value),
+            op,
+            expected,
+            severity,
+            message,
+            Some(path),
+        ));
+    } else {
+        out.push(assertion(
+            &format!("{id}.metric_present"),
+            &json!(false),
+            "==",
+            json!(true),
+            "partial",
+            &format!("missing metric {path}; cannot evaluate: {message}"),
+            Some(path),
+        ));
+    }
 }
 
 fn assertion(
@@ -538,10 +1230,384 @@ fn path_i64(value: &Value, path: &str) -> Option<i64> {
     path_value(value, path).and_then(Value::as_i64)
 }
 
+fn path_f64(value: &Value, path: &str) -> Option<f64> {
+    path_value(value, path).and_then(Value::as_f64)
+}
+
+fn path_vec3(value: &Value, path: &str) -> Option<[f64; 3]> {
+    path_value(value, path).and_then(vec3_value)
+}
+
+fn vec3_value(value: &Value) -> Option<[f64; 3]> {
+    let arr = value.as_array()?;
+    if arr.len() != 3 {
+        return None;
+    }
+    Some([arr[0].as_f64()?, arr[1].as_f64()?, arr[2].as_f64()?])
+}
+
+fn vec3_sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn vec3_len_xz(v: [f64; 3]) -> f64 {
+    (v[0] * v[0] + v[2] * v[2]).sqrt()
+}
+
+fn dot_xz(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[2] * b[2]
+}
+
 fn num(value: &Value) -> Option<f64> {
     value.as_f64()
 }
 
 fn round1(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(player_x: f64, ground_x: f64) -> Value {
+        json!({
+            "player": { "pos": [player_x, 15.0, 40.0] },
+            "visual": {
+                "static_world": {
+                    "ground": [ground_x, 0.0, 48.0],
+                    "nest_marker": [60.0, 20.0, 60.0]
+                }
+            }
+        })
+    }
+
+    fn probed_state(player_x: f64, current_player_x: f64, ground_x: f64) -> Value {
+        json!({
+            "visual": {
+                "movement_probe": {
+                    "first_player_pos": [player_x, 15.0, 40.0],
+                    "current_player_pos": [current_player_x, 15.0, 40.0],
+                    "first_static_world": {
+                        "ground": [48.0, 0.0, 48.0]
+                    },
+                    "current_static_world": {
+                        "ground": [ground_x, 0.0, 48.0]
+                    }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn static_world_drift_fails_when_visual_follows_player() {
+        let prev = state(10.0, 48.0);
+        let current = state(14.0, 52.0);
+
+        let drift = static_world_visual_follow_drift(&prev, &current);
+
+        assert!(!drift.ok, "{}", drift.message);
+        assert!(drift.message.contains("ground"));
+    }
+
+    #[test]
+    fn static_world_drift_passes_when_visual_stays_fixed() {
+        let prev = state(10.0, 48.0);
+        let current = state(14.0, 48.0);
+
+        let drift = static_world_visual_follow_drift(&prev, &current);
+
+        assert!(drift.ok, "{}", drift.message);
+    }
+
+    #[test]
+    fn movement_probe_fails_when_static_visual_moves_with_player() {
+        let state = probed_state(10.0, 14.0, 52.0);
+
+        let drift = movement_probe_drift(&state);
+
+        assert!(!drift.ok, "{}", drift.message);
+        assert_eq!(drift.severity, "fail");
+        assert!(drift.message.contains("ground"));
+    }
+
+    #[test]
+    fn movement_probe_fails_when_probe_is_missing() {
+        let drift = movement_probe_drift(&json!({}));
+
+        assert!(!drift.ok);
+        assert_eq!(drift.severity, "partial");
+        assert!(drift.message.contains("missing first player position"));
+    }
+
+    #[test]
+    fn render_telemetry_flags_mesh_and_frame_spikes() {
+        let state = json!({
+            "render": {
+                "frame": {
+                    "dt_max_ms": 120.0,
+                    "dt_over_50ms": 4
+                },
+                "terrain": {
+                    "smooth_mesh_builds": 5,
+                    "smooth_mesh_max_ms": 88.0,
+                    "terrain_despawns": 8
+                }
+            }
+        });
+
+        let assertions = render_telemetry_assertions(&state);
+        let failed = assertions.iter().filter(|a| !a.ok).map(|a| a.id.as_str()).collect::<Vec<_>>();
+
+        assert!(failed.contains(&"render.frame_dt_max"));
+        assert!(failed.contains(&"render.frame_spikes"));
+        assert!(failed.contains(&"render.smooth_mesh_builds"));
+        assert!(failed.contains(&"render.smooth_mesh_max_ms"));
+        assert!(failed.contains(&"render.terrain_despawns"));
+    }
+
+    #[test]
+    fn eco_cycle_missing_metrics_are_partial_not_hard_failures() {
+        let state = json!({"eco_cycle": {"rabbits": 5}});
+
+        let assertions = eco_cycle_assertions(&state);
+
+        assert!(assertions.iter().any(|a| a.id == "eco.clouds_exist.metric_present"));
+        assert!(
+            assertions.iter().filter(|a| !a.ok).all(|a| a.severity == "partial"),
+            "missing metrics should not be hard failures"
+        );
+    }
+
+    #[test]
+    fn eco_cycle_zero_clouds_and_rain_are_hard_failures_when_metrics_exist() {
+        let state = json!({
+            "eco_cycle": {
+                "clouds": 0,
+                "rainfall": 0.0,
+                "plants_grown": 0,
+                "rabbits_born": 0,
+                "wildlife_born": 0
+            }
+        });
+
+        let assertions = eco_cycle_assertions(&state);
+        let hard_failed = assertions
+            .iter()
+            .filter(|a| !a.ok && a.severity == "fail")
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(hard_failed.contains(&"eco.clouds_exist"));
+        assert!(hard_failed.contains(&"eco.clouds_produce_rain"));
+    }
+
+    #[test]
+    fn network_command_fails_when_online_mode_sends_zero_moves() {
+        let state = json!({"role": "client_online", "network_command": {"move_world_sent": 0}});
+        let assertions = network_command_assertions(&state);
+        let failed: Vec<&Assertion> = assertions.iter().filter(|a| !a.ok).collect();
+        assert!(failed.iter().any(|a| a.id == "network.move_world_sent_advances"));
+        assert!(failed.iter().all(|a| a.severity == "fail"));
+    }
+
+    #[test]
+    fn network_command_passes_when_offline_and_silence() {
+        let state = json!({"role": "client_offline", "network_command": {"move_world_sent": 0}});
+        let assertions = network_command_assertions(&state);
+        assert!(assertions.iter().all(|a| a.ok));
+    }
+
+    #[test]
+    fn network_command_warns_when_offline_records_moves() {
+        let state = json!({"role": "client_offline", "network_command": {"move_world_sent": 12}});
+        let assertions = network_command_assertions(&state);
+        let offline_leak = assertions
+            .iter()
+            .find(|a| a.id == "network.move_world_sent_offline_leak")
+            .expect("offline leak assertion missing");
+        assert!(!offline_leak.ok);
+        assert_eq!(offline_leak.severity, "partial");
+    }
+
+    #[test]
+    fn camera_eye_too_high_is_hard_failure() {
+        let state = json!({
+            "camera": {
+                "mode": "FirstPerson",
+                "first_person_eye": [48.0, 95.0, 48.0]
+            }
+        });
+        let assertions = camera_assertions(&state);
+        let high_eye = assertions
+            .iter()
+            .find(|a| a.id == "camera.first_person_eye_y_in_range")
+            .expect("eye y assertion missing");
+        assert!(
+            !high_eye.ok,
+            "eye_y=95 should exceed FIRST_PERSON_EYE_MAX_Y={}; actual={} op={} expected={}",
+            FIRST_PERSON_EYE_MAX_Y, high_eye.actual, high_eye.op, high_eye.expected
+        );
+        assert_eq!(high_eye.severity, "fail");
+        assert_eq!(high_eye.actual, json!(95.0));
+    }
+
+    #[test]
+    fn camera_eye_in_range_passes() {
+        let state = json!({
+            "camera": {
+                "mode": "FirstPerson",
+                "first_person_eye": [48.0, 16.7, 48.0]
+            }
+        });
+        let assertions = camera_assertions(&state);
+        let eye = assertions
+            .iter()
+            .find(|a| a.id == "camera.first_person_eye_y_in_range")
+            .expect("eye y assertion missing");
+        assert!(eye.ok, "eye_y=16.7 should pass");
+    }
+
+    #[test]
+    fn camera_missing_mode_is_hard_failure() {
+        let state = json!({"camera": {}});
+        let assertions = camera_assertions(&state);
+        let mode = assertions
+            .iter()
+            .find(|a| a.id == "camera.mode_present")
+            .expect("mode assertion missing");
+        assert!(!mode.ok);
+        assert_eq!(mode.severity, "fail");
+    }
+
+    #[test]
+    fn resource_deltas_flags_only_tick_motion_as_partial() {
+        let dir = temp_root("xtask_deltas_only_tick");
+        let deltas = json!({
+            "tick": 308,
+            "resource_deltas": [
+                {"path": "tick", "current": 308.0, "previous": 295.0, "delta": 13.0, "delta_abs": 13.0}
+            ]
+        });
+        fs::write(dir.join("diff.json"), deltas.to_string()).unwrap();
+        let assertions = resource_deltas_assertions(&dir);
+        let a = assertions
+            .iter()
+            .find(|a| a.id == "state.resource_deltas_have_nontick_motion")
+            .expect("resource_deltas assertion missing");
+        assert!(!a.ok);
+        assert_eq!(a.severity, "partial");
+        assert_eq!(a.actual, json!(0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resource_deltas_passes_with_nontick_motion() {
+        let dir = temp_root("xtask_deltas_with_nontick");
+        let deltas = json!({
+            "tick": 308,
+            "resource_deltas": [
+                {"path": "tick", "current": 308.0, "previous": 295.0, "delta": 13.0, "delta_abs": 13.0},
+                {"path": "pool.food", "current": 50.0, "previous": 45.0, "delta": 5.0, "delta_abs": 5.0}
+            ]
+        });
+        fs::write(dir.join("diff.json"), deltas.to_string()).unwrap();
+        let assertions = resource_deltas_assertions(&dir);
+        let a = assertions
+            .iter()
+            .find(|a| a.id == "state.resource_deltas_have_nontick_motion")
+            .expect("resource_deltas assertion missing");
+        assert!(a.ok);
+        assert_eq!(a.actual, json!(1));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn regression_monsters_drop_below_ratio_is_partial() {
+        let prev = json!({"monsters": {"current": 60}});
+        let curr = json!({"monsters": {"current": 20}});
+        let assertions = regression_assertions(&curr, &prev);
+        let monsters = assertions
+            .iter()
+            .find(|a| a.id == "regression.monsters_not_collapsed")
+            .expect("monsters regression assertion missing");
+        assert!(!monsters.ok);
+        assert_eq!(monsters.severity, "partial");
+    }
+
+    #[test]
+    fn regression_nations_drop_is_hard_failure() {
+        let prev = json!({"nations": {"total_nations": 3}});
+        let curr = json!({"nations": {"total_nations": 2}});
+        let assertions = regression_assertions(&curr, &prev);
+        let nations = assertions
+            .iter()
+            .find(|a| a.id == "regression.nations_total_non_decreasing")
+            .expect("nations regression assertion missing");
+        assert!(!nations.ok);
+        assert_eq!(nations.severity, "fail");
+    }
+
+    #[test]
+    fn regression_nations_growth_or_steady_is_ok() {
+        let prev = json!({"nations": {"total_nations": 3}});
+        let curr = json!({"nations": {"total_nations": 4}});
+        let assertions = regression_assertions(&curr, &prev);
+        let nations = assertions
+            .iter()
+            .find(|a| a.id == "regression.nations_total_non_decreasing")
+            .expect("nations regression assertion missing");
+        assert!(nations.ok);
+    }
+
+    #[test]
+    fn stderr_scan_counts_deserialize_invalid_entity() {
+        let dir = temp_root("xtask_stderr_deser");
+        fs::write(
+            dir.join("loop.err.log"),
+            "INFO start\nERROR Attempting to deserialize an invalid entity.\nERROR Attempting to deserialize an invalid entity.\nINFO done\n",
+        )
+        .unwrap();
+        let mut scan = StderrScan::default();
+        scan_stderr_dir(&dir, &mut scan);
+        assert_eq!(scan.deserialize_invalid_count, 2);
+        assert_eq!(scan.files_scanned, 1);
+        assert_eq!(scan.out_of_bounds_count, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stderr_scan_counts_out_of_bounds_and_voxel_overflow() {
+        let dir = temp_root("xtask_stderr_oob");
+        fs::write(
+            dir.join("loop.err.log"),
+            "INFO a\nWARN OUT OF BOUNDS pos=1\nINFO b\n体素过多 (3100)\nINFO c\nOUT OF BOUNDS pos=2\n",
+        )
+        .unwrap();
+        let mut scan = StderrScan::default();
+        scan_stderr_dir(&dir, &mut scan);
+        assert_eq!(scan.out_of_bounds_count, 2);
+        assert_eq!(scan.voxel_overflow_count, 1);
+        assert_eq!(scan.deserialize_invalid_count, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stderr_scan_ignores_non_err_log_files() {
+        let dir = temp_root("xtask_stderr_filter");
+        fs::write(dir.join("loop.log"), "Attempting to deserialize an invalid entity.\n").unwrap();
+        let mut scan = StderrScan::default();
+        scan_stderr_dir(&dir, &mut scan);
+        assert_eq!(scan.files_scanned, 0);
+        assert_eq!(scan.deserialize_invalid_count, 0);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn temp_root(name: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
 }

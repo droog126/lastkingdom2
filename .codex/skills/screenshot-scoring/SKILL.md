@@ -16,27 +16,33 @@ Use this skill after `$closed-loop-ai-dev` identifies that PNG review is needed,
 Minimum:
 
 - current screenshot PNG path
-- current `health.json`
+- current `health.json` (must include `assertions.failed`, `assertions.hard_failed`, `assertions.partial_failed`, `verdict`, and the `stderr` block: `deserialize_invalid_count`, `out_of_bounds_count`, `voxel_overflow_count`, `files_scanned`)
 
 Preferred:
 
-- current `assertions.json`
-- current `final_state.json`
-- current `diff.json`
-- previous comparable screenshot and `diff.json`
-- current task goal
+- current `assertions.json` (full assertion list with id + severity + actual + expected)
+- current `regression.json` (must include `newly_failed`, `still_failing`, `newly_passed` — list every newly-failed assertion in the verdict)
+- current `final_state.json` (must include `camera.mode`, `camera.first_person_eye`, `monsters.current`, `nations.total_nations`, `network_command.move_world_sent`, `role`)
+- current `diff.json` (`resource_deltas` for sim-motion evidence)
+- previous comparable screenshot, `health.json`, and `diff.json`
+- `.harness/KNOWN_ISSUES.md` "Open" section (must cross-check: did this iter fix any open issue?)
+- current task goal (from `decision.md` task: line or `task:` field)
 
 If a required visual cannot be inspected, score only artifact-backed categories and mark visual categories as blocked with the reason.
 
 ## Scoring Workflow
 
-1. Check hard gates before scoring.
-2. Inspect the whole screenshot at normal view.
-3. Zoom or crop only to confirm uncertain details.
-4. Score each category from 0 to 10 using the anchors below.
-5. Give one sentence of concrete evidence for every category.
-6. Compare against the previous iteration if available.
-7. Choose exactly one highest-value next change.
+1. **Read `health.json` first** — note `verdict` (PASS / PARTIAL / FAIL), `assertions.failed`/`hard_failed`/`partial_failed`, and the `stderr` block (any nonzero `deserialize_invalid_count` is a hard gate even if overall verdict is PASS).
+2. **Read `regression.json`** — `newly_failed` list is the most important signal: anything that passed before but failed this iter is the priority finding. List every id in the verdict.
+3. **Read `assertions.json`** — for any failed assertion, copy the exact `message` into the decision `problems:` section.
+4. **Cross-check `KNOWN_ISSUES.md` Open** — for each open ISSUE-NNN, mark "verified fixed" / "still open" / "not addressed" in the decision `carryover:` section.
+5. Check hard gates (next section) before scoring.
+6. Inspect the whole screenshot at normal view.
+7. Zoom or crop only to confirm uncertain details.
+8. Score each category from 0 to 10 using the anchors below.
+9. Give one sentence of concrete evidence for every category.
+10. Compare against the previous iteration if available.
+11. Choose exactly one highest-value next change.
 
 Do not give high scores for intent, code changes, generated assets, or expected behavior that is not visible in the screenshot.
 
@@ -49,7 +55,19 @@ Apply these caps before category scoring:
 - World visible but player/camera target is lost and HUD cannot establish state: total score max 4.0.
 - HUD or overlay covers the main scene enough to prevent visual judgment: total score max 5.0.
 - `health.json` is `FAIL` for non-visual invariant/state reasons: gameplay score max 4 even if the screenshot looks good.
-- Repeated severe log/assertion spam related to rendering, out-of-bounds, or voxel count: gameplay score max 5.
+- `health.json` is `PARTIAL`: gameplay score max 6 even if visuals look clean.
+- Repeated severe log/assertion spam related to rendering, out-of-bounds, or voxel count: gameplay score max 5. Quantified thresholds (from `health.json::stderr` block, populated by `xtask/src/health.rs::scan_stderr_logs`):
+  - `stderr.deserialize_invalid_count >= 1` is a hard gate (lightyear protocol registry mismatch floods logs at ~5ms cadence and blocks real packets — iter_199 root cause).
+  - `stderr.out_of_bounds_count >= 5` is a hard gate (MoveTo retry / bounds clamping missing).
+  - `stderr.voxel_overflow_count >= 5` is a hard gate (render warn throttle missing).
+  - `stderr.files_scanned == 0` is a partial gate (no `.err.log` found at all means harness cannot detect runtime errors — run loop or fix log redirect).
+- `assertions.json` has any `severity == "fail"` and `ok == false`: gameplay score max 4. Read `regression.json::newly_failed` to see what regressed this iter; list every newly-failed assertion by id in the decision verdict.
+- `assertions.json` has any `severity == "partial"` and `ok == false`: gameplay score max 6.
+- Network regression (online mode only): `network_command.move_world_sent == 0` after 30s+ is a hard gate (WASD pipeline dead — iter_200 root cause B).
+- First-person task alignment: `decision.md` task says "first-person" but `final_state.json::camera.mode != "FirstPerson"` is a hard gate (iter_200 mode was ThirdPerson despite first-person task).
+- Pretty landmark Y regression: `camera.first_person_eye[1] > 18` (or current `FIRST_PERSON_EYE_MAX_Y` constant) is a hard gate for any iter whose task mentions landmarks / kenney / sokpop decor — they spawn at eye-Y, not 19m in the air (iter_200 root cause C).
+
+If a hard gate fires, fix the gate cause before scoring categories. Do not give a category above the cap.
 
 ## Category Rubric
 
@@ -73,7 +91,7 @@ Check horizon, background color, fog, lighting direction, overexposure, and unde
 - 8: player is clear, well framed, and has orientation/height context.
 - 10: player is visually expressive, readable at a glance, and compositionally placed.
 
-Check silhouette, contrast, camera framing, occlusion, feet/contact with ground, direction cue, head/body alignment, neck or overlap, and whether limbs look connected rather than floating or stuffed into the body.
+Check silhouette, contrast, camera framing, occlusion, contact with ground, direction cue, major-part alignment, and whether connected parts look intentionally attached.
 
 ### Terrain
 
@@ -83,18 +101,18 @@ Check silhouette, contrast, camera framing, occlusion, feet/contact with ground,
 - 8: terrain has clear shapes, height variation, paths/landmarks, and depth.
 - 10: terrain is polished, varied, navigable, and supports the intended fantasy.
 
-Check terrain readability, spawn platform, cliffs/holes, edges, pathing, and scale. For environment props or model previews, penalize generic display-base presentation when the asset should read as an in-world object; prefer a convincing footprint, layered forms, and local detail that reads at target scale.
+Check terrain readability, usable surfaces, edges, pathing, and scale. For environment props or model previews, penalize generic display-base presentation when the asset should read as an in-world object; prefer a convincing footprint, layered forms, and local detail that reads at target scale.
 
 ### Decor
 
 - 0: no decor or all props invisible.
 - 2: decor exists but is tiny, floating, clipped, repetitive, or visually noisy.
-- 5: some trees/water/animals/monsters/props are visible and identifiable.
+- 5: some environmental elements, actors, structures, or props are visible and identifiable.
 - 8: decor creates layered composition and makes the world feel inhabited.
 - 10: decor is varied, well placed, thematic, and reinforces gameplay readability.
 
-Check props, vegetation, water, actors, buildings, object scale, repetition, material assignment, and whether any asset still reads as placeholder, sample, debug, or calibration geometry instead of intentional content.
-For gameplay-system screenshots, verify important variety is visually inspectable, not only counted in HUD/state. Penalize large foreground actors, blocks, trees, signs, or demo props that hide the player or the relevant interaction band.
+Check props, environment elements, actors, structures, object scale, repetition, material assignment, and whether any asset still reads as placeholder, sample, debug, or calibration geometry instead of intentional content.
+For runtime screenshots, verify important variety is visually inspectable, not only counted in UI or state. Penalize foreground or oversized elements that hide the focal subject or relevant interaction area.
 
 ### HUD
 
@@ -116,8 +134,8 @@ Use screenshot plus `health.json`, `final_state.json`, and `diff.json`.
 - 8: action, resources, actors, and world state form a clear loop.
 - 10: screenshot and artifacts show compelling, stable, self-explanatory gameplay.
 
-Check movement, actor visibility, monster/animal/player state, resource changes, scenario progress, and observer assertions.
-For finite resource loops, score higher only when artifacts show an explainable conversion chain: inputs consumed, outputs produced within caps, and production stopping or capping when inputs are exhausted.
+Check movement, actor visibility, state changes, scenario progress, and observer assertions.
+For stateful loops, score higher only when artifacts show an explainable chain: inputs change, outputs are produced within expected limits, and stop or cap conditions are honored.
 
 ## Total Score
 
@@ -170,6 +188,6 @@ next:
 - If terrain is below 5, prioritize spawn framing, navigation readability, or camera placement.
 - If HUD is below 5, prioritize legibility and non-overlap.
 - If gameplay is below 5 with visual scores above 5, inspect state artifacts before changing visuals.
-- If decor is below 5 but terrain/player/HUD are good, add or reposition visible props, animals, buildings, or water.
+- If decor is below 5 but terrain/player/HUD are good, add or reposition visible content that reinforces scene readability.
 - If sky is below 5 and the scene is otherwise readable, tune lighting/fog/background after gameplay readability is stable.
-- If state proves entities exist but the screenshot reads as only one visible thing, prioritize camera corridor, spawn placement, scale, or occlusion fixes before adding more content.
+- If state proves content exists but the screenshot does not make it visually inspectable, prioritize camera framing, placement, scale, or occlusion fixes before adding more content.
