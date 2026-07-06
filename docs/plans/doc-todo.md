@@ -1,9 +1,9 @@
 # Doc-Todo 开发计划
 ## 文档改进 + 待实现功能路线图
 
-> **版本**: v1.1
+> **版本**: v1.2
 > **日期**: 2026-07-06
-> **状态**: 文档清理已完成，功能开发待推进
+> **状态**: 文档清理 + 测试覆盖一轮补充已完成，功能开发待推进
 
 ---
 
@@ -74,31 +74,66 @@
 
 ## 三、测试覆盖提升
 
+> ✅ **本节已于 2026-07-06 完成一轮补充**
+
 ### 3.1 当前测试状态
 
-| 层级 | 位置 | 状态 | 建议 |
-|------|------|------|------|
-| 单元规则 | `crates/core/src/**` | ✅ 有基础测试 | 扩展到所有模块 |
-| crate 集成 | `crates/client` / `crates/server` | ⬜ 较少 | 添加编译接口测试 |
-| 闭环测试 | `xtask loop` | ✅ 有健康检查 | 增加状态断言 |
+| 层级 | 位置 | 状态 | 测试数 |
+|------|------|------|--------|
+| 单元规则 | `crates/core/src/**` | ✅ 全面覆盖 | 272 个测试 |
+| crate 集成 | `crates/client` / `crates/server` | ⬜ 较少 | - |
+| 闭环测试 | `xtask loop` | ✅ 有健康检查 | - |
 
-### 3.2 必须补测试的规则
+### 3.2 各模块测试覆盖现状
 
-| 模块 | 测试项 | 优先级 |
-|------|-------|--------|
-| resource | 资源上限、守恒验证、掉落回流 | P0 |
-| combat | 伤害结算、格挡招架、硬直击退 | P0 |
-| protection | 保护期检查 attacker/target | P0 |
-| match_state | 阶段边界、wall_secs 刷新 | P0 |
-| monster/creature | 死亡掉落、计数回流 | P0 |
-| nation | 创建解散、旗帜上限、人口上限 | P1 |
-| protocol | CLI 参数解析、端口配置 | P1 |
-| scenario | 推进完成/失败原因 | P1 |
-| ai | 连续重复决策检测 | P1 |
+| 模块 | 测试数 | 覆盖要点 | 状态 |
+|------|-------|---------|------|
+| resource | 13 | 资源上限、守恒验证、掉落回流、transfer | ✅ P0 已覆盖 |
+| combat | 41 | 伤害结算、格挡招架、硬直击退、连招 | ✅ P0 已覆盖 |
+| protection | 5 | 保护期检查 attacker/target | ✅ P0 已覆盖 |
+| match_state | 5 | 阶段边界、wall_secs 刷新 | ✅ P0 已覆盖 |
+| monster | 5 | 死亡掉落、计数回流、王国销毁 | ✅ P0 已覆盖 |
+| creature | 8 | 死亡掉落、计数回流、攻击距离 | ✅ P0 已覆盖 |
+| nation | 17 | 创建解散、旗帜上限、人口上限、upkeep | ✅ P1 已覆盖 |
+| **pvp** | **13** | **武器表、PositionHistory、FixedTick、Hitbox** | ✅ **本次新增** |
+| **protocol** | **10** | **消息序列化、命令解析、组件包装** | ✅ **本次新增** |
+| scenario | - | 推进完成/失败原因 | ⬜ 待补充 |
+| ai | - | 连续重复决策检测 | ⬜ 待补充 |
+| world | 18+ | 生成、gather、玩家出生点 | ✅ 已覆盖 |
+| ecology | - | 生态循环 | ⬜ 待补充 |
 
-### 3.3 测试审计目标
+### 3.3 本轮新增测试详情
 
-- [ ] `crates/core/src` 每个 `.rs` 文件至少有 1 个 `#[test]`
+**pvp 模块（新增 13 个测试）**：
+- `combat_state_default_is_idle`
+- `weapon_stats_cooldown_matches_speed`
+- `hitbox_default_has_reasonable_size`
+- `position_history_default_size_60`
+- `position_history_push_and_query`
+- `position_history_evicts_old_when_full`
+- `position_history_oldest_tick`
+- `weapon_id_from_u8_known_values`
+- `weapon_id_from_u8_out_of_range`
+- `weapon_stats_match_weapon_table`
+- `fixed_tick_increment_wraps`
+- `fixed_tick_wraps_at_max`
+- `all_six_weapons_have_stats`
+
+**protocol 模块（新增 10 个测试）**：
+- `player_action_variants_count`
+- `build_recipe_variants`
+- `gameplay_command_kind_variants`
+- `attack_input_json_roundtrip`
+- `gameplay_command_json_roundtrip`
+- `kill_feed_entry_json_roundtrip`
+- `components_wrap_values`
+- `eco_snapshot_constants_are_reasonable`
+- `voxel_delta_fields`
+
+### 3.4 测试审计目标
+
+- [x] `crates/core/src` 核心模块有测试（resource/combat/nation/monster/creature/protection/match_state/world/pvp/protocol）
+- [ ] `crates/core/src` 每个 `.rs` 文件至少有 1 个 `#[test]`（剩余：player.rs, clock.rs, ai/mod.rs, scenario/mod.rs, ecology/mod.rs, eco_cycle.rs 等）
 - [ ] 核心模块（resource, combat, nation）测试覆盖率 ≥ 60%
 - [ ] 每次 PR 必须通过 `just test-changed`
 - [ ] 玩法变更必须先写测试再实现

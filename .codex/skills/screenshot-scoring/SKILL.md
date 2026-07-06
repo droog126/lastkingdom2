@@ -94,7 +94,7 @@ Check terrain readability, spawn platform, cliffs/holes, edges, pathing, and sca
 - 10: decor is varied, well placed, thematic, and reinforces gameplay readability.
 
 Check props, vegetation, water, actors, buildings, object scale, repetition, material assignment, and whether any asset still reads as placeholder, sample, debug, or calibration geometry instead of intentional content.
-For ecology screenshots, verify variety is visually inspectable, not only counted in HUD/state. Penalize large foreground animals, blocks, trees, signs, or demo props that hide the player or the animal/plant/resource band.
+For gameplay-system screenshots, verify important variety is visually inspectable, not only counted in HUD/state. Penalize large foreground actors, blocks, trees, signs, or demo props that hide the player or the relevant interaction band.
 
 ### HUD
 
@@ -117,7 +117,7 @@ Use screenshot plus `health.json`, `final_state.json`, and `diff.json`.
 - 10: screenshot and artifacts show compelling, stable, self-explanatory gameplay.
 
 Check movement, actor visibility, monster/animal/player state, resource changes, scenario progress, and observer assertions.
-For finite ecology/resource loops, score higher only when artifacts show an explainable conversion chain, such as fruit eaten, food produced, regrowth consuming an input pool, and production stopping or capping when inputs are exhausted.
+For finite resource loops, score higher only when artifacts show an explainable conversion chain: inputs consumed, outputs produced within caps, and production stopping or capping when inputs are exhausted.
 
 ## Total Score
 
@@ -172,4 +172,4 @@ next:
 - If gameplay is below 5 with visual scores above 5, inspect state artifacts before changing visuals.
 - If decor is below 5 but terrain/player/HUD are good, add or reposition visible props, animals, buildings, or water.
 - If sky is below 5 and the scene is otherwise readable, tune lighting/fog/background after gameplay readability is stable.
-- If state proves entities exist but the screenshot reads as "only berries" or "only one creature", prioritize camera corridor, spawn placement, scale, or occlusion fixes before adding more content.
+- If state proves entities exist but the screenshot reads as only one visible thing, prioritize camera corridor, spawn placement, scale, or occlusion fixes before adding more content.

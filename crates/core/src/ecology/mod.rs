@@ -133,7 +133,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     EcologyCatalogEntry {
         kind: EcologyKind::Creature(CreatureKind::Pig),
         model_path: "animals/pig.glb",
-        visual_scale: Vec3::splat(0.55),
+        visual_scale: Vec3::splat(0.34),
         produced_resource: Some(ResourceKind::Food),
         preferred_biome: Some(Biome::Jungle),
         source_block: None,
@@ -141,7 +141,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     EcologyCatalogEntry {
         kind: EcologyKind::Creature(CreatureKind::Sheep),
         model_path: "animals/sheep.glb",
-        visual_scale: Vec3::splat(0.55),
+        visual_scale: Vec3::splat(0.34),
         produced_resource: Some(ResourceKind::Food),
         preferred_biome: Some(Biome::Tundra),
         source_block: None,
@@ -149,7 +149,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     EcologyCatalogEntry {
         kind: EcologyKind::Creature(CreatureKind::Cow),
         model_path: "animals/cow.glb",
-        visual_scale: Vec3::splat(0.65),
+        visual_scale: Vec3::splat(0.38),
         produced_resource: Some(ResourceKind::Food),
         preferred_biome: Some(Biome::Jungle),
         source_block: None,
@@ -157,7 +157,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     EcologyCatalogEntry {
         kind: EcologyKind::Creature(CreatureKind::Chicken),
         model_path: "animals/chicken.glb",
-        visual_scale: Vec3::splat(0.50),
+        visual_scale: Vec3::splat(0.30),
         produced_resource: Some(ResourceKind::Apple),
         preferred_biome: Some(Biome::Jungle),
         source_block: None,
@@ -165,7 +165,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     EcologyCatalogEntry {
         kind: EcologyKind::Tree(TreeKind::Sokpop),
         model_path: "procedural/pretty/sokpop_tree.glb",
-        visual_scale: Vec3::splat(0.55),
+        visual_scale: Vec3::splat(0.24),
         produced_resource: Some(ResourceKind::Wood),
         preferred_biome: Some(Biome::Jungle),
         source_block: Some(BlockType::Wood),

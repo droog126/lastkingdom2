@@ -282,7 +282,7 @@ mod tests {
 
         for i in 0..3 {
             ph.push(PositionSnapshot {
-                tick: i * 10,
+                tick: (i + 1) * 10,
                 translation: Vec3::new(i as f32, 0.0, 0.0),
                 rotation: Quat::IDENTITY,
                 velocity: Vec3::ZERO,
@@ -293,12 +293,12 @@ mod tests {
 
         let snap = ph.query(15).unwrap();
         assert_eq!(snap.tick, 10);
-        assert!((snap.translation.x - 1.0).abs() < 0.001);
+        assert!((snap.translation.x - 0.0).abs() < 0.001);
 
         assert!(ph.query(5).is_none());
 
         let latest = ph.query(100).unwrap();
-        assert_eq!(latest.tick, 20);
+        assert_eq!(latest.tick, 30);
     }
 
     #[test]

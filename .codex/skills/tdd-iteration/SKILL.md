@@ -21,7 +21,7 @@ Prefer tests in `crates/core` because they are fastest and most stable.
 Add or update tests for:
 
 - resource add/remove/drop/transfer/conservation
-- finite ecology/resource conversions, especially "does not grow when the required source pool is empty" and "does not consume when the destination pool is full"
+- finite resource conversions, especially "does not produce when the required source pool is empty" and "does not consume when the destination pool is full"
 - nations, monsters, animals, combat, protection periods, phase timing
 - CLI, protocol, and network parameter parsing
 - AI decisions
@@ -63,4 +63,4 @@ If the whole repo already has formatting drift, format only files touched in the
 - Avoid `unwrap()` in production code unless a local invariant makes panic intentionally correct and obvious.
 - Do not hide new warnings with broad `allow` attributes.
 - Tests must not depend on wall-clock time, random iteration order, or local machine config.
-- For demo ecology, test both catalog variety and default placement when visibility matters. "Entity exists in state" is not enough if the gameplay proof depends on initial camera readability.
+- When behavior must be visible in a demo or screenshot, test both state variety and default placement/framing where practical. "Entity exists in state" is not enough if the proof depends on initial camera readability.

@@ -26,16 +26,16 @@ impl CreatureKind {
         match self {
             CreatureKind::Pig => Color::srgb(0.95, 0.75, 0.78),
             CreatureKind::Sheep => Color::srgb(0.96, 0.96, 0.92),
-            CreatureKind::Cow => Color::srgb(0.65, 0.45, 0.30),
+            CreatureKind::Cow => Color::srgb(0.74, 0.63, 0.48),
             CreatureKind::Chicken => Color::srgb(1.00, 0.90, 0.30),
         }
     }
     pub const fn size(self) -> Vec3 {
         match self {
-            CreatureKind::Pig => Vec3::new(0.58, 0.44, 0.78),
-            CreatureKind::Sheep => Vec3::new(0.62, 0.58, 0.78),
-            CreatureKind::Cow => Vec3::new(0.78, 0.70, 0.98),
-            CreatureKind::Chicken => Vec3::new(0.34, 0.42, 0.36),
+            CreatureKind::Pig => Vec3::new(0.34, 0.25, 0.42),
+            CreatureKind::Sheep => Vec3::new(0.36, 0.28, 0.42),
+            CreatureKind::Cow => Vec3::new(0.42, 0.32, 0.50),
+            CreatureKind::Chicken => Vec3::new(0.22, 0.25, 0.22),
         }
     }
     pub fn label_zh(self) -> &'static str {
@@ -286,7 +286,7 @@ fn spawn_debug_creature_at(
         Mesh3d(mesh_h),
         MeshMaterial3d(mat_h),
         Transform::from_translation(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5))
-            .with_scale(kind.size()),
+            .with_scale(kind.size() * 0.35),
         CombatHealth { current: 12.0, max: 12.0, invuln_until_tick: 0 },
         Stamina::default(),
         BlockState::default(),

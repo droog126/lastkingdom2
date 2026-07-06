@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::ecology::{
-    ecology_entry, EcologyKind, ResourceDropKind, ResourceNodeKind, TreeKind, WildlifeKind,
+    EcologyKind, ResourceDropKind, ResourceNodeKind, TreeKind, WildlifeKind, ecology_entry,
 };
 use lk2_core::player::PlayerState;
 use lk2_core::world::World as GameWorld;
 
-use crate::render::scalar_field::effective_ground_height;
 use crate::render::CameraAngles;
+use crate::render::scalar_field::effective_ground_height;
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -38,6 +38,12 @@ pub struct WaterMarker;
 pub struct GrassPlatformMarker;
 
 #[derive(Component)]
+pub struct GroundDetail {
+    pub offset: Vec2,
+    pub y_offset: f32,
+}
+
+#[derive(Component)]
 pub struct GroundDiscOuter;
 
 #[derive(Component)]
@@ -64,6 +70,19 @@ pub fn follow_water(player: Res<PlayerState>, mut q: Query<&mut Transform, With<
     };
     tf.translation.x = player.pos.x;
     tf.translation.z = player.pos.z;
+}
+
+pub fn follow_ground_details(
+    player: Res<PlayerState>,
+    game_world: Res<GameWorld>,
+    mut q: Query<(&GroundDetail, &mut Transform)>,
+) {
+    for (detail, mut tf) in &mut q {
+        let x = player.pos.x + detail.offset.x;
+        let z = player.pos.z + detail.offset.y;
+        let ground_top = effective_ground_height(&game_world, x.floor() as i32, z.floor() as i32);
+        tf.translation = Vec3::new(x, ground_top + detail.y_offset, z);
+    }
 }
 
 pub fn follow_grass_platform(
@@ -281,16 +300,6 @@ pub struct CloudPuff {
     pub phase: f32,
 }
 
-#[derive(Component)]
-pub struct V2WorldMarker;
-
-#[derive(Component)]
-pub struct KenneyLandmark {
-    /// Local offset from the player: x = camera-right, y = vertical, z = camera-forward.
-    pub rel: Vec3,
-    pub y_offset: f32,
-}
-
 #[allow(unreachable_code)]
 pub fn spawn_pretty(
     mut commands: Commands,
@@ -324,9 +333,6 @@ pub fn spawn_pretty(
         return;
     }
 
-    let kenney_enabled = std::env::var("LK2_DISABLE_KENNEY")
-        .map(|value| !matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-        .unwrap_or(true);
     let auto_demo_mode = std::env::args().any(|a| a == "--auto-demo");
 
     if cfg.show_water {
@@ -353,32 +359,37 @@ pub fn spawn_pretty(
         );
     }
 
-    if !first_person_mode {
-        let grass_size = 180.0_f32;
-        let ground_y =
-            effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-        commands.spawn((
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(grass_size, grass_size))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.22, 0.62, 0.18),
-                emissive: Color::srgb(0.03, 0.10, 0.02).into(),
-                perceptual_roughness: 0.96,
-                metallic: 0.0,
-                ..default()
-            })),
-            Transform::from_translation(Vec3::new(player.pos.x, ground_y + 0.035, player.pos.z)),
-            GrassPlatformMarker,
-        ));
+    let grass_size = 180.0_f32;
+    let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(grass_size, grass_size))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.30, 0.58, 0.22),
+            emissive: Color::srgb(0.025, 0.055, 0.018).into(),
+            perceptual_roughness: 0.96,
+            metallic: 0.0,
+            ..default()
+        })),
+        Transform::from_translation(Vec3::new(player.pos.x, ground_y + 0.035, player.pos.z)),
+        GrassPlatformMarker,
+    ));
 
-        spawn_playable_village_diorama(
-            &mut commands,
-            &game_world,
-            player.pos,
-            &asset_server,
-            &mut meshes,
-            &mut materials,
-        );
-    }
+    spawn_ground_detail_layer(
+        &mut commands,
+        &game_world,
+        player.pos,
+        &mut meshes,
+        &mut materials,
+    );
+
+    spawn_playable_village_diorama(
+        &mut commands,
+        &game_world,
+        player.pos,
+        &asset_server,
+        &mut meshes,
+        &mut materials,
+    );
 
     if !first_person_mode {
         commands.spawn((
@@ -414,7 +425,7 @@ pub fn spawn_pretty(
         ));
     }
 
-    if cfg.show_player_avatar && !first_person_mode {
+    if cfg.show_player_avatar && !first_person_mode && !auto_demo_mode {
         let ground_top =
             effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
         commands.spawn((
@@ -465,7 +476,7 @@ pub fn spawn_pretty(
         info!("spawned sokpop tree and fallen stick near player");
     }
 
-    if false && cfg.show_player_avatar && !first_person_mode {
+    if auto_demo_mode && cfg.show_player_avatar && !first_person_mode {
         let base = player.pos;
 
         // i=0 head
@@ -816,28 +827,6 @@ pub fn spawn_pretty(
 
     let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
 
-    if first_person_mode {
-        if !auto_demo_mode {
-            spawn_first_person_village(
-                &mut commands,
-                &asset_server,
-                &game_world,
-                player.pos,
-                camera_angles.yaw,
-            );
-        }
-        if kenney_enabled && !auto_demo_mode {
-            spawn_first_person_camp_props(
-                &mut commands,
-                &asset_server,
-                &game_world,
-                player.pos,
-                camera_angles.yaw,
-            );
-        }
-        return;
-    }
-
     if cfg.show_legacy_debug_props && !first_person_mode && !auto_demo_mode {
         for i in 0..8 {
             let angle = (i as f32) * (std::f32::consts::TAU / 8.0);
@@ -963,52 +952,8 @@ pub fn spawn_pretty(
         );
     }
 
-    // Kenney landmarks + decorative markers stay visible in first-person so the
-    // map does not look bare. Y is anchored to player.pos.y, NOT ground_y, so
-    // the props sit at the player's eye level even when the surrounding terrain
-    // has tall hills (ground_y at the offset (x, z) can be 35+ while player.pos.y
     // is ~15 — that mismatch was the root cause of "kenney landmark Y=34.65, 19m
     // above player's head, first-person cannot see").
-    let landmark_anchor_y = player.pos.y;
-    if cfg.show_legacy_debug_props && !auto_demo_mode {
-        spawn_v2_crown_season_markers(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player.pos,
-            landmark_anchor_y,
-        );
-    }
-    if cfg.show_legacy_debug_props && kenney_enabled && !auto_demo_mode {
-        spawn_kenney_landmarks(&mut commands, &asset_server, player.pos, landmark_anchor_y);
-    }
-
-    if !first_person_mode {
-        let hill_distance = 28.0;
-        let hill_offsets: [(f32, f32); 4] = [
-            (hill_distance, hill_distance),
-            (-hill_distance, hill_distance),
-            (hill_distance, -hill_distance),
-            (-hill_distance, -hill_distance),
-        ];
-        for (hx, hz) in hill_offsets.iter() {
-            let h_x = player.pos.x + hx;
-            let h_z = player.pos.z + hz;
-            commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(8.0, 4.5, 8.0))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.20, 0.42, 0.18),
-                    emissive: Color::srgb(0.04, 0.08, 0.03).into(),
-                    perceptual_roughness: 0.95,
-                    metallic: 0.0,
-                    alpha_mode: AlphaMode::Blend,
-                    ..default()
-                })),
-                Transform::from_translation(Vec3::new(h_x, ground_y + 2.25, h_z)),
-            ));
-        }
-    }
-
     #[cfg(feature = "audit-pretty-models")]
     audit_pretty::spawn_audit_ring(
         &mut commands,
@@ -1024,516 +969,6 @@ fn local_offset_from_yaw(offset: Vec3, yaw: f32) -> Vec3 {
     let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
     let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
     right * offset.x + Vec3::Y * offset.y + forward * offset.z
-}
-
-fn spawn_scene_asset(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    _game_world: &GameWorld,
-    player_pos: Vec3,
-    yaw: f32,
-    path: &'static str,
-    offset: Vec3,
-    scale: f32,
-    asset_yaw: f32,
-) {
-    let world_offset = local_offset_from_yaw(offset, yaw);
-    let x = player_pos.x + world_offset.x;
-    let z = player_pos.z + world_offset.z;
-    // Anchor Y to player_pos.y so first-person village buildings, camp props
-    // and kenney markers sit at eye level instead of 19m+ above the player on
-    // tall-hill terrain (root cause C of iter_200).
-    let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
-    commands.spawn((
-        WorldAssetRoot(scene),
-        Transform::from_translation(Vec3::new(x, player_pos.y + offset.y, z))
-            .with_rotation(Quat::from_rotation_y(yaw + asset_yaw))
-            .with_scale(Vec3::splat(scale)),
-    ));
-}
-
-fn spawn_first_person_village(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    game_world: &GameWorld,
-    player_pos: Vec3,
-    yaw: f32,
-) {
-    const BUILDINGS: &[(&str, Vec3, f32, f32)] = &[
-        (
-            "procedural/pretty/house_small.glb",
-            Vec3::new(-7.0, 0.0, 20.0),
-            2.2,
-            0.20,
-        ),
-        (
-            "procedural/pretty/tavern.glb",
-            Vec3::new(7.0, 0.0, 23.0),
-            2.1,
-            -0.25,
-        ),
-        (
-            "procedural/pretty/well.glb",
-            Vec3::new(0.0, 0.0, 18.0),
-            1.7,
-            0.0,
-        ),
-        (
-            "procedural/pretty/barn.glb",
-            Vec3::new(-12.0, 0.0, 30.0),
-            2.3,
-            0.35,
-        ),
-        (
-            "procedural/pretty/windmill.glb",
-            Vec3::new(13.0, 0.0, 33.0),
-            2.2,
-            -0.45,
-        ),
-        (
-            "procedural/pretty/watchtower.glb",
-            Vec3::new(-18.0, 0.0, 38.0),
-            2.1,
-            0.10,
-        ),
-        (
-            "procedural/pretty/market_stall.glb",
-            Vec3::new(5.0, 0.0, 15.0),
-            1.8,
-            0.65,
-        ),
-        (
-            "procedural/pretty/fence.glb",
-            Vec3::new(-4.0, 0.0, 13.0),
-            2.0,
-            1.57,
-        ),
-        (
-            "procedural/pretty/fence.glb",
-            Vec3::new(10.0, 0.0, 17.0),
-            2.0,
-            1.57,
-        ),
-        (
-            "procedural/pretty/signpost.glb",
-            Vec3::new(-1.8, 0.0, 12.0),
-            1.4,
-            -0.35,
-        ),
-        (
-            "procedural/pretty/lantern_post.glb",
-            Vec3::new(3.2, 0.0, 12.0),
-            1.6,
-            0.0,
-        ),
-        (
-            "procedural/pretty/crate.glb",
-            Vec3::new(-8.5, 0.0, 14.0),
-            1.4,
-            0.4,
-        ),
-        (
-            "procedural/pretty/barrel.glb",
-            Vec3::new(8.8, 0.0, 14.5),
-            1.4,
-            -0.2,
-        ),
-    ];
-
-    for (path, offset, scale, asset_yaw) in BUILDINGS {
-        spawn_scene_asset(
-            commands,
-            asset_server,
-            game_world,
-            player_pos,
-            yaw,
-            path,
-            *offset,
-            *scale,
-            *asset_yaw,
-        );
-    }
-}
-
-fn spawn_first_person_camp_props(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    game_world: &GameWorld,
-    player_pos: Vec3,
-    yaw: f32,
-) {
-    const PROPS: &[(&str, Vec3, f32, f32)] = &[
-        (
-            "kenney/curated/survival_props/kenney_tent.glb",
-            Vec3::new(-13.0, 0.0, 17.0),
-            1.4,
-            0.35,
-        ),
-        (
-            "kenney/curated/survival_props/kenney_campfire_pit.glb",
-            Vec3::new(-10.0, 0.0, 15.0),
-            1.3,
-            0.0,
-        ),
-        (
-            "kenney/curated/survival_props/kenney_workbench.glb",
-            Vec3::new(12.0, 0.0, 18.0),
-            1.3,
-            -0.45,
-        ),
-        (
-            "kenney/curated/characters/kenney_villager_male_a.glb",
-            Vec3::new(-2.8, 0.0, 16.0),
-            1.0,
-            0.15,
-        ),
-        (
-            "kenney/curated/characters/kenney_villager_female_a.glb",
-            Vec3::new(2.8, 0.0, 16.5),
-            1.0,
-            -0.15,
-        ),
-    ];
-
-    for (path, offset, scale, asset_yaw) in PROPS {
-        spawn_scene_asset(
-            commands,
-            asset_server,
-            game_world,
-            player_pos,
-            yaw,
-            path,
-            *offset,
-            *scale,
-            *asset_yaw,
-        );
-    }
-}
-
-fn spawn_kenney_landmarks(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    player_pos: Vec3,
-    _ground_y: f32,
-) {
-    const LANDMARKS: &[(&str, &str, Vec3, f32, f32)] = &[
-        (
-            "kenney_campfire_pit",
-            "kenney/curated/survival_props/kenney_campfire_pit.glb",
-            Vec3::new(-5.5, -0.35, -8.0),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_tent",
-            "kenney/curated/survival_props/kenney_tent.glb",
-            Vec3::new(-8.0, -0.35, -10.5),
-            1.0,
-            0.4,
-        ),
-        (
-            "kenney_workbench",
-            "kenney/curated/survival_props/kenney_workbench.glb",
-            Vec3::new(-3.0, -0.35, -10.0),
-            1.0,
-            -0.2,
-        ),
-        (
-            "kenney_resource_wood",
-            "kenney/curated/survival_props/kenney_resource_wood.glb",
-            Vec3::new(-2.0, -0.35, -6.0),
-            1.0,
-            0.2,
-        ),
-        (
-            "kenney_resource_stone",
-            "kenney/curated/survival_props/kenney_resource_stone.glb",
-            Vec3::new(-8.5, -0.35, -6.5),
-            1.0,
-            -0.3,
-        ),
-        (
-            "kenney_tool_axe",
-            "kenney/curated/survival_props/kenney_tool_axe.glb",
-            Vec3::new(-4.3, -0.20, -5.0),
-            1.0,
-            0.9,
-        ),
-        (
-            "kenney_tool_pickaxe",
-            "kenney/curated/survival_props/kenney_tool_pickaxe.glb",
-            Vec3::new(-5.8, -0.20, -5.2),
-            1.0,
-            0.7,
-        ),
-        (
-            "kenney_row_boat_small",
-            "kenney/curated/coastal_and_pirate/kenney_row_boat_small.glb",
-            Vec3::new(11.0, -0.30, 13.5),
-            1.0,
-            -0.8,
-        ),
-        (
-            "kenney_dock_platform",
-            "kenney/curated/coastal_and_pirate/kenney_dock_platform.glb",
-            Vec3::new(8.0, -0.35, 12.0),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_palm_straight",
-            "kenney/curated/coastal_and_pirate/kenney_palm_straight.glb",
-            Vec3::new(14.0, -0.35, 10.0),
-            1.0,
-            0.2,
-        ),
-        (
-            "kenney_ship_wreck",
-            "kenney/curated/coastal_and_pirate/kenney_ship_wreck.glb",
-            Vec3::new(17.0, -0.35, 15.0),
-            1.0,
-            -0.5,
-        ),
-        (
-            "kenney_pirate_flag",
-            "kenney/curated/coastal_and_pirate/kenney_pirate_flag.glb",
-            Vec3::new(6.0, -0.35, 13.0),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_cannon",
-            "kenney/curated/coastal_and_pirate/kenney_cannon.glb",
-            Vec3::new(5.0, -0.35, 10.0),
-            1.0,
-            1.2,
-        ),
-        (
-            "kenney_villager_male_a",
-            "kenney/curated/characters/kenney_villager_male_a.glb",
-            Vec3::new(3.0, -0.35, -7.0),
-            1.0,
-            -0.4,
-        ),
-        (
-            "kenney_villager_female_a",
-            "kenney/curated/characters/kenney_villager_female_a.glb",
-            Vec3::new(5.0, -0.35, -9.0),
-            1.0,
-            0.6,
-        ),
-        (
-            "kenney_bunny",
-            "kenney/curated/animals/kenney_bunny.glb",
-            Vec3::new(8.0, -0.35, -4.0),
-            1.0,
-            -0.7,
-        ),
-        (
-            "kenney_deer",
-            "kenney/curated/animals/kenney_deer.glb",
-            Vec3::new(13.0, -0.35, -7.0),
-            1.0,
-            0.1,
-        ),
-        (
-            "kenney_cow",
-            "kenney/curated/animals/kenney_cow.glb",
-            Vec3::new(11.0, -0.35, -12.5),
-            1.0,
-            -0.6,
-        ),
-        (
-            "kenney_fox",
-            "kenney/curated/animals/kenney_fox.glb",
-            Vec3::new(15.5, -0.35, -2.5),
-            1.0,
-            0.8,
-        ),
-        (
-            "kenney_bear",
-            "kenney/curated/animals/kenney_bear.glb",
-            Vec3::new(18.0, -0.35, -9.0),
-            1.0,
-            -0.9,
-        ),
-        (
-            "kenney_block_grass_large",
-            "kenney/curated/terrain_and_pickups/kenney_block_grass_large.glb",
-            Vec3::new(0.0, -0.35, 8.0),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_block_snow_large",
-            "kenney/curated/terrain_and_pickups/kenney_block_snow_large.glb",
-            Vec3::new(2.8, -0.35, 8.0),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_coin_gold",
-            "kenney/curated/terrain_and_pickups/kenney_coin_gold.glb",
-            Vec3::new(1.2, 0.25, 5.5),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_heart",
-            "kenney/curated/terrain_and_pickups/kenney_heart.glb",
-            Vec3::new(2.6, 0.35, 5.8),
-            1.0,
-            0.0,
-        ),
-        (
-            "kenney_door_open",
-            "kenney/curated/terrain_and_pickups/kenney_door_open.glb",
-            Vec3::new(-1.5, -0.35, 7.0),
-            1.0,
-            0.0,
-        ),
-    ];
-
-    for (name, path, offset, scale, yaw) in LANDMARKS {
-        let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(*path));
-        // Anchor Y to player.pos.y so kenney props sit at eye level in
-        // first-person view. The previous ground_y-based Y could be 19m+ above
-        // the player's head (see iter_200 task root cause C).
-        let pos = Vec3::new(
-            player_pos.x + offset.x,
-            player_pos.y + offset.y,
-            player_pos.z + offset.z,
-        );
-        commands.spawn((
-            WorldAssetRoot(scene),
-            Transform::from_translation(pos)
-                .with_rotation(Quat::from_rotation_y(*yaw))
-                .with_scale(Vec3::splat(*scale)),
-            KenneyLandmark { rel: *offset, y_offset: offset.y },
-        ));
-        info!("[kenney] spawned landmark {} at {:?}", name, pos);
-    }
-}
-
-pub fn follow_kenney_landmarks(
-    player: Res<PlayerState>,
-    _game_world: Res<GameWorld>,
-    camera_angles: Res<CameraAngles>,
-    mut q: Query<(&mut Transform, &KenneyLandmark)>,
-) {
-    let yaw = camera_angles.yaw;
-    let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
-    let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
-    for (mut transform, landmark) in &mut q {
-        let rel = right * landmark.rel.x + forward * landmark.rel.z;
-        let x = player.pos.x + rel.x;
-        let z = player.pos.z + rel.z;
-        // Track player.pos.y instead of ground_y so props stay anchored to the
-        // player (which is what makes them visible in first-person).
-        transform.translation = Vec3::new(x, player.pos.y + landmark.y_offset, z);
-    }
-}
-
-fn spawn_v2_crown_season_markers(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    player_pos: Vec3,
-    ground_y: f32,
-) {
-    spawn_v2_cube(
-        commands,
-        meshes,
-        materials,
-        Vec3::new(player_pos.x, ground_y + 0.28, player_pos.z),
-        Vec3::new(7.5, 0.26, 7.5),
-        Color::srgb(0.28, 0.34, 0.24),
-        Color::srgb(0.16, 0.26, 0.12),
-    );
-
-    let pois = [
-        (
-            Vec3::new(12.5, 0.85, -12.5),
-            Vec3::new(0.65, 1.70, 0.65),
-            Color::srgb(0.70, 0.30, 0.18),
-            Color::srgb(0.95, 0.50, 0.24),
-        ),
-        (
-            Vec3::new(-12.5, 0.75, -12.5),
-            Vec3::new(0.70, 1.50, 0.70),
-            Color::srgb(0.15, 0.46, 0.42),
-            Color::srgb(0.28, 0.82, 0.72),
-        ),
-        (
-            Vec3::new(12.5, 0.70, 12.5),
-            Vec3::new(0.80, 1.40, 0.80),
-            Color::srgb(0.55, 0.16, 0.28),
-            Color::srgb(0.90, 0.28, 0.44),
-        ),
-        (
-            Vec3::new(-12.5, 0.65, 12.5),
-            Vec3::new(0.70, 1.30, 0.70),
-            Color::srgb(0.62, 0.48, 0.20),
-            Color::srgb(0.95, 0.76, 0.26),
-        ),
-    ];
-
-    for (offset, size, base, glow) in pois {
-        spawn_v2_cube(
-            commands,
-            meshes,
-            materials,
-            Vec3::new(
-                player_pos.x + offset.x,
-                ground_y + offset.y,
-                player_pos.z + offset.z,
-            ),
-            size,
-            base,
-            glow,
-        );
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.62))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: glow,
-                emissive: (glow.to_linear() * 1.15).into(),
-                perceptual_roughness: 0.38,
-                metallic: 0.0,
-                ..default()
-            })),
-            Transform::from_translation(Vec3::new(
-                player_pos.x + offset.x,
-                ground_y + offset.y + size.y * 0.58,
-                player_pos.z + offset.z,
-            )),
-            V2WorldMarker,
-        ));
-    }
-}
-
-fn spawn_v2_cube(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    pos: Vec3,
-    size: Vec3,
-    base: Color,
-    glow: Color,
-) -> Entity {
-    commands
-        .spawn((
-            Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: base,
-                emissive: (glow.to_linear() * 0.65).into(),
-                perceptual_roughness: 0.62,
-                metallic: 0.0,
-                ..default()
-            })),
-            Transform::from_translation(pos),
-            V2WorldMarker,
-        ))
-        .id()
 }
 
 fn spawn_playable_village_diorama(
@@ -1603,7 +1038,9 @@ fn spawn_playable_village_diorama(
             Mesh3d(patch_mesh.clone()),
             MeshMaterial3d(grass_dark.clone()),
             Transform::from_translation(pos)
-                .with_rotation(Quat::from_rotation_y(pretty_hash01(i, 23) * std::f32::consts::TAU))
+                .with_rotation(Quat::from_rotation_y(
+                    pretty_hash01(i, 23) * std::f32::consts::TAU,
+                ))
                 .with_scale(Vec3::new(
                     0.7 + pretty_hash01(i, 29) * 1.5,
                     1.0,
@@ -1643,26 +1080,34 @@ fn spawn_playable_village_diorama(
     }
 
     for (path, ox, oz, scale, yaw) in [
-        ("procedural/pretty/house_small.glb", -6.0, -16.0, 0.62, 0.35),
-        ("procedural/pretty/house_small.glb", 6.5, -16.0, 0.58, -0.2),
-        ("procedural/pretty/house_small.glb", 15.5, -4.0, 0.56, 0.15),
-        ("procedural/pretty/chapel.glb", -15.0, -3.0, 0.56, 0.1),
-        ("procedural/pretty/well.glb", -8.0, -8.5, 0.44, 0.0),
-        ("procedural/pretty/market_stall.glb", 7.0, 2.0, 0.56, 0.7),
+        ("procedural/pretty/well.glb", -8.0, -8.5, 0.38, 0.0),
+        ("procedural/pretty/market_stall.glb", 7.0, 2.0, 0.44, 0.7),
+        ("procedural/pretty/barrel.glb", 4.8, -2.6, 0.34, 0.4),
     ] {
-        spawn_grounded_scene(commands, game_world, player_pos, asset_server, path, ox, oz, 0.03, scale, yaw);
+        spawn_grounded_scene(
+            commands,
+            game_world,
+            player_pos,
+            asset_server,
+            path,
+            ox,
+            oz,
+            0.03,
+            scale,
+            yaw,
+        );
     }
 
     for (ox, oz, scale) in [
-        (-23.0, -20.0, 0.52),
-        (-20.0, -12.0, 0.48),
-        (-22.0, -2.0, 0.50),
-        (-18.0, 11.0, 0.46),
-        (-12.0, 16.0, 0.44),
-        (20.0, -19.0, 0.48),
-        (22.0, -10.0, 0.46),
-        (21.0, 2.0, 0.44),
-        (20.0, 14.0, 0.42),
+        (-23.0, -20.0, 0.34),
+        (-20.0, -12.0, 0.32),
+        (-22.0, -2.0, 0.33),
+        (-18.0, 11.0, 0.31),
+        (-12.0, 16.0, 0.30),
+        (20.0, -19.0, 0.32),
+        (22.0, -10.0, 0.31),
+        (21.0, 2.0, 0.30),
+        (20.0, 14.0, 0.29),
     ] {
         spawn_grounded_scene(
             commands,
@@ -1678,6 +1123,70 @@ fn spawn_playable_village_diorama(
         );
     }
 
+    for (i, (ox, oz, yaw)) in [
+        (-7.5, -3.5, 0.1),
+        (-5.2, 1.5, -0.2),
+        (-2.8, 5.4, 0.4),
+        (2.5, -2.8, -0.5),
+        (4.6, 2.6, 0.25),
+        (8.4, 5.6, -0.15),
+        (-12.2, 4.8, 0.55),
+        (12.4, -8.0, -0.35),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        spawn_grounded_scene(
+            commands,
+            game_world,
+            player_pos,
+            asset_server,
+            ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush)).model_path,
+            ox,
+            oz,
+            0.06,
+            0.46,
+            yaw,
+        );
+        for fruit_index in 0..3 {
+            let angle = fruit_index as f32 * std::f32::consts::TAU / 3.0 + i as f32 * 0.43;
+            spawn_grounded_scene(
+                commands,
+                game_world,
+                player_pos,
+                asset_server,
+                ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit)).model_path,
+                ox + angle.cos() * 0.24,
+                oz + angle.sin() * 0.24,
+                0.40,
+                0.22,
+                angle,
+            );
+        }
+    }
+
+    for (ox, oz, yaw) in [
+        (-9.0, -0.5, 0.7),
+        (-3.8, 3.6, -0.5),
+        (3.4, 4.8, 1.1),
+        (8.2, -2.2, -1.0),
+        (13.5, 2.7, 0.3),
+        (-15.4, -5.5, -0.8),
+    ] {
+        spawn_grounded_scene(
+            commands,
+            game_world,
+            player_pos,
+            asset_server,
+            ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit)).model_path,
+            ox,
+            oz,
+            0.06,
+            0.42,
+            yaw,
+        );
+    }
+
     let rock_mesh = meshes.add(Cuboid::new(0.35, 0.20, 0.30));
     for i in 0..70 {
         let ox = -23.0 + pretty_hash01(i, 41) * 46.0;
@@ -1687,7 +1196,9 @@ fn spawn_playable_village_diorama(
             Mesh3d(rock_mesh.clone()),
             MeshMaterial3d(rock.clone()),
             Transform::from_translation(pos)
-                .with_rotation(Quat::from_rotation_y(pretty_hash01(i, 47) * std::f32::consts::TAU))
+                .with_rotation(Quat::from_rotation_y(
+                    pretty_hash01(i, 47) * std::f32::consts::TAU,
+                ))
                 .with_scale(Vec3::splat(0.55 + pretty_hash01(i, 53) * 0.75)),
         ));
     }
@@ -1729,12 +1240,122 @@ fn grounded_world_pos(
 }
 
 fn pretty_hash01(i: usize, salt: usize) -> f32 {
-    let mut x = (i as u32)
-        .wrapping_mul(1_664_525)
-        .wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
+    let mut x =
+        (i as u32).wrapping_mul(1_664_525).wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
     x ^= x >> 16;
     x = x.wrapping_mul(2_246_822_519);
     ((x >> 8) as f32) / ((u32::MAX >> 8) as f32)
+}
+
+fn spawn_ground_detail_layer(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let patch_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
+    let pebble_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let tuft_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
+    let patch_mats: Vec<Handle<StandardMaterial>> = [
+        Color::srgba(0.24, 0.48, 0.20, 0.58),
+        Color::srgba(0.42, 0.56, 0.24, 0.46),
+        Color::srgba(0.30, 0.43, 0.19, 0.50),
+        Color::srgba(0.47, 0.38, 0.22, 0.36),
+        Color::srgba(0.36, 0.50, 0.32, 0.42),
+    ]
+    .into_iter()
+    .map(|color| {
+        materials.add(StandardMaterial {
+            base_color: color,
+            emissive: (color.to_linear() * 0.06).into(),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.98,
+            metallic: 0.0,
+            ..default()
+        })
+    })
+    .collect();
+
+    let pebble_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.54, 0.53, 0.45),
+        emissive: Color::srgb(0.035, 0.035, 0.030).into(),
+        perceptual_roughness: 0.92,
+        metallic: 0.0,
+        ..default()
+    });
+    let tuft_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.19, 0.43, 0.16),
+        emissive: Color::srgb(0.025, 0.065, 0.020).into(),
+        perceptual_roughness: 0.96,
+        metallic: 0.0,
+        ..default()
+    });
+    let flower_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.94, 0.67, 0.34),
+        emissive: Color::srgb(0.12, 0.07, 0.03).into(),
+        perceptual_roughness: 0.86,
+        metallic: 0.0,
+        ..default()
+    });
+
+    for i in 0..42 {
+        let radius = 5.0 + pretty_hash01(i, 1) * 34.0;
+        let angle = i as f32 * 2.3999631 + pretty_hash01(i, 2) * 0.55;
+        let offset = Vec2::new(angle.cos() * radius, angle.sin() * radius * 0.72);
+        let x = player_pos.x + offset.x;
+        let z = player_pos.z + offset.y;
+        let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+        let sx = 2.8 + pretty_hash01(i, 3) * 5.6;
+        let sz = 1.4 + pretty_hash01(i, 4) * 3.6;
+        commands.spawn((
+            Mesh3d(patch_mesh.clone()),
+            MeshMaterial3d(patch_mats[i % patch_mats.len()].clone()),
+            Transform::from_translation(Vec3::new(x, ground_y + 0.052, z))
+                .with_rotation(Quat::from_rotation_y(angle * 0.37))
+                .with_scale(Vec3::new(sx, 1.0, sz)),
+            GroundDetail { offset, y_offset: 0.052 },
+        ));
+    }
+
+    for i in 0..46 {
+        let radius = 4.0 + pretty_hash01(i, 11) * 32.0;
+        let angle = i as f32 * 1.671 + pretty_hash01(i, 12);
+        let offset = Vec2::new(angle.cos() * radius, angle.sin() * radius * 0.70);
+        let x = player_pos.x + offset.x;
+        let z = player_pos.z + offset.y;
+        let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+        let is_flower = i % 9 == 0;
+        let scale = if is_flower {
+            Vec3::new(0.10, 0.24, 0.10)
+        } else if i % 3 == 0 {
+            Vec3::new(0.22, 0.10, 0.18)
+        } else {
+            Vec3::new(0.10, 0.24 + pretty_hash01(i, 13) * 0.18, 0.10)
+        };
+        let y_offset = if is_flower { 0.16 } else { scale.y * 0.5 };
+        let mesh = if i % 3 == 0 {
+            pebble_mesh.clone()
+        } else {
+            tuft_mesh.clone()
+        };
+        let material = if is_flower {
+            flower_mat.clone()
+        } else if i % 3 == 0 {
+            pebble_mat.clone()
+        } else {
+            tuft_mat.clone()
+        };
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(Vec3::new(x, ground_y + y_offset, z))
+                .with_rotation(Quat::from_rotation_y(angle))
+                .with_scale(scale),
+            GroundDetail { offset, y_offset },
+        ));
+    }
 }
 
 fn spawn_cube(

@@ -41,8 +41,8 @@ use lk2_core::world::{World as GameWorld, WorldConfig, generate_world, player_sp
 use crate::capture::{TickRecorder, periodic_screenshot, tick_recorder};
 use crate::pretty::{
     PlayerAnimState, PrettyConfig, animate_avatar, animate_cloud_puffs, animate_monsters,
-    follow_ground_discs, follow_kenney_landmarks, follow_monster_cubes, follow_water,
-    spawn_eco_visuals, spawn_pretty, update_eco_visuals, update_player_anim_state,
+    follow_grass_platform, follow_ground_details, follow_ground_discs, follow_monster_cubes,
+    follow_water, spawn_eco_visuals, spawn_pretty, update_eco_visuals, update_player_anim_state,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -50,13 +50,14 @@ use crate::pvp_systems::{
     trigger_visual_effects,
 };
 use crate::render::{
-    CameraAngles, CameraMode, FreeFlyState, JumpState, LastMoveDirection, NestMarkerCount, Player,
-    RenderConfig, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle, cycle_terrain_preset,
-    emergency_teleport, first_person_camera, freefly_movement, freefly_toggle, held_weapon_follow,
-    maintain_cursor_grab, mouse_look_system, player_input, setup_atmosphere, setup_cursor_grab,
-    setup_terrain_underlay, spawn_nest_markers, spawn_terrain_around_player,
-    toggle_cursor_grab_on_esc, underlay_follow_player, update_animal_indicator,
-    update_nest_indicator, update_nest_marker_positions,
+    AntiStuckState, CameraAngles, CameraMode, FreeFlyState, JumpState, LastMoveDirection,
+    NestMarkerCount, Player, RenderConfig, SpawnedBlocks, SwordSwing, auto_demo,
+    camera_mode_toggle, cycle_terrain_preset, emergency_teleport, first_person_camera,
+    freefly_movement, freefly_toggle, held_weapon_follow, maintain_cursor_grab, mouse_look_system,
+    offline_anti_stuck, player_input, setup_atmosphere, setup_cursor_grab, setup_terrain_underlay,
+    spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
+    underlay_follow_player, update_animal_indicator, update_nest_indicator,
+    update_nest_marker_positions,
 };
 use crate::ui::{
     ClientRunMode, setup_fonts, setup_hud, update_hud, update_nest_radar, update_tutorial_overlay,
@@ -71,7 +72,9 @@ fn workspace_asset_root() -> PathBuf {
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::Controlled;
 use lk2_core::protocol::PlayerAction;
-use lk2_core::protocol::components::{EcoSnapshot, GameplayHudState, Health, VoxelDelta};
+use lk2_core::protocol::components::{
+    EcoSnapshot, GameplayHudState, Health, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
+};
 use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
 
@@ -152,6 +155,9 @@ struct ReplicatedSnapshot {
     eco_berries: usize,
     eco_plants: usize,
     last_voxel_revision: u64,
+    last_chunk_revision: u64,
+    last_chunk_x: i32,
+    last_chunk_z: i32,
 }
 
 #[derive(Resource, Debug, Clone)]
@@ -193,6 +199,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let offline_mode = args.iter().any(|a| a == "--offline");
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
+    let no_scenario_mode = args.iter().any(|a| a == "--no-scenario");
     let first_person_mode = args.iter().any(|a| a == "--first-person");
     let hold_forward_test = args.iter().any(|a| a == "--hold-forward-test");
     let no_focus_window = args.iter().any(|a| a == "--no-focus-window");
@@ -263,8 +270,10 @@ fn main() {
         }
     }
 
-    let scenario = if auto_demo_mode {
-        Scenario {
+    let scenario = if no_scenario_mode && !auto_demo_mode {
+        None
+    } else if auto_demo_mode {
+        Some(Scenario {
             name: "idle".into(),
             record_window: None,
             steps: vec![
@@ -273,11 +282,16 @@ fn main() {
                 },
                 lk2_core::scenario::ScenarioStep::WaitTicks { ticks: AUTO_DEMO_WAIT_TICKS },
             ],
-        }
+        })
     } else {
-        lk2_core::scenario::load_scenario_from_args_or_default(&args)
+        Some(lk2_core::scenario::load_scenario_from_args_or_default(
+            &args,
+        ))
     };
-    let scenario_state = ScenarioState::from_scenario(scenario.clone());
+    let scenario_name =
+        scenario.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| "manual".to_string());
+    let scenario_state =
+        scenario.map(ScenarioState::from_scenario).unwrap_or_else(ScenarioState::default);
 
     let _ = std::fs::create_dir_all("screenshots");
 
@@ -291,7 +305,7 @@ fn main() {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: format!("万国起源：最后一国 钻石版 — {}", scenario.name).into(),
+                    title: format!("万国起源：最后一国 钻石版 — {}", scenario_name).into(),
                     resolution: WindowResolution::new(1280, 720),
 
                     present_mode: PresentMode::Immediate,
@@ -364,8 +378,14 @@ fn main() {
         tracing::info!("--hold-forward-test: simulating held W without OS input");
     }
 
+    let camera_angles = if auto_demo_mode && !first_person_mode {
+        CameraAngles { yaw: std::f32::consts::FRAC_PI_2, pitch: -0.22 }
+    } else {
+        CameraAngles::default()
+    };
+
     app.insert_resource(render_config)
-        .insert_resource(CameraAngles::default())
+        .insert_resource(camera_angles)
         .init_resource::<SwordSwing>()
         .insert_resource(if first_person_mode {
             CameraMode::FirstPerson
@@ -386,6 +406,7 @@ fn main() {
         .init_resource::<LastMoveDirection>()
         .init_resource::<FreeFlyState>()
         .init_resource::<JumpState>()
+        .init_resource::<AntiStuckState>()
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
         .init_resource::<ReplicatedSnapshot>()
@@ -447,6 +468,7 @@ fn main() {
             apply_server_pos_update,
             debug_dump_replicated_entities,
             apply_authoritative_snapshot,
+            apply_voxel_chunk_snapshot,
             apply_voxel_delta,
         )
             .chain(),
@@ -459,6 +481,7 @@ fn main() {
             maintain_cursor_grab,
             mouse_look_system,
             player_input,
+            offline_anti_stuck.run_if(resource_equals(ClientRunMode::Offline)),
             send_online_gameplay_commands,
             first_person_camera,
             record_online_motion_trace,
@@ -512,10 +535,11 @@ fn main() {
     app.add_systems(
         Update,
         (
+            follow_grass_platform,
             follow_ground_discs,
+            follow_ground_details,
             underlay_follow_player,
             follow_water,
-            follow_kenney_landmarks,
             follow_monster_cubes,
             animate_monsters,
             animate_cloud_puffs,
@@ -825,6 +849,62 @@ fn apply_voxel_delta(
     }
 }
 
+fn apply_voxel_chunk_snapshot(
+    run_mode: Res<ClientRunMode>,
+    chunk_q: Query<&VoxelChunkSnapshot>,
+    mut snapshot: ResMut<ReplicatedSnapshot>,
+    mut game_world: ResMut<GameWorld>,
+    mut spawned: ResMut<SpawnedBlocks>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    for chunk in chunk_q.iter() {
+        if chunk.revision < snapshot.last_chunk_revision {
+            continue;
+        }
+        if chunk.revision == snapshot.last_chunk_revision
+            && chunk.chunk_x == snapshot.last_chunk_x
+            && chunk.chunk_z == snapshot.last_chunk_z
+        {
+            continue;
+        }
+        if chunk.y_size <= 0 {
+            continue;
+        }
+
+        let expected_len = (VOXEL_CHUNK_SIZE_XZ * VOXEL_CHUNK_SIZE_XZ * chunk.y_size) as usize;
+        if chunk.blocks.len() != expected_len {
+            tracing::warn!(
+                "[net] ignoring malformed chunk snapshot ({},{}): len={} expected={}",
+                chunk.chunk_x,
+                chunk.chunk_z,
+                chunk.blocks.len(),
+                expected_len
+            );
+            continue;
+        }
+
+        let x_min = chunk.chunk_x * VOXEL_CHUNK_SIZE_XZ;
+        let z_min = chunk.chunk_z * VOXEL_CHUNK_SIZE_XZ;
+        let mut i = 0usize;
+        for y in chunk.y_min..(chunk.y_min + chunk.y_size) {
+            for z in z_min..(z_min + VOXEL_CHUNK_SIZE_XZ) {
+                for x in x_min..(x_min + VOXEL_CHUNK_SIZE_XZ) {
+                    let block = block_type_from_u8(chunk.blocks[i]);
+                    game_world.set(x, y, z, block);
+                    i += 1;
+                }
+            }
+        }
+
+        snapshot.last_chunk_revision = chunk.revision;
+        snapshot.last_chunk_x = chunk.chunk_x;
+        snapshot.last_chunk_z = chunk.chunk_z;
+        spawned.last_player_block = [i32::MIN; 3];
+    }
+}
+
 fn record_online_motion_trace(
     run_mode: Res<ClientRunMode>,
     time: Res<Time>,
@@ -832,15 +912,17 @@ fn record_online_motion_trace(
     camera_q: Query<&Transform, With<Camera3d>>,
     mut trace: ResMut<OnlineMotionTrace>,
 ) {
-    if *run_mode != ClientRunMode::Online {
-        return;
-    }
     if !trace.enabled {
         trace.enabled =
             std::env::var("LK2_MOTION_TRACE").is_ok() || std::env::var("LK2_ONLINE_PROBE").is_ok();
         if trace.enabled {
             let _ = std::fs::create_dir_all("screenshots");
-            match std::fs::File::create("screenshots/online_motion_trace.jsonl") {
+            let path = if *run_mode == ClientRunMode::Online {
+                "screenshots/online_motion_trace.jsonl"
+            } else {
+                "screenshots/offline_motion_trace.jsonl"
+            };
+            match std::fs::File::create(path) {
                 Ok(file) => trace.file = Some(file),
                 Err(err) => {
                     warn!("[motion-trace] failed to create trace file: {err}");
@@ -1143,6 +1225,7 @@ fn setup_world(
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
     mut player: ResMut<PlayerState>,
+    mut anti_stuck: ResMut<AntiStuckState>,
 ) {
     *game_world = generate_world(&WorldConfig {
         preset: preset_name_static().to_string(),
@@ -1189,6 +1272,9 @@ fn setup_world(
         player.block_pos = [48, 16, 48];
         player.pos = Vec3::new(48.5, 16.0, 48.5);
     }
+    anti_stuck.last_safe_pos = player.pos;
+    anti_stuck.last_safe_block = player.block_pos;
+    anti_stuck.unsafe_ticks = 0;
     player.inventory.insert(ResourceKind::Wood, 0);
     player.inventory.insert(ResourceKind::Food, 5);
 

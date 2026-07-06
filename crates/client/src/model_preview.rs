@@ -25,8 +25,8 @@ use bevy::pbr::{
     AtmosphereSettings, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
     ScreenSpaceReflections,
 };
-use bevy::prelude::*;
 use bevy::post_process::bloom::Bloom;
+use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{PresentMode, WindowResolution};
 use bevy_world_serialization::WorldAsset;
@@ -114,11 +114,7 @@ pub fn run_model_preview() {
     // driver loop can iterate every GLB without overwriting the previous shot.
     let png_path = match single_filter.as_deref() {
         Some(filter) => {
-            let stem = normalize_filter(filter)
-                .rsplit('/')
-                .next()
-                .unwrap_or("model")
-                .to_string();
+            let stem = normalize_filter(filter).rsplit('/').next().unwrap_or("model").to_string();
             output_dir.join(format!("{stem}.png"))
         }
         None => output_dir.join("model_preview.png"),
@@ -215,7 +211,10 @@ fn collect_preview_glbs(
         if !matches.is_empty() {
             return matches;
         }
-        warn!("[model-preview] no GLB matched '{}'; showing featured set", filter);
+        warn!(
+            "[model-preview] no GLB matched '{}'; showing featured set",
+            filter
+        );
     }
 
     if !show_all {
@@ -237,7 +236,8 @@ fn normalize_filter(filter: &str) -> String {
 }
 
 fn preview_path_matches(asset_path: &str, normalized_filter: &str) -> bool {
-    let normalized_path = asset_path.strip_suffix(".glb").unwrap_or(asset_path).to_ascii_lowercase();
+    let normalized_path =
+        asset_path.strip_suffix(".glb").unwrap_or(asset_path).to_ascii_lowercase();
     let stem = normalized_path.rsplit('/').next().unwrap_or(&normalized_path);
     normalized_path == normalized_filter
         || stem == normalized_filter
@@ -259,7 +259,8 @@ fn collect_glbs_recursive(asset_root: &Path, dir: &Path, out: &mut Vec<(String, 
         {
             continue;
         }
-        let rel = path.strip_prefix(asset_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let rel =
+            path.strip_prefix(asset_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
         let category = path
             .parent()
             .and_then(|parent| parent.strip_prefix(asset_root).ok())
@@ -325,7 +326,11 @@ fn spawn_models(
     mut state: ResMut<ModelPreviewState>,
     show_all: Res<ShowAllModels>,
 ) {
-    let glbs = collect_preview_glbs(&state.asset_root, show_all.0, state.single_filter.as_deref());
+    let glbs = collect_preview_glbs(
+        &state.asset_root,
+        show_all.0,
+        state.single_filter.as_deref(),
+    );
     let base_mesh = meshes.add(Cylinder::new(CELL_SIZE * 0.30, 0.035));
     let base_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.52, 0.54, 0.48),
@@ -398,12 +403,7 @@ fn setup_camera(mut commands: Commands, state: Res<ModelPreviewState>) {
     } else {
         rows * 3.8
     };
-    let preview_camera = PreviewCamera {
-        yaw: -0.30,
-        distance,
-        height: 3.7,
-        center,
-    };
+    let preview_camera = PreviewCamera { yaw: -0.30, distance, height: 3.7, center };
     let pos = camera_pos(&preview_camera);
     commands.insert_resource(preview_camera);
     commands.spawn((
@@ -428,11 +428,7 @@ fn setup_overlay(mut commands: Commands, state: Res<ModelPreviewState>) {
     if state.auto_shot {
         return;
     }
-    let focused = state
-        .models
-        .get(state.focused_index)
-        .map(|m| m.path.as_str())
-        .unwrap_or("none");
+    let focused = state.models.get(state.focused_index).map(|m| m.path.as_str()).unwrap_or("none");
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -469,7 +465,10 @@ fn preview_overlay_text(state: &ModelPreviewState, fallback: &str) -> String {
     }
 }
 
-fn update_overlay(state: Res<ModelPreviewState>, mut q: Query<&mut Text, With<PreviewOverlayText>>) {
+fn update_overlay(
+    state: Res<ModelPreviewState>,
+    mut q: Query<&mut Text, With<PreviewOverlayText>>,
+) {
     if !state.is_changed() {
         return;
     }
@@ -535,7 +534,11 @@ fn focus_controls(
     }
     let mut changed = false;
     if keys.just_pressed(KeyCode::BracketLeft) {
-        state.focused_index = if state.focused_index == 0 { len - 1 } else { state.focused_index - 1 };
+        state.focused_index = if state.focused_index == 0 {
+            len - 1
+        } else {
+            state.focused_index - 1
+        };
         changed = true;
     }
     if keys.just_pressed(KeyCode::BracketRight) {
@@ -547,7 +550,11 @@ fn focus_controls(
     }
     if changed {
         if let Some(model) = state.models.get(state.focused_index) {
-            camera.center = Vec3::new(model.world_pos[0], model.world_pos[1] + 1.2, model.world_pos[2]);
+            camera.center = Vec3::new(
+                model.world_pos[0],
+                model.world_pos[1] + 1.2,
+                model.world_pos[2],
+            );
             camera.distance = 4.8;
             camera.height = 3.7;
         }
@@ -592,7 +599,12 @@ fn maybe_take_screenshot(
     let pending = state
         .scene_handles
         .iter()
-        .filter(|handle| !matches!(asset_server.load_state(*handle), bevy::asset::LoadState::Loaded))
+        .filter(|handle| {
+            !matches!(
+                asset_server.load_state(*handle),
+                bevy::asset::LoadState::Loaded
+            )
+        })
         .count();
     if state.frame < STABILIZATION_FRAMES || pending > 0 {
         return;
@@ -600,7 +612,10 @@ fn maybe_take_screenshot(
     commands.spawn(Screenshot::primary_window()).observe(save_to_disk(state.png_path.clone()));
     state.shot_requested = true;
     state.exit_deadline = Some(Instant::now() + Duration::from_secs(20));
-    info!("[model-preview] screenshot requested: {}", state.png_path.display());
+    info!(
+        "[model-preview] screenshot requested: {}",
+        state.png_path.display()
+    );
 }
 
 fn exit_model_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<ModelPreviewState>) {
@@ -640,7 +655,8 @@ mod tests {
         assert_eq!(by_stem.len(), 1);
         assert_eq!(by_stem[0].0, "procedural/pretty/sokpop_tree.glb");
 
-        let by_path = collect_preview_glbs(&root, false, Some("procedural/pretty/fallen_stick.glb"));
+        let by_path =
+            collect_preview_glbs(&root, false, Some("procedural/pretty/fallen_stick.glb"));
         assert_eq!(by_path.len(), 1);
         assert_eq!(by_path[0].0, "procedural/pretty/fallen_stick.glb");
     }

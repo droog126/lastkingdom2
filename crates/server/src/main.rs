@@ -8,7 +8,9 @@ use lightyear::prelude::server::ServerUdpIo;
 
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::PlayerAction;
-use lk2_core::protocol::components::{EcoSnapshot, GameplayHudState, PlayerPos, VoxelDelta};
+use lk2_core::protocol::components::{
+    EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
+};
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
 };
@@ -37,8 +39,9 @@ use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
 use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{
-    World as GameWorld, WorldGenerator, install_huge_spawn_platform, player_body_clear,
-    player_spawn_position_near, player_stand_position_at,
+    World as GameWorld, WorldConfig, WorldGenerator, generate_world, player_body_clear,
+    player_position_is_safe, player_spawn_position_near, player_stand_position_at,
+    resolve_player_stuck_near,
 };
 
 use crate::pvp_systems::{
@@ -53,6 +56,8 @@ const PLAYER_COLLISION_RADIUS: f32 = 0.34;
 const JUMP_TAKEOFF_SPEED: f32 = 7.2;
 const JUMP_GRAVITY: f32 = 28.0;
 const JUMP_TERMINAL_SPEED: f32 = -18.0;
+const ANTI_STUCK_SEARCH_RADIUS: i32 = 6;
+const ANTI_STUCK_FAILED_MOVE_LIMIT: u8 = 12;
 
 #[derive(Resource, Debug, Clone, Copy)]
 struct ServerJumpState {
@@ -63,6 +68,19 @@ struct ServerJumpState {
 impl Default for ServerJumpState {
     fn default() -> Self {
         Self { velocity_y: 0.0, grounded: true }
+    }
+}
+
+#[derive(Resource, Debug, Clone)]
+struct AntiStuckState {
+    last_safe_pos: Vec3,
+    last_safe_block: [i32; 3],
+    failed_move_ticks: u8,
+}
+
+impl Default for AntiStuckState {
+    fn default() -> Self {
+        Self { last_safe_pos: Vec3::ZERO, last_safe_block: [0, 0, 0], failed_move_ticks: 0 }
     }
 }
 
@@ -191,6 +209,42 @@ fn empty_voxel_delta() -> VoxelDelta {
         z: 0,
         block: block_type_to_u8(lk2_core::world::BlockType::Air),
     }
+}
+
+fn empty_voxel_chunk_snapshot() -> VoxelChunkSnapshot {
+    VoxelChunkSnapshot {
+        revision: 0,
+        chunk_x: 0,
+        chunk_z: 0,
+        y_min: 0,
+        y_size: 0,
+        blocks: Vec::new(),
+    }
+}
+
+fn build_voxel_chunk_snapshot(
+    world: &GameWorld,
+    revision: u64,
+    player_block_pos: [i32; 3],
+) -> VoxelChunkSnapshot {
+    let chunk_x = player_block_pos[0].div_euclid(VOXEL_CHUNK_SIZE_XZ);
+    let chunk_z = player_block_pos[2].div_euclid(VOXEL_CHUNK_SIZE_XZ);
+    let x_min = chunk_x * VOXEL_CHUNK_SIZE_XZ;
+    let z_min = chunk_z * VOXEL_CHUNK_SIZE_XZ;
+    let y_min = 0;
+    let y_size = world.size;
+    let mut blocks =
+        Vec::with_capacity((VOXEL_CHUNK_SIZE_XZ * VOXEL_CHUNK_SIZE_XZ * y_size) as usize);
+
+    for y in y_min..(y_min + y_size) {
+        for z in z_min..(z_min + VOXEL_CHUNK_SIZE_XZ) {
+            for x in x_min..(x_min + VOXEL_CHUNK_SIZE_XZ) {
+                blocks.push(block_type_to_u8(world.get(x, y, z)));
+            }
+        }
+    }
+
+    VoxelChunkSnapshot { revision, chunk_x, chunk_z, y_min, y_size, blocks }
 }
 
 fn record_voxel_delta(
@@ -482,6 +536,7 @@ fn apply_udp_gameplay_commands(
     world: Res<GameWorld>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
     jump: Res<ServerJumpState>,
+    mut anti_stuck: ResMut<AntiStuckState>,
     mut player_q: Query<
         (
             &mut bevy::prelude::Transform,
@@ -527,7 +582,7 @@ fn apply_udp_gameplay_commands(
     let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
     diagnostics.last_move_applied =
         if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-            if jump.grounded {
+            let moved = if jump.grounded {
                 apply_world_move(
                     &mut transform,
                     &mut player_pos,
@@ -545,10 +600,62 @@ fn apply_udp_gameplay_commands(
                     dir,
                     1.0 / 60.0,
                 )
-            }
+            };
+            maintain_anti_stuck(
+                &world,
+                &mut player,
+                &mut transform,
+                &mut player_pos,
+                &mut anti_stuck,
+                moved,
+            );
+            moved
         } else {
             false
         };
+}
+
+fn maintain_anti_stuck(
+    world: &GameWorld,
+    player: &mut PlayerState,
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    anti_stuck: &mut AntiStuckState,
+    moved: bool,
+) {
+    if player_position_is_safe(world, player.pos) {
+        anti_stuck.last_safe_pos = player.pos;
+        anti_stuck.last_safe_block = player.block_pos;
+        anti_stuck.failed_move_ticks = 0;
+        return;
+    }
+
+    anti_stuck.failed_move_ticks = if moved {
+        0
+    } else {
+        anti_stuck.failed_move_ticks.saturating_add(1)
+    };
+
+    if anti_stuck.failed_move_ticks < ANTI_STUCK_FAILED_MOVE_LIMIT {
+        return;
+    }
+
+    let resolved =
+        resolve_player_stuck_near(world, player.pos, ANTI_STUCK_SEARCH_RADIUS).or_else(|| {
+            resolve_player_stuck_near(world, anti_stuck.last_safe_pos, ANTI_STUCK_SEARCH_RADIUS)
+        });
+    let Some((pos, block_pos)) = resolved else {
+        return;
+    };
+
+    player.pos = pos;
+    player.block_pos = block_pos;
+    transform.translation = pos;
+    player_pos.0 = pos;
+    anti_stuck.last_safe_pos = pos;
+    anti_stuck.last_safe_block = block_pos;
+    anti_stuck.failed_move_ticks = 0;
+    warn!("[anti-stuck] resolved player to {:?}", block_pos);
 }
 
 fn apply_world_move(
@@ -713,20 +820,32 @@ fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
 
 fn sync_authoritative_snapshot_components(
     clock: Res<SimClock>,
+    world: Res<GameWorld>,
     player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
     eco: Res<EcoCycle>,
     obs: Res<TickObserver>,
+    revision: Res<WorldRevision>,
     last_delta: Res<LastVoxelDeltaState>,
-    mut q: Query<(&mut GameplayHudState, &mut EcoSnapshot, &mut VoxelDelta), With<PlayerPos>>,
+    mut q: Query<
+        (
+            &mut GameplayHudState,
+            &mut EcoSnapshot,
+            &mut VoxelDelta,
+            &mut VoxelChunkSnapshot,
+        ),
+        With<PlayerPos>,
+    >,
 ) {
     let hud = build_gameplay_hud_state(&clock, &player, &pool, &nations, &monsters, &obs);
     let eco_snapshot = eco.to_snapshot(clock.tick);
-    for (mut hud_state, mut eco_state, mut delta) in q.iter_mut() {
+    let chunk_snapshot = build_voxel_chunk_snapshot(&world, revision.0, player.block_pos);
+    for (mut hud_state, mut eco_state, mut delta, mut chunk) in q.iter_mut() {
         *hud_state = hud.clone();
         *eco_state = eco_snapshot.clone();
+        *chunk = chunk_snapshot.clone();
         if last_delta.revision > 0 {
             *delta = VoxelDelta {
                 revision: last_delta.revision,
@@ -836,6 +955,7 @@ fn main() {
         .init_resource::<LastVoxelDeltaState>()
         .init_resource::<ServerCommandDiagnostics>()
         .init_resource::<ServerJumpState>()
+        .init_resource::<AntiStuckState>()
         .insert_resource(scenario_state)
         .add_systems(
             Startup,
@@ -948,6 +1068,7 @@ fn spawn_server(mut commands: Commands) {
 fn spawn_player(
     mut commands: Commands,
     mut player: ResMut<PlayerState>,
+    mut anti_stuck: ResMut<AntiStuckState>,
     game_world: Res<GameWorld>,
 ) {
     let sx = constant::WORLD_SIZE / 2;
@@ -970,6 +1091,9 @@ fn spawn_player(
         });
     player.pos = spawn;
     player.block_pos = spawn_block;
+    anti_stuck.last_safe_pos = spawn;
+    anti_stuck.last_safe_block = spawn_block;
+    anti_stuck.failed_move_ticks = 0;
     info!(
         "[player] spawning authoritative player entity at {:?}, block={:?}",
         spawn, spawn_block
@@ -983,6 +1107,7 @@ fn spawn_player(
         empty_gameplay_hud_state(),
         EcoCycle::default().to_snapshot(0),
         empty_voxel_delta(),
+        empty_voxel_chunk_snapshot(),
     ));
 }
 
@@ -1057,9 +1182,7 @@ fn setup_world(
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
 ) {
-    let pipeline = lk2_core::world::terrain::presets::by_name("default");
-    *game_world = GameWorld::with_pipeline(constant::WORLD_SIZE, pipeline);
-    install_huge_spawn_platform(&mut game_world);
+    *game_world = generate_world(&WorldConfig::default());
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
 
     use lk2_core::resource::ResourceKind;

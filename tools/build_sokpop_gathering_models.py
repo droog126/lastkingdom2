@@ -32,7 +32,7 @@ def make_sokpop_gatherer() -> None:
     # Forward is negative Y. Neck overlaps both torso and head, so the simple
     # toy-like stack reads as connected instead of floating or crushed.
     cube("torso", (0.0, 0.0, 0.76), (0.42, 0.31, 0.66), shirt)
-    cube("pants_block", (0.0, -0.005, 0.29), (0.36, 0.28, 0.30), trousers)
+    cube("pants_block", (0.0, -0.005, 0.39), (0.36, 0.28, 0.34), trousers)
     cylinder("neck", (0.0, -0.015, 1.13), 0.135, 0.25, skin, vertices=8)
     cube("collar", (0.0, -0.02, 1.08), (0.28, 0.22, 0.07), shirt_dark)
     uv_sphere("head", (0.0, -0.015, 1.46), (0.35, 0.315, 0.33), skin, 10, 5)
@@ -47,10 +47,10 @@ def make_sokpop_gatherer() -> None:
     uv_sphere("hand_l", (-0.42, -0.05, 0.38), (0.072, 0.064, 0.072), skin, 8, 4)
     uv_sphere("hand_r", (0.42, -0.05, 0.38), (0.072, 0.064, 0.072), skin, 8, 4)
 
-    rotate(cylinder("leg_l", (-0.13, 0.0, -0.02), 0.085, 0.48, trousers, vertices=7), 0.0, 0.0, 0.0)
-    rotate(cylinder("leg_r", (0.13, 0.0, -0.02), 0.085, 0.48, trousers, vertices=7), 0.0, 0.0, 0.0)
-    cube("boot_l", (-0.13, -0.06, -0.24), (0.13, 0.18, 0.080), boot)
-    cube("boot_r", (0.13, -0.06, -0.24), (0.13, 0.18, 0.080), boot)
+    rotate(cylinder("leg_l", (-0.13, 0.0, 0.06), 0.080, 0.72, trousers, vertices=7), 0.0, 0.0, 0.0)
+    rotate(cylinder("leg_r", (0.13, 0.0, 0.06), 0.080, 0.72, trousers, vertices=7), 0.0, 0.0, 0.0)
+    cube("boot_l", (-0.13, -0.10, -0.35), (0.16, 0.30, 0.12), boot)
+    cube("boot_r", (0.13, -0.10, -0.35), (0.16, 0.30, 0.12), boot)
 
     cube("basket", (0.0, 0.31, 0.68), (0.34, 0.10, 0.30), basket)
     cube("basket_rim", (0.0, 0.38, 0.87), (0.38, 0.035, 0.050), basket_dark)

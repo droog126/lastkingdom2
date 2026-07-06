@@ -54,15 +54,15 @@ For asset-only iterations, use the same observe -> decide -> act discipline with
 
 ## Timing And Executables
 
-- A source change is not present in the loop if `--skip-build` runs an old `target/debug/lk2-client.exe`. Build the client first after gameplay or presentation changes.
-- If offline health is `PARTIAL` only because `tick < 500`, inspect whether auto-demo scenario completion or another exit path stops the app before the authority sim reaches the completion tick.
-- Do not tune auto-demo duration by frame count alone. Compare `final_state.json.tick`, `frame_tick`, and `wall_secs`; the health contract is based on simulation tick.
+- A source change is not present in the loop if validation runs stale build output. Build the affected executable or artifact first after gameplay or presentation changes.
+- If health is `PARTIAL` only because progress is below the completion threshold, inspect whether auto-demo completion or another exit path stops the app before the authoritative progress metric reaches the threshold.
+- Do not tune auto-demo duration by frame count alone. Compare the state progress metric, frame count, and wall time; the health contract is based on simulation progress.
 - When a loop exits early but still writes PNG/state, write `decision.md` for that partial iteration before rerunning.
 
 ## State Vs Pixels
 
-- Do not call gameplay done because JSON contains entities. For T0-like systems, require state proof, resource deltas, and a screenshot that makes the loop inspectable.
-- For finite resource loops, look for depletion/cap evidence such as source pool decreasing to zero, destination pool increasing only within cap, and production stopping when inputs are exhausted.
+- Do not call gameplay done because JSON contains entities. For core gameplay systems, require state proof, state deltas, and a screenshot or runtime view that makes the loop inspectable.
+- For finite resource loops, look for depletion/cap evidence such as source pools decreasing, destination pools respecting caps, and production stopping when inputs are exhausted.
 
 ## Decision Template
 

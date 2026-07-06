@@ -15,8 +15,8 @@ use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
 use lk2_core::world::{
-    Biome, BlockType, World as GameWorld, player_body_clear, player_spawn_position_near,
-    player_stand_position_at,
+    Biome, BlockType, World as GameWorld, player_body_clear, player_position_is_safe,
+    player_spawn_position_near, player_stand_position_at, resolve_player_stuck_near,
 };
 
 mod greedy_mesh;
@@ -98,6 +98,8 @@ pub enum CameraMode {
     FirstPerson,
 
     ThirdPerson,
+
+    TopDown,
 }
 
 impl Default for CameraMode {
@@ -124,6 +126,19 @@ impl Default for JumpState {
     }
 }
 
+#[derive(Resource, Debug, Clone)]
+pub struct AntiStuckState {
+    pub last_safe_pos: Vec3,
+    pub last_safe_block: [i32; 3],
+    pub unsafe_ticks: u8,
+}
+
+impl Default for AntiStuckState {
+    fn default() -> Self {
+        Self { last_safe_pos: Vec3::ZERO, last_safe_block: [0, 0, 0], unsafe_ticks: 0 }
+    }
+}
+
 #[derive(Resource)]
 pub struct FreeFlyState {
     pub enabled: bool,
@@ -131,21 +146,11 @@ pub struct FreeFlyState {
     pub position: Vec3,
 
     pub velocity: Vec3,
-
-    pub saved_player_pos: Option<[i32; 3]>,
-
-    pub saved_player_world_pos: Option<Vec3>,
 }
 
 impl Default for FreeFlyState {
     fn default() -> Self {
-        Self {
-            enabled: false,
-            position: Vec3::new(48.5, 18.0, 48.5),
-            velocity: Vec3::ZERO,
-            saved_player_pos: None,
-            saved_player_world_pos: None,
-        }
+        Self { enabled: false, position: Vec3::new(48.5, 18.0, 48.5), velocity: Vec3::ZERO }
     }
 }
 
@@ -186,10 +191,10 @@ pub fn spawn_terrain_around_player(
     mut last_mesh_wall: Local<f32>,
 ) {
     let now = time.elapsed_secs();
-    if *mode == CameraMode::FirstPerson
-        && !cfg.smooth_terrain
-        && !spawned.visual_entities.is_empty()
-    {
+    let show_terrain_visuals = !(cfg.auto_keys && *mode == CameraMode::ThirdPerson);
+    let has_spawned_terrain =
+        !spawned.visual_entities.is_empty() || !spawned.collider_entities.is_empty();
+    if *mode == CameraMode::FirstPerson && !cfg.smooth_terrain && has_spawned_terrain {
         return;
     }
     let moved_far = if let Some(last) = spawned.last_mesh_center {
@@ -199,10 +204,10 @@ pub fn spawn_terrain_around_player(
     } else {
         true
     };
-    if !moved_far && !spawned.visual_entities.is_empty() {
+    if !moved_far && has_spawned_terrain {
         return;
     }
-    if now - *last_mesh_wall < 1.5 && !spawned.visual_entities.is_empty() {
+    if now - *last_mesh_wall < 1.5 && has_spawned_terrain {
         return;
     }
 
@@ -236,35 +241,39 @@ pub fn spawn_terrain_around_player(
                 double_sided: false,
                 ..default()
             });
-            let mesh_handle = meshes.add(sm.mesh.clone());
-            let visual = commands
-                .spawn((
-                    Mesh3d(mesh_handle),
-                    MeshMaterial3d(mat),
-                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
-                    TerrainChunk,
-                ))
-                .id();
-            spawned.visual_entities.push(visual);
+            if show_terrain_visuals {
+                let mesh_handle = meshes.add(sm.mesh.clone());
+                let visual = commands
+                    .spawn((
+                        Mesh3d(mesh_handle),
+                        MeshMaterial3d(mat),
+                        Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                        TerrainChunk,
+                    ))
+                    .id();
+                spawned.visual_entities.push(visual);
+            }
 
-            let collider_verts: Vec<Vec3> =
-                sm.collider_trimesh.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
-            let collider_indices: Vec<[u32; 3]> = sm
-                .collider_indices
-                .chunks(3)
-                .filter(|c| c.len() == 3)
-                .map(|c| [c[0], c[1], c[2]])
-                .collect();
-            let collider = Collider::trimesh(collider_verts, collider_indices);
-            let collider_ent = commands
-                .spawn((
-                    RigidBody::Static,
-                    collider,
-                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
-                    TerrainChunk,
-                ))
-                .id();
-            spawned.collider_entities.push(collider_ent);
+            if show_terrain_visuals {
+                let collider_verts: Vec<Vec3> =
+                    sm.collider_trimesh.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+                let collider_indices: Vec<[u32; 3]> = sm
+                    .collider_indices
+                    .chunks(3)
+                    .filter(|c| c.len() == 3)
+                    .map(|c| [c[0], c[1], c[2]])
+                    .collect();
+                let collider = Collider::trimesh(collider_verts, collider_indices);
+                let collider_ent = commands
+                    .spawn((
+                        RigidBody::Static,
+                        collider,
+                        Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                        TerrainChunk,
+                    ))
+                    .id();
+                spawned.collider_entities.push(collider_ent);
+            }
 
             spawned.last_player_block = player.block_pos;
             spawned.last_mesh_center = Some(Vec3::new(
@@ -340,7 +349,6 @@ pub fn spawn_terrain_around_player(
     let mesh_secs = time.elapsed_secs() - started;
 
     for bm in block_meshes {
-        let mat = mats[&bm.block_type].clone();
         let bevy_mesh = bm.to_bevy_mesh();
 
         let collider_opt = if matches!(bm.block_type, BlockType::Water) {
@@ -349,19 +357,21 @@ pub fn spawn_terrain_around_player(
             Collider::trimesh_from_mesh(&bevy_mesh)
         };
 
-        let mesh_handle = meshes.add(bevy_mesh);
+        if show_terrain_visuals {
+            let mat = mats[&bm.block_type].clone();
+            let mesh_handle = meshes.add(bevy_mesh.clone());
+            let visual = commands
+                .spawn((
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(mat),
+                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                    TerrainChunk,
+                ))
+                .id();
+            spawned.visual_entities.push(visual);
+        }
 
-        let visual = commands
-            .spawn((
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(mat),
-                Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
-                TerrainChunk,
-            ))
-            .id();
-        spawned.visual_entities.push(visual);
-
-        if let Some(collider) = collider_opt {
+        if show_terrain_visuals && let Some(collider) = collider_opt {
             let collider_ent = commands
                 .spawn((
                     RigidBody::Static,
@@ -545,41 +555,20 @@ pub fn mouse_look_system(
     angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
 }
 
-pub fn freefly_toggle(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut freefly: ResMut<FreeFlyState>,
-    mut player: ResMut<PlayerState>,
-) {
+pub fn freefly_toggle(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<CameraMode>) {
     if !keys.just_pressed(KeyCode::F3) {
         return;
     }
-    freefly.enabled = !freefly.enabled;
-    if freefly.enabled {
-        freefly.saved_player_pos = Some(player.block_pos);
-        freefly.saved_player_world_pos = Some(player.pos);
-        freefly.position = player.pos + Vec3::Y * 18.0;
-        freefly.velocity = Vec3::ZERO;
-        info!(
-            "🕊 FreeFly ON — 玩家身体冻结在 {:?}，WASD 飞 / Space↑ / Shift↓ / 鼠标视角 / F3 回本体",
-            player.block_pos
-        );
-    } else {
-        if let Some(saved) = freefly.saved_player_pos.take() {
-            let saved_pos = freefly.saved_player_world_pos.take().unwrap_or(Vec3::new(
-                saved[0] as f32 + 0.5,
-                saved[1] as f32,
-                saved[2] as f32 + 0.5,
-            ));
-            info!(
-                "🕊 FreeFly OFF — 还原玩家 {:?} -> {:?}",
-                player.block_pos, saved
-            );
-            set_player_position(&mut player, saved_pos, saved);
-        } else {
-            info!("🕊 FreeFly OFF");
+    *mode = match *mode {
+        CameraMode::TopDown => {
+            info!("CameraMode -> 3rd person");
+            CameraMode::ThirdPerson
         }
-        freefly.velocity = Vec3::ZERO;
-    }
+        _ => {
+            info!("CameraMode -> top-down");
+            CameraMode::TopDown
+        }
+    };
 }
 
 pub fn camera_mode_toggle(
@@ -595,11 +584,15 @@ pub fn camera_mode_toggle(
     }
     *mode = match *mode {
         CameraMode::FirstPerson => {
-            info!("📷 CameraMode → 3rd person");
+            info!("CameraMode -> 3rd person");
             CameraMode::ThirdPerson
         }
         CameraMode::ThirdPerson => {
-            info!("📷 CameraMode → 1st person");
+            info!("CameraMode -> 1st person");
+            CameraMode::FirstPerson
+        }
+        CameraMode::TopDown => {
+            info!("CameraMode -> 1st person");
             CameraMode::FirstPerson
         }
     };
@@ -1271,24 +1264,42 @@ fn try_player_move_continuous(
         return (false, "no_horizontal_or_distance");
     }
 
-    let next = player.pos + horizontal.normalize() * distance;
-    let next_x = next.x.floor() as i32;
-    let next_z = next.z.floor() as i32;
-    let Some((stand_pos, block_pos)) =
-        player_stand_position_at(game_world, next_x, next_z, player.pos.y, threshold)
-    else {
-        return (false, "no_standable_column");
-    };
+    let dir = horizontal.normalize();
+    let candidates = [
+        dir,
+        Vec3::new(dir.z, 0.0, -dir.x).normalize_or_zero(),
+        Vec3::new(-dir.z, 0.0, dir.x).normalize_or_zero(),
+    ];
 
-    if stand_pos.y - player.pos.y > threshold {
-        return (false, "step_too_high");
-    }
-    if !player_volume_clear_at(game_world, Vec3::new(next.x, stand_pos.y, next.z)) {
-        return (false, "volume_blocked");
+    for (i, candidate_dir) in candidates.into_iter().enumerate() {
+        if candidate_dir.length_squared() < 0.0001 {
+            continue;
+        }
+        let next = player.pos + candidate_dir * distance;
+        let next_x = next.x.floor() as i32;
+        let next_z = next.z.floor() as i32;
+        let Some((stand_pos, block_pos)) =
+            player_stand_position_at(game_world, next_x, next_z, player.pos.y, threshold)
+        else {
+            continue;
+        };
+
+        if stand_pos.y - player.pos.y > threshold {
+            continue;
+        }
+        if !player_volume_clear_at(game_world, Vec3::new(next.x, stand_pos.y, next.z)) {
+            continue;
+        }
+
+        set_player_position(player, Vec3::new(next.x, stand_pos.y, next.z), block_pos);
+        return if i == 0 {
+            (true, "moved_continuous")
+        } else {
+            (true, "slid_continuous")
+        };
     }
 
-    set_player_position(player, Vec3::new(next.x, stand_pos.y, next.z), block_pos);
-    (true, "moved_continuous")
+    (false, "blocked_continuous")
 }
 
 fn try_player_air_move_continuous(
@@ -1333,6 +1344,45 @@ fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {
         }
     }
     true
+}
+
+pub fn offline_anti_stuck(
+    game_world: Res<GameWorld>,
+    mut player: ResMut<PlayerState>,
+    mut anti_stuck: ResMut<AntiStuckState>,
+    mut player_tf_q: Query<&mut Transform, With<Player>>,
+) {
+    const SEARCH_RADIUS: i32 = 6;
+    const UNSAFE_TICK_LIMIT: u8 = 12;
+
+    if player_position_is_safe(&game_world, player.pos) {
+        anti_stuck.last_safe_pos = player.pos;
+        anti_stuck.last_safe_block = player.block_pos;
+        anti_stuck.unsafe_ticks = 0;
+        return;
+    }
+
+    anti_stuck.unsafe_ticks = anti_stuck.unsafe_ticks.saturating_add(1);
+    if anti_stuck.unsafe_ticks < UNSAFE_TICK_LIMIT {
+        return;
+    }
+
+    let resolved =
+        resolve_player_stuck_near(&game_world, player.pos, SEARCH_RADIUS).or_else(|| {
+            resolve_player_stuck_near(&game_world, anti_stuck.last_safe_pos, SEARCH_RADIUS)
+        });
+    let Some((pos, block_pos)) = resolved else {
+        return;
+    };
+
+    set_player_position(&mut player, pos, block_pos);
+    if let Ok(mut tf) = player_tf_q.single_mut() {
+        tf.translation = pos;
+    }
+    anti_stuck.last_safe_pos = pos;
+    anti_stuck.last_safe_block = block_pos;
+    anti_stuck.unsafe_ticks = 0;
+    tracing::warn!("[anti-stuck] offline resolved player to {:?}", block_pos);
 }
 
 fn step_player_jump(
@@ -1729,6 +1779,15 @@ pub fn first_person_camera(
         return;
     }
 
+    if *mode == CameraMode::TopDown {
+        let (sy, cy) = angles.yaw.sin_cos();
+        let target = player.pos + Vec3::Y * 0.8;
+        let camera_offset = Vec3::new(-sy * 8.0, 42.0, cy * 8.0);
+        tf.translation = target + camera_offset;
+        tf.look_at(target, Vec3::Y);
+        return;
+    }
+
     let eye_base = player.pos + Vec3::Y * 1.7;
 
     let phase = anim_state.step_phase;
@@ -1800,6 +1859,7 @@ pub fn first_person_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lk2_core::world::{WorldConfig, generate_world, player_spawn_position_at};
 
     fn flat_test_world() -> GameWorld {
         let mut world = GameWorld::new(8);
@@ -1872,5 +1932,37 @@ mod tests {
         assert!(moved, "{reason}");
         assert!((player.pos.y - 1.7).abs() < 0.001);
         assert!(player.pos.x > 3.5);
+    }
+
+    #[test]
+    fn continuous_move_crosses_flat_leaf_platform() {
+        let mut world = GameWorld::new(8);
+        for x in 0..world.size {
+            for z in 0..world.size {
+                world.set(x, 0, z, BlockType::Leaves);
+            }
+        }
+        let mut player =
+            PlayerState { pos: Vec3::new(3.5, 1.0, 3.5), block_pos: [3, 1, 3], ..default() };
+
+        let (moved, reason) = try_player_move_continuous(&mut player, &world, Vec3::X, 0.25, 0.85);
+
+        assert!(moved, "{reason}");
+        assert!(player.pos.x > 3.5);
+        assert_eq!(player.block_pos, [3, 1, 3]);
+    }
+
+    #[test]
+    fn continuous_move_from_default_spawn_advances() {
+        let world = generate_world(&WorldConfig::default());
+        let (pos, block_pos) =
+            player_spawn_position_at(&world, constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2)
+                .expect("default world should have a spawn position");
+        let mut player = PlayerState { pos, block_pos, ..default() };
+
+        let (moved, reason) = try_player_move_continuous(&mut player, &world, Vec3::X, 0.25, 0.85);
+
+        assert!(moved, "{reason}");
+        assert!(player.pos.x > pos.x);
     }
 }

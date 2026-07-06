@@ -229,6 +229,18 @@ pub mod components {
         pub z: i32,
         pub block: u8,
     }
+
+    pub const VOXEL_CHUNK_SIZE_XZ: i32 = 16;
+
+    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+    pub struct VoxelChunkSnapshot {
+        pub revision: u64,
+        pub chunk_x: i32,
+        pub chunk_z: i32,
+        pub y_min: i32,
+        pub y_size: i32,
+        pub blocks: Vec<u8>,
+    }
 }
 
 pub struct ProtocolPlugin;
@@ -287,6 +299,7 @@ impl Plugin for ProtocolPlugin {
         app.component::<components::GameplayHudState>().replicate();
         app.component::<components::EcoSnapshot>().replicate();
         app.component::<components::VoxelDelta>().replicate();
+        app.component::<components::VoxelChunkSnapshot>().replicate();
     }
 }
 
@@ -297,7 +310,6 @@ mod tests {
 
     #[test]
     fn player_action_variants_count() {
-        use strum::IntoEnumIterator;
         let count = [
             PlayerAction::MoveForward,
             PlayerAction::MoveBackward,
@@ -312,7 +324,8 @@ mod tests {
             PlayerAction::Craft,
             PlayerAction::FoundNation,
             PlayerAction::KillCreature,
-        ].len();
+        ]
+        .len();
         assert_eq!(count, 13);
     }
 
@@ -334,15 +347,30 @@ mod tests {
             }
             _ => panic!("expected MoveWorld"),
         }
-        assert!(matches!(GameplayCommandKind::Jump, GameplayCommandKind::Jump));
-        assert!(matches!(GameplayCommandKind::GatherFootBlock, GameplayCommandKind::GatherFootBlock));
-        assert!(matches!(GameplayCommandKind::PlaceWoodFootBlock, GameplayCommandKind::PlaceWoodFootBlock));
+        assert!(matches!(
+            GameplayCommandKind::Jump,
+            GameplayCommandKind::Jump
+        ));
+        assert!(matches!(
+            GameplayCommandKind::GatherFootBlock,
+            GameplayCommandKind::GatherFootBlock
+        ));
+        assert!(matches!(
+            GameplayCommandKind::PlaceWoodFootBlock,
+            GameplayCommandKind::PlaceWoodFootBlock
+        ));
         assert!(matches!(
             GameplayCommandKind::Craft(messages::BuildRecipe::PlankPack),
             GameplayCommandKind::Craft(messages::BuildRecipe::PlankPack)
         ));
-        assert!(matches!(GameplayCommandKind::FoundNation, GameplayCommandKind::FoundNation));
-        assert!(matches!(GameplayCommandKind::KillNearestCreature, GameplayCommandKind::KillNearestCreature));
+        assert!(matches!(
+            GameplayCommandKind::FoundNation,
+            GameplayCommandKind::FoundNation
+        ));
+        assert!(matches!(
+            GameplayCommandKind::KillNearestCreature,
+            GameplayCommandKind::KillNearestCreature
+        ));
     }
 
     #[test]
@@ -380,11 +408,8 @@ mod tests {
     #[test]
     fn kill_feed_entry_json_roundtrip() {
         use messages::KillFeedEntry;
-        let entry = KillFeedEntry {
-            killer_name: "Alice".into(),
-            victim_name: "Bob".into(),
-            weapon_id: 3,
-        };
+        let entry =
+            KillFeedEntry { killer_name: "Alice".into(), victim_name: "Bob".into(), weapon_id: 3 };
         let json = serde_json::to_string(&entry).unwrap();
         let decoded: KillFeedEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.killer_name, "Alice");
@@ -416,13 +441,7 @@ mod tests {
     #[test]
     fn voxel_delta_fields() {
         use components::VoxelDelta;
-        let d = VoxelDelta {
-            revision: 123,
-            x: 5,
-            y: 10,
-            z: -3,
-            block: 7,
-        };
+        let d = VoxelDelta { revision: 123, x: 5, y: 10, z: -3, block: 7 };
         assert_eq!(d.revision, 123);
         assert_eq!(d.x, 5);
         assert_eq!(d.y, 10);

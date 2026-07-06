@@ -789,6 +789,62 @@ pub fn player_spawn_position_near(
     best.map(|(_, pos, block_pos)| (pos, block_pos))
 }
 
+pub fn player_position_is_safe(world: &World, pos: Vec3) -> bool {
+    let x = pos.x.floor() as i32;
+    let z = pos.z.floor() as i32;
+    let foot_y = pos.y.floor() as i32;
+    foot_y > 0 && world.get(x, foot_y - 1, z).is_solid() && player_body_clear(world, x, foot_y, z)
+}
+
+pub fn resolve_player_stuck_near(
+    world: &World,
+    pos: Vec3,
+    search_radius: i32,
+) -> Option<(Vec3, [i32; 3])> {
+    if player_position_is_safe(world, pos) {
+        let block_pos = [
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        ];
+        return Some((pos, block_pos));
+    }
+
+    let x = pos.x.floor() as i32;
+    let z = pos.z.floor() as i32;
+    let radius = search_radius.max(0);
+    let mut best: Option<(f32, Vec3, [i32; 3])> = None;
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx * dx + dz * dz > radius * radius {
+                continue;
+            }
+            let Some((stand_pos, block_pos)) = player_spawn_position_at(world, x + dx, z + dz)
+            else {
+                continue;
+            };
+            let candidate = Vec3::new(
+                pos.x.floor() + 0.5 + dx as f32,
+                stand_pos.y,
+                pos.z.floor() + 0.5 + dz as f32,
+            );
+            if !player_position_is_safe(world, candidate) {
+                continue;
+            }
+            let dist2 = (candidate - pos).length_squared();
+            match best {
+                None => best = Some((dist2, candidate, block_pos)),
+                Some((best_dist2, _, _)) if dist2 < best_dist2 => {
+                    best = Some((dist2, candidate, block_pos));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    best.map(|(_, pos, block_pos)| (pos, block_pos))
+}
+
 fn spawn_clearance(world: &World, block_pos: [i32; 3], radius: i32) -> bool {
     let radius = radius.max(0);
     for dz in -radius..=radius {
@@ -1033,7 +1089,11 @@ mod tests {
         assert_eq!(b.get(x, foot_y - 1, z), BlockType::Leaves);
 
         for (x, y, z) in [(4, 4, 4), (48, 15, 48), (83, 12, 21), (16, 30, 64)] {
-            assert_eq!(a.get(x, y, z), b.get(x, y, z), "voxel mismatch at {x},{y},{z}");
+            assert_eq!(
+                a.get(x, y, z),
+                b.get(x, y, z),
+                "voxel mismatch at {x},{y},{z}"
+            );
         }
     }
 
@@ -1052,6 +1112,27 @@ mod tests {
 
         assert_ne!(block_pos, [4, 2, 4]);
         assert!(spawn_clearance(&w, block_pos, 1));
+    }
+
+    #[test]
+    fn resolve_player_stuck_near_moves_blocked_player_to_safe_column() {
+        let mut w = World::new(8);
+        w.set(3, 1, 3, BlockType::Dirt);
+        w.set(3, 2, 3, BlockType::Stone);
+        w.set(3, 3, 3, BlockType::Stone);
+        w.set(4, 1, 3, BlockType::Dirt);
+
+        let stuck = Vec3::new(3.5, 2.0, 3.5);
+        assert!(!player_position_is_safe(&w, stuck));
+
+        let (pos, block_pos) = resolve_player_stuck_near(&w, stuck, 2).unwrap();
+
+        assert_ne!(block_pos, [3, 2, 3]);
+        assert!(player_position_is_safe(&w, pos));
+        assert_eq!(
+            w.get(block_pos[0], block_pos[1] - 1, block_pos[2]),
+            BlockType::Dirt
+        );
     }
 
     #[test]

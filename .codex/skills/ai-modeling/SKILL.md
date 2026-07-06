@@ -25,8 +25,8 @@ For the Sokpop-style target, keep models simple, grounded, and structurally read
 - When iterating after screenshot feedback, fix the structural problem directly instead of compensating with unrelated details.
 - Generate a preview render or use the model preview system after export, and self-check for scale, alignment, visible gaps, unwanted intersections, material readability, and whether the model still reads at target size.
 - If an old generator can recreate a retired asset, update or disable that entry point in the same change. Removing only the GLB is not enough.
-- When generated animals or ecology props are wired into gameplay, judge them in the actual game camera corridor. A model that reads in isolation can still fail if another legacy creature, marker, tree, or prop occludes it in the closed-loop screenshot.
-- Prefer asset scale and placement that proves gameplay state: rabbits, wildlife, berry fruit, plant/resource nodes, and drops should remain identifiable at normal screenshot scale without relying only on HUD counts.
+- When generated assets are wired into gameplay, judge them in the actual game camera corridor. A model that reads in isolation can still fail if another legacy actor, marker, tree, or prop occludes it in the closed-loop screenshot.
+- Prefer asset scale and placement that proves gameplay state: important actors, props, nodes, pickups, and drops should remain identifiable at normal screenshot scale without relying only on HUD counts.
 
 ## Blender
 

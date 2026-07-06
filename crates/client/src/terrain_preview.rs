@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use bevy::camera::Exposure;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::pbr::{AtmosphereSettings, ScreenSpaceReflections};
-use bevy::prelude::*;
 use bevy::post_process::bloom::Bloom;
+use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{PresentMode, WindowResolution};
 use bevy_world_serialization::WorldAsset;
@@ -71,7 +71,14 @@ pub fn run_terrain_preview() {
     });
     app.add_systems(
         Startup,
-        (setup_rendering, setup_lights, setup_world, setup_camera, setup_overlay).chain(),
+        (
+            setup_rendering,
+            setup_lights,
+            setup_world,
+            setup_camera,
+            setup_overlay,
+        )
+            .chain(),
     );
     app.add_systems(Update, (maybe_take_screenshot, exit_preview).chain());
     app.run();
@@ -198,13 +205,33 @@ fn setup_world(
     ));
 
     spawn_raised_lots(&mut commands, &mut meshes, &raised_grass, &edge_mat);
-    spawn_ground_detail(&mut commands, &mut meshes, &dark_grass, &flower_mat, &path_dirt);
-    spawn_wild_side(&mut commands, &asset_server, &mut state, &mut meshes, &wild_grass, &rock_mat);
+    spawn_ground_detail(
+        &mut commands,
+        &mut meshes,
+        &dark_grass,
+        &flower_mat,
+        &path_dirt,
+    );
+    spawn_wild_side(
+        &mut commands,
+        &asset_server,
+        &mut state,
+        &mut meshes,
+        &wild_grass,
+        &rock_mat,
+    );
     spawn_village_roads(&mut commands, &mut meshes, &road, &road_light, &road_dark);
     spawn_road_edges(&mut commands, &mut meshes, &edge_mat, &rock_mat);
     spawn_farms(&mut commands, &mut meshes, &farm_soil, &field);
     spawn_buildings(&mut commands, &asset_server, &mut state);
-    spawn_village_decor(&mut commands, &asset_server, &mut state, &mut meshes, &cyan, &rock_mat);
+    spawn_village_decor(
+        &mut commands,
+        &asset_server,
+        &mut state,
+        &mut meshes,
+        &cyan,
+        &rock_mat,
+    );
 }
 
 fn spawn_raised_lots(
@@ -248,7 +275,11 @@ fn spawn_raised_lots(
                 MeshMaterial3d(edge_mat.clone()),
                 Transform::from_xyz(*ex, 0.08, *ez).with_scale(Vec3::new(*esx, 0.55, *esz)),
             ));
-            let count = if *esx > *esz { (*esx / 2.4) as usize } else { (*esz / 2.4) as usize };
+            let count = if *esx > *esz {
+                (*esx / 2.4) as usize
+            } else {
+                (*esz / 2.4) as usize
+            };
             for n in 0..count.max(1) {
                 if (n + edge_idx) % 3 == 0 {
                     continue;
@@ -263,8 +294,9 @@ fn spawn_raised_lots(
                 commands.spawn((
                     Mesh3d(tuft_mesh.clone()),
                     MeshMaterial3d(edge_mat.clone()),
-                    Transform::from_translation(pos)
-                        .with_rotation(Quat::from_rotation_y(hash01(n, 213) * std::f32::consts::TAU)),
+                    Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(
+                        hash01(n, 213) * std::f32::consts::TAU,
+                    )),
                 ));
             }
         }
@@ -284,12 +316,18 @@ fn spawn_ground_detail(
         let z = -35.0 + hash01(i, 103) * 70.0;
         let sx = 0.8 + hash01(i, 107) * 1.8;
         let sz = 0.5 + hash01(i, 109) * 1.4;
-        let mat = if i % 9 == 0 { path_dirt.clone() } else { dark_grass.clone() };
+        let mat = if i % 9 == 0 {
+            path_dirt.clone()
+        } else {
+            dark_grass.clone()
+        };
         commands.spawn((
             Mesh3d(patch.clone()),
             MeshMaterial3d(mat),
             Transform::from_xyz(x, 0.0, z)
-                .with_rotation(Quat::from_rotation_y(hash01(i, 111) * std::f32::consts::TAU))
+                .with_rotation(Quat::from_rotation_y(
+                    hash01(i, 111) * std::f32::consts::TAU,
+                ))
                 .with_scale(Vec3::new(sx, 1.0, sz)),
         ));
     }
@@ -409,12 +447,28 @@ fn spawn_wild_side(
         (-22.0, -1.0, 1.18),
     ];
     for (x, z, scale) in trees {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/sokpop_tree.glb", Vec3::new(x, 0.0, z), scale, 0.0);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/sokpop_tree.glb",
+            Vec3::new(x, 0.0, z),
+            scale,
+            0.0,
+        );
     }
     for i in 0..16 {
         let x = -30.0 + hash01(i, 41) * 24.0;
         let z = -25.0 + hash01(i, 43) * 48.0;
-        spawn_asset(commands, asset_server, state, "procedural/eco/rabbit.glb", Vec3::new(x, 0.0, z), 0.55, hash01(i, 47) * std::f32::consts::TAU);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/eco/rabbit.glb",
+            Vec3::new(x, 0.0, z),
+            0.55,
+            hash01(i, 47) * std::f32::consts::TAU,
+        );
     }
 }
 
@@ -445,7 +499,11 @@ fn spawn_village_roads(
     for i in 0..280 {
         let vertical = i % 2 == 0;
         let lane = i / 2;
-        let mat = if i % 5 == 0 { road_dark.clone() } else { road_light.clone() };
+        let mat = if i % 5 == 0 {
+            road_dark.clone()
+        } else {
+            road_light.clone()
+        };
         let jitter = (hash01(i, 171) - 0.5) * 0.32;
         if vertical {
             let x = [-2.0, 10.0, 22.0, 34.0][lane % 4] + jitter;
@@ -464,7 +522,9 @@ fn spawn_village_roads(
                 Mesh3d(stone_mesh.clone()),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(x, 0.08, z)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 + (hash01(i, 177) - 0.5) * 0.18))
+                    .with_rotation(Quat::from_rotation_y(
+                        std::f32::consts::FRAC_PI_2 + (hash01(i, 177) - 0.5) * 0.18,
+                    ))
                     .with_scale(Vec3::new(0.95 + hash01(i, 179) * 0.25, 1.0, 0.9)),
             ));
         }
@@ -490,13 +550,23 @@ fn spawn_road_edges(
         } else {
             Vec3::new(along + 16.0, 0.11, cross_coord + side * 0.95)
         };
-        let mat = if i % 3 == 0 { edge_mat.clone() } else { rock_mat.clone() };
-        let mesh = if i % 3 == 0 { bush.clone() } else { pebble.clone() };
+        let mat = if i % 3 == 0 {
+            edge_mat.clone()
+        } else {
+            rock_mat.clone()
+        };
+        let mesh = if i % 3 == 0 {
+            bush.clone()
+        } else {
+            pebble.clone()
+        };
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(mat),
             Transform::from_translation(pos)
-                .with_rotation(Quat::from_rotation_y(hash01(i, 157) * std::f32::consts::TAU))
+                .with_rotation(Quat::from_rotation_y(
+                    hash01(i, 157) * std::f32::consts::TAU,
+                ))
                 .with_scale(Vec3::splat(0.65 + hash01(i, 159) * 0.8)),
         ));
     }
@@ -562,7 +632,15 @@ fn spawn_buildings(
         ("procedural/pretty/market_stall.glb", 28.0, 9.0, 1.25, 0.7),
     ];
     for (path, x, z, scale, yaw) in buildings {
-        spawn_asset(commands, asset_server, state, path, Vec3::new(x, 0.0, z), scale, yaw);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            path,
+            Vec3::new(x, 0.0, z),
+            scale,
+            yaw,
+        );
     }
 }
 
@@ -574,16 +652,46 @@ fn spawn_village_decor(
     cyan: &Handle<StandardMaterial>,
     rock_mat: &Handle<StandardMaterial>,
 ) {
-    for (x, z) in [(0.0, -24.0), (12.0, -8.0), (24.0, 8.0), (36.0, 24.0), (10.0, 24.0), (34.0, -8.0)] {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/fountain.glb", Vec3::new(x, 0.0, z), 0.65, 0.0);
+    for (x, z) in [
+        (0.0, -24.0),
+        (12.0, -8.0),
+        (24.0, 8.0),
+        (36.0, 24.0),
+        (10.0, 24.0),
+        (34.0, -8.0),
+    ] {
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/fountain.glb",
+            Vec3::new(x, 0.0, z),
+            0.65,
+            0.0,
+        );
         commands.spawn((
             Mesh3d(meshes.add(Cylinder::new(0.08, 1.4))),
             MeshMaterial3d(cyan.clone()),
             Transform::from_xyz(x, 0.7, z),
         ));
     }
-    for (x, z) in [(3.0, 8.0), (12.0, 24.0), (30.0, -26.0), (34.0, -8.0), (3.0, -10.0), (25.0, 30.0)] {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/sokpop_tree.glb", Vec3::new(x, 0.0, z), 1.0, 0.0);
+    for (x, z) in [
+        (3.0, 8.0),
+        (12.0, 24.0),
+        (30.0, -26.0),
+        (34.0, -8.0),
+        (3.0, -10.0),
+        (25.0, 30.0),
+    ] {
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/sokpop_tree.glb",
+            Vec3::new(x, 0.0, z),
+            1.0,
+            0.0,
+        );
     }
     for (x, z, yaw) in [
         (3.0, -4.0, 0.0),
@@ -593,7 +701,15 @@ fn spawn_village_decor(
         (22.0, 25.0, 0.0),
         (34.0, 4.0, 1.57),
     ] {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/fence.glb", Vec3::new(x, 0.0, z), 0.75, yaw);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/fence.glb",
+            Vec3::new(x, 0.0, z),
+            0.75,
+            yaw,
+        );
     }
     for (x, z, yaw) in [
         (6.0, -8.0, 0.2),
@@ -601,7 +717,15 @@ fn spawn_village_decor(
         (30.0, 8.0, 0.6),
         (14.0, 8.0, -0.4),
     ] {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/market_stall.glb", Vec3::new(x, 0.0, z), 0.85, yaw);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/market_stall.glb",
+            Vec3::new(x, 0.0, z),
+            0.85,
+            yaw,
+        );
     }
     for (x, z, yaw) in [
         (2.0, -30.0, 0.0),
@@ -614,7 +738,15 @@ fn spawn_village_decor(
         (21.0, 22.0, -0.6),
         (32.0, 30.0, 0.2),
     ] {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/crate.glb", Vec3::new(x, 0.0, z), 0.55, yaw);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/crate.glb",
+            Vec3::new(x, 0.0, z),
+            0.55,
+            yaw,
+        );
     }
     for (x, z, yaw) in [
         (12.0, -30.0, 0.1),
@@ -623,7 +755,15 @@ fn spawn_village_decor(
         (15.0, 30.0, -0.2),
         (36.0, 12.0, 0.5),
     ] {
-        spawn_asset(commands, asset_server, state, "procedural/pretty/bench.glb", Vec3::new(x, 0.0, z), 0.65, yaw);
+        spawn_asset(
+            commands,
+            asset_server,
+            state,
+            "procedural/pretty/bench.glb",
+            Vec3::new(x, 0.0, z),
+            0.65,
+            yaw,
+        );
     }
     for i in 0..26 {
         let x = -4.0 + hash01(i, 61) * 42.0;
@@ -631,7 +771,8 @@ fn spawn_village_decor(
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(0.32, 0.22, 0.28))),
             MeshMaterial3d(rock_mat.clone()),
-            Transform::from_xyz(x, 0.12, z).with_rotation(Quat::from_rotation_y(hash01(i, 71) * std::f32::consts::TAU)),
+            Transform::from_xyz(x, 0.12, z)
+                .with_rotation(Quat::from_rotation_y(hash01(i, 71) * std::f32::consts::TAU)),
         ));
     }
 }
@@ -657,7 +798,8 @@ fn spawn_asset(
 }
 
 fn hash01(i: usize, salt: usize) -> f32 {
-    let mut x = (i as u32).wrapping_mul(1_664_525).wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
+    let mut x =
+        (i as u32).wrapping_mul(1_664_525).wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
     x ^= x >> 16;
     x = x.wrapping_mul(2_246_822_519);
     ((x >> 8) as f32) / ((u32::MAX >> 8) as f32)
@@ -675,7 +817,12 @@ fn maybe_take_screenshot(
     let pending = state
         .scene_handles
         .iter()
-        .filter(|handle| !matches!(asset_server.load_state(*handle), bevy::asset::LoadState::Loaded))
+        .filter(|handle| {
+            !matches!(
+                asset_server.load_state(*handle),
+                bevy::asset::LoadState::Loaded
+            )
+        })
         .count();
     if state.frame < STABILIZATION_FRAMES {
         return;
@@ -686,7 +833,10 @@ fn maybe_take_screenshot(
     commands.spawn(Screenshot::primary_window()).observe(save_to_disk(state.png_path.clone()));
     state.shot_requested = true;
     state.exit_deadline = Some(Instant::now() + Duration::from_secs(60));
-    info!("[terrain-preview] screenshot requested: {}", state.png_path.display());
+    info!(
+        "[terrain-preview] screenshot requested: {}",
+        state.png_path.display()
+    );
 }
 
 fn exit_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<TerrainPreviewState>) {
