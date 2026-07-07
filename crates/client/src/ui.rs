@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::pvp_systems::HealthHudMarker;
-use crate::render::{AnimalIndicatorText, CameraAngles, NestIndicatorText, Player};
+use crate::render::{AnimalIndicatorText, CameraAngles, CameraMode, NestIndicatorText, Player};
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::combat::{
@@ -438,7 +438,34 @@ pub fn update_hud(
         ),
         With<Player>,
     >,
+    camera_mode: Res<CameraMode>,
 ) {
+    if *camera_mode == CameraMode::TopDown {
+        if let Ok(mut text) = q_hud.p0().single_mut() {
+            text.0.clear();
+        }
+        if let Ok(mut text) = q_hud.p1().single_mut() {
+            text.0.clear();
+        }
+        if let Ok(mut text) = q_hud.p2().single_mut() {
+            text.0.clear();
+        }
+        if let Ok(mut text) = q_hud.p3().single_mut() {
+            text.0.clear();
+        }
+        if let Ok(mut text) = q_hud.p4().single_mut() {
+            text.0.clear();
+        }
+        if let Ok((mut text, mut flash)) = q_hud.p5().single_mut() {
+            text.0.clear();
+            flash.text.clear();
+        }
+        if let Ok(mut text) = q_hud.p6().single_mut() {
+            text.0.clear();
+        }
+        return;
+    }
+
     let fps = (1.0 / time.delta_secs().max(0.001)).round() as i32;
     let hud_state = hud_state_q.iter().next();
     let wood = hud_state.map(|s| s.pool_wood).unwrap_or(pool.get(ResourceKind::Wood));
@@ -539,10 +566,15 @@ pub fn update_hud(
 
     if let Ok(mut text) = q_hud.p6().single_mut() {
         **text = format!(
-            "ECO LOOP: rabbits {}/5 -> eat fruit -> CO2 {:.1} -> berries grow fruit {}",
+            "ECO LOOP: clouds {} rain {:.1} -> plants {}(+{}) -> rabbits {}(+{}) -> wildlife {}(+{})",
+            eco.clouds.len(),
+            eco.rainfall,
+            eco.plant_count(),
+            eco.plants_grown,
             eco.rabbit_count(),
-            eco.co2,
-            eco.total_fruit()
+            eco.rabbits_born,
+            eco.wildlife_count(),
+            eco.wildlife_born
         );
     }
 

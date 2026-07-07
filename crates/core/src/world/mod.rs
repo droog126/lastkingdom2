@@ -90,6 +90,7 @@ impl Biome {
 pub enum BlockType {
     Air,
     Dirt,
+    Grass,
     Stone,
     Sand,
     Snow,
@@ -115,7 +116,11 @@ impl BlockType {
     pub const fn is_surface(self) -> bool {
         matches!(
             self,
-            BlockType::Dirt | BlockType::Sand | BlockType::Snow | BlockType::BerryThicket
+            BlockType::Dirt
+                | BlockType::Grass
+                | BlockType::Sand
+                | BlockType::Snow
+                | BlockType::BerryThicket
         )
     }
 
@@ -123,8 +128,7 @@ impl BlockType {
         use BlockType::*;
         use ResourceKind as R;
         match self {
-            Air | Sand | Snow | Leaves | Water => None,
-            Dirt => None,
+            Air | Dirt | Grass | Sand | Snow | Leaves | Water => None,
             Stone => Some((R::Wood, 0)),
             Wood => Some((R::Wood, 5)),
             IronOre => Some((R::Wood, 0)),
@@ -140,6 +144,7 @@ impl BlockType {
         match self {
             Air => [0.0, 0.0, 0.0, 0.0],
             Dirt => [0.55, 0.36, 0.20, 1.0],
+            Grass => [0.30, 0.58, 0.22, 1.0],
             Stone => [0.55, 0.55, 0.55, 1.0],
             Sand => [0.92, 0.82, 0.55, 1.0],
             Snow => [0.95, 0.97, 1.00, 1.0],
@@ -888,7 +893,7 @@ pub fn install_huge_spawn_platform(world: &mut World) {
     world.push_geo_layer(ShapeLayer {
         name: "huge_spawn_platform_grass_surface".into(),
         weight: 52.0,
-        fill: FillMode::Replace(BlockType::Leaves),
+        fill: FillMode::Replace(BlockType::Grass),
         shapes: vec![ShapeSpec::Box(BoxShape {
             name: "huge_spawn_platform_grass_surface_box".into(),
             min: [cx - half_extent, top_y - 1, cz - half_extent],
@@ -1031,6 +1036,14 @@ mod tests {
     }
 
     #[test]
+    fn grass_is_standable_visual_surface_without_resource_yield() {
+        assert!(BlockType::Grass.is_solid());
+        assert!(BlockType::Grass.is_surface());
+        assert_eq!(BlockType::Grass.yields(), None);
+        assert_eq!(BlockType::Grass.debug_color_rgba()[3], 1.0);
+    }
+
+    #[test]
     fn player_spawn_position_uses_topmost_clear_standable_column() {
         let mut w = World::new(8);
         w.set(3, 1, 3, BlockType::Dirt);
@@ -1085,8 +1098,8 @@ mod tests {
         assert_eq!(a.size, config.size);
         assert_eq!(a.seed, config.seed);
         assert_eq!(a.pipeline.name, config.preset);
-        assert_eq!(a.get(x, foot_y - 1, z), BlockType::Leaves);
-        assert_eq!(b.get(x, foot_y - 1, z), BlockType::Leaves);
+        assert_eq!(a.get(x, foot_y - 1, z), BlockType::Grass);
+        assert_eq!(b.get(x, foot_y - 1, z), BlockType::Grass);
 
         for (x, y, z) in [(4, 4, 4), (48, 15, 48), (83, 12, 21), (16, 30, 64)] {
             assert_eq!(
@@ -1144,7 +1157,7 @@ mod tests {
         let z = WORLD_SIZE / 2;
         let foot_y = SEA_LEVEL + 3;
 
-        assert_eq!(w.get(x, foot_y - 1, z), BlockType::Leaves);
+        assert_eq!(w.get(x, foot_y - 1, z), BlockType::Grass);
         for y in foot_y..VERTICAL_SIZE {
             assert_eq!(w.get(x, y, z), BlockType::Air, "y={} must be clear", y);
         }

@@ -138,6 +138,9 @@ pub fn build_state_json(
             "plant_nodes": eco.plant_count(),
         },
         "eco_cycle": {
+            "clouds": eco.clouds.len(),
+            "rain": eco.rain,
+            "rainfall": eco.rainfall,
             "rabbits": eco.rabbit_count(),
             "wildlife": eco.wildlife_count(),
             "berry_bushes": eco.berry_count(),
@@ -146,6 +149,9 @@ pub fn build_state_json(
             "co2": eco.co2,
             "fruit_eaten": eco.fruit_eaten,
             "fruit_grown": eco.fruit_grown,
+            "plants_grown": eco.plants_grown,
+            "rabbits_born": eco.rabbits_born,
+            "wildlife_born": eco.wildlife_born,
         },
         "observer": {
             "snapshots": obs.snapshots.len(),
@@ -239,12 +245,20 @@ mod tests {
             assert_has_path(&json, &["creatures", "passive_current"]).as_u64(),
             Some(9)
         );
-        assert_eq!(assert_has_path(&json, &["creatures", "wildlife"]).as_u64(), Some(4));
+        assert_eq!(
+            assert_has_path(&json, &["creatures", "wildlife"]).as_u64(),
+            Some(4)
+        );
         assert!(assert_has_path(&json, &["creatures", "berry_bushes"]).is_number());
         assert!(assert_has_path(&json, &["creatures", "plant_nodes"]).is_number());
         assert!(assert_has_path(&json, &["eco_cycle", "rabbits"]).is_number());
         assert!(assert_has_path(&json, &["eco_cycle", "wildlife"]).is_number());
         assert!(assert_has_path(&json, &["eco_cycle", "plant_nodes"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "clouds"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "rainfall"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "plants_grown"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "rabbits_born"]).is_number());
+        assert!(assert_has_path(&json, &["eco_cycle", "wildlife_born"]).is_number());
         assert!(assert_has_path(&json, &["observer", "anomalies"]).is_number());
         assert_eq!(
             assert_has_path(&json, &["world", "size"]).as_i64(),

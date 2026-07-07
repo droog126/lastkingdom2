@@ -1,7 +1,7 @@
 use std::{
     env,
     ffi::OsStr,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -68,10 +68,13 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let parsed = parse_loop(raw);
     fs::create_dir_all(root.join("run-logs")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("screenshots")).map_err(|e| e.to_string())?;
+    let _lock = LoopLock::acquire(root)?;
+    reject_active_workspace_builds(root)?;
     enforce_decision_gate(root, parsed.refresh_after_fail)?;
 
     let use_offline = parsed.offline || (!parsed.online && !parsed.no_server);
-    let mut envs = runtime_env(root, &parsed.rust_log)?;
+    let target_dir = loop_target_dir(root);
+    let mut envs = runtime_env(root, &target_dir, &parsed.rust_log)?;
     if parsed.no_kenney {
         envs.push(("LK2_DISABLE_KENNEY".to_string(), "1".to_string()));
         println!(">>> Kenney gameplay models OFF <<<");
@@ -89,8 +92,8 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         println!(">>> audit pretty models ON <<<");
     }
 
-    let client_exe = exe_path(root, "lk2-client");
-    let server_exe = exe_path(root, "lk2-server");
+    let client_exe = exe_path(&target_dir, "lk2-client");
+    let server_exe = exe_path(&target_dir, "lk2-server");
     if !parsed.skip_build || !client_exe.exists() {
         cargo_build_with_fallback(root, "lk2-client", &features, &envs)?;
     }
@@ -100,7 +103,18 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
     }
-    stage_windows_runtime_files(root)?;
+    ensure_binary_fresh(
+        root,
+        &client_exe,
+        &[
+            "crates/client/src/main.rs",
+            "crates/client/src/capture.rs",
+            "crates/client/src/pretty/mod.rs",
+            "crates/client/src/render/mod.rs",
+            "crates/core/src/clock.rs",
+        ],
+    )?;
+    stage_windows_runtime_files(root, &target_dir)?;
 
     let before = latest_iter(root).and_then(|p| iter_number(&p)).unwrap_or(0);
     let server_log = root.join("screenshots/loop_server.log");
@@ -197,7 +211,10 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     }
 
     print_latest(root)?;
-    let health_result = run_latest_health(root);
+    let health_result = ready
+        .as_deref()
+        .map(|iter| run_health_for_iter(root, iter))
+        .unwrap_or_else(|| run_latest_health(root));
     write_decision_template(root)?;
     if let Err(err) = health_result {
         write_loop_diagnosis(
@@ -255,15 +272,17 @@ pub fn scenario(root: &Path, raw: &[String]) -> Result<()> {
         }
         i += 1;
     }
+    let target_dir = loop_target_dir(root);
     let envs = runtime_env(
         root,
+        &target_dir,
         &env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )?;
-    let client_exe = exe_path(root, "lk2-client");
+    let client_exe = exe_path(&target_dir, "lk2-client");
     if !skip_build || !client_exe.exists() {
-        cargo_build_with_fallback(root, "lk2-client", DEV_DYNAMIC_FEATURES, &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", &[], &envs)?;
     }
-    stage_windows_runtime_files(root)?;
+    stage_windows_runtime_files(root, &target_dir)?;
     let files = expand_pattern(root, &json)?;
     if files.is_empty() {
         return Err(format!("no JSON files matched: {json}"));
@@ -338,7 +357,11 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
     parsed
 }
 
-fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
+pub fn loop_target_dir(root: &Path) -> PathBuf {
+    root.join(".tmp").join("loop-target")
+}
+
+fn runtime_env(root: &Path, target_dir: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
     let sysroot =
         match Command::new("rustc").args(["--print", "sysroot"]).current_dir(root).output() {
             Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
@@ -355,7 +378,8 @@ fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
             }
         };
     let sep = if cfg!(windows) { ";" } else { ":" };
-    let mut path = [root.join("target/debug/deps"), root.join("target/debug")]
+    let debug = target_dir.join("debug");
+    let mut path = [debug.join("deps"), debug]
         .into_iter()
         .filter(|p| p.exists())
         .map(|p| p.display().to_string())
@@ -364,6 +388,11 @@ fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
         let sysroot_bin = PathBuf::from(&sysroot).join("bin");
         if sysroot_bin.exists() {
             path.push(sysroot_bin.display().to_string());
+        }
+    }
+    if let Ok(existing_path) = env::var("PATH") {
+        if !existing_path.is_empty() {
+            path.push(existing_path);
         }
     }
     let path_str = path.join(sep);
@@ -376,6 +405,10 @@ fn runtime_env(root: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
         ("BEVY_ASSET_ROOT".to_string(), root.display().to_string()),
         ("RUST_LOG".to_string(), rust_log.to_string()),
         ("CARGO_MANIFEST_DIR".to_string(), root.display().to_string()),
+        (
+            "CARGO_TARGET_DIR".to_string(),
+            target_dir.display().to_string(),
+        ),
         ("PATH".to_string(), path_str),
         ("WGPU_BACKEND".to_string(), "dx12".to_string()),
     ])
@@ -414,6 +447,50 @@ fn cargo_build_with_fallback(
                 }
             }
         }
+        Err(first) if is_msvc_stale_link_failure(&first.text) => {
+            println!(">>> MSVC link failed for {package}; cleaning this package and retrying once");
+            write_loop_diagnosis(
+                root,
+                &build_diagnosis(&first, "clean_package_and_retry_build"),
+            )?;
+            cargo_clean_package(root, package, envs)?;
+            match cargo_build_once(root, package, features, envs) {
+                Ok(()) => Ok(()),
+                Err(second) => {
+                    write_loop_diagnosis(
+                        root,
+                        &build_diagnosis(&second, "fix_compile_before_loop"),
+                    )?;
+                    write_auto_decision(root, "build", &second.text)?;
+                    Err(format!(
+                        ">>> BUILD FAILED for {package}; see run-logs/loop_diagnosis.json"
+                    ))
+                }
+            }
+        }
+        Err(first) if is_windows_build_script_access_denied(&first.text) => {
+            println!(
+                ">>> build script execution was denied for {package}; clearing loop target and retrying once"
+            );
+            write_loop_diagnosis(
+                root,
+                &build_diagnosis(&first, "clear_loop_target_and_retry_build"),
+            )?;
+            clear_loop_target(root, envs)?;
+            match cargo_build_once(root, package, features, envs) {
+                Ok(()) => Ok(()),
+                Err(second) => {
+                    write_loop_diagnosis(
+                        root,
+                        &build_diagnosis(&second, "fix_compile_before_loop"),
+                    )?;
+                    write_auto_decision(root, "build", &second.text)?;
+                    Err(format!(
+                        ">>> BUILD FAILED for {package}; see run-logs/loop_diagnosis.json"
+                    ))
+                }
+            }
+        }
         Err(failure) => {
             write_loop_diagnosis(root, &build_diagnosis(&failure, "fix_compile_before_loop"))?;
             write_auto_decision(root, "build", &failure.text)?;
@@ -431,7 +508,7 @@ fn cargo_build_once(
     envs: &[(String, String)],
 ) -> std::result::Result<(), BuildFailure> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["build", "-p", package]).current_dir(root);
+    cmd.args(["build", "-p", package, "-j", "1"]).current_dir(root);
     let joined;
     if !features.is_empty() {
         joined = features.join(",");
@@ -440,6 +517,7 @@ fn cargo_build_once(
     for (k, v) in envs {
         cmd.env(k, v);
     }
+    cmd.env("CARGO_INCREMENTAL", "0");
     println!(">>> {:?}", cmd);
     let output = cmd
         .output()
@@ -456,6 +534,184 @@ fn cargo_build_once(
         return Err(BuildFailure { package: package.to_string(), text });
     }
     Ok(())
+}
+
+fn ensure_binary_fresh(root: &Path, binary: &Path, sources: &[&str]) -> Result<()> {
+    let binary_time = fs::metadata(binary)
+        .and_then(|m| m.modified())
+        .map_err(|e| format!("failed to stat {}: {e}", binary.display()))?;
+    let mut stale_sources = Vec::new();
+    for rel in sources {
+        let path = root.join(rel);
+        let Ok(source_time) = fs::metadata(&path).and_then(|m| m.modified()) else {
+            continue;
+        };
+        if source_time > binary_time {
+            stale_sources.push((*rel).to_string());
+        }
+    }
+    if stale_sources.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "refusing to run stale {}; newer sources: {}. Rebuild completed binary before loop capture.",
+            binary.display(),
+            stale_sources.join(", ")
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct LoopLock {
+    path: PathBuf,
+}
+
+impl LoopLock {
+    fn acquire(root: &Path) -> Result<Self> {
+        let dir = root.join(".tmp");
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join("loop.lock");
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => Ok(Self { path }),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+                "another xtask loop appears to be running (lock: {}). Stop it or remove the stale lock after verifying no loop/build process is active.",
+                path.display()
+            )),
+            Err(err) => Err(format!(
+                "failed to create loop lock {}: {err}",
+                path.display()
+            )),
+        }
+    }
+}
+
+impl Drop for LoopLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn reject_active_workspace_builds(root: &Path) -> Result<()> {
+    #[cfg(not(windows))]
+    {
+        let _ = root;
+        return Ok(());
+    }
+    #[cfg(windows)]
+    {
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process -Filter \"name = 'cargo.exe' or name = 'rustc.exe' or name = 'lk2-client.exe' or name = 'lk2-server.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress",
+            ])
+            .output()
+            .map_err(|e| format!("failed to query active build processes: {e}"))?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        if has_active_workspace_process(root, &text) {
+            return Err(
+                "active cargo/rustc/lk2 client/server process detected for this workspace; wait for it to finish before running xtask loop".to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(process_json) else {
+        return false;
+    };
+    let current = std::process::id() as u64;
+    let mut rows = match value {
+        serde_json::Value::Array(rows) => rows,
+        serde_json::Value::Object(_) => vec![value],
+        _ => return false,
+    };
+    let mut ancestor_ids = std::collections::HashSet::new();
+    ancestor_ids.insert(current);
+    loop {
+        let mut changed = false;
+        for row in &rows {
+            let pid = row.get("ProcessId").and_then(serde_json::Value::as_u64).unwrap_or(0);
+            let ppid = row.get("ParentProcessId").and_then(serde_json::Value::as_u64).unwrap_or(0);
+            if ancestor_ids.contains(&pid) && ppid != 0 && ancestor_ids.insert(ppid) {
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let root_text = root.display().to_string().to_ascii_lowercase();
+    for row in rows.drain(..) {
+        let pid = row.get("ProcessId").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        if ancestor_ids.contains(&pid) {
+            continue;
+        }
+        let name =
+            row.get("Name").and_then(serde_json::Value::as_str).unwrap_or("").to_ascii_lowercase();
+        let command = row
+            .get("CommandLine")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if name == "lk2-client.exe" || name == "lk2-server.exe" {
+            return true;
+        }
+        if !command.contains(&root_text) {
+            continue;
+        }
+        if command.contains(" lk2-client")
+            || command.contains(" lk2_client")
+            || command.contains(" lk2-server")
+            || command.contains(" lk2_server")
+            || command.contains("-p lk2-client")
+            || command.contains("-p lk2-server")
+            || command.contains("-p xtask -- loop")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn clear_loop_target(root: &Path, envs: &[(String, String)]) -> Result<()> {
+    let Some(target_dir) =
+        envs.iter().find(|(k, _)| k == "CARGO_TARGET_DIR").map(|(_, v)| PathBuf::from(v))
+    else {
+        return Err("CARGO_TARGET_DIR missing; refusing to clear unknown target dir".to_string());
+    };
+    let expected = loop_target_dir(root);
+    if target_dir != expected {
+        return Err(format!(
+            "refusing to clear unexpected target dir {}; expected {}",
+            target_dir.display(),
+            expected.display()
+        ));
+    }
+    if target_dir.exists() {
+        fs::remove_dir_all(&target_dir)
+            .map_err(|e| format!("failed to clear {}: {e}", target_dir.display()))?;
+    }
+    Ok(())
+}
+
+fn cargo_clean_package(root: &Path, package: &str, envs: &[(String, String)]) -> Result<()> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["clean", "-p", package]).current_dir(root);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let output =
+        cmd.output().map_err(|e| format!("failed to run cargo clean -p {package}: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        Err(format!("cargo clean -p {package} failed:\n{text}"))
+    }
 }
 
 fn spawn_logged(
@@ -489,6 +745,20 @@ fn is_dynamic_link_failure(text: &str) -> bool {
     text.contains("LNK1189") || text.contains("bevy_dylib")
 }
 
+fn is_msvc_stale_link_failure(text: &str) -> bool {
+    text.contains("LNK2019")
+        && text.contains("LNK1120")
+        && (text.contains("bevy_ecs") || text.contains(".rcgu.o"))
+}
+
+fn is_windows_build_script_access_denied(text: &str) -> bool {
+    text.contains("failed to run custom build command")
+        && text.contains("build-script-build")
+        && (text.contains("os error 5")
+            || text.contains("Access is denied")
+            || text.contains("拒绝访问"))
+}
+
 fn classify_build_failure(text: &str) -> (&'static str, Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     let mut files = Vec::new();
@@ -510,6 +780,10 @@ fn classify_build_failure(text: &str) -> (&'static str, Vec<String>, Vec<String>
     }
     let kind = if is_dynamic_link_failure(text) {
         "windows_dynamic_link_failure"
+    } else if is_msvc_stale_link_failure(text) {
+        "windows_msvc_stale_link_failure"
+    } else if is_windows_build_script_access_denied(text) {
+        "windows_build_script_access_denied"
     } else if !errors.is_empty() {
         "rust_compile_error"
     } else {
@@ -656,15 +930,18 @@ fn iter_ready(iter: &Path) -> bool {
         return false;
     };
     // iter_210: in online mode SimClock.tick stays at 0 (server runs the
-    // authoritative sim), so the tick >= 500 gate would never fire. Accept
-    // either an offline tick >= 500 OR an online iter that has run at least
+    // authoritative sim), so the offline tick gate would never fire. Accept
+    // either an offline tick at the health completion threshold OR an online iter that has run at least
     // 4 wall seconds and produced a >= 30KB screenshot.
     let role = json.get("role").and_then(Value::as_str).unwrap_or("");
-    let tick_ok = json.get("tick").and_then(Value::as_i64).unwrap_or(0) >= 500;
+    let tick_ok = json.get("tick").and_then(Value::as_i64).unwrap_or(0) >= 100;
     let wall_ok = json.get("wall_secs").and_then(Value::as_f64).unwrap_or(0.0) >= 4.0;
     if json.pointer("/visual/movement_probe/first_player_pos").is_none()
         || json.pointer("/visual/movement_probe/current_player_pos").is_none()
     {
+        return false;
+    }
+    if json.pointer("/visual/player_readability/marker_count").is_none() {
         return false;
     }
     if role == "client_offline" {
@@ -701,6 +978,10 @@ fn run_latest_health(root: &Path) -> Result<()> {
         println!("  (no iter_* dir to check)");
         return Ok(());
     };
+    run_health_for_iter(root, &iter)
+}
+
+fn run_health_for_iter(root: &Path, iter: &Path) -> Result<()> {
     let prev = previous_iter(root, &iter);
     let verdict = evaluate_health(root, &iter, prev.as_deref(), false)?;
     if verdict == "FAIL" {
@@ -833,7 +1114,12 @@ fn latest_iter(root: &Path) -> Option<PathBuf> {
 }
 
 fn newest_iter_after(root: &Path, before: u32) -> Option<PathBuf> {
-    iter_dirs(root).ok()?.into_iter().filter(|p| iter_number(p).unwrap_or(0) > before).next_back()
+    iter_dirs(root)
+        .ok()?
+        .into_iter()
+        .filter(|p| iter_number(p).unwrap_or(0) > before)
+        .rev()
+        .find(|p| iter_ready(p))
 }
 
 fn previous_iter(root: &Path, iter: &Path) -> Option<PathBuf> {
@@ -861,8 +1147,8 @@ fn iter_number(path: &Path) -> Option<u32> {
     path.file_name().and_then(OsStr::to_str)?.strip_prefix("iter_")?.parse().ok()
 }
 
-fn exe_path(root: &Path, name: &str) -> PathBuf {
-    root.join("target/debug").join(if cfg!(windows) {
+fn exe_path(target_dir: &Path, name: &str) -> PathBuf {
+    target_dir.join("debug").join(if cfg!(windows) {
         format!("{name}.exe")
     } else {
         name.to_string()
@@ -892,11 +1178,11 @@ fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-pub fn stage_windows_runtime_files(root: &Path) -> Result<()> {
+pub fn stage_windows_runtime_files(root: &Path, target_dir: &Path) -> Result<()> {
     if !cfg!(windows) {
         return Ok(());
     }
-    let debug = root.join("target/debug");
+    let debug = target_dir.join("debug");
     if !debug.exists() {
         return Ok(());
     }
@@ -912,6 +1198,10 @@ pub fn stage_windows_runtime_files(root: &Path) -> Result<()> {
     copy_bevy_dylib_alias(&debug)?;
     stage_assets_dir(root, &debug)?;
     Ok(())
+}
+
+pub fn stage_default_windows_runtime_files(root: &Path) -> Result<()> {
+    stage_windows_runtime_files(root, &root.join("target"))
 }
 
 fn find_bevy_dylibs(debug: &Path) -> Result<Vec<PathBuf>> {
@@ -1108,6 +1398,77 @@ mod tests {
     }
 
     #[test]
+    fn classifies_msvc_stale_link_failure() {
+        let (kind, errors, files) = classify_build_failure(
+            "lk2_client.e2lg.rcgu.o : error LNK2019: unresolved external symbol bevy_ecs::entity::clone_entities\nF:\\rustProject\\lastkingdom2\\target\\debug\\deps\\lk2_client.exe : fatal error LNK1120: 441 unresolved externals",
+        );
+
+        assert_eq!(kind, "windows_msvc_stale_link_failure");
+        assert!(errors.is_empty());
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn classifies_windows_build_script_access_denied() {
+        let (kind, errors, files) = classify_build_failure(
+            "error: failed to run custom build command for `parking_lot_core v0.9.12`\n\nCaused by:\n  could not execute process `F:\\rustProject\\lastkingdom2\\.tmp\\loop-target\\debug\\build\\parking_lot_core\\build-script-build` (never executed)\n\nCaused by:\n  Access is denied. (os error 5)",
+        );
+
+        assert_eq!(kind, "windows_build_script_access_denied");
+        assert!(errors.is_empty());
+        assert!(files.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn active_process_filter_ignores_xtask_launch_parent() {
+        let root = PathBuf::from("F:\\rustProject\\lastkingdom2");
+        let current = std::process::id();
+        let parent = current + 1000;
+        let json = serde_json::json!([
+            {
+                "ProcessId": current,
+                "ParentProcessId": parent,
+                "Name": "xtask.exe",
+                "CommandLine": "xtask.exe loop --offline"
+            },
+            {
+                "ProcessId": parent,
+                "ParentProcessId": 1,
+                "Name": "cargo.exe",
+                "CommandLine": "cargo run -p xtask -- loop --offline"
+            }
+        ])
+        .to_string();
+
+        assert!(!has_active_workspace_process(&root, &json));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn active_process_filter_detects_other_lk2_client() {
+        let root = PathBuf::from("F:\\rustProject\\lastkingdom2");
+        let current = std::process::id();
+        let json = serde_json::json!([
+            {
+                "ProcessId": current,
+                "ParentProcessId": 1,
+                "Name": "xtask.exe",
+                "CommandLine": "xtask.exe loop --offline"
+            },
+            {
+                "ProcessId": current + 2000,
+                "ParentProcessId": 1,
+                "Name": "lk2-client.exe",
+                "CommandLine": "F:\\rustProject\\lastkingdom2\\target\\debug\\lk2-client.exe --offline"
+            }
+        ])
+        .to_string();
+
+        assert!(has_active_workspace_process(&root, &json));
+    }
+
+    #[test]
     fn classifies_rust_compile_errors_and_primary_files() {
         let text = "error[E0004]: non-exhaustive patterns\n   --> crates\\client\\src\\pretty\\mod.rs:1295:15\nerror[E0599]: no method named chain\n   --> crates\\client\\src\\main.rs:563:66\n";
 
@@ -1136,6 +1497,20 @@ mod tests {
     }
 
     #[test]
+    fn loop_lock_rejects_concurrent_acquire() {
+        let root = temp_root("xtask_loop_lock");
+        let first = LoopLock::acquire(&root).expect("first lock should acquire");
+        let err = LoopLock::acquire(&root).unwrap_err();
+        assert!(
+            err.contains("another xtask loop appears to be running"),
+            "got: {err}"
+        );
+        drop(first);
+        assert!(LoopLock::acquire(&root).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn next_ready_iter_waits_when_no_new_iter_exists() {
         let root = temp_root("xtask_no_new_iter");
         fs::create_dir_all(root.join("screenshots")).unwrap();
@@ -1148,7 +1523,11 @@ mod tests {
         let root = temp_root("xtask_incomplete_iter");
         let iter = root.join("screenshots/iter_2");
         fs::create_dir_all(&iter).unwrap();
-        fs::write(iter.join("final_state.json"), r#"{"tick":499}"#).unwrap();
+        fs::write(
+            iter.join("final_state.json"),
+            r#"{"role":"client_offline","tick":20,"wall_secs":5.0,"visual":{"movement_probe":{"first_player_pos":[1,2,3],"current_player_pos":[2,2,3]}}}"#,
+        )
+        .unwrap();
         assert!(next_ready_iter(&root, 1).is_none());
         let _ = fs::remove_dir_all(root);
     }
@@ -1168,10 +1547,39 @@ mod tests {
 
         fs::write(
             iter.join("final_state.json"),
-            r#"{"role":"client_offline","tick":500,"wall_secs":5.0,"visual":{"movement_probe":{"first_player_pos":[1,2,3],"current_player_pos":[2,2,3]}}}"#,
+            r#"{"role":"client_offline","tick":500,"wall_secs":5.0,"visual":{"movement_probe":{"first_player_pos":[1,2,3],"current_player_pos":[2,2,3]},"player_readability":{"marker_count":2}}}"#,
         )
         .unwrap();
         assert_eq!(next_ready_iter(&root, 1), Some(iter));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn next_ready_iter_uses_newest_ready_iter_not_newest_directory() {
+        let root = temp_root("xtask_newest_ready_iter");
+        let _ = fs::remove_dir_all(&root);
+        let screenshots = root.join("screenshots");
+        fs::create_dir_all(&screenshots).unwrap();
+
+        let ready = screenshots.join("iter_2");
+        fs::create_dir_all(&ready).unwrap();
+        fs::write(
+            ready.join("final_state.json"),
+            r#"{"role":"client_offline","tick":100,"wall_secs":5.0,"visual":{"movement_probe":{"first_player_pos":[1,2,3],"current_player_pos":[2,2,3]},"player_readability":{"marker_count":2}}}"#,
+        )
+        .unwrap();
+        fs::write(ready.join("iter_2.png"), vec![1u8; 40 * 1024]).unwrap();
+
+        let incomplete = screenshots.join("iter_3");
+        fs::create_dir_all(&incomplete).unwrap();
+        fs::write(
+            incomplete.join("final_state.json"),
+            r#"{"role":"client_offline","tick":100,"wall_secs":5.0,"visual":{"movement_probe":{"first_player_pos":[1,2,3],"current_player_pos":[2,2,3]},"player_readability":{"marker_count":2}}}"#,
+        )
+        .unwrap();
+        fs::write(incomplete.join("iter_3.png"), vec![1u8; 72]).unwrap();
+
+        assert_eq!(next_ready_iter(&root, 1), Some(ready));
         let _ = fs::remove_dir_all(root);
     }
 

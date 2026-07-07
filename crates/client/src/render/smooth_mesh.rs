@@ -134,27 +134,37 @@ fn terrain_color(p: [f32; 3]) -> [f32; 4] {
 
 fn laplacian_smooth(vertices: Vec<McVertex>, indices: &[u32], passes: u32) -> Vec<McVertex> {
     let mut verts = vertices;
+    let mut neighbors: Vec<Vec<usize>> = vec![Vec::new(); verts.len()];
+    for tri in indices.chunks_exact(3) {
+        let a = tri[0] as usize;
+        let b = tri[1] as usize;
+        let c = tri[2] as usize;
+        if a >= verts.len() || b >= verts.len() || c >= verts.len() {
+            continue;
+        }
+        neighbors[a].push(b);
+        neighbors[a].push(c);
+        neighbors[b].push(a);
+        neighbors[b].push(c);
+        neighbors[c].push(a);
+        neighbors[c].push(b);
+    }
+
     for _ in 0..passes {
         let mut new_positions: Vec<[f32; 3]> = Vec::with_capacity(verts.len());
-        for i in 0..verts.len() {
-            let mut neighbors: Vec<[f32; 3]> = Vec::new();
-            for tri in indices.chunks(3) {
-                if tri.contains(&(i as u32)) {
-                    for &vi in tri {
-                        if vi != i as u32 {
-                            neighbors.push(verts[vi as usize].position);
-                        }
-                    }
-                }
-            }
-            if neighbors.is_empty() {
+        for (i, vertex_neighbors) in neighbors.iter().enumerate() {
+            if vertex_neighbors.is_empty() {
                 new_positions.push(verts[i].position);
                 continue;
             }
-            let sum: [f32; 3] = neighbors.iter().fold([0.0; 3], |acc, n| {
-                [acc[0] + n[0], acc[1] + n[1], acc[2] + n[2]]
-            });
-            let n = neighbors.len() as f32;
+            let mut sum = [0.0; 3];
+            for &neighbor in vertex_neighbors {
+                let p = verts[neighbor].position;
+                sum[0] += p[0];
+                sum[1] += p[1];
+                sum[2] += p[2];
+            }
+            let n = vertex_neighbors.len() as f32;
             let avg = [sum[0] / n, sum[1] / n, sum[2] / n];
 
             let orig = verts[i].position;

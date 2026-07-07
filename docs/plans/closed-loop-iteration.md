@@ -5,7 +5,7 @@
 ## 当前事实源
 
 - 入口：`just loop`
-- 直接命令：`cargo run -q -p xtask -- loop --offline --seconds 60`
+- 直接命令：`just xtask loop --offline --seconds 60`
 - 健康检查：`just health`
 - 实现位置：`xtask/src/loop_cmd.rs` 和 `xtask/src/health.rs`
 - 人类运行指南：`docs/STARTING.md`

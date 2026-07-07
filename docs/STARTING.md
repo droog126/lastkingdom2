@@ -79,7 +79,7 @@ just loop
 等价于：
 
 ```powershell
-cargo run -q -p xtask -- loop --offline --seconds 60
+just xtask loop --offline --seconds 60
 ```
 
 `xtask loop` 会按需 build `lk2-client`，运行离线 auto-demo，生成 `screenshots\iter_NN\` 目录，执行 health 检查，并写入 `decision.template.md`。下一轮运行前，上一轮必须有 `decision.md`。

@@ -155,7 +155,9 @@ pub fn visual(root: &Path) -> Result<()> {
     let mut failed = false;
     let mut warnings = Vec::new();
     println!("# Visual ownership audit\n");
-    for file in find_files(&client_root, |p| p.extension().and_then(OsStr::to_str) == Some("rs"))? {
+    for file in find_files(&client_root, |p| {
+        p.extension().and_then(OsStr::to_str) == Some("rs")
+    })? {
         let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
         let mut debug_depth = 0_i32;
         for (idx, line) in text.lines().enumerate() {
@@ -271,7 +273,10 @@ mod tests {
     #[test]
     fn decision_template_forces_carryover_section() {
         let out = decision_template("iter_201", None);
-        assert!(out.contains("carryover:"), "missing carryover section:\n{out}");
+        assert!(
+            out.contains("carryover:"),
+            "missing carryover section:\n{out}"
+        );
         assert!(
             out.contains("addressed_this_iter"),
             "missing addressed_this_iter line:\n{out}"
@@ -290,12 +295,18 @@ mod tests {
     fn decision_template_forces_claim_evidence_section() {
         let out = decision_template("iter_201", None);
         assert!(out.contains("claims:"), "missing claims section:\n{out}");
-        assert!(out.contains("state_evidence"), "missing state evidence line:\n{out}");
+        assert!(
+            out.contains("state_evidence"),
+            "missing state evidence line:\n{out}"
+        );
         assert!(
             out.contains("screenshot_evidence"),
             "missing screenshot evidence line:\n{out}"
         );
-        assert!(out.contains("verdict:"), "missing claim verdict line:\n{out}");
+        assert!(
+            out.contains("verdict:"),
+            "missing claim verdict line:\n{out}"
+        );
     }
 
     #[test]

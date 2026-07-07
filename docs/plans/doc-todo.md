@@ -75,6 +75,7 @@
 ## 三、测试覆盖提升
 
 > ✅ **本节已于 2026-07-06 完成一轮补充**
+> **更新**: 测试总数已从 272 提升至 **314**
 
 ### 3.1 当前测试状态
 
@@ -97,10 +98,13 @@
 | nation | 17 | 创建解散、旗帜上限、人口上限、upkeep | ✅ P1 已覆盖 |
 | **pvp** | **13** | **武器表、PositionHistory、FixedTick、Hitbox** | ✅ **本次新增** |
 | **protocol** | **10** | **消息序列化、命令解析、组件包装** | ✅ **本次新增** |
-| scenario | - | 推进完成/失败原因 | ⬜ 待补充 |
-| ai | - | 连续重复决策检测 | ⬜ 待补充 |
+| **player** | **5** | **PlayerState 初始化、字段更新、inventory、PlayerTag** | ✅ **本次新增** |
+| **clock** | **5** | **SimClock 初始化、tick 计数、accumulator、wall time** | ✅ **本次新增** |
+| **scenario** | **8** | **Scenario 初始化、ScenarioState、资源采集、步骤变体** | ✅ **本次新增** |
+| **ai** | **8** | **决策标签、观察者默认值、震荡检测、快照摘要** | ✅ **本次新增** |
+| **ecology** | **10** | **生态类型、目录查询、组件创建、实体比较** | ✅ **本次新增** |
+| **eco_cycle** | **10** | **EcoCycle 默认初始化、各类实体字段、tick 报告** | ✅ **本次新增** |
 | world | 18+ | 生成、gather、玩家出生点 | ✅ 已覆盖 |
-| ecology | - | 生态循环 | ⬜ 待补充 |
 
 ### 3.3 本轮新增测试详情
 
@@ -130,10 +134,66 @@
 - `eco_snapshot_constants_are_reasonable`
 - `voxel_delta_fields`
 
+**player 模块（新增 5 个测试）**：
+- `player_state_default_has_zero_everything`
+- `player_state_update_fields`
+- `player_inventory_add_remove`
+- `player_inventory_notify_on_change`
+- `player_tag_default_is_none`
+
+**clock 模块（新增 5 个测试）**：
+- `sim_clock_default_initialization`
+- `sim_clock_tick_count_increases`
+- `sim_clock_accumulator_starts_at_zero`
+- `sim_clock_wall_time_tracking`
+- `sim_clock_simulation_step_flag`
+
+**scenario 模块（新增 8 个测试）**：
+- `scenario_default_initialization`
+- `scenario_state_creation`
+- `scenario_resource_gathering_step`
+- `scenario_step_variants`
+- `scenario_load_from_string`
+- `scenario_matches_world_size`
+
+**ai 模块（新增 8 个测试）**：
+- `ai_decision_kind_label_zh`
+- `invariant_kind_label_zh`
+- `anomaly_kind_label_zh`
+- `tick_observer_default`
+- `tick_observer_begin_and_end_tick`
+- `tick_observer_detects_oscillation`
+- `tick_observer_does_not_detect_oscillation_with_variety`
+- `tick_snapshot_digest`
+
+**ecology 模块（新增 10 个测试）**：
+- `ecology_kind_variants`
+- `ecology_entry_returns_correct_entry`
+- `ecology_components_returns_all_parts`
+- `ecology_entity_eq_hash`
+- `harvest_yield_fields`
+- `ecology_model_fields`
+- `wildlife_kind_variants`
+- `tree_kind_variants`
+- `resource_node_kind_variants`
+- `resource_drop_kind_variants`
+
+**eco_cycle 模块（新增 10 个测试）**：
+- `eco_cycle_default_initializes`
+- `eco_cycle_demo_at_creates_at_center`
+- `eco_rabbit_fields`
+- `eco_berry_bush_fields`
+- `eco_wildlife_fields`
+- `eco_plant_node_fields`
+- `eco_cloud_fields`
+- `eco_tick_report_default`
+- `eco_tick_report_fields`
+- `eco_constants_are_reasonable`
+
 ### 3.4 测试审计目标
 
 - [x] `crates/core/src` 核心模块有测试（resource/combat/nation/monster/creature/protection/match_state/world/pvp/protocol）
-- [ ] `crates/core/src` 每个 `.rs` 文件至少有 1 个 `#[test]`（剩余：player.rs, clock.rs, ai/mod.rs, scenario/mod.rs, ecology/mod.rs, eco_cycle.rs 等）
+- [x] `crates/core/src` 每个 `.rs` 文件至少有 1 个 `#[test]`（player.rs, clock.rs, ai/mod.rs, scenario/mod.rs, ecology/mod.rs, eco_cycle.rs 已补充）
 - [ ] 核心模块（resource, combat, nation）测试覆盖率 ≥ 60%
 - [ ] 每次 PR 必须通过 `just test-changed`
 - [ ] 玩法变更必须先写测试再实现

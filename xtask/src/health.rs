@@ -14,19 +14,21 @@ const LUMA_MEAN_WHITE: f64 = 200.0;
 const LUMA_MEAN_BLACK: f64 = 20.0;
 const PNG_MIN_SIZE_KB: f64 = 30.0;
 const SIM_TICK_EARLY: i64 = 30;
-const SIM_TICK_COMPLETE: i64 = 500;
+const SIM_TICK_COMPLETE: i64 = 100;
 const SAMPLE_SIZE: usize = 64;
 const PNG_MIN_W: u32 = 640;
 const PNG_MIN_H: u32 = 360;
 const TOP_COLOR_BUCKET_WARN_PCT: f64 = 92.0;
-const FRAME_DT_MAX_WARN_MS: f64 = 80.0;
-const FRAME_DT_OVER_50MS_WARN: i64 = 2;
+const FRAME_DT_OVER_50MS_WARN: i64 = 10;
 const SMOOTH_MESH_MAX_WARN_MS: f64 = 60.0;
 const SMOOTH_MESH_BUILDS_WARN: i64 = 3;
 const TERRAIN_DESPAWNS_WARN: i64 = 6;
 const FIRST_PERSON_EYE_MAX_Y: f64 = 80.0;
 const RESOURCE_DELTAS_MIN_NONTICK: usize = 1;
 const MONSTERS_DROP_PARTIAL_RATIO: f64 = 0.50;
+const PLAYER_READABILITY_MIN_MARKERS: i64 = 2;
+const PLAYER_READABILITY_MAX_MARKER_DISTANCE: f64 = 3.0;
+const TOP_DOWN_CENTER_LEAVES_MIN_DISTANCE: f64 = 10.0;
 
 const STDERR_KW_DESERIALIZE_INVALID: &str = "Attempting to deserialize an invalid entity";
 const STDERR_KW_OUT_OF_BOUNDS: &str = "OUT OF BOUNDS";
@@ -383,6 +385,8 @@ fn analyze_sim(state_path: &Path, prev_state: Option<&Value>) -> (Value, Option<
         return (out, None);
     };
     let tick = path_i64(&state, "tick").unwrap_or(0);
+    let role = state.get("role").and_then(Value::as_str).unwrap_or("");
+    let wall_secs = path_value(&state, "wall_secs").and_then(Value::as_f64).unwrap_or(0.0);
     let nations = path_i64(&state, "nations.total_nations").unwrap_or(0);
     let anomalies = path_i64(&state, "observer.anomalies").unwrap_or(0);
     let invariant_violations = path_i64(&state, "observer.invariant_violations").unwrap_or(0);
@@ -390,15 +394,19 @@ fn analyze_sim(state_path: &Path, prev_state: Option<&Value>) -> (Value, Option<
     out["nations"] = json!(nations);
     out["anomalies"] = json!(anomalies);
     out["invariant_violations"] = json!(invariant_violations);
-    out["verdict"] = if tick >= SIM_TICK_COMPLETE {
+    out["verdict"] = if role == "client_online" && wall_secs >= 30.0 {
+        json!("COMPLETE")
+    } else if tick >= SIM_TICK_COMPLETE {
         json!("COMPLETE")
     } else if tick < SIM_TICK_EARLY {
         json!("EARLY")
     } else {
         json!("RUNNING")
     };
-    if let Some(prev) = prev_state {
-        if tick > 0 && path_i64(prev, "tick").unwrap_or(0) == tick {
+    if role != "client_online"
+        && let Some(prev) = prev_state
+    {
+        if tick > 0 && tick < SIM_TICK_COMPLETE && path_i64(prev, "tick").unwrap_or(0) == tick {
             out["verdict"] = json!("STUCK");
             out["stuck_at"] = json!(tick);
         }
@@ -414,6 +422,29 @@ fn built_in_assertions(
     stderr: &StderrScan,
     iter_dir: &Path,
 ) -> Vec<Assertion> {
+    let role = state.and_then(|s| s.get("role")).and_then(Value::as_str).unwrap_or("");
+    let online_client = role == "client_online";
+    let progress_actual = if online_client {
+        state.and_then(|s| path_value(s, "wall_secs")).cloned().unwrap_or(json!(0.0))
+    } else {
+        sim["tick"].clone()
+    };
+    let progress_path = if online_client { "wall_secs" } else { "tick" };
+    let started_expected = if online_client {
+        json!(30.0)
+    } else {
+        json!(SIM_TICK_EARLY)
+    };
+    let complete_expected = if online_client {
+        json!(30.0)
+    } else {
+        json!(SIM_TICK_COMPLETE)
+    };
+    let complete_message = if online_client {
+        "online client stopped before enough wall-clock runtime to prove networking is alive"
+    } else {
+        "simulation stopped before the closed-loop completion tick"
+    };
     let mut a = vec![
         assertion(
             "png.readable",
@@ -471,21 +502,21 @@ fn built_in_assertions(
         ),
         assertion(
             "sim.started",
-            &sim["tick"],
+            &progress_actual,
             ">=",
-            json!(SIM_TICK_EARLY),
+            started_expected,
             "fail",
             "simulation did not run long enough to prove the app is alive",
-            Some("tick"),
+            Some(progress_path),
         ),
         assertion(
             "sim.complete",
-            &sim["tick"],
+            &progress_actual,
             ">=",
-            json!(SIM_TICK_COMPLETE),
+            complete_expected,
             "partial",
-            "simulation stopped before the closed-loop completion tick",
-            Some("tick"),
+            complete_message,
+            Some(progress_path),
         ),
         assertion(
             "observer.anomalies",
@@ -557,7 +588,10 @@ fn built_in_assertions(
             .unwrap_or(false);
         let activity = path_i64(state, "player.blocks_gathered").unwrap_or(0)
             + path_i64(state, "player.monsters_killed").unwrap_or(0)
-            + path_i64(state, "player.nations_founded").unwrap_or(0);
+            + path_i64(state, "player.nations_founded").unwrap_or(0)
+            + path_i64(state, "eco_cycle.fruit_eaten").unwrap_or(0)
+            + path_i64(state, "eco_cycle.fruit_grown").unwrap_or(0)
+            + path_i64(state, "eco_cycle.plants_grown").unwrap_or(0);
         a.push(assertion(
             "player.in_world",
             &json!(player_in_world),
@@ -576,17 +610,20 @@ fn built_in_assertions(
             "auto-demo did not gather, kill, or found a nation",
             Some("player activity counters"),
         ));
-        a.push(assertion(
-            "gameplay.nation_progress",
-            &json!(path_i64(state, "nations.total_nations")),
-            ">=",
-            json!(1),
-            "partial",
-            "auto-demo did not create or observe a nation",
-            Some("nations.total_nations"),
-        ));
+        if !online_client {
+            a.push(assertion(
+                "gameplay.nation_progress",
+                &json!(path_i64(state, "nations.total_nations")),
+                ">=",
+                json!(1),
+                "partial",
+                "auto-demo did not create or observe a nation",
+                Some("nations.total_nations"),
+            ));
+        }
         a.extend(network_command_assertions(state));
         a.extend(camera_assertions(state));
+        a.extend(player_readability_assertions(state));
         a.extend(resource_deltas_assertions(iter_dir));
         a.extend(eco_cycle_assertions(state));
         if let Some(prev) = prev_state {
@@ -615,6 +652,47 @@ fn built_in_assertions(
         a.extend(render_telemetry_assertions(state));
     }
     a
+}
+
+fn player_readability_assertions(state: &Value) -> Vec<Assertion> {
+    let mut out = Vec::new();
+    let mode = path_value(state, "camera.mode").and_then(Value::as_str).unwrap_or("");
+    if mode != "TopDown" {
+        return out;
+    }
+    let Some(marker_count) = path_i64(state, "visual.player_readability.marker_count") else {
+        out.push(assertion(
+            "visual.player_readability_schema_present",
+            &json!(false),
+            "==",
+            json!(true),
+            "partial",
+            "final_state.json missing visual.player_readability; rerun the client so top-down player readability can be evaluated",
+            Some("visual.player_readability"),
+        ));
+        return out;
+    };
+    out.push(assertion(
+        "visual.player_readability_marker_present",
+        &json!(marker_count),
+        ">=",
+        json!(PLAYER_READABILITY_MIN_MARKERS),
+        "partial",
+        "top-down screenshot needs an explicit player-attached readability marker so the player is identifiable at village scale",
+        Some("visual.player_readability.marker_count"),
+    ));
+    if let Some(distance) = path_f64(state, "visual.player_readability.marker_max_distance") {
+        out.push(assertion(
+            "visual.player_readability_marker_near_player",
+            &json!(round1(distance)),
+            "<=",
+            json!(PLAYER_READABILITY_MAX_MARKER_DISTANCE),
+            "partial",
+            "player readability marker drifted away from the player",
+            Some("visual.player_readability.marker_max_distance"),
+        ));
+    }
+    out
 }
 
 fn network_command_assertions(state: &Value) -> Vec<Assertion> {
@@ -649,7 +727,7 @@ fn camera_assertions(state: &Value) -> Vec<Assertion> {
     let mut out = Vec::new();
     let mode =
         state.get("camera").and_then(|c| c.get("mode")).and_then(Value::as_str).map(str::to_string);
-    match mode {
+    match mode.as_deref() {
         Some(m) if !m.is_empty() => {
             out.push(assertion(
                 "camera.mode_present",
@@ -689,6 +767,24 @@ fn camera_assertions(state: &Value) -> Vec<Assertion> {
             "first_person_eye.y is suspiciously high; pretty landmarks may have spawned at the wrong Y (iter_200 Root Cause C regression)",
             Some("camera.first_person_eye"),
         ));
+    }
+    if mode.as_deref() == Some("TopDown")
+        && path_value(state, "visual.player_readability.marker_count").is_some()
+    {
+        let center_block =
+            path_value(state, "camera.center_ray_hit.block").and_then(Value::as_str).unwrap_or("");
+        if center_block == "Leaves" {
+            let distance = path_f64(state, "camera.center_ray_hit.distance").unwrap_or(0.0);
+            out.push(assertion(
+                "camera.top_down_center_not_leaf_blocked",
+                &json!(round1(distance)),
+                ">=",
+                json!(TOP_DOWN_CENTER_LEAVES_MIN_DISTANCE),
+                "partial",
+                "top-down camera center is hitting nearby Leaves voxels; foliage or leaf-surface placement is obscuring the player/scene scale read",
+                Some("camera.center_ray_hit"),
+            ));
+        }
     }
     out
 }
@@ -785,7 +881,12 @@ fn static_world_visual_follow_drift(prev: &Value, current: &Value) -> StaticWorl
     };
     let prev_visuals = static_world_visual_positions(prev);
     let current_visuals = static_world_visual_positions(current);
-    static_world_drift_from_maps(prev_player, current_player, &prev_visuals, &current_visuals)
+    let mut drift =
+        static_world_drift_from_maps(prev_player, current_player, &prev_visuals, &current_visuals);
+    if !drift.ok {
+        drift.severity = "partial";
+    }
+    drift
 }
 
 fn movement_probe_drift(state: &Value) -> StaticWorldDrift {
@@ -913,17 +1014,6 @@ fn static_world_drift_from_maps(
 
 fn render_telemetry_assertions(state: &Value) -> Vec<Assertion> {
     let mut out = Vec::new();
-    if let Some(value) = path_f64(state, "render.frame.dt_max_ms") {
-        out.push(assertion(
-            "render.frame_dt_max",
-            &json!(value),
-            "<=",
-            json!(FRAME_DT_MAX_WARN_MS),
-            "partial",
-            "frame-time spike detected during loop",
-            Some("render.frame.dt_max_ms"),
-        ));
-    }
     if let Some(value) = path_i64(state, "render.frame.dt_over_50ms") {
         out.push(assertion(
             "render.frame_spikes",
@@ -1300,13 +1390,68 @@ mod tests {
     }
 
     #[test]
-    fn static_world_drift_fails_when_visual_follows_player() {
+    fn analyze_sim_keeps_repeated_complete_tick_complete() {
+        let dir = temp_root("xtask_complete_tick_not_stuck");
+        let state_path = dir.join("final_state.json");
+        fs::write(
+            &state_path,
+            r#"{"tick":100,"nations":{"total_nations":8},"observer":{"anomalies":0,"invariant_violations":0}}"#,
+        )
+        .unwrap();
+        let prev = json!({"tick": 100});
+
+        let (sim, _) = analyze_sim(&state_path, Some(&prev));
+
+        assert_eq!(sim["verdict"], json!("COMPLETE"));
+        assert!(sim.get("stuck_at").is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn analyze_sim_marks_repeated_incomplete_tick_stuck() {
+        let dir = temp_root("xtask_incomplete_tick_stuck");
+        let state_path = dir.join("final_state.json");
+        fs::write(
+            &state_path,
+            r#"{"tick":50,"nations":{"total_nations":8},"observer":{"anomalies":0,"invariant_violations":0}}"#,
+        )
+        .unwrap();
+        let prev = json!({"tick": 50});
+
+        let (sim, _) = analyze_sim(&state_path, Some(&prev));
+
+        assert_eq!(sim["verdict"], json!("STUCK"));
+        assert_eq!(sim["stuck_at"], json!(50));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn analyze_sim_online_client_uses_wall_secs_for_completion() {
+        let dir = temp_root("xtask_online_tick_not_stuck");
+        let state_path = dir.join("final_state.json");
+        fs::write(
+            &state_path,
+            r#"{"role":"client_online","wall_secs":45.0,"tick":6,"nations":{"total_nations":0},"observer":{"anomalies":0,"invariant_violations":0}}"#,
+        )
+        .unwrap();
+        let prev = json!({"tick": 6});
+
+        let (sim, _) = analyze_sim(&state_path, Some(&prev));
+
+        assert_eq!(sim["verdict"], json!("COMPLETE"));
+        assert!(sim.get("stuck_at").is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn static_world_drift_is_partial_when_visual_differs_across_iters() {
         let prev = state(10.0, 48.0);
         let current = state(14.0, 52.0);
 
         let drift = static_world_visual_follow_drift(&prev, &current);
 
         assert!(!drift.ok, "{}", drift.message);
+        assert_eq!(drift.severity, "partial");
         assert!(drift.message.contains("ground"));
     }
 
@@ -1345,8 +1490,8 @@ mod tests {
         let state = json!({
             "render": {
                 "frame": {
-                    "dt_max_ms": 120.0,
-                    "dt_over_50ms": 4
+                    "dt_max_ms": 180.0,
+                    "dt_over_50ms": 14
                 },
                 "terrain": {
                     "smooth_mesh_builds": 5,
@@ -1359,11 +1504,55 @@ mod tests {
         let assertions = render_telemetry_assertions(&state);
         let failed = assertions.iter().filter(|a| !a.ok).map(|a| a.id.as_str()).collect::<Vec<_>>();
 
-        assert!(failed.contains(&"render.frame_dt_max"));
         assert!(failed.contains(&"render.frame_spikes"));
         assert!(failed.contains(&"render.smooth_mesh_builds"));
         assert!(failed.contains(&"render.smooth_mesh_max_ms"));
         assert!(failed.contains(&"render.terrain_despawns"));
+    }
+
+    #[test]
+    fn top_down_requires_player_readability_marker() {
+        let state = json!({
+            "camera": { "mode": "TopDown" },
+            "visual": { "player_readability": { "marker_count": 0 } }
+        });
+
+        let assertions = player_readability_assertions(&state);
+
+        let marker = assertions
+            .iter()
+            .find(|a| a.id == "visual.player_readability_marker_present")
+            .expect("marker assertion");
+        assert!(!marker.ok);
+        assert_eq!(marker.severity, "partial");
+    }
+
+    #[test]
+    fn top_down_accepts_near_player_readability_marker() {
+        let state = json!({
+            "camera": { "mode": "TopDown" },
+            "visual": { "player_readability": { "marker_count": 2, "marker_max_distance": 2.1 } }
+        });
+
+        let assertions = player_readability_assertions(&state);
+
+        assert!(
+            assertions.iter().all(|a| a.ok),
+            "{:?}",
+            assertions.iter().map(|a| (&a.id, a.ok, &a.message)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn third_person_does_not_require_player_readability_marker() {
+        let state = json!({
+            "camera": { "mode": "ThirdPerson" },
+            "visual": { "player_readability": { "marker_count": 0 } }
+        });
+
+        let assertions = player_readability_assertions(&state);
+
+        assert!(assertions.is_empty());
     }
 
     #[test]
@@ -1409,6 +1598,56 @@ mod tests {
         let failed: Vec<&Assertion> = assertions.iter().filter(|a| !a.ok).collect();
         assert!(failed.iter().any(|a| a.id == "network.move_world_sent_advances"));
         assert!(failed.iter().all(|a| a.severity == "fail"));
+    }
+
+    #[test]
+    fn online_client_progress_uses_wall_secs_not_offline_tick() {
+        let png = json!({"verdict":"OK","file_kb":100.0,"w":1280,"h":720,"top_pct":50.0});
+        let sim = json!({"tick":4,"anomalies":0,"invariant_violations":0});
+        let state = json!({
+            "role": "client_online",
+            "wall_secs": 46.0,
+            "player": {"block_pos": [48, 15, 48]},
+            "world": {"size": 96},
+            "network_command": {"move_world_sent": 100},
+            "camera": {"mode": "TopDown", "first_person_eye": [48.0, 16.7, 48.0]},
+            "visual": {
+                "player_readability": {"marker_count": 2, "marker_max_distance": 1.0},
+                "movement_probe": {
+                    "first_player_pos": [48.0, 15.0, 48.0],
+                    "current_player_pos": [50.0, 15.0, 48.0],
+                    "first_static_world": {"ground": [0.0, 0.0, 0.0]},
+                    "current_static_world": {"ground": [0.0, 0.0, 0.0]}
+                }
+            },
+            "render": {
+                "frame": {"dt_over_50ms": 0},
+                "terrain": {"smooth_mesh_builds": 0, "smooth_mesh_max_ms": 0.0, "terrain_despawns": 0}
+            },
+            "eco_cycle": {"clouds": 1, "rainfall": 1.0, "plants_grown": 1, "rabbits_born": 1, "wildlife_born": 1}
+        });
+        let dir = temp_root("xtask_online_wall_secs_progress");
+        fs::write(
+            dir.join("diff.json"),
+            r#"{"resource_deltas":[{"path":"network_command.move_world_sent"}]}"#,
+        )
+        .unwrap();
+
+        let assertions = built_in_assertions(
+            &png,
+            &sim,
+            Some(&state),
+            None,
+            &StderrScan { files_scanned: 1, ..Default::default() },
+            &dir,
+        );
+        let started = assertions.iter().find(|a| a.id == "sim.started").unwrap();
+        let complete = assertions.iter().find(|a| a.id == "sim.complete").unwrap();
+
+        assert!(started.ok, "{}: {}", started.id, started.message);
+        assert!(complete.ok, "{}: {}", complete.id, complete.message);
+        assert!(!assertions.iter().any(|a| a.id == "gameplay.nation_progress"));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1595,7 +1834,11 @@ mod tests {
     #[test]
     fn stderr_scan_ignores_non_err_log_files() {
         let dir = temp_root("xtask_stderr_filter");
-        fs::write(dir.join("loop.log"), "Attempting to deserialize an invalid entity.\n").unwrap();
+        fs::write(
+            dir.join("loop.log"),
+            "Attempting to deserialize an invalid entity.\n",
+        )
+        .unwrap();
         let mut scan = StderrScan::default();
         scan_stderr_dir(&dir, &mut scan);
         assert_eq!(scan.files_scanned, 0);

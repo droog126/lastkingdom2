@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::ecology::{
@@ -6,8 +8,8 @@ use lk2_core::ecology::{
 use lk2_core::player::PlayerState;
 use lk2_core::world::World as GameWorld;
 
-use crate::render::CameraAngles;
 use crate::render::scalar_field::effective_ground_height;
+use crate::render::{CameraAngles, CameraMode};
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -32,180 +34,36 @@ impl Default for PrettyConfig {
 }
 
 #[derive(Component)]
-pub struct WaterMarker;
-
-#[derive(Component)]
-pub struct GrassPlatformMarker;
-
-#[derive(Component)]
-pub struct GroundDetail {
-    pub offset: Vec2,
-    pub y_offset: f32,
-}
-
-#[derive(Component)]
-pub struct GroundDiscOuter;
-
-#[derive(Component)]
-pub struct GroundDiscInner;
-
-pub fn follow_ground_discs(
-    player: Res<PlayerState>,
-    game_world: Res<GameWorld>,
-    mut outer: Query<&mut Transform, (With<GroundDiscOuter>, Without<GroundDiscInner>)>,
-    mut inner: Query<&mut Transform, (With<GroundDiscInner>, Without<GroundDiscOuter>)>,
-) {
-    let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-    for mut t in &mut outer {
-        t.translation = Vec3::new(player.pos.x, ground_top - 0.05, player.pos.z);
-    }
-    for mut t in &mut inner {
-        t.translation = Vec3::new(player.pos.x, ground_top + 0.25, player.pos.z);
-    }
-}
-
-pub fn follow_water(player: Res<PlayerState>, mut q: Query<&mut Transform, With<WaterMarker>>) {
-    let Ok(mut tf) = q.single_mut() else {
-        return;
-    };
-    tf.translation.x = player.pos.x;
-    tf.translation.z = player.pos.z;
-}
-
-pub fn follow_ground_details(
-    player: Res<PlayerState>,
-    game_world: Res<GameWorld>,
-    mut q: Query<(&GroundDetail, &mut Transform)>,
-) {
-    for (detail, mut tf) in &mut q {
-        let x = player.pos.x + detail.offset.x;
-        let z = player.pos.z + detail.offset.y;
-        let ground_top = effective_ground_height(&game_world, x.floor() as i32, z.floor() as i32);
-        tf.translation = Vec3::new(x, ground_top + detail.y_offset, z);
-    }
-}
-
-pub fn follow_grass_platform(
-    player: Res<PlayerState>,
-    game_world: Res<GameWorld>,
-    mut q: Query<&mut Transform, With<GrassPlatformMarker>>,
-) {
-    let Ok(mut tf) = q.single_mut() else {
-        return;
-    };
-    let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-    tf.translation = Vec3::new(player.pos.x, ground_top + 0.035, player.pos.z);
-}
-
-#[derive(Component)]
-pub struct AvatarPart {
-    pub offset: Vec3,
-    pub rest_scale: Vec3,
-    pub sokpop: SokpopAnim,
-}
-
-#[derive(Component)]
 pub struct PlayerAvatarModel;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AvatarPartKind {
-    Head,
-    Hair,
-    HeadDetail,
-    Torso,
-    Thigh,
-    Shin,
-    Hand,
+#[derive(Component)]
+pub struct PlayerReadabilityMarker {
+    pub part: PlayerReadabilityMarkerPart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SquashAxis {
-    None,
-    Y,
+pub enum PlayerReadabilityMarkerPart {
+    Ring,
+    Arrow,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct SokpopAnim {
-    pub phase_offset: f32,
-    pub bob_amp: Vec3,
-    pub lean_factor: f32,
-    pub squash_axis: SquashAxis,
-}
+#[derive(Component)]
+pub struct WorldGroundFallback;
 
-fn avatar_sokpop(kind: AvatarPartKind) -> SokpopAnim {
-    match kind {
-        AvatarPartKind::Head => SokpopAnim {
-            phase_offset: 0.0,
-            bob_amp: Vec3::new(0.02, 0.05, 0.0),
-            lean_factor: 0.85,
-            squash_axis: SquashAxis::None,
-        },
-        AvatarPartKind::Hair => SokpopAnim {
-            phase_offset: 0.25,
-            bob_amp: Vec3::new(0.02, 0.06, 0.0),
-            lean_factor: 0.9,
-            squash_axis: SquashAxis::None,
-        },
-        AvatarPartKind::HeadDetail => SokpopAnim {
-            phase_offset: 0.15,
-            bob_amp: Vec3::new(0.02, 0.045, 0.0),
-            lean_factor: 0.95,
-            squash_axis: SquashAxis::None,
-        },
-        AvatarPartKind::Torso => SokpopAnim {
-            phase_offset: 0.0,
-            bob_amp: Vec3::new(0.04, 0.06, 0.0),
-            lean_factor: 1.0,
-            squash_axis: SquashAxis::Y,
-        },
-        AvatarPartKind::Thigh => SokpopAnim {
-            phase_offset: 0.0,
-            bob_amp: Vec3::new(0.16, 0.09, 0.0),
-            lean_factor: 0.25,
-            squash_axis: SquashAxis::None,
-        },
-        AvatarPartKind::Shin => SokpopAnim {
-            phase_offset: std::f32::consts::PI,
-            bob_amp: Vec3::new(0.18, 0.05, 0.0),
-            lean_factor: 0.15,
-            squash_axis: SquashAxis::None,
-        },
-        AvatarPartKind::Hand => SokpopAnim {
-            phase_offset: std::f32::consts::PI,
-            bob_amp: Vec3::new(0.22, 0.06, 0.0),
-            lean_factor: 0.7,
-            squash_axis: SquashAxis::None,
-        },
-    }
-}
+const PLAYER_AVATAR_SCALE: f32 = 0.90;
+const PLAYER_AVATAR_FOOT_TO_ORIGIN: f32 = 0.41;
+const PLAYER_MARKER_RING_RADIUS: f32 = 1.08;
+const PLAYER_MARKER_RING_THICKNESS: f32 = 0.08;
+const PLAYER_MARKER_ARROW_LENGTH: f32 = 1.15;
+const PLAYER_MARKER_ARROW_WIDTH: f32 = 0.20;
+const PLAYER_MARKER_Y_OFFSET: f32 = 0.06;
 
-const AVATAR_VISUAL_SCALE: f32 = 0.55;
-
-fn avatar_offset(offset: Vec3) -> Vec3 {
-    offset * AVATAR_VISUAL_SCALE
-}
-
-impl AvatarPart {
-    pub fn new(offset: Vec3, rest_scale: Vec3, kind: AvatarPartKind) -> Self {
-        Self { offset, rest_scale, sokpop: avatar_sokpop(kind) }
-    }
-}
-
-fn spawn_avatar_part(
-    commands: &mut Commands,
-    mesh: Handle<Mesh>,
-    material: Handle<StandardMaterial>,
-    pos: Vec3,
-    offset: Vec3,
-    rest_scale: Vec3,
-    kind: AvatarPartKind,
-) {
-    commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
-        Transform::from_translation(pos).with_scale(rest_scale),
-        AvatarPart::new(offset, rest_scale, kind),
-    ));
+fn player_avatar_translation(x: f32, ground_top: f32, z: f32, bob: f32) -> Vec3 {
+    Vec3::new(
+        x,
+        ground_top + PLAYER_AVATAR_FOOT_TO_ORIGIN * PLAYER_AVATAR_SCALE + bob,
+        z,
+    )
 }
 
 #[derive(Component)]
@@ -213,8 +71,10 @@ pub struct MonsterCube {
     pub base: Vec3,
 }
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EcoVisual {
+    Cloud { id: u32 },
+    Rain { id: u32, index: u32 },
     Rabbit { id: u32 },
     Wildlife { id: u32 },
     BerryBush { id: u32 },
@@ -300,6 +160,13 @@ pub struct CloudPuff {
     pub phase: f32,
 }
 
+fn cloud_puff_translation(base: Vec3, phase: f32, elapsed_secs: f32) -> Vec3 {
+    let drift_x = (elapsed_secs * 0.22 + phase).sin() * 0.7;
+    let drift_z = (elapsed_secs * 0.16 + phase * 0.7).cos() * 0.5;
+    let bob_y = (elapsed_secs * 0.6 + phase).sin() * 0.22;
+    base + Vec3::new(drift_x, bob_y, drift_z)
+}
+
 #[allow(unreachable_code)]
 pub fn spawn_pretty(
     mut commands: Commands,
@@ -307,14 +174,14 @@ pub fn spawn_pretty(
     player: Res<PlayerState>,
     cfg: Res<PrettyConfig>,
     asset_server: Res<AssetServer>,
-    camera_mode: Res<crate::render::CameraMode>,
+    camera_mode: Res<CameraMode>,
     camera_angles: Res<CameraAngles>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // First-person hides only camera-obstructing presentation actors. Low
     // ground props stay visible so the map does not look empty.
-    let first_person_mode = *camera_mode == crate::render::CameraMode::FirstPerson;
+    let first_person_mode = *camera_mode == CameraMode::FirstPerson;
 
     #[cfg(feature = "audit-pretty-models")]
     #[allow(unused_variables, unreachable_code)]
@@ -334,12 +201,14 @@ pub fn spawn_pretty(
     }
 
     let auto_demo_mode = std::env::args().any(|a| a == "--auto-demo");
+    let world_center = lk2_core::constant::WORLD_SIZE as f32 * 0.5 + 0.5;
+    let world_anchor = Vec3::new(world_center, player.pos.y, world_center);
 
     if cfg.show_water {
         let s = 14.0_f32;
         let water_y = lk2_core::constant::WATER_Y - 1.5;
-        let cx = player.pos.x;
-        let cz = player.pos.z;
+        let cx = world_anchor.x;
+        let cz = world_anchor.z;
         commands.spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(s, s))),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -351,7 +220,6 @@ pub fn spawn_pretty(
                 ..default()
             })),
             Transform::from_translation(Vec3::new(cx, water_y, cz)),
-            WaterMarker,
         ));
         info!(
             "🌊 水面已 spawn (y={}, size={}, 跟随玩家 @ ({:.1}, {:.1}))",
@@ -359,25 +227,10 @@ pub fn spawn_pretty(
         );
     }
 
-    let grass_size = 180.0_f32;
-    let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(grass_size, grass_size))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.30, 0.58, 0.22),
-            emissive: Color::srgb(0.025, 0.055, 0.018).into(),
-            perceptual_roughness: 0.96,
-            metallic: 0.0,
-            ..default()
-        })),
-        Transform::from_translation(Vec3::new(player.pos.x, ground_y + 0.035, player.pos.z)),
-        GrassPlatformMarker,
-    ));
-
     spawn_ground_detail_layer(
         &mut commands,
         &game_world,
-        player.pos,
+        world_anchor,
         &mut meshes,
         &mut materials,
     );
@@ -385,58 +238,33 @@ pub fn spawn_pretty(
     spawn_playable_village_diorama(
         &mut commands,
         &game_world,
-        player.pos,
+        world_anchor,
         &asset_server,
         &mut meshes,
         &mut materials,
     );
 
-    if !first_person_mode {
-        commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.8, 0.05))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.32, 0.48, 0.20, 0.65),
-                emissive: Color::srgb(0.20, 0.40, 0.10).into(),
-                perceptual_roughness: 0.95,
-                metallic: 0.0,
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            })),
-            Transform::from_translation(Vec3::new(player.pos.x, player.pos.y - 0.05, player.pos.z)),
-            GroundDiscOuter,
-        ));
-
-        commands.spawn((
-            Mesh3d(meshes.add(Cylinder::new(0.3, 0.05))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.55, 0.75, 0.30, 0.85),
-                emissive: Color::srgb(0.30, 0.50, 0.15).into(),
-                perceptual_roughness: 0.92,
-                metallic: 0.0,
-                alpha_mode: AlphaMode::Blend,
-                ..default()
-            })),
-            Transform::from_translation(Vec3::new(
-                player.pos.x,
-                player.pos.y + 0.005,
-                player.pos.z,
-            )),
-            GroundDiscInner,
-        ));
-    }
-
-    if cfg.show_player_avatar && !first_person_mode && !auto_demo_mode {
+    if cfg.show_player_avatar && !first_person_mode {
         let ground_top =
             effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
+        let avatar_translation =
+            player_avatar_translation(player.pos.x, ground_top, player.pos.z, 0.0);
         commands.spawn((
             WorldAssetRoot(asset_server.load(
                 GltfAssetLabel::Scene(0).from_asset("procedural/pretty/sokpop_gatherer.glb"),
             )),
-            Transform::from_translation(Vec3::new(player.pos.x, ground_top + 0.24, player.pos.z))
+            Transform::from_translation(avatar_translation)
                 .with_rotation(Quat::from_rotation_y(camera_angles.yaw))
-                .with_scale(Vec3::splat(0.62)),
+                .with_scale(Vec3::splat(PLAYER_AVATAR_SCALE)),
             PlayerAvatarModel,
         ));
+        spawn_player_readability_marker(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            avatar_translation,
+            camera_angles.yaw,
+        );
         info!("spawned sokpop gatherer avatar at {:?}", player.pos);
     }
 
@@ -476,257 +304,6 @@ pub fn spawn_pretty(
         info!("spawned sokpop tree and fallen stick near player");
     }
 
-    if auto_demo_mode && cfg.show_player_avatar && !first_person_mode {
-        let base = player.pos;
-
-        // i=0 head
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.30)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.85, 0.75),
-                emissive: LinearRgba::from(Color::srgb(0.40, 0.34, 0.30)) * 0.5,
-                perceptual_roughness: 0.5,
-                metallic: 0.0,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.0, 0.70, 0.0)),
-            avatar_offset(Vec3::new(0.0, 0.70, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.93, 0.93),
-            AvatarPartKind::Head,
-        );
-
-        // i=1 hair
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.30)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.45, 0.30, 0.20),
-                emissive: LinearRgba::from(Color::srgb(0.18, 0.12, 0.08)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.0, 0.80, 0.0)),
-            avatar_offset(Vec3::new(0.0, 0.80, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.60, 1.0),
-            AvatarPartKind::Hair,
-        );
-
-        // i=2 left eye (black)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.09)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.05, 0.02, 0.04),
-                emissive: Color::BLACK.into(),
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(-0.10, 0.72, 0.22)),
-            avatar_offset(Vec3::new(-0.10, 0.72, 0.22)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.78, 1.0, 0.55),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=3 right eye (black)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.09)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.05, 0.02, 0.04),
-                emissive: Color::BLACK.into(),
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.10, 0.72, 0.22)),
-            avatar_offset(Vec3::new(0.10, 0.72, 0.22)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.78, 1.0, 0.55),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=4 left pupil (white)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.03)),
-            materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                emissive: Color::WHITE.to_linear() * 1.5,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(-0.085, 0.76, 0.27)),
-            avatar_offset(Vec3::new(-0.085, 0.76, 0.27)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.6, 0.7, 0.3),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=5 right pupil (white)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.03)),
-            materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                emissive: Color::WHITE.to_linear() * 1.5,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.115, 0.76, 0.27)),
-            avatar_offset(Vec3::new(0.115, 0.76, 0.27)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.6, 0.7, 0.3),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=6 left ear (pink)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.07)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.65, 0.70),
-                emissive: LinearRgba::from(Color::srgb(0.50, 0.30, 0.30)) * 0.5,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(-0.22, 0.66, 0.18)),
-            avatar_offset(Vec3::new(-0.22, 0.66, 0.18)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.7, 0.5),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=7 right ear (pink)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.07)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.65, 0.70),
-                emissive: LinearRgba::from(Color::srgb(0.50, 0.30, 0.30)) * 0.5,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.22, 0.66, 0.18)),
-            avatar_offset(Vec3::new(0.22, 0.66, 0.18)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.7, 0.5),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=8 mouth
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.04)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.85, 0.30, 0.40),
-                emissive: LinearRgba::from(Color::srgb(0.40, 0.10, 0.15)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.0, 0.62, 0.27)),
-            avatar_offset(Vec3::new(0.0, 0.62, 0.27)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(0.4, 0.3, 0.3),
-            AvatarPartKind::HeadDetail,
-        );
-
-        // i=9 torso (red)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.30)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.40, 0.40),
-                emissive: LinearRgba::from(Color::srgb(0.50, 0.20, 0.20)) * 0.5,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.0, 0.40, 0.0)),
-            avatar_offset(Vec3::new(0.0, 0.40, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.93, 0.83),
-            AvatarPartKind::Torso,
-        );
-
-        // i=10 left thigh (blue)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.10)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.40, 0.55, 0.95),
-                emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(-0.10, 0.10, 0.0)),
-            avatar_offset(Vec3::new(-0.10, 0.10, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
-            AvatarPartKind::Thigh,
-        );
-
-        // i=11 right thigh (blue)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.10)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.40, 0.55, 0.95),
-                emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.10, 0.10, 0.0)),
-            avatar_offset(Vec3::new(0.10, 0.10, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
-            AvatarPartKind::Thigh,
-        );
-
-        // i=12 left shin/foot
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.13)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.40, 0.55, 0.95),
-                emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(-0.10, 0.05, 0.05)),
-            avatar_offset(Vec3::new(-0.10, 0.05, 0.05)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.6, 1.2),
-            AvatarPartKind::Shin,
-        );
-
-        // i=13 right shin/foot
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.13)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.40, 0.55, 0.95),
-                emissive: LinearRgba::from(Color::srgb(0.16, 0.22, 0.38)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.10, 0.05, 0.05)),
-            avatar_offset(Vec3::new(0.10, 0.05, 0.05)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 0.6, 1.2),
-            AvatarPartKind::Shin,
-        );
-
-        // i=14 left hand (skin)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.10)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.85, 0.75),
-                emissive: LinearRgba::from(Color::srgb(0.40, 0.34, 0.30)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(-0.30, 0.42, 0.0)),
-            avatar_offset(Vec3::new(-0.30, 0.42, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
-            AvatarPartKind::Hand,
-        );
-
-        // i=15 right hand (skin)
-        spawn_avatar_part(
-            &mut commands,
-            meshes.add(Sphere::new(0.10)),
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.85, 0.75),
-                emissive: LinearRgba::from(Color::srgb(0.40, 0.34, 0.30)) * 0.4,
-                ..default()
-            }),
-            base + avatar_offset(Vec3::new(0.30, 0.42, 0.0)),
-            avatar_offset(Vec3::new(0.30, 0.42, 0.0)),
-            Vec3::splat(AVATAR_VISUAL_SCALE) * Vec3::new(1.0, 1.0, 1.0),
-            AvatarPartKind::Hand,
-        );
-
-        info!(
-            "🧍 玩家 avatar (sokpop-style Q 版) 已 spawn at {:?}",
-            player.pos
-        );
-    }
-
     if cfg.show_monster_cubes && !first_person_mode && !auto_demo_mode {
         let monster_kinds = [
             (Color::srgb(0.5, 0.85, 0.2), "Snake"),
@@ -760,6 +337,7 @@ pub fn spawn_pretty(
         info!("👹 5 个怪物球体已 spawn (7.5-14.7m 圆周, 半径 1.3m, 朝 player 走)");
     }
 
+    let show_clouds = first_person_mode || !auto_demo_mode;
     let cloud_layouts: [(f32, f32, f32, f32, f32); 4] = if first_person_mode {
         [
             (0.7, 42.0, 33.0, 1.0, 0.7),
@@ -776,9 +354,14 @@ pub fn spawn_pretty(
         ]
     };
     for (angle, r, base_y, ex, ez) in cloud_layouts.iter().copied() {
-        let cx = player.pos.x + angle.cos() * r;
-        let cz = player.pos.z + angle.sin() * r;
+        if !show_clouds {
+            continue;
+        }
+        let cx = world_anchor.x + angle.cos() * r;
+        let cz = world_anchor.z + angle.sin() * r;
         let cy = base_y;
+        let base = Vec3::new(cx, cy, cz);
+        let phase = angle * 1.3;
 
         let cloud_color = Color::srgba(0.92, 0.95, 1.0, 0.85);
         let cloud_mat = materials.add(StandardMaterial {
@@ -793,35 +376,35 @@ pub fn spawn_pretty(
         commands.spawn((
             Mesh3d(meshes.add(Sphere::new(1.6))),
             MeshMaterial3d(cloud_mat.clone()),
-            Transform::from_translation(Vec3::new(cx, cy, cz)),
-            CloudPuff { base: Vec3::new(cx, cy, cz), phase: angle * 1.3 },
+            Transform::from_translation(cloud_puff_translation(base, phase, 0.0)),
+            CloudPuff { base, phase },
         ));
 
+        let base = Vec3::new(cx - 1.5 * ex, cy + 0.2, cz);
+        let phase = angle * 1.3 + 1.7;
         commands.spawn((
             Mesh3d(meshes.add(Sphere::new(1.1))),
             MeshMaterial3d(cloud_mat.clone()),
-            Transform::from_translation(Vec3::new(cx - 1.5 * ex, cy + 0.2, cz)),
-            CloudPuff { base: Vec3::new(cx - 1.5 * ex, cy + 0.2, cz), phase: angle * 1.3 + 1.7 },
+            Transform::from_translation(cloud_puff_translation(base, phase, 0.0)),
+            CloudPuff { base, phase },
         ));
 
+        let base = Vec3::new(cx + 1.6 * ex, cy - 0.1, cz + 0.5 * ez);
+        let phase = angle * 1.3 + 3.1;
         commands.spawn((
             Mesh3d(meshes.add(Sphere::new(1.2))),
             MeshMaterial3d(cloud_mat.clone()),
-            Transform::from_translation(Vec3::new(cx + 1.6 * ex, cy - 0.1, cz + 0.5 * ez)),
-            CloudPuff {
-                base: Vec3::new(cx + 1.6 * ex, cy - 0.1, cz + 0.5 * ez),
-                phase: angle * 1.3 + 3.1,
-            },
+            Transform::from_translation(cloud_puff_translation(base, phase, 0.0)),
+            CloudPuff { base, phase },
         ));
 
+        let base = Vec3::new(cx + 0.3, cy + 1.0, cz - 0.2 * ez);
+        let phase = angle * 1.3 + 4.5;
         commands.spawn((
             Mesh3d(meshes.add(Sphere::new(0.9))),
             MeshMaterial3d(cloud_mat),
-            Transform::from_translation(Vec3::new(cx + 0.3, cy + 1.0, cz - 0.2 * ez)),
-            CloudPuff {
-                base: Vec3::new(cx + 0.3, cy + 1.0, cz - 0.2 * ez),
-                phase: angle * 1.3 + 4.5,
-            },
+            Transform::from_translation(cloud_puff_translation(base, phase, 0.0)),
+            CloudPuff { base, phase },
         ));
     }
 
@@ -965,6 +548,64 @@ pub fn spawn_pretty(
     );
 }
 
+fn spawn_player_readability_marker(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    avatar_translation: Vec3,
+    yaw: f32,
+) {
+    let marker_y = avatar_translation.y + PLAYER_MARKER_Y_OFFSET;
+    let marker_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.12, 0.28, 0.95, 0.82),
+        emissive: Color::srgb(0.08, 0.16, 0.55).into(),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.65,
+        metallic: 0.0,
+        ..default()
+    });
+    let arrow_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 0.92, 0.22, 0.95),
+        emissive: Color::srgb(0.55, 0.38, 0.04).into(),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.55,
+        metallic: 0.0,
+        ..default()
+    });
+    let ring_mesh = meshes.add(Torus {
+        major_radius: PLAYER_MARKER_RING_RADIUS,
+        minor_radius: PLAYER_MARKER_RING_THICKNESS,
+    });
+    commands.spawn((
+        Mesh3d(ring_mesh),
+        MeshMaterial3d(marker_mat),
+        Transform::from_translation(Vec3::new(
+            avatar_translation.x,
+            marker_y,
+            avatar_translation.z,
+        )),
+        PlayerReadabilityMarker { part: PlayerReadabilityMarkerPart::Ring },
+        Visibility::Visible,
+    ));
+    let arrow_mesh = meshes.add(Cuboid::new(
+        PLAYER_MARKER_ARROW_WIDTH,
+        PLAYER_MARKER_RING_THICKNESS * 1.8,
+        PLAYER_MARKER_ARROW_LENGTH,
+    ));
+    let forward = Quat::from_rotation_y(yaw).mul_vec3(Vec3::Z);
+    commands.spawn((
+        Mesh3d(arrow_mesh),
+        MeshMaterial3d(arrow_mat),
+        Transform::from_translation(
+            Vec3::new(avatar_translation.x, marker_y + 0.03, avatar_translation.z)
+                + forward * (PLAYER_MARKER_RING_RADIUS + PLAYER_MARKER_ARROW_LENGTH * 0.42),
+        )
+        .with_rotation(Quat::from_rotation_y(yaw)),
+        PlayerReadabilityMarker { part: PlayerReadabilityMarkerPart::Arrow },
+        Visibility::Visible,
+    ));
+}
+
 fn local_offset_from_yaw(offset: Vec3, yaw: f32) -> Vec3 {
     let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
     let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
@@ -980,43 +621,85 @@ fn spawn_playable_village_diorama(
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
     let grass_dark = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.18, 0.50, 0.16),
+        base_color: Color::srgb(0.23, 0.46, 0.18),
         perceptual_roughness: 0.92,
         metallic: 0.0,
         ..default()
     });
     let road = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.62, 0.58, 0.49),
+        base_color: Color::srgb(0.70, 0.61, 0.43),
         perceptual_roughness: 0.86,
         metallic: 0.0,
         ..default()
     });
     let field = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.82, 0.66, 0.26),
+        base_color: Color::srgb(0.86, 0.64, 0.24),
         perceptual_roughness: 0.88,
         metallic: 0.0,
         ..default()
     });
     let soil = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.36, 0.24, 0.14),
+        base_color: Color::srgb(0.42, 0.27, 0.16),
         perceptual_roughness: 0.9,
         metallic: 0.0,
         ..default()
     });
     let rock = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.45, 0.47, 0.42),
+        base_color: Color::srgb(0.52, 0.50, 0.43),
         perceptual_roughness: 0.84,
         metallic: 0.0,
         ..default()
     });
+    let ruin_stone = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.61, 0.58, 0.49),
+        perceptual_roughness: 0.9,
+        metallic: 0.0,
+        ..default()
+    });
+    let ruin_shadow = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.38, 0.37, 0.32),
+        perceptual_roughness: 0.94,
+        metallic: 0.0,
+        ..default()
+    });
+    let moss = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.28, 0.56, 0.20),
+        emissive: Color::srgb(0.025, 0.075, 0.015).into(),
+        perceptual_roughness: 0.96,
+        metallic: 0.0,
+        ..default()
+    });
+    let blossom = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.47, 0.42),
+        emissive: Color::srgb(0.14, 0.035, 0.025).into(),
+        perceptual_roughness: 0.82,
+        metallic: 0.0,
+        ..default()
+    });
+
+    spawn_living_ruins(
+        commands,
+        game_world,
+        player_pos,
+        meshes,
+        &ruin_stone,
+        &ruin_shadow,
+        &moss,
+        &blossom,
+    );
 
     let road_mesh = meshes.add(Cuboid::new(1.0, 0.05, 1.0));
     for (ox, oz, sx, sz) in [
-        (0.0, -5.0, 2.0, 34.0),
-        (-10.0, -5.0, 1.4, 28.0),
-        (10.0, -5.0, 1.4, 28.0),
-        (0.0, -13.0, 28.0, 1.7),
-        (0.0, 4.0, 28.0, 1.7),
+        (-22.0, -4.0, 1.45, 48.0),
+        (-10.0, -4.0, 1.60, 52.0),
+        (2.0, -4.0, 1.80, 54.0),
+        (14.0, -4.0, 1.55, 50.0),
+        (26.0, -4.0, 1.40, 44.0),
+        (2.0, -24.0, 56.0, 1.55),
+        (2.0, -12.0, 58.0, 1.70),
+        (2.0, 0.0, 60.0, 1.85),
+        (2.0, 12.0, 58.0, 1.70),
+        (2.0, 24.0, 54.0, 1.55),
     ] {
         let pos = grounded_world_pos(game_world, player_pos, ox, oz, 0.03);
         commands.spawn((
@@ -1027,10 +710,12 @@ fn spawn_playable_village_diorama(
     }
 
     let patch_mesh = meshes.add(Cuboid::new(1.0, 0.03, 1.0));
-    for i in 0..46 {
-        let ox = -22.0 + pretty_hash01(i, 11) * 44.0;
-        let oz = -24.0 + pretty_hash01(i, 17) * 38.0;
-        if ox.abs() < 3.0 || (oz + 13.0).abs() < 2.0 || (oz - 4.0).abs() < 2.0 {
+    for i in 0..86 {
+        let ox = -31.0 + pretty_hash01(i, 11) * 62.0;
+        let oz = -30.0 + pretty_hash01(i, 17) * 58.0;
+        if [-22.0, -10.0, 2.0, 14.0, 26.0].iter().any(|road_x| (ox - road_x).abs() < 1.8)
+            || [-24.0, -12.0, 0.0, 12.0, 24.0].iter().any(|road_z| (oz - road_z).abs() < 1.8)
+        {
             continue;
         }
         let pos = grounded_world_pos(game_world, player_pos, ox, oz, 0.04);
@@ -1051,7 +736,13 @@ fn spawn_playable_village_diorama(
 
     let farm_mesh = meshes.add(Cuboid::new(1.0, 0.05, 1.0));
     let wheat_mesh = meshes.add(Cuboid::new(0.15, 0.58, 0.15));
-    for (cx, cz, sx, sz) in [(-15.0, 8.0, 7.0, 6.0), (15.0, 8.0, 7.0, 6.0)] {
+    for (cx, cz, sx, sz) in [
+        (-16.0, -18.0, 8.5, 7.5),
+        (8.0, -18.0, 8.5, 7.5),
+        (-16.0, 6.0, 8.5, 7.5),
+        (8.0, 6.0, 8.5, 7.5),
+        (20.0, 18.0, 7.0, 6.0),
+    ] {
         let pos = grounded_world_pos(game_world, player_pos, cx, cz, 0.04);
         commands.spawn((
             Mesh3d(farm_mesh.clone()),
@@ -1080,9 +771,31 @@ fn spawn_playable_village_diorama(
     }
 
     for (path, ox, oz, scale, yaw) in [
-        ("procedural/pretty/well.glb", -8.0, -8.5, 0.38, 0.0),
-        ("procedural/pretty/market_stall.glb", 7.0, 2.0, 0.44, 0.7),
-        ("procedural/pretty/barrel.glb", 4.8, -2.6, 0.34, 0.4),
+        ("procedural/pretty/well.glb", -4.0, -6.0, 0.38, 0.0),
+        ("procedural/pretty/well.glb", 20.0, -6.0, 0.34, 0.4),
+        ("procedural/pretty/market_stall.glb", -4.0, 18.0, 0.44, 0.7),
+        ("procedural/pretty/market_stall.glb", 20.0, 6.0, 0.40, -0.5),
+        ("procedural/pretty/house_small.glb", -16.0, -6.0, 0.54, 0.15),
+        (
+            "procedural/pretty/house_small.glb",
+            -16.0,
+            18.0,
+            0.50,
+            -0.45,
+        ),
+        ("procedural/pretty/house_small.glb", 20.0, -18.0, 0.52, 0.85),
+        ("procedural/pretty/tavern.glb", 8.0, 18.0, 0.48, -0.25),
+        ("procedural/pretty/barn.glb", -28.0, 6.0, 0.46, 0.45),
+        ("procedural/pretty/chapel.glb", 8.0, -6.0, 0.46, -0.2),
+        ("procedural/pretty/watchtower.glb", -28.0, -18.0, 0.46, 0.4),
+        ("procedural/pretty/watchtower.glb", 32.0, 18.0, 0.42, -0.5),
+        ("procedural/pretty/windmill.glb", 32.0, -6.0, 0.46, 0.1),
+        ("procedural/pretty/forge.glb", -4.0, -18.0, 0.42, 0.7),
+        ("procedural/pretty/fountain.glb", 8.0, 6.0, 0.34, 0.0),
+        ("procedural/pretty/barrel.glb", -16.0, -6.0, 0.34, 0.4),
+        ("procedural/pretty/barrel.glb", 8.0, 18.0, 0.32, -0.2),
+        ("procedural/pretty/cart.glb", 20.0, 18.0, 0.34, 0.5),
+        ("procedural/pretty/haystack.glb", -28.0, 18.0, 0.38, -0.2),
     ] {
         spawn_grounded_scene(
             commands,
@@ -1099,15 +812,19 @@ fn spawn_playable_village_diorama(
     }
 
     for (ox, oz, scale) in [
-        (-23.0, -20.0, 0.34),
-        (-20.0, -12.0, 0.32),
-        (-22.0, -2.0, 0.33),
-        (-18.0, 11.0, 0.31),
-        (-12.0, 16.0, 0.30),
-        (20.0, -19.0, 0.32),
-        (22.0, -10.0, 0.31),
-        (21.0, 2.0, 0.30),
-        (20.0, 14.0, 0.29),
+        (-31.0, -29.0, 0.62),
+        (-28.0, -16.0, 0.58),
+        (-30.0, -3.0, 0.64),
+        (-28.0, 10.0, 0.58),
+        (-31.0, 25.0, 0.56),
+        (-4.0, -30.0, 0.62),
+        (24.0, -28.0, 0.58),
+        (31.0, -14.0, 0.56),
+        (30.0, 2.0, 0.58),
+        (29.0, 16.0, 0.56),
+        (26.0, 29.0, 0.56),
+        (-8.0, 29.0, 0.58),
+        (4.0, 13.5, 0.52),
     ] {
         spawn_grounded_scene(
             commands,
@@ -1117,7 +834,7 @@ fn spawn_playable_village_diorama(
             ecology_entry(EcologyKind::Tree(TreeKind::Sokpop)).model_path,
             ox,
             oz,
-            0.03,
+            0.01,
             scale,
             0.0,
         );
@@ -1144,7 +861,7 @@ fn spawn_playable_village_diorama(
             ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush)).model_path,
             ox,
             oz,
-            0.06,
+            0.01,
             0.46,
             yaw,
         );
@@ -1158,7 +875,7 @@ fn spawn_playable_village_diorama(
                 ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit)).model_path,
                 ox + angle.cos() * 0.24,
                 oz + angle.sin() * 0.24,
-                0.40,
+                0.34,
                 0.22,
                 angle,
             );
@@ -1181,7 +898,7 @@ fn spawn_playable_village_diorama(
             ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit)).model_path,
             ox,
             oz,
-            0.06,
+            0.02,
             0.42,
             yaw,
         );
@@ -1226,6 +943,89 @@ fn spawn_grounded_scene(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
+fn spawn_living_ruins(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    ruin_stone: &Handle<StandardMaterial>,
+    ruin_shadow: &Handle<StandardMaterial>,
+    moss: &Handle<StandardMaterial>,
+    blossom: &Handle<StandardMaterial>,
+) {
+    let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let cap_mesh = meshes.add(Cuboid::new(1.0, 0.08, 1.0));
+    let sprout_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
+    for (ox, oz, sx, sy, sz, yaw, broken) in [
+        (-6.0, -1.6, 2.8, 0.95, 0.42, 0.10, false),
+        (-3.0, -1.3, 1.8, 0.62, 0.40, -0.08, true),
+        (1.0, -1.8, 2.4, 0.72, 0.42, 0.05, true),
+        (4.3, -1.4, 1.6, 1.05, 0.44, -0.12, false),
+        (-5.6, 4.2, 0.45, 1.30, 1.0, 0.18, false),
+        (5.2, 3.8, 0.42, 1.05, 0.9, -0.22, true),
+        (-0.8, 4.9, 0.50, 0.76, 1.1, 0.03, true),
+    ] {
+        let pos = grounded_world_pos(game_world, player_pos, ox, oz, sy * 0.5 + 0.04);
+        commands.spawn((
+            Mesh3d(block_mesh.clone()),
+            MeshMaterial3d(if broken {
+                ruin_shadow.clone()
+            } else {
+                ruin_stone.clone()
+            }),
+            Transform::from_translation(pos)
+                .with_rotation(Quat::from_rotation_y(yaw))
+                .with_scale(Vec3::new(sx, sy, sz)),
+        ));
+
+        let moss_pos = grounded_world_pos(game_world, player_pos, ox, oz, sy + 0.10);
+        commands.spawn((
+            Mesh3d(cap_mesh.clone()),
+            MeshMaterial3d(moss.clone()),
+            Transform::from_translation(moss_pos)
+                .with_rotation(Quat::from_rotation_y(yaw + 0.04))
+                .with_scale(Vec3::new(sx * 0.82, 1.0, sz * 1.55)),
+        ));
+    }
+
+    for (i, (ox, oz)) in [
+        (-7.2, -0.1),
+        (-4.6, 0.8),
+        (-1.8, -0.6),
+        (2.2, 0.6),
+        (5.8, 0.0),
+        (-5.4, 3.0),
+        (-2.2, 3.7),
+        (2.8, 3.2),
+        (5.9, 2.4),
+        (0.2, 5.8),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let is_blossom = i % 3 == 0;
+        let height = if is_blossom { 0.34 } else { 0.42 };
+        let pos = grounded_world_pos(game_world, player_pos, ox, oz, height * 0.5 + 0.06);
+        commands.spawn((
+            Mesh3d(sprout_mesh.clone()),
+            MeshMaterial3d(if is_blossom {
+                blossom.clone()
+            } else {
+                moss.clone()
+            }),
+            Transform::from_translation(pos)
+                .with_rotation(Quat::from_rotation_y(i as f32 * 0.73))
+                .with_scale(if is_blossom {
+                    Vec3::new(0.16, height, 0.16)
+                } else {
+                    Vec3::new(0.18, height, 0.14)
+                }),
+        ));
+    }
+}
+
 fn grounded_world_pos(
     game_world: &GameWorld,
     player_pos: Vec3,
@@ -1259,11 +1059,11 @@ fn spawn_ground_detail_layer(
     let tuft_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
     let patch_mats: Vec<Handle<StandardMaterial>> = [
-        Color::srgba(0.24, 0.48, 0.20, 0.58),
-        Color::srgba(0.42, 0.56, 0.24, 0.46),
-        Color::srgba(0.30, 0.43, 0.19, 0.50),
-        Color::srgba(0.47, 0.38, 0.22, 0.36),
-        Color::srgba(0.36, 0.50, 0.32, 0.42),
+        Color::srgba(0.26, 0.46, 0.20, 0.56),
+        Color::srgba(0.52, 0.54, 0.28, 0.44),
+        Color::srgba(0.32, 0.40, 0.24, 0.48),
+        Color::srgba(0.55, 0.42, 0.24, 0.38),
+        Color::srgba(0.42, 0.48, 0.38, 0.42),
     ]
     .into_iter()
     .map(|color| {
@@ -1315,7 +1115,6 @@ fn spawn_ground_detail_layer(
             Transform::from_translation(Vec3::new(x, ground_y + 0.052, z))
                 .with_rotation(Quat::from_rotation_y(angle * 0.37))
                 .with_scale(Vec3::new(sx, 1.0, sz)),
-            GroundDetail { offset, y_offset: 0.052 },
         ));
     }
 
@@ -1353,7 +1152,6 @@ fn spawn_ground_detail_layer(
             Transform::from_translation(Vec3::new(x, ground_y + y_offset, z))
                 .with_rotation(Quat::from_rotation_y(angle))
                 .with_scale(scale),
-            GroundDetail { offset, y_offset },
         ));
     }
 }
@@ -1390,6 +1188,8 @@ pub fn spawn_eco_visuals(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let bubble_mesh = meshes.add(Sphere::new(0.5));
+    let cloud_mesh = meshes.add(Sphere::new(1.35));
+    let rain_mesh = meshes.add(Cuboid::new(0.035, 0.72, 0.035));
     let bubble_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(0.45, 0.90, 1.0, 0.62),
         emissive: Color::srgb(0.25, 0.75, 1.0).into(),
@@ -1399,10 +1199,49 @@ pub fn spawn_eco_visuals(
         metallic: 0.0,
         ..default()
     });
+    let cloud_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.86, 0.90, 0.92, 0.78),
+        emissive: Color::srgb(0.30, 0.34, 0.36).into(),
+        unlit: false,
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.95,
+        metallic: 0.0,
+        ..default()
+    });
+    let rain_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.34, 0.58, 0.95, 0.72),
+        emissive: Color::srgb(0.14, 0.30, 0.70).into(),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.25,
+        metallic: 0.0,
+        ..default()
+    });
 
     let rabbit_entry = ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit));
     let bush_entry = ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush));
     let fruit_entry = ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit));
+
+    for cloud in &eco.clouds {
+        spawn_eco_visual_part(
+            &mut commands,
+            cloud_mesh.clone(),
+            cloud_mat.clone(),
+            EcoVisual::Cloud { id: cloud.id },
+            Vec3::ZERO,
+            Vec3::splat(1.0),
+        );
+        for index in 0..4 {
+            spawn_eco_visual_part(
+                &mut commands,
+                rain_mesh.clone(),
+                rain_mat.clone(),
+                EcoVisual::Rain { id: cloud.id, index },
+                Vec3::ZERO,
+                Vec3::splat(1.0),
+            );
+        }
+    }
 
     for rabbit in &eco.rabbits {
         spawn_eco_scene_visual(
@@ -1519,6 +1358,39 @@ pub fn update_eco_visuals(
     let t = time.elapsed_secs();
     for (visual, mut transform) in &mut q {
         match *visual {
+            EcoVisual::Cloud { id } => {
+                let Some(cloud) = eco.clouds.iter().find(|cloud| cloud.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                let phase = t * 0.45 + cloud.phase;
+                transform.translation = Vec3::new(
+                    cloud.pos.x + phase.sin() * 0.45,
+                    8.5 + cloud.rain * 2.2 + phase.cos() * 0.18,
+                    cloud.pos.y + phase.cos() * 0.35,
+                );
+                let scale = 1.1 + cloud.rain.clamp(0.0, 1.0) * 0.45;
+                transform.scale = Vec3::new(scale * 1.65, scale * 0.52, scale);
+            }
+            EcoVisual::Rain { id, index } => {
+                let Some(cloud) = eco.clouds.iter().find(|cloud| cloud.id == id) else {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                };
+                if cloud.rain <= 0.05 {
+                    transform.scale = Vec3::ZERO;
+                    continue;
+                }
+                let phase = t * 2.8 + cloud.phase + index as f32 * 0.73;
+                let spread = 0.55 + index as f32 * 0.18;
+                transform.translation = Vec3::new(
+                    cloud.pos.x + phase.sin() * spread,
+                    7.8 - (phase.fract() * 2.4),
+                    cloud.pos.y + phase.cos() * spread * 0.7,
+                );
+                transform.scale = Vec3::new(0.06, 0.52 + cloud.rain * 0.25, 0.06);
+                transform.rotation = Quat::from_rotation_z(0.16);
+            }
             EcoVisual::Rabbit { id } => {
                 let Some(rabbit) = eco.rabbits.iter().find(|rabbit| rabbit.id == id) else {
                     transform.scale = Vec3::ZERO;
@@ -1530,7 +1402,7 @@ pub fn update_eco_visuals(
                 let phase = t * 5.0 + id as f32 * 0.9;
                 let hop = phase.sin().max(0.0) * 0.28;
                 let breath = (t * 2.2 + id as f32).sin() * 0.03;
-                transform.translation = Vec3::new(x, ground_y + 0.08 + hop + breath, z);
+                transform.translation = Vec3::new(x, ground_y + 0.025 + hop + breath, z);
                 transform.scale =
                     ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit)).visual_scale;
                 transform.rotation = Quat::from_rotation_y((t * 0.4 + id as f32).sin() * 0.35);
@@ -1545,7 +1417,7 @@ pub fn update_eco_visuals(
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let entry = ecology_entry(EcologyKind::Wildlife(animal.kind));
                 let bob = (t * 1.8 + id as f32).sin() * 0.045;
-                transform.translation = Vec3::new(x, ground_y + 0.08 + bob, z);
+                transform.translation = Vec3::new(x, ground_y + bob.max(0.0), z);
                 transform.scale = entry.visual_scale;
                 transform.rotation = Quat::from_rotation_y((t * 0.22 + id as f32).sin() * 0.45);
             }
@@ -1558,7 +1430,7 @@ pub fn update_eco_visuals(
                 let z = berry.pos.y;
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let sway = (t * 1.4 + id as f32).sin() * 0.015;
-                transform.translation = Vec3::new(x, ground_y + 0.08 + sway, z);
+                transform.translation = Vec3::new(x, ground_y + sway.max(0.0), z);
                 transform.scale =
                     ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush))
                         .visual_scale
@@ -1597,7 +1469,7 @@ pub fn update_eco_visuals(
                 let ground_y = effective_ground_height(&game_world, x as i32, z as i32);
                 let entry = ecology_entry(EcologyKind::ResourceNode(plant.kind));
                 let sway = (t * 1.1 + id as f32 * 0.7).sin() * 0.025;
-                transform.translation = Vec3::new(x, ground_y + 0.06 + sway, z);
+                transform.translation = Vec3::new(x, ground_y + sway.max(0.0), z);
                 transform.scale = entry.visual_scale * if plant.stock == 0 { 0.65 } else { 1.0 };
                 transform.rotation = Quat::from_rotation_y(id as f32 * 0.71);
             }
@@ -1624,12 +1496,150 @@ pub fn update_eco_visuals(
     }
 }
 
+pub fn sync_eco_visual_spawns(
+    mut commands: Commands,
+    eco: Res<EcoCycle>,
+    existing: Query<&EcoVisual>,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let existing = existing.iter().copied().collect::<HashSet<_>>();
+    let rabbit_entry = ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit));
+    let bush_entry = ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::BerryBush));
+    let fruit_entry = ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit));
+
+    for cloud in &eco.clouds {
+        let visual = EcoVisual::Cloud { id: cloud.id };
+        if !existing.contains(&visual) {
+            let cloud_mesh = meshes.add(Sphere::new(1.35));
+            let cloud_mat = materials.add(StandardMaterial {
+                base_color: Color::srgba(0.86, 0.90, 0.92, 0.78),
+                emissive: Color::srgb(0.30, 0.34, 0.36).into(),
+                unlit: false,
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.95,
+                metallic: 0.0,
+                ..default()
+            });
+            spawn_eco_visual_part(
+                &mut commands,
+                cloud_mesh,
+                cloud_mat,
+                visual,
+                Vec3::ZERO,
+                Vec3::splat(1.0),
+            );
+        }
+        for index in 0..4 {
+            let visual = EcoVisual::Rain { id: cloud.id, index };
+            if existing.contains(&visual) {
+                continue;
+            }
+            let rain_mesh = meshes.add(Cuboid::new(0.035, 0.72, 0.035));
+            let rain_mat = materials.add(StandardMaterial {
+                base_color: Color::srgba(0.34, 0.58, 0.95, 0.72),
+                emissive: Color::srgb(0.14, 0.30, 0.70).into(),
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.25,
+                metallic: 0.0,
+                ..default()
+            });
+            spawn_eco_visual_part(
+                &mut commands,
+                rain_mesh,
+                rain_mat,
+                visual,
+                Vec3::ZERO,
+                Vec3::splat(1.0),
+            );
+        }
+    }
+
+    for rabbit in &eco.rabbits {
+        let visual = EcoVisual::Rabbit { id: rabbit.id };
+        if !existing.contains(&visual) {
+            spawn_eco_scene_visual(
+                &mut commands,
+                &asset_server,
+                rabbit_entry.model_path,
+                visual,
+                Vec3::new(rabbit.pos.x, 0.0, rabbit.pos.y),
+                rabbit_entry.visual_scale,
+            );
+        }
+    }
+
+    for animal in &eco.wildlife {
+        let visual = EcoVisual::Wildlife { id: animal.id };
+        if !existing.contains(&visual) {
+            let entry = ecology_entry(EcologyKind::Wildlife(animal.kind));
+            spawn_eco_scene_visual(
+                &mut commands,
+                &asset_server,
+                entry.model_path,
+                visual,
+                Vec3::new(animal.pos.x, 0.0, animal.pos.y),
+                entry.visual_scale,
+            );
+        }
+    }
+
+    for berry in &eco.berries {
+        let visual = EcoVisual::BerryBush { id: berry.id };
+        if !existing.contains(&visual) {
+            spawn_eco_scene_visual(
+                &mut commands,
+                &asset_server,
+                bush_entry.model_path,
+                visual,
+                Vec3::new(berry.pos.x, 0.0, berry.pos.y),
+                bush_entry.visual_scale,
+            );
+        }
+        for index in 0..3 {
+            let visual = EcoVisual::BerryFruit { id: berry.id, index };
+            if existing.contains(&visual) {
+                continue;
+            }
+            spawn_eco_scene_visual(
+                &mut commands,
+                &asset_server,
+                fruit_entry.model_path,
+                visual,
+                Vec3::new(berry.pos.x, 0.0, berry.pos.y),
+                fruit_entry.visual_scale,
+            );
+        }
+    }
+
+    for plant in &eco.plants {
+        let visual = EcoVisual::PlantNode { id: plant.id };
+        if !existing.contains(&visual) {
+            let entry = ecology_entry(EcologyKind::ResourceNode(plant.kind));
+            spawn_eco_scene_visual(
+                &mut commands,
+                &asset_server,
+                entry.model_path,
+                visual,
+                Vec3::new(plant.pos.x, 0.0, plant.pos.y),
+                entry.visual_scale,
+            );
+        }
+    }
+}
+
 pub fn animate_avatar(
-    mut q: Query<(&mut Transform, &AvatarPart)>,
-    mut model_q: Query<&mut Transform, (With<PlayerAvatarModel>, Without<AvatarPart>)>,
+    mut model_q: Query<&mut Transform, With<PlayerAvatarModel>>,
+    mut marker_q: Query<
+        (&mut Transform, &mut Visibility, &PlayerReadabilityMarker),
+        Without<PlayerAvatarModel>,
+    >,
     player: Res<PlayerState>,
     game_world: Res<GameWorld>,
     state: Res<PlayerAnimState>,
+    camera_mode: Res<CameraMode>,
 ) {
     let ground_top = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
     let base_x = player.pos.x;
@@ -1637,58 +1647,50 @@ pub fn animate_avatar(
 
     let phase = state.step_phase;
     let speed = state.smoothed_speed;
-    let idle = (1.0 - speed).max(0.0);
-    let breath = (phase * 0.18).sin() * 0.03 * idle;
 
-    let move_world = state.smoothed_move_world;
-    let lean_strength = 0.18 * speed.max(0.1);
-    let lean_pitch = -move_world.y * lean_strength;
-    let lean_roll = move_world.x * lean_strength;
-
-    let vy = state.vertical_vel;
-    let stretch = (1.0 + vy * 0.06).clamp(0.85, 1.15);
-
+    let mut marker_yaw = 0.0;
+    let mut saw_avatar = false;
     for mut transform in &mut model_q {
+        saw_avatar = true;
         let bob = (phase * 0.5).sin() * 0.035 * speed.max(0.15);
         let yaw = if state.smoothed_move_world.length_squared() > 0.001 {
             state.smoothed_move_world.x.atan2(state.smoothed_move_world.y)
         } else {
             transform.rotation.to_euler(EulerRot::YXZ).0
         };
-        transform.translation = Vec3::new(base_x, ground_top + 0.24 + bob, base_z);
+        marker_yaw = yaw;
+        transform.translation = player_avatar_translation(base_x, ground_top, base_z, bob);
         transform.rotation = Quat::from_rotation_y(yaw);
-        transform.scale = Vec3::splat(0.62);
+        transform.scale = Vec3::splat(PLAYER_AVATAR_SCALE);
     }
-
-    for (mut transform, part) in q.iter_mut() {
-        let p = phase + part.sokpop.phase_offset;
-        let amp = part.sokpop.bob_amp;
-
-        let sway_x = p.sin() * amp.x;
-        let bob_y = p.sin() * amp.y + breath;
-        let sway_z = p.cos() * amp.z * 0.5;
-
-        let rest = part.offset;
-        transform.translation = Vec3::new(
-            base_x + rest.x + sway_x,
-            ground_top + rest.y + bob_y,
-            base_z + rest.z + sway_z,
-        );
-
-        let lf = part.sokpop.lean_factor;
-        let pitch = lean_pitch * lf;
-        let roll = lean_roll * lf;
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, 0.0, pitch, roll);
-
-        let scale = match part.sokpop.squash_axis {
-            SquashAxis::Y => Vec3::new(
-                part.rest_scale.x / stretch,
-                part.rest_scale.y * stretch,
-                part.rest_scale.z / stretch,
-            ),
-            SquashAxis::None => part.rest_scale,
-        };
-        transform.scale = scale;
+    if !saw_avatar && *camera_mode != CameraMode::TopDown {
+        for (_, mut visibility, _) in &mut marker_q {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+    if *camera_mode != CameraMode::TopDown {
+        for (_, mut visibility, _) in &mut marker_q {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+    let marker_y =
+        ground_top + PLAYER_AVATAR_FOOT_TO_ORIGIN * PLAYER_AVATAR_SCALE + PLAYER_MARKER_Y_OFFSET;
+    let forward = Quat::from_rotation_y(marker_yaw).mul_vec3(Vec3::Z);
+    for (mut transform, mut visibility, marker) in &mut marker_q {
+        *visibility = Visibility::Visible;
+        match marker.part {
+            PlayerReadabilityMarkerPart::Ring => {
+                transform.translation = Vec3::new(base_x, marker_y, base_z);
+                transform.rotation = Quat::IDENTITY;
+            }
+            PlayerReadabilityMarkerPart::Arrow => {
+                transform.translation = Vec3::new(base_x, marker_y + 0.03, base_z)
+                    + forward * (PLAYER_MARKER_RING_RADIUS + PLAYER_MARKER_ARROW_LENGTH * 0.42);
+                transform.rotation = Quat::from_rotation_y(marker_yaw);
+            }
+        }
     }
 }
 
@@ -1734,8 +1736,7 @@ pub fn animate_monsters(time: Res<Time>, mut q: Query<(&mut Transform, &MonsterC
 pub fn animate_cloud_puffs(time: Res<Time>, mut q: Query<(&mut Transform, &CloudPuff)>) {
     let t = time.elapsed_secs();
     for (mut tf, puff) in q.iter_mut() {
-        let bob = (t * 0.6 + puff.phase).sin() * 0.15;
-        tf.translation = puff.base + Vec3::Y * bob;
+        tf.translation = cloud_puff_translation(puff.base, puff.phase, t);
     }
 }
 
@@ -1749,5 +1750,17 @@ mod tests {
         assert_eq!(eco_fruit_marker_count(1), 1);
         assert_eq!(eco_fruit_marker_count(3), 3);
         assert_eq!(eco_fruit_marker_count(9), 3);
+    }
+
+    #[test]
+    fn cloud_puff_translation_moves_horizontally() {
+        let base = Vec3::new(10.0, 20.0, 30.0);
+        let a = cloud_puff_translation(base, 0.7, 0.0);
+        let b = cloud_puff_translation(base, 0.7, 12.0);
+
+        assert!((a.x - b.x).abs() > 0.5);
+        assert!((a.z - b.z).abs() > 0.3);
+        assert!((a.y - base.y).abs() <= 0.23);
+        assert!((b.y - base.y).abs() <= 0.23);
     }
 }

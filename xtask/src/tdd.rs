@@ -1,6 +1,6 @@
 use std::{env, path::Path, process::Command};
 
-use crate::{Result, args, audit};
+use crate::{Result, args, audit, workspace_command};
 
 #[derive(Debug)]
 struct TddArgs {
@@ -35,14 +35,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             run_step(
                 root,
                 "client build",
-                &[
-                    "cargo",
-                    "build",
-                    "-p",
-                    "lk2-client",
-                    "--features",
-                    "dev-dynamic-linking",
-                ],
+                &["cargo", "build", "-p", "lk2-client"],
             )
         }
         "server" => {
@@ -54,14 +47,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             run_step(
                 root,
                 "server build",
-                &[
-                    "cargo",
-                    "build",
-                    "-p",
-                    "lk2-server",
-                    "--features",
-                    "dev-dynamic-linking",
-                ],
+                &["cargo", "build", "-p", "lk2-server"],
             )
         }
         "workspace" => {
@@ -79,7 +65,8 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         ),
         "audit" => {
             audit::tdd(root)?;
-            audit::architecture(root)
+            audit::architecture(root)?;
+            audit::visual(root)
         }
         "changed" => run_changed(root, &parsed),
         other => Err(format!("unknown TDD scope: {other}")),
@@ -217,9 +204,8 @@ pub fn run_step(root: &Path, title: &str, cmd: &[&str]) -> Result<()> {
     println!(">>> {title}");
     println!("    {}", cmd.join(" "));
     let (program, args) = cmd.split_first().ok_or_else(|| "empty command".to_string())?;
-    let status = Command::new(program)
+    let status = workspace_command(root, program)
         .args(args)
-        .current_dir(root)
         .status()
         .map_err(|e| format!("{program} failed to start: {e}"))?;
     if !status.success() {

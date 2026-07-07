@@ -77,11 +77,18 @@ Closed-loop entry points:
 ```sh
 just loop
 just health
-cargo run -q -p xtask -- loop --offline --seconds 60
-cargo run -q -p xtask -- health
+just xtask loop --offline --seconds 60
+just xtask health
 ```
 
 Use dev dynamic linking only for local client/server development when the repo scripts expect it. Do not use it for release or CI validation.
+
+## Validation Discipline
+
+- Do not keep blindly editing Rust code when the affected crate cannot compile or `cargo check` cannot run. First diagnose the compile/check blocker, reduce the validation scope, or report the blocker with the exact command and error.
+- After code changes, run at least the narrowest relevant `cargo check -p <crate>`, `cargo test -p <crate>`, or `just test-*` command before calling the task done.
+- If validation is unavailable because of environment limits, locked executables, missing tools, or unrelated pre-existing failures, stop after the smallest coherent change and state what was not validated. Do not pile on speculative fixes.
+- Treat a failed compile/check as the next task surface. Fix it or explicitly leave the task incomplete; do not claim success based only on reading the code.
 
 ## Rust Build Performance
 

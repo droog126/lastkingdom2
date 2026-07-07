@@ -63,10 +63,10 @@ just health
 `just loop` currently maps to:
 
 ```sh
-cargo run -q -p xtask -- loop --offline --seconds 60
+just xtask loop --offline --seconds 60
 ```
 
-`cargo run -q -p xtask -- audit-architecture` checks:
+`just xtask audit-architecture` checks:
 
 - no hard-coded local absolute paths in project scripts,
 - no duplicate client objective setup registration,

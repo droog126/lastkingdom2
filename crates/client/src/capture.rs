@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use lk2_core::ai::TickObserver;
@@ -12,13 +13,41 @@ use lk2_core::resource::GlobalResourcePool;
 use lk2_core::world::World as GameWorld;
 
 use crate::OnlineCommandDiagnostics;
-use crate::render::{CameraAngles, CameraMode};
+use crate::pretty::{PlayerReadabilityMarker, WorldGroundFallback};
+use crate::render::{CameraAngles, CameraMode, NestMarker, RenderTelemetry, TerrainChunk};
 use crate::ui::ClientRunMode;
 
-pub const FIRST_SCREENSHOT_MIN_FRAME: u64 = 500;
+pub const FIRST_SCREENSHOT_MIN_PROGRESS: u64 = 100;
+const FIRST_SCREENSHOT_MIN_WALL_SECS: f32 = 4.0;
+const SCREENSHOT_DIR: &str = "screenshots";
 
 fn capture_enabled() -> bool {
     std::env::var("LK2_CAPTURE").is_ok() || std::env::args().any(|a| a == "--auto-demo")
+}
+
+fn first_screenshot_min_progress() -> u64 {
+    first_screenshot_min_progress_from_env(
+        std::env::var("LK2_FIRST_SCREENSHOT_PROGRESS").ok().as_deref(),
+    )
+}
+
+fn first_screenshot_min_progress_from_env(value: Option<&str>) -> u64 {
+    value
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|progress| progress.max(FIRST_SCREENSHOT_MIN_PROGRESS))
+        .unwrap_or(FIRST_SCREENSHOT_MIN_PROGRESS)
+}
+
+fn screenshot_gate_ready(
+    run_mode: ClientRunMode,
+    capture_tick: u64,
+    first_progress: u64,
+    wall_secs: f32,
+) -> bool {
+    if wall_secs < FIRST_SCREENSHOT_MIN_WALL_SECS {
+        return false;
+    }
+    run_mode != ClientRunMode::Offline || capture_tick >= first_progress
 }
 
 #[derive(Resource, Default)]
@@ -27,21 +56,79 @@ pub struct TickRecorder {
     pub current_iter: u32,
 }
 
+#[derive(Resource, Default, Clone)]
+pub struct StaticWorldVisualSnapshot {
+    pub first_player_pos: Option<Vec3>,
+    pub current_player_pos: Option<Vec3>,
+    pub first_positions: Vec<(&'static str, Vec3)>,
+    pub current_positions: Vec<(&'static str, Vec3)>,
+    pub player_marker_count: usize,
+    pub player_marker_max_distance: Option<f32>,
+    pub camera_transform: Option<Transform>,
+}
+
+#[derive(SystemParam)]
+pub struct CaptureStateParams<'w> {
+    time: Res<'w, Time>,
+    player: Res<'w, PlayerState>,
+    pool: Res<'w, GlobalResourcePool>,
+    nations: Res<'w, NationRegistry>,
+    monsters: Res<'w, MonsterEcosystem>,
+    eco: Res<'w, EcoCycle>,
+    obs: Res<'w, TickObserver>,
+    game_world: Res<'w, GameWorld>,
+    run_mode: Res<'w, ClientRunMode>,
+    camera_angles: Res<'w, CameraAngles>,
+    camera_mode: Res<'w, CameraMode>,
+    online_commands: Res<'w, OnlineCommandDiagnostics>,
+    static_world_visuals: Res<'w, StaticWorldVisualSnapshot>,
+    render_telemetry: Res<'w, RenderTelemetry>,
+}
+
+pub fn update_static_world_visual_snapshot(
+    mut snapshot: ResMut<StaticWorldVisualSnapshot>,
+    player: Res<PlayerState>,
+    ground_fallback: Query<&Transform, With<WorldGroundFallback>>,
+    player_markers: Query<&Transform, With<PlayerReadabilityMarker>>,
+    nest_markers: Query<&Transform, With<NestMarker>>,
+    terrain_chunks: Query<&Transform, With<TerrainChunk>>,
+    camera: Query<&Transform, With<Camera3d>>,
+) {
+    let mut current_positions = Vec::new();
+    if let Some(tf) = ground_fallback.iter().next() {
+        current_positions.push(("ground_fallback", tf.translation));
+    }
+    if let Some(tf) = nest_markers.iter().next() {
+        current_positions.push(("nest_marker_0", tf.translation));
+    }
+    if let Some(tf) = terrain_chunks.iter().next() {
+        current_positions.push(("terrain_chunk_0", tf.translation));
+    }
+
+    snapshot.current_player_pos = Some(player.pos);
+    snapshot.current_positions = current_positions.clone();
+    snapshot.player_marker_count = player_markers.iter().count();
+    snapshot.player_marker_max_distance = player_markers
+        .iter()
+        .map(|tf| {
+            Vec2::new(
+                tf.translation.x - player.pos.x,
+                tf.translation.z - player.pos.z,
+            )
+            .length()
+        })
+        .max_by(|a, b| a.total_cmp(b));
+    snapshot.camera_transform = camera.iter().next().cloned();
+    if snapshot.first_player_pos.is_none() && !current_positions.is_empty() {
+        snapshot.first_player_pos = Some(player.pos);
+        snapshot.first_positions = current_positions;
+    }
+}
+
 pub fn periodic_screenshot(
-    time: Res<Time>,
     mut clock: ResMut<SimClock>,
     mut commands: Commands,
-    player: Res<PlayerState>,
-    pool: Res<GlobalResourcePool>,
-    nations: Res<NationRegistry>,
-    monsters: Res<MonsterEcosystem>,
-    eco: Res<EcoCycle>,
-    obs: Res<TickObserver>,
-    game_world: Res<GameWorld>,
-    run_mode: Res<ClientRunMode>,
-    camera_angles: Res<CameraAngles>,
-    camera_mode: Res<CameraMode>,
-    online_commands: Res<OnlineCommandDiagnostics>,
+    params: CaptureStateParams,
 ) {
     if !capture_enabled() {
         return;
@@ -53,25 +140,33 @@ pub fn periodic_screenshot(
         let start = START.get_or_init(std::time::Instant::now);
         start.elapsed().as_secs_f32()
     };
-    let _ = time;
-
-    if clock.frame_tick >= FIRST_SCREENSHOT_MIN_FRAME && now - clock.last_screenshot_wall >= 4.0 {
+    let _ = &params.time;
+    let first_progress = first_screenshot_min_progress();
+    let capture_tick = if *params.run_mode == ClientRunMode::Offline {
+        clock.tick
+    } else {
+        clock.frame_tick
+    };
+    if capture_tick == first_progress {
         eprintln!(
-            "[shot] fire frame={} sim_tick={} wall={:.1} last={:.1}",
-            clock.frame_tick, clock.tick, now, clock.last_screenshot_wall
+            "[shot] gate reached frame={} sim_tick={} capture_tick={} wall={:.1} mode={:?}",
+            clock.frame_tick, clock.tick, capture_tick, now, *params.camera_mode
         );
     }
 
-    if clock.frame_tick < FIRST_SCREENSHOT_MIN_FRAME {
+    if capture_tick >= first_progress && now - clock.last_screenshot_wall >= 4.0 {
+        eprintln!(
+            "[shot] fire frame={} sim_tick={} capture_tick={} wall={:.1} last={:.1}",
+            clock.frame_tick, clock.tick, capture_tick, now, clock.last_screenshot_wall
+        );
+    }
+
+    if !screenshot_gate_ready(*params.run_mode, capture_tick, first_progress, now) {
         // iter_210: in online mode SimClock.tick doesn't advance (server runs
-        // the authoritative sim), so the offline-only FIRST_SCREENSHOT_MIN_FRAME
+        // the authoritative sim), so the offline-only first screenshot progress
         // gate would block every screenshot forever. Fall back to wall-clock
         // so online first-person can still produce a screenshot.
-        if *run_mode != ClientRunMode::Offline {
-            // (handled below by the wall-clock interval check; no early return)
-        } else {
-            return;
-        }
+        return;
     }
 
     let interval = std::env::var("LK2_SCREENSHOT_INTERVAL")
@@ -82,9 +177,12 @@ pub fn periodic_screenshot(
         return;
     }
     clock.last_screenshot_wall = now;
+    if clock.screenshot_count == 0 {
+        clock.screenshot_count = latest_existing_iter_id().unwrap_or(0);
+    }
     clock.screenshot_count += 1;
     let iter_id = clock.screenshot_count;
-    let iter_dir = format!("screenshots/iter_{:02}", iter_id);
+    let iter_dir = format!("{SCREENSHOT_DIR}/iter_{:02}", iter_id);
     let _ = std::fs::create_dir_all(&iter_dir);
     let png_path: PathBuf = format!("{}/iter_{:02}.png", iter_dir, iter_id).into();
     let state_path = format!("{}/final_state.json", iter_dir);
@@ -96,19 +194,21 @@ pub fn periodic_screenshot(
         .observe(bevy::render::view::screenshot::save_to_disk(png_path));
 
     let state = build_state_json(
-        &time,
+        &params.time,
         &clock,
-        &player,
-        &pool,
-        &nations,
-        &monsters,
-        &eco,
-        &obs,
-        &game_world,
-        *run_mode,
-        &camera_angles,
-        *camera_mode,
-        &online_commands,
+        &params.player,
+        &params.pool,
+        &params.nations,
+        &params.monsters,
+        &params.eco,
+        &params.obs,
+        &params.game_world,
+        *params.run_mode,
+        &params.camera_angles,
+        *params.camera_mode,
+        &params.online_commands,
+        &params.static_world_visuals,
+        &params.render_telemetry,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
@@ -129,20 +229,9 @@ pub fn periodic_screenshot(
 }
 
 pub fn tick_recorder(
-    time: Res<Time>,
     mut rec: ResMut<TickRecorder>,
     clock: Res<SimClock>,
-    player: Res<PlayerState>,
-    pool: Res<GlobalResourcePool>,
-    nations: Res<NationRegistry>,
-    monsters: Res<MonsterEcosystem>,
-    eco: Res<EcoCycle>,
-    obs: Res<TickObserver>,
-    game_world: Res<GameWorld>,
-    run_mode: Res<ClientRunMode>,
-    camera_angles: Res<CameraAngles>,
-    camera_mode: Res<CameraMode>,
-    online_commands: Res<OnlineCommandDiagnostics>,
+    params: CaptureStateParams,
 ) {
     if !capture_enabled() {
         return;
@@ -151,13 +240,7 @@ pub fn tick_recorder(
     use std::sync::atomic::{AtomicU64, Ordering};
     static LOCAL_FRAME_TICK: AtomicU64 = AtomicU64::new(0);
     let local_frame_tick = LOCAL_FRAME_TICK.fetch_add(1, Ordering::Relaxed) + 1;
-    let sample_tick = if clock.tick > 0 {
-        clock.tick
-    } else if clock.frame_tick > 0 {
-        clock.frame_tick / 60
-    } else {
-        local_frame_tick / 60
-    };
+    let sample_tick = clock.tick.max(clock.frame_tick / 60).max(local_frame_tick / 60);
     if sample_tick == 0 || sample_tick % 5 != 0 || sample_tick == rec.last_dump_tick {
         return;
     }
@@ -165,24 +248,40 @@ pub fn tick_recorder(
     rec.current_iter = sample_tick as u32;
     let path = format!("screenshots/state_t{}.json", sample_tick);
     let state = build_state_json(
-        &time,
+        &params.time,
         &clock,
-        &player,
-        &pool,
-        &nations,
-        &monsters,
-        &eco,
-        &obs,
-        &game_world,
-        *run_mode,
-        &camera_angles,
-        *camera_mode,
-        &online_commands,
+        &params.player,
+        &params.pool,
+        &params.nations,
+        &params.monsters,
+        &params.eco,
+        &params.obs,
+        &params.game_world,
+        *params.run_mode,
+        &params.camera_angles,
+        *params.camera_mode,
+        &params.online_commands,
+        &params.static_world_visuals,
+        &params.render_telemetry,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
         info!("📝 tick state dumped → {}", path);
     }
+}
+
+fn latest_existing_iter_id() -> Option<u32> {
+    std::fs::read_dir(SCREENSHOT_DIR)
+        .ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if !entry.file_type().ok()?.is_dir() {
+                return None;
+            }
+            let name = entry.file_name();
+            name.to_str()?.strip_prefix("iter_")?.parse::<u32>().ok()
+        })
+        .max()
 }
 
 fn build_state_json(
@@ -199,6 +298,8 @@ fn build_state_json(
     camera_angles: &CameraAngles,
     camera_mode: CameraMode,
     online_commands: &OnlineCommandDiagnostics,
+    static_world_visuals: &StaticWorldVisualSnapshot,
+    render_telemetry: &RenderTelemetry,
 ) -> serde_json::Value {
     let mut state = lk2_core::diagnostics::build_state_json(
         time,
@@ -215,7 +316,17 @@ fn build_state_json(
     if let Some(obj) = state.as_object_mut() {
         let first_person_forward = first_person_forward(camera_angles.yaw, camera_angles.pitch);
         let eye = player.pos + Vec3::Y * 1.7;
-        let hit = ray_voxel_first_hit(game_world, eye, first_person_forward, 160.0);
+        let (center_ray_origin, center_ray_forward) = static_world_visuals
+            .camera_transform
+            .as_ref()
+            .map(|tf| {
+                (
+                    tf.translation,
+                    tf.rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero(),
+                )
+            })
+            .unwrap_or((eye, first_person_forward));
+        let hit = ray_voxel_first_hit(game_world, center_ray_origin, center_ray_forward, 160.0);
         obj.insert(
             "camera".to_string(),
             serde_json::json!({
@@ -224,6 +335,8 @@ fn build_state_json(
                 "pitch": camera_angles.pitch,
                 "first_person_eye": [eye.x, eye.y, eye.z],
                 "first_person_forward": [first_person_forward.x, first_person_forward.y, first_person_forward.z],
+                "center_ray_origin": [center_ray_origin.x, center_ray_origin.y, center_ray_origin.z],
+                "center_ray_forward": [center_ray_forward.x, center_ray_forward.y, center_ray_forward.z],
                 "center_ray_hit": hit.map(|h| serde_json::json!({
                     "block_pos": h.0,
                     "point": [h.1.x, h.1.y, h.1.z],
@@ -241,8 +354,69 @@ fn build_state_json(
                 "last_dz_milli": online_commands.last_dz_milli,
             }),
         );
+        obj.insert(
+            "visual".to_string(),
+            serde_json::json!({
+                "static_world": static_world_visual_json(&static_world_visuals.current_positions),
+                "movement_probe": movement_probe_json(static_world_visuals),
+                "player_readability": player_readability_json(static_world_visuals),
+            }),
+        );
+        obj.insert(
+            "render".to_string(),
+            render_telemetry_json(render_telemetry),
+        );
     }
     state
+}
+
+fn player_readability_json(snapshot: &StaticWorldVisualSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "marker_count": snapshot.player_marker_count,
+        "marker_max_distance": snapshot.player_marker_max_distance,
+    })
+}
+
+fn static_world_visual_json(positions: &[(&'static str, Vec3)]) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    for (name, pos) in positions {
+        obj.insert((*name).to_string(), vec3_json(*pos));
+    }
+    serde_json::Value::Object(obj)
+}
+
+fn movement_probe_json(snapshot: &StaticWorldVisualSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "first_player_pos": snapshot.first_player_pos.map(|p| vec3_json(p)),
+        "current_player_pos": snapshot.current_player_pos.map(|p| vec3_json(p)),
+        "first_static_world": static_world_visual_json(&snapshot.first_positions),
+        "current_static_world": static_world_visual_json(&snapshot.current_positions),
+    })
+}
+
+fn render_telemetry_json(telemetry: &RenderTelemetry) -> serde_json::Value {
+    serde_json::json!({
+        "frame": {
+            "samples": telemetry.frame_samples,
+            "dt_max_ms": telemetry.frame_dt_max_ms,
+            "dt_over_50ms": telemetry.frame_dt_over_50ms,
+        },
+        "terrain": {
+            "smooth_mesh_builds": telemetry.smooth_mesh_builds,
+            "smooth_mesh_total_ms": telemetry.smooth_mesh_total_ms,
+            "smooth_mesh_max_ms": telemetry.smooth_mesh_max_ms,
+            "smooth_mesh_total_tris": telemetry.smooth_mesh_total_tris,
+            "greedy_mesh_builds": telemetry.greedy_mesh_builds,
+            "greedy_mesh_total_ms": telemetry.greedy_mesh_total_ms,
+            "greedy_mesh_max_ms": telemetry.greedy_mesh_max_ms,
+            "terrain_despawns": telemetry.terrain_despawns,
+            "collider_rebuilds": telemetry.collider_rebuilds,
+        }
+    })
+}
+
+fn vec3_json(v: Vec3) -> serde_json::Value {
+    serde_json::json!([v.x, v.y, v.z])
 }
 
 fn first_person_forward(yaw: f32, pitch: f32) -> Vec3 {
@@ -301,6 +475,11 @@ fn build_state_diff(prev: &serde_json::Value, current: &serde_json::Value) -> se
         "monsters.kingdoms",
         "monsters.nests",
         "creatures.passive_current",
+        "eco_cycle.clouds",
+        "eco_cycle.rainfall",
+        "eco_cycle.plants_grown",
+        "eco_cycle.rabbits_born",
+        "eco_cycle.wildlife_born",
         "eco_cycle.rabbits",
         "eco_cycle.berry_bushes",
         "eco_cycle.fruit",
@@ -360,6 +539,53 @@ fn value_at_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a ser
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_screenshot_progress_env_cannot_disable_offline_progress_gate() {
+        assert_eq!(
+            first_screenshot_min_progress_from_env(Some("0")),
+            FIRST_SCREENSHOT_MIN_PROGRESS
+        );
+        assert_eq!(
+            first_screenshot_min_progress_from_env(Some("12")),
+            FIRST_SCREENSHOT_MIN_PROGRESS
+        );
+        assert_eq!(first_screenshot_min_progress_from_env(Some("250")), 250);
+    }
+
+    #[test]
+    fn screenshot_gate_requires_wall_time_and_offline_progress() {
+        assert!(!screenshot_gate_ready(
+            ClientRunMode::Offline,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_WALL_SECS - 0.1,
+        ));
+        assert!(!screenshot_gate_ready(
+            ClientRunMode::Offline,
+            FIRST_SCREENSHOT_MIN_PROGRESS - 1,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_WALL_SECS,
+        ));
+        assert!(screenshot_gate_ready(
+            ClientRunMode::Offline,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_WALL_SECS,
+        ));
+        assert!(!screenshot_gate_ready(
+            ClientRunMode::Offline,
+            20,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_WALL_SECS,
+        ));
+        assert!(screenshot_gate_ready(
+            ClientRunMode::Online,
+            0,
+            FIRST_SCREENSHOT_MIN_PROGRESS,
+            FIRST_SCREENSHOT_MIN_WALL_SECS,
+        ));
+    }
 
     #[test]
     fn state_diff_reports_sorted_numeric_deltas() {

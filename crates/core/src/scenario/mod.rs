@@ -130,6 +130,141 @@ impl ScenarioState {
     }
 }
 
+#[cfg(test)]
+mod smoke_tests {
+    use super::*;
+
+    #[test]
+    fn scenario_default() {
+        let s = Scenario::default();
+        assert_eq!(s.name, "default");
+        assert!(s.record_window.is_some());
+        assert!(s.steps.is_empty());
+    }
+
+    #[test]
+    fn scenario_state_from_scenario() {
+        let sc = Scenario {
+            name: "test".into(),
+            record_window: None,
+            steps: vec![ScenarioStep::WaitTicks { ticks: 10 }],
+        };
+        let state = ScenarioState::from_scenario(sc);
+        assert_eq!(state.current_step, 0);
+        assert_eq!(state.last_step_done_tick, 0);
+        assert_eq!(state.step_in_progress, false);
+        assert_eq!(state.recording, false);
+        assert_eq!(state.current_dir, [1, 0, 0]);
+        assert_eq!(state.pending_target, None);
+        assert_eq!(state.pending_gather_left, 0);
+        assert_eq!(state.end_requested, false);
+    }
+
+    #[test]
+    fn award_gathered_resource_adds_to_pool_and_player() {
+        let mut pool = GlobalResourcePool::new();
+        let mut player = PlayerState::default();
+
+        let result = award_gathered_resource(&mut pool, &mut player, ResourceKind::Wood, 10);
+        assert!(result.is_ok());
+        assert_eq!(pool.get(ResourceKind::Wood), 10);
+        assert_eq!(player.inventory.get(&ResourceKind::Wood), Some(&10));
+        assert_eq!(player.blocks_gathered, 10);
+    }
+
+    #[test]
+    fn award_gathered_resource_exceeds_pool_cap_fails() {
+        let mut pool = GlobalResourcePool::new();
+        pool.force_add(ResourceKind::Wood, ResourceKind::Wood.max());
+        let mut player = PlayerState::default();
+
+        let result = award_gathered_resource(&mut pool, &mut player, ResourceKind::Wood, 1);
+        assert!(result.is_err());
+        assert_eq!(player.blocks_gathered, 0);
+    }
+
+    #[test]
+    fn load_scenario_from_args_or_default_uses_default_when_no_args() {
+        let sc = load_scenario_from_args_or_default(&[]);
+        assert_eq!(sc.name, "default");
+        assert!(sc.steps.len() > 0);
+    }
+
+    #[test]
+    fn load_scenario_from_args_or_default_uses_default_on_error() {
+        let sc =
+            load_scenario_from_args_or_default(&["--offline".into(), "nonexistent.json".into()]);
+        assert_eq!(sc.name, "default");
+    }
+
+    #[test]
+    fn scenario_step_variants() {
+        assert!(matches!(
+            ScenarioStep::MoveTo { pos: [10, 5, 10] },
+            ScenarioStep::MoveTo { .. }
+        ));
+        assert!(matches!(
+            ScenarioStep::Step { dir: [1, 0, 0] },
+            ScenarioStep::Step { .. }
+        ));
+        assert!(matches!(
+            ScenarioStep::Gather { count: 3 },
+            ScenarioStep::Gather { .. }
+        ));
+        assert!(matches!(ScenarioStep::Attack, ScenarioStep::Attack));
+        assert!(matches!(
+            ScenarioStep::FoundNation,
+            ScenarioStep::FoundNation
+        ));
+        assert!(matches!(
+            ScenarioStep::UpgradePop { target: 10 },
+            ScenarioStep::UpgradePop { .. }
+        ));
+        assert!(matches!(
+            ScenarioStep::WaitTicks { ticks: 5 },
+            ScenarioStep::WaitTicks { .. }
+        ));
+        assert!(matches!(
+            ScenarioStep::Screenshot { name: "test".into() },
+            ScenarioStep::Screenshot { .. }
+        ));
+        assert!(matches!(
+            ScenarioStep::RecordBegin,
+            ScenarioStep::RecordBegin
+        ));
+        assert!(matches!(ScenarioStep::RecordEnd, ScenarioStep::RecordEnd));
+        assert!(matches!(
+            ScenarioStep::Log { msg: "test".into() },
+            ScenarioStep::Log { .. }
+        ));
+        assert!(matches!(ScenarioStep::Quit, ScenarioStep::Quit));
+    }
+
+    #[test]
+    fn recorded_tick_fields() {
+        let rt = RecordedTick {
+            tick: 100,
+            player: [10.0, 5.0, 20.0],
+            player_block: [10, 5, 20],
+            wood: 100,
+            food: 50,
+            apple: 30,
+            soul: 10,
+            flags: 2,
+            monsters: 50,
+            nation_id: Some(0),
+            blocks_gathered: 100,
+            nations_founded: 1,
+            monsters_killed: 5,
+            step_label: "test".into(),
+        };
+        assert_eq!(rt.tick, 100);
+        assert_eq!(rt.flags, 2);
+        assert_eq!(rt.monsters, 50);
+        assert_eq!(rt.nation_id, Some(0));
+    }
+}
+
 pub fn award_gathered_resource(
     pool: &mut GlobalResourcePool,
     player: &mut PlayerState,

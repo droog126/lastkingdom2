@@ -26,6 +26,8 @@ Use this skill for gameplay-facing and engine-facing changes. Combine it with `$
 - Avoid naming conflicts with Bevy `World`; use `World as GameWorld` when needed.
 - Throttle per-tick `info!` and `warn!` logs with `Local<u32>` or equivalent.
 - Keep visual state tied to simulation state unless the task is explicitly presentation-only.
+- In normal client gameplay, terrain must come from real world/voxel terrain systems. Do not add large fake ground planes, underlays, or player-foot discs that follow the player unless they are explicitly debug/preview-only and default off.
+- If a visual helper follows the player, keep it small, intentional, and named as a helper. Large world-scale meshes must be static in world space or generated from world state, never attached to player movement.
 
 ## Dependency Guardrails
 
@@ -52,9 +54,11 @@ Handle only one to three strongly related issues per task. Record additional fin
 - Resource drops and manual kills should share rule logic, not duplicate matches.
 - A better screenshot with unchanged `diff.json` may be presentation-only.
 - Changed state with unchanged screenshot often means player, camera, or entity visibility is wrong.
-- Legacy gameplay visuals can hide new ECS systems. If a screenshot does not prove a new loop, inspect nearby old systems, markers, landmarks, or demo props before changing core rules.
+- Existing presentation layers can hide new simulation behavior. If a screenshot does not prove a new loop, inspect visibility, placement, camera framing, and old presentation systems before changing core rules.
+- When changing camera scale, especially top-down or far views, inspect old presentation layers for fake terrain, underlays, discs, or marker meshes that were harmless in close view but read as world geometry at distance.
 - Auto-demo timing must be validated against the same simulation progress metric used by health checks, not frame count or wall-clock intuition.
 - For client-server simulation work, make offline and server-authoritative modes run the same core rule step, then replicate explicit snapshots to clients. Do not let online clients invent authoritative state locally.
+- When adding or changing visible gameplay state, require both state evidence and visual evidence at the intended camera scale. A system can be correct but still fail the player experience if its important state is hidden, too small, or visually ambiguous.
 
 ## Completion
 
@@ -62,6 +66,7 @@ A gameplay/client task is complete only when:
 
 - the change is explained clearly
 - relevant tests or a reason for no tests are provided
+- the affected crate has compiled or passed the narrowest relevant `cargo check`; if it cannot, stop and report the blocker instead of continuing blind edits
 - validation commands passed or failures are reported concretely
 - closed-loop artifacts were inspected when visuals/gameplay changed
 - unresolved risks are listed

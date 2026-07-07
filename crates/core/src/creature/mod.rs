@@ -278,7 +278,7 @@ fn spawn_debug_creature_at(
     kind: CreatureKind,
     fixed_wander_secs: f32,
 ) -> bool {
-    let mesh_h = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let mesh_h = meshes.add(Sphere::new(1.0));
     let mat_h = materials.add(creature_material(kind));
     commands.spawn((
         Creature { kind, block_pos: [x, y, z] },
@@ -286,7 +286,7 @@ fn spawn_debug_creature_at(
         Mesh3d(mesh_h),
         MeshMaterial3d(mat_h),
         Transform::from_translation(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5))
-            .with_scale(kind.size() * 0.35),
+            .with_scale(kind.size()),
         CombatHealth { current: 12.0, max: 12.0, invuln_until_tick: 0 },
         Stamina::default(),
         BlockState::default(),

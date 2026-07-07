@@ -107,12 +107,8 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let mut glbs = collect_glbs(&asset_root);
     if let Some(filter) = only.as_deref() {
         let needle = filter.to_ascii_lowercase();
-        let needle_stem = needle
-            .rsplit('/')
-            .next()
-            .unwrap_or(&needle)
-            .trim_end_matches(".glb")
-            .to_string();
+        let needle_stem =
+            needle.rsplit('/').next().unwrap_or(&needle).trim_end_matches(".glb").to_string();
         let needle_no_ext = needle.trim_end_matches(".glb").to_string();
         glbs.retain(|(rel, _)| {
             let lower = rel.to_ascii_lowercase();
@@ -141,10 +137,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     if let Some(n) = limit {
         glbs.truncate(n);
     }
-    println!(
-        ">>> model-preview-all: {} GLB(s) to iterate",
-        glbs.len()
-    );
+    println!(">>> model-preview-all: {} GLB(s) to iterate", glbs.len());
 
     let started = Instant::now();
     let mut entries: Vec<ModelEntry> = Vec::with_capacity(glbs.len());
@@ -155,13 +148,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             .unwrap_or(asset_path)
             .trim_end_matches(".glb")
             .to_string();
-        println!(
-            "\n[{}/{}] {} -> {}",
-            idx + 1,
-            glbs.len(),
-            asset_path,
-            stem
-        );
+        println!("\n[{}/{}] {} -> {}", idx + 1, glbs.len(), asset_path, stem);
         let png_rel = format!("{OUTPUT_DIR}/{stem}.png");
         let png_abs = root.join(&png_rel);
         if !skip_render {
@@ -212,10 +199,7 @@ fn run_one(
         "--model-preview-shot".to_string(),
     ];
     let mut cmd = Command::new(client_exe);
-    cmd.args(&args)
-        .current_dir(root)
-        .env_remove("PATH")
-        .stdin(std::process::Stdio::null());
+    cmd.args(&args).current_dir(root).env_remove("PATH").stdin(std::process::Stdio::null());
     for (k, v) in envs {
         cmd.env(k, v);
     }
@@ -301,7 +285,10 @@ fn evaluate_png(
                 if verdict == "pass" {
                     verdict = "uninspectable".to_string();
                 }
-                problems.push("PNG inspection helper missing; cannot verify materials/orientation".to_string());
+                problems.push(
+                    "PNG inspection helper missing; cannot verify materials/orientation"
+                        .to_string(),
+                );
             }
         }
     }
@@ -345,10 +332,7 @@ fn inspect_png(_root: &Path, png_abs: &Path) -> Option<PngInspection> {
 
     let rgb: Vec<u8> = match color {
         png::ColorType::Rgb => bytes.to_vec(),
-        png::ColorType::Rgba => bytes
-            .chunks(4)
-            .flat_map(|c| [c[0], c[1], c[2]])
-            .collect(),
+        png::ColorType::Rgba => bytes.chunks(4).flat_map(|c| [c[0], c[1], c[2]]).collect(),
         png::ColorType::Grayscale => bytes.iter().flat_map(|v| [*v, *v, *v]).collect(),
         png::ColorType::GrayscaleAlpha => {
             let mut out = Vec::with_capacity(bytes.len() / 2 * 3);
@@ -471,10 +455,7 @@ fn summarize(entries: &[ModelEntry]) -> ModelSummary {
     let total = entries.len();
     let rendered = entries.iter().filter(|e| e.rendered).count();
     let failed = entries.iter().filter(|e| e.verdict == "fail").count();
-    let white_or_blank = entries
-        .iter()
-        .filter(|e| e.verdict == "white_or_blank")
-        .count();
+    let white_or_blank = entries.iter().filter(|e| e.verdict == "white_or_blank").count();
     let flat_or_lying = entries.iter().filter(|e| e.verdict == "lying_down").count();
     let scores: Vec<f32> = entries.iter().map(score_for).collect();
     let mean_score = if scores.is_empty() {
@@ -482,14 +463,7 @@ fn summarize(entries: &[ModelEntry]) -> ModelSummary {
     } else {
         scores.iter().sum::<f32>() / scores.len() as f32
     };
-    ModelSummary {
-        total,
-        rendered,
-        failed,
-        white_or_blank,
-        flat_or_lying,
-        mean_score,
-    }
+    ModelSummary { total, rendered, failed, white_or_blank, flat_or_lying, mean_score }
 }
 
 fn score_for(e: &ModelEntry) -> f32 {
@@ -511,8 +485,11 @@ fn write_results(root: &Path, entries: &[ModelEntry], summary: &ModelSummary) ->
         "summary": summary,
         "entries": entries,
     });
-    fs::write(&path, serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -530,7 +507,10 @@ fn write_decision(
     ));
     md.push_str("score:\n");
     md.push_str(&format!("- total: {:.1}/10\n", summary.mean_score));
-    md.push_str(&format!("- rendered: {}/{}\n", summary.rendered, summary.total));
+    md.push_str(&format!(
+        "- rendered: {}/{}\n",
+        summary.rendered, summary.total
+    ));
     md.push_str(&format!("- failed: {}\n", summary.failed));
     md.push_str(&format!("- white_or_blank: {}\n", summary.white_or_blank));
     md.push_str(&format!("- flat_or_lying: {}\n", summary.flat_or_lying));
@@ -544,13 +524,7 @@ fn write_decision(
     md.push_str("by_verdict:\n");
     for (v, list) in &by_verdict {
         md.push_str(&format!("- {} ({}): ", v, list.len()));
-        md.push_str(
-            &list
-                .iter()
-                .map(|e| e.stem.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
+        md.push_str(&list.iter().map(|e| e.stem.as_str()).collect::<Vec<_>>().join(", "));
         md.push('\n');
     }
     md.push('\n');
@@ -598,7 +572,9 @@ fn write_decision(
             summary.failed
         ));
     } else {
-        md.push_str("- all models pass; pick next visual improvement (e.g. add variety, props, glow)\n");
+        md.push_str(
+            "- all models pass; pick next visual improvement (e.g. add variety, props, glow)\n",
+        );
     }
 
     let path = root.join(OUTPUT_DIR).join("decision.md");
@@ -632,11 +608,8 @@ fn collect_glbs(asset_root: &Path) -> Vec<(String, String)> {
             {
                 continue;
             }
-            let rel = path
-                .strip_prefix(asset_root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel =
+                path.strip_prefix(asset_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
             let category = path
                 .parent()
                 .and_then(|parent| parent.strip_prefix(asset_root).ok())
@@ -652,14 +625,11 @@ fn collect_glbs(asset_root: &Path) -> Vec<(String, String)> {
 }
 
 fn runtime_env(root: &Path) -> Result<Vec<(String, String)>> {
-    let sysroot = match Command::new("rustc")
-        .args(["--print", "sysroot"])
-        .current_dir(root)
-        .output()
-    {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        Err(_) => String::new(),
-    };
+    let sysroot =
+        match Command::new("rustc").args(["--print", "sysroot"]).current_dir(root).output() {
+            Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            Err(_) => String::new(),
+        };
     let sep = if cfg!(windows) { ";" } else { ":" };
     // Keep the inherited PATH so things like `sccache` keep working, and
     // prepend our target/debug helpers so the spawned `lk2-client.exe` finds
@@ -693,8 +663,14 @@ fn runtime_env(root: &Path) -> Result<Vec<(String, String)>> {
 
 fn cargo_build(root: &Path, envs: &[(String, String)]) -> Result<()> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["build", "-p", "lk2-client", "--features", &DEV_DYNAMIC_FEATURES.join(",")])
-        .current_dir(root);
+    cmd.args([
+        "build",
+        "-p",
+        "lk2-client",
+        "--features",
+        &DEV_DYNAMIC_FEATURES.join(","),
+    ])
+    .current_dir(root);
     for (k, v) in envs {
         cmd.env(k, v);
     }

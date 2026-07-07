@@ -40,3 +40,69 @@ impl Default for SimClock {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sim_clock_default_initializes_zero() {
+        let c = SimClock::default();
+        assert_eq!(c.frame_tick, 0);
+        assert_eq!(c.tick, 0);
+        assert_eq!(c.last_sim_step_ran, false);
+        assert_eq!(c.last_tick_wall, 0.0);
+        assert_eq!(c.slow_tick_accum, 0.0);
+        assert_eq!(c.last_hud_wall, 0.0);
+        assert_eq!(c.last_screenshot_wall, 0.0);
+    }
+
+    #[test]
+    fn sim_clock_tick_counter() {
+        let mut c = SimClock::default();
+        c.tick = 100;
+        c.frame_tick = 1000;
+
+        assert_eq!(c.tick, 100);
+        assert_eq!(c.frame_tick, 1000);
+    }
+
+    #[test]
+    fn sim_clock_accumulator() {
+        let mut c = SimClock::default();
+        c.slow_tick_accum = 0.5;
+        c.slow_tick_accum += 0.3;
+
+        assert!((c.slow_tick_accum - 0.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn sim_clock_wall_time() {
+        let mut c = SimClock::default();
+        c.last_tick_wall = 10.0;
+        c.last_hud_wall = 5.0;
+        c.last_screenshot_wall = 2.0;
+
+        assert_eq!(c.last_tick_wall, 10.0);
+        assert_eq!(c.last_hud_wall, 5.0);
+        assert_eq!(c.last_screenshot_wall, 2.0);
+    }
+
+    #[test]
+    fn sim_clock_sim_step_flag() {
+        let mut c = SimClock::default();
+        assert_eq!(c.last_sim_step_ran, false);
+
+        c.last_sim_step_ran = true;
+        assert_eq!(c.last_sim_step_ran, true);
+
+        c.last_sim_step_ran = false;
+        assert_eq!(c.last_sim_step_ran, false);
+    }
+
+    #[test]
+    fn sim_clock_screenshot_count() {
+        let c = SimClock::default();
+        assert_eq!(c.screenshot_count, 0);
+    }
+}

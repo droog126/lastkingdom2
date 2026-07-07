@@ -396,9 +396,17 @@ mod tests {
         for i in 0..6u8 {
             let wid = WeaponId::from_u8(i).expect(&format!("weapon {} should exist", i));
             let stats = wid.stats();
-            assert!(stats.damage > 0.0, "weapon {} should have positive damage", i);
+            assert!(
+                stats.damage > 0.0,
+                "weapon {} should have positive damage",
+                i
+            );
             assert!(stats.reach > 0.0, "weapon {} should have positive reach", i);
-            assert!(stats.attack_speed > 0.0, "weapon {} should have positive attack speed", i);
+            assert!(
+                stats.attack_speed > 0.0,
+                "weapon {} should have positive attack speed",
+                i
+            );
         }
     }
 }

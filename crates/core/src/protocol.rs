@@ -174,6 +174,7 @@ pub mod components {
     pub const ECO_SNAPSHOT_MAX_WILDLIFE: usize = 16;
     pub const ECO_SNAPSHOT_MAX_BERRIES: usize = 16;
     pub const ECO_SNAPSHOT_MAX_PLANTS: usize = 24;
+    pub const ECO_SNAPSHOT_MAX_CLOUDS: usize = 8;
 
     #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
     pub struct EcoRabbitNet {
@@ -209,12 +210,27 @@ pub mod components {
         pub stock: u32,
     }
 
+    #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct EcoCloudNet {
+        pub id: u32,
+        pub x: f32,
+        pub z: f32,
+        pub rain: f32,
+        pub phase: f32,
+    }
+
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct EcoSnapshot {
         pub tick: u64,
         pub co2: f32,
+        pub rain: f32,
+        pub rainfall: f32,
         pub fruit_eaten: u64,
         pub fruit_grown: u64,
+        pub plants_grown: u64,
+        pub rabbits_born: u64,
+        pub wildlife_born: u64,
+        pub clouds: Vec<EcoCloudNet>,
         pub rabbits: Vec<EcoRabbitNet>,
         pub wildlife: Vec<EcoWildlifeNet>,
         pub berries: Vec<EcoBerryNet>,
@@ -436,6 +452,7 @@ mod tests {
         assert_eq!(ECO_SNAPSHOT_MAX_WILDLIFE, 16);
         assert_eq!(ECO_SNAPSHOT_MAX_BERRIES, 16);
         assert_eq!(ECO_SNAPSHOT_MAX_PLANTS, 24);
+        assert_eq!(ECO_SNAPSHOT_MAX_CLOUDS, 8);
     }
 
     #[test]

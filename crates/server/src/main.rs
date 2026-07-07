@@ -136,6 +136,7 @@ fn block_type_to_u8(block: lk2_core::world::BlockType) -> u8 {
         BlockType::FrostcoreOre => 10,
         BlockType::LivingRoot => 11,
         BlockType::BerryThicket => 12,
+        BlockType::Grass => 13,
     }
 }
 
@@ -809,6 +810,10 @@ fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
             for oz in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
                 let x = (pos.x + ox).floor() as i32;
                 let z = (pos.z + oz).floor() as i32;
+                if x < 0 || x >= world.size || y < 0 || y >= world.size || z < 0 || z >= world.size
+                {
+                    return false;
+                }
                 if world.get(x, y, z).is_solid() {
                     return false;
                 }
@@ -1390,5 +1395,34 @@ fn tick_recorder(
     }
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lk2_core::world::BlockType;
+
+    #[test]
+    fn block_type_wire_codes_keep_existing_values_and_append_grass() {
+        assert_eq!(block_type_to_u8(BlockType::Air), 0);
+        assert_eq!(block_type_to_u8(BlockType::Dirt), 1);
+        assert_eq!(block_type_to_u8(BlockType::Stone), 2);
+        assert_eq!(block_type_to_u8(BlockType::BerryThicket), 12);
+        assert_eq!(block_type_to_u8(BlockType::Grass), 13);
+    }
+
+    #[test]
+    fn player_volume_clear_rejects_world_edge_escape() {
+        let mut world = GameWorld::new(8);
+        for x in 0..world.size {
+            for z in 0..world.size {
+                world.set(x, 0, z, BlockType::Stone);
+            }
+        }
+
+        assert!(!player_volume_clear_at(&world, Vec3::new(8.1, 1.0, 3.5)));
+        assert!(!player_volume_clear_at(&world, Vec3::new(-0.1, 1.0, 3.5)));
+        assert!(player_volume_clear_at(&world, Vec3::new(3.5, 1.0, 3.5)));
     }
 }

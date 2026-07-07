@@ -128,6 +128,7 @@ pub fn greedy_mesh_for_type_aabb(
 
 const RENDERABLE_TYPES: &[BlockType] = &[
     BlockType::Dirt,
+    BlockType::Grass,
     BlockType::Stone,
     BlockType::Sand,
     BlockType::Snow,

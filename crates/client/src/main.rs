@@ -3,7 +3,10 @@ use bevy::camera::Exposure;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::{IntoScheduleConfigs, common_conditions::resource_equals};
 use bevy::light::{AtmosphereEnvironmentMapLight, VolumetricFog, VolumetricLight};
-use bevy::pbr::{AtmosphereSettings, ScreenSpaceReflections};
+use bevy::pbr::{
+    AtmosphereSettings, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
+    ScreenSpaceReflections,
+};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
@@ -36,13 +39,19 @@ use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
-use lk2_core::world::{World as GameWorld, WorldConfig, generate_world, player_spawn_position_at};
+use lk2_core::world::{
+    BlockType, World as GameWorld, WorldConfig, generate_world, player_spawn_position_at,
+    player_spawn_position_near,
+};
 
-use crate::capture::{TickRecorder, periodic_screenshot, tick_recorder};
+use crate::capture::{
+    StaticWorldVisualSnapshot, TickRecorder, periodic_screenshot, tick_recorder,
+    update_static_world_visual_snapshot,
+};
 use crate::pretty::{
     PlayerAnimState, PrettyConfig, animate_avatar, animate_cloud_puffs, animate_monsters,
-    follow_grass_platform, follow_ground_details, follow_ground_discs, follow_monster_cubes,
-    follow_water, spawn_eco_visuals, spawn_pretty, update_eco_visuals, update_player_anim_state,
+    follow_monster_cubes, spawn_eco_visuals, spawn_pretty, sync_eco_visual_spawns,
+    update_eco_visuals, update_player_anim_state,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -51,19 +60,19 @@ use crate::pvp_systems::{
 };
 use crate::render::{
     AntiStuckState, CameraAngles, CameraMode, FreeFlyState, JumpState, LastMoveDirection,
-    NestMarkerCount, Player, RenderConfig, SpawnedBlocks, SwordSwing, auto_demo,
+    NestMarkerCount, Player, RenderConfig, RenderTelemetry, SpawnedBlocks, SwordSwing, auto_demo,
     camera_mode_toggle, cycle_terrain_preset, emergency_teleport, first_person_camera,
-    freefly_movement, freefly_toggle, held_weapon_follow, maintain_cursor_grab, mouse_look_system,
-    offline_anti_stuck, player_input, setup_atmosphere, setup_cursor_grab, setup_terrain_underlay,
-    spawn_nest_markers, spawn_terrain_around_player, toggle_cursor_grab_on_esc,
-    underlay_follow_player, update_animal_indicator, update_nest_indicator,
-    update_nest_marker_positions,
+    freefly_movement, held_weapon_follow, maintain_cursor_grab, mouse_look_system,
+    offline_anti_stuck, player_input, record_render_frame_time, setup_atmosphere,
+    setup_cursor_grab, spawn_nest_markers, spawn_terrain_around_player, sync_camera_projection,
+    toggle_cursor_grab_on_esc, toggle_freefly, top_down_camera_toggle, update_animal_indicator,
+    update_nest_indicator,
 };
 use crate::ui::{
     ClientRunMode, setup_fonts, setup_hud, update_hud, update_nest_radar, update_tutorial_overlay,
 };
 
-const AUTO_DEMO_WAIT_TICKS: u64 = 5_500;
+const AUTO_DEMO_WAIT_TICKS: u64 = 50_000;
 
 fn workspace_asset_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("assets")
@@ -280,6 +289,9 @@ fn main() {
                 lk2_core::scenario::ScenarioStep::Log {
                     msg: "=== idle: 玩家不动看动物 ===".into(),
                 },
+                // xtask decides when an auto-demo capture is complete. Keep the
+                // scenario alive past the health gate so slow Bevy frames do not
+                // exit before a ready screenshot/state pair is written.
                 lk2_core::scenario::ScenarioStep::WaitTicks { ticks: AUTO_DEMO_WAIT_TICKS },
             ],
         })
@@ -308,7 +320,11 @@ fn main() {
                     title: format!("万国起源：最后一国 钻石版 — {}", scenario_name).into(),
                     resolution: WindowResolution::new(1280, 720),
 
-                    present_mode: PresentMode::Immediate,
+                    present_mode: if hidden_window {
+                        PresentMode::Immediate
+                    } else {
+                        PresentMode::AutoVsync
+                    },
                     focused: !no_focus_window && !hidden_window,
                     visible: !hidden_window,
                     ..default()
@@ -367,7 +383,7 @@ fn main() {
     }
     if first_person_mode {
         render_config.auto_orbit = false;
-        render_config.auto_walk = false;
+        render_config.auto_walk = auto_demo_mode || hold_forward_test;
         render_config.auto_keys = false;
         render_config.mouse_look = true;
         tracing::info!("--first-person: CameraMode=FirstPerson, mouse_look=true");
@@ -389,10 +405,13 @@ fn main() {
         .init_resource::<SwordSwing>()
         .insert_resource(if first_person_mode {
             CameraMode::FirstPerson
+        } else if auto_demo_mode {
+            CameraMode::TopDown
         } else {
             CameraMode::default()
         })
         .init_resource::<SpawnedBlocks>()
+        .init_resource::<RenderTelemetry>()
         .init_resource::<PrettyConfig>()
         .init_resource::<PlayerState>()
         .init_resource::<SimClock>()
@@ -403,6 +422,7 @@ fn main() {
         .init_resource::<EcoCycle>()
         .init_resource::<TickObserver>()
         .init_resource::<TickRecorder>()
+        .init_resource::<StaticWorldVisualSnapshot>()
         .init_resource::<LastMoveDirection>()
         .init_resource::<FreeFlyState>()
         .init_resource::<JumpState>()
@@ -441,7 +461,6 @@ fn main() {
             setup_camera,
             setup_light,
             setup_atmosphere,
-            setup_terrain_underlay,
             setup_cursor_grab,
             setup_world,
             spawn_nest_markers,
@@ -502,11 +521,15 @@ fn main() {
     );
 
     app.add_systems(Update, update_player_anim_state.before(animate_avatar));
+    app.add_systems(Update, record_render_frame_time);
     app.add_systems(
         Update,
         (
-            freefly_toggle,
+            top_down_camera_toggle,
+            toggle_freefly,
             camera_mode_toggle,
+            sync_camera_projection,
+            sync_top_down_lighting,
             emergency_teleport,
             cycle_terrain_preset,
         )
@@ -529,22 +552,7 @@ fn main() {
 
     app.add_systems(
         Update,
-        update_nest_marker_positions.run_if(resource_equals(CameraMode::ThirdPerson)),
-    );
-
-    app.add_systems(
-        Update,
-        (
-            follow_grass_platform,
-            follow_ground_discs,
-            follow_ground_details,
-            underlay_follow_player,
-            follow_water,
-            follow_monster_cubes,
-            animate_monsters,
-            animate_cloud_puffs,
-        )
-            .chain(),
+        (follow_monster_cubes, animate_monsters, animate_cloud_puffs).chain(),
     );
 
     app.add_systems(Update, collect_combat_input_offline);
@@ -555,6 +563,7 @@ fn main() {
         Update,
         (
             simulation_tick.run_if(resource_equals(ClientRunMode::Offline)),
+            sync_eco_visual_spawns,
             update_eco_visuals,
             end_tick_system.run_if(resource_equals(ClientRunMode::Offline)),
             update_hud,
@@ -562,14 +571,20 @@ fn main() {
             update_tutorial_overlay,
             update_animal_indicator,
             update_nest_indicator,
-            tick_recorder,
-            periodic_screenshot,
+        )
+            .chain(),
+    );
+    app.add_systems(Update, update_static_world_visual_snapshot);
+    app.add_systems(Update, tick_recorder);
+    app.add_systems(Update, periodic_screenshot);
+    app.add_systems(
+        Update,
+        (
             despawn_dead_creatures.run_if(resource_equals(ClientRunMode::Offline)),
             update_creatures.run_if(resource_equals(ClientRunMode::Offline)),
             day_night_cycle,
             exit_on_esc,
-        )
-            .chain(),
+        ),
     );
 
     app.run();
@@ -825,6 +840,7 @@ fn block_type_from_u8(value: u8) -> lk2_core::world::BlockType {
         10 => BlockType::FrostcoreOre,
         11 => BlockType::LivingRoot,
         12 => BlockType::BerryThicket,
+        13 => BlockType::Grass,
         _ => BlockType::Air,
     }
 }
@@ -1120,6 +1136,27 @@ impl Default for TimeOfDay {
     }
 }
 
+fn sync_top_down_lighting(
+    mode: Res<CameraMode>,
+    mut sun: Query<&mut DirectionalLight, With<Sun>>,
+    mut fill: Query<&mut DirectionalLight, (Without<Sun>, With<DirectionalLight>)>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+) {
+    let top_down = *mode == CameraMode::TopDown;
+    if let Ok(mut light) = sun.single_mut() {
+        light.shadow_maps_enabled = !top_down;
+        light.illuminance = if top_down {
+            26_000.0
+        } else {
+            bevy::light::light_consts::lux::RAW_SUNLIGHT
+        };
+    }
+    if let Ok(mut light) = fill.single_mut() {
+        light.illuminance = if top_down { 7_500.0 } else { 6_000.0 };
+    }
+    ambient.brightness = if top_down { 1.65 } else { 1.15 };
+}
+
 fn setup_camera(mut commands: Commands) {
     // iter_456: wire the bevy 0.19 atmosphere + post-process stack onto the camera
     // so the rendered scene actually uses atmospheric scattering, volumetric fog,
@@ -1143,6 +1180,10 @@ fn setup_camera(mut commands: Commands) {
         Msaa::Off,
         TemporalAntiAliasing::default(),
         ScreenSpaceReflections { min_perceptual_roughness: 0.0..0.0, ..default() },
+        ScreenSpaceAmbientOcclusion {
+            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+            ..default()
+        },
     ));
 }
 
@@ -1152,29 +1193,29 @@ fn setup_light(mut commands: Commands) {
     // sky and to cast volumetric god-rays through the volumetric fog.
     commands.spawn((
         DirectionalLight {
-            illuminance: bevy::light::light_consts::lux::RAW_SUNLIGHT,
+            illuminance: bevy::light::light_consts::lux::RAW_SUNLIGHT * 0.82,
             shadow_maps_enabled: true,
-            color: Color::srgb(1.0, 0.96, 0.88),
+            color: Color::srgb(1.0, 0.91, 0.78),
             ..default()
         },
-        Transform::from_xyz(40.0, 80.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(70.0, 62.0, 28.0).looking_at(Vec3::new(20.0, 0.0, 20.0), Vec3::Y),
         Sun,
         VolumetricLight,
     ));
 
     commands.spawn((
         DirectionalLight {
-            illuminance: 6000.0,
+            illuminance: 8500.0,
             shadow_maps_enabled: false,
-            color: Color::srgb(0.85, 0.88, 0.95),
+            color: Color::srgb(0.62, 0.74, 1.0),
             ..default()
         },
         Transform::from_xyz(-40.0, 50.0, -25.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.98, 0.96, 0.88),
-        brightness: 1.15,
+        color: Color::srgb(0.86, 0.91, 1.0),
+        brightness: 1.05,
         affects_lightmapped_meshes: true,
     });
 }
@@ -1184,6 +1225,7 @@ pub fn day_night_cycle(
     mut tod: ResMut<TimeOfDay>,
     mut sun: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut fill: Query<&mut DirectionalLight, (Without<Sun>, With<DirectionalLight>)>,
+    mode: Res<CameraMode>,
 ) {
     // iter_456: the legacy `mut clear: ResMut<ClearColor>` is gone. Bevy 0.19's
     // `Atmosphere` entity computes the sky color procedurally from the sun
@@ -1197,6 +1239,11 @@ pub fn day_night_cycle(
     }
     let t = tod.0;
     let dayness = (std::f32::consts::PI * t).sin().max(0.0);
+    let readable_dayness = if *mode == CameraMode::ThirdPerson {
+        dayness.max(0.72)
+    } else {
+        dayness
+    };
     let sunset_glow = (1.0 - (2.0 * t - 1.0).abs()).powi(3);
 
     let dist = 80.0;
@@ -1206,7 +1253,8 @@ pub fn day_night_cycle(
         // RAW_SUNLIGHT at full day; ramp down to near-moonless at night so the
         // Atmosphere's Mie phase renders the sun correctly without blowing out
         // the camera exposure.
-        l.illuminance = bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * dayness);
+        l.illuminance =
+            bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * readable_dayness);
         l.color = Color::srgb(
             1.0 - 0.15 * sunset_glow,
             0.95 - 0.35 * sunset_glow,
@@ -1214,7 +1262,7 @@ pub fn day_night_cycle(
         );
     }
     if let Ok(mut l) = fill.single_mut() {
-        l.illuminance = 3000.0 * dayness + 150.0;
+        l.illuminance = 6_000.0 * readable_dayness + 1_200.0;
     }
 }
 
@@ -1269,8 +1317,10 @@ fn setup_world(
         && !std::env::args().any(|a| a == "--first-person")
         && (spawn_pos - Vec3::new(48.5, 16.0, 48.5)).length() < 2.0
     {
-        player.block_pos = [48, 16, 48];
-        player.pos = Vec3::new(48.5, 16.0, 48.5);
+        let (demo_pos, demo_block) = auto_demo_scale_readable_spawn(&game_world, 48, 48)
+            .unwrap_or((Vec3::new(48.5, 16.0, 48.5), [48, 16, 48]));
+        player.block_pos = demo_block;
+        player.pos = demo_pos;
     }
     anti_stuck.last_safe_pos = player.pos;
     anti_stuck.last_safe_block = player.block_pos;
@@ -1290,6 +1340,59 @@ fn setup_world(
         constant::WORLD_SIZE,
         spawn
     );
+}
+
+fn auto_demo_scale_readable_spawn(world: &GameWorld, x: i32, z: i32) -> Option<(Vec3, [i32; 3])> {
+    const SEARCH_RADIUS: i32 = 8;
+    const CLEARANCE_RADIUS: i32 = 2;
+    const FORWARD_CLEAR_DISTANCE: i32 = 11;
+
+    let mut best: Option<(i32, Vec3, [i32; 3])> = None;
+    for dz in -SEARCH_RADIUS..=SEARCH_RADIUS {
+        for dx in -SEARCH_RADIUS..=SEARCH_RADIUS {
+            let dist2 = dx * dx + dz * dz;
+            if dist2 > SEARCH_RADIUS * SEARCH_RADIUS {
+                continue;
+            }
+            let Some((pos, block_pos)) =
+                player_spawn_position_near(world, x + dx, z + dz, 0, CLEARANCE_RADIUS)
+            else {
+                continue;
+            };
+            if top_down_forward_leaf_distance(world, block_pos, FORWARD_CLEAR_DISTANCE).is_some() {
+                continue;
+            }
+            match best {
+                None => best = Some((dist2, pos, block_pos)),
+                Some((best_dist2, _, _)) if dist2 < best_dist2 => {
+                    best = Some((dist2, pos, block_pos));
+                }
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, pos, block_pos)| (pos, block_pos))
+}
+
+fn top_down_forward_leaf_distance(
+    world: &GameWorld,
+    block_pos: [i32; 3],
+    max_distance: i32,
+) -> Option<i32> {
+    for dx in 1..=max_distance {
+        let x = block_pos[0] + dx;
+        if !world.in_bounds(x, block_pos[1], block_pos[2]) {
+            continue;
+        }
+        for y in (block_pos[1] - 1)..=(block_pos[1] + 2) {
+            if world.in_bounds(x, y, block_pos[2])
+                && world.get(x, y, block_pos[2]) == BlockType::Leaves
+            {
+                return Some(dx);
+            }
+        }
+    }
+    None
 }
 
 fn sync_player_combat_anchor(
@@ -1378,7 +1481,7 @@ fn run_startup_self_check_once(
 }
 
 fn simulation_tick(
-    fixed_time: Res<Time<Fixed>>,
+    time: Res<Time>,
     mut clock: ResMut<SimClock>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
@@ -1386,7 +1489,7 @@ fn simulation_tick(
     mut obs: ResMut<TickObserver>,
 ) {
     let _ = advance_fixed_authority_tick(
-        fixed_time.delta_secs(),
+        time.delta_secs(),
         &mut clock,
         &mut pool,
         &mut monsters,
@@ -1483,7 +1586,7 @@ fn setup_player_pvp(mut commands: Commands, player: Query<Entity, With<Player>>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::FIRST_SCREENSHOT_MIN_FRAME;
+    use crate::capture::FIRST_SCREENSHOT_MIN_PROGRESS;
 
     #[test]
     fn client_self_check_resources_are_registered() {
@@ -1511,6 +1614,6 @@ mod tests {
 
     #[test]
     fn first_screenshot_waits_for_meaningful_sim_progress() {
-        assert!(FIRST_SCREENSHOT_MIN_FRAME >= 500);
+        assert!(FIRST_SCREENSHOT_MIN_PROGRESS >= 100);
     }
 }

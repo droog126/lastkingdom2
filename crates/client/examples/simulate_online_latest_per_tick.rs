@@ -113,7 +113,10 @@ fn main() {
     // Case 5: diagonal input preserves magnitude 1.0.
     let mut player = PlayerState { pos: spawn, block_pos: spawn_block, ..Default::default() };
     let before = player.pos;
-    let diag_world = (0.7071068_f32, -0.7071068_f32);
+    let diag_world = (
+        std::f32::consts::FRAC_1_SQRT_2,
+        -std::f32::consts::FRAC_1_SQRT_2,
+    );
     let dx_milli_diag = (diag_world.0 * 1000.0).round() as i16;
     let dz_milli_diag = (diag_world.1 * 1000.0).round() as i16;
     for _ in 0..server_ticks {

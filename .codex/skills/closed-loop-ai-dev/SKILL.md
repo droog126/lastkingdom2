@@ -24,7 +24,7 @@ just loop
 Direct form:
 
 ```sh
-cargo run -q -p xtask -- loop --offline --seconds 60
+just xtask loop --offline --seconds 60
 ```
 
 Quickly find latest iterations:
@@ -62,7 +62,9 @@ For asset-only iterations, use the same observe -> decide -> act discipline with
 ## State Vs Pixels
 
 - Do not call gameplay done because JSON contains entities. For core gameplay systems, require state proof, state deltas, and a screenshot or runtime view that makes the loop inspectable.
-- For finite resource loops, look for depletion/cap evidence such as source pools decreasing, destination pools respecting caps, and production stopping when inputs are exhausted.
+- For stateful loops, look for cause-and-effect evidence such as inputs changing, outputs respecting limits, and expected stop or cap conditions being reached.
+- For camera or movement-facing visual changes, verify that world-scale visuals stay fixed in world space while the player moves. Treat any player-following continent, fake ground sheet, underlay, or foot disc in normal gameplay as a failure unless the task explicitly asked for a debug marker.
+- For top-down or far camera changes, inspect at least one runtime view or screenshot after movement; compile checks alone do not catch scale/framing bugs.
 
 ## Decision Template
 

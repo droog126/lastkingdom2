@@ -1,7 +1,9 @@
+use bevy::camera::ScalingMode;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::HashMap;
+use std::time::Instant;
 
 use avian3d::prelude::{Collider, RigidBody};
 
@@ -55,8 +57,8 @@ impl Default for RenderConfig {
             radius: 48,
             max_blocks: 5000,
             y_offset: 0.0,
-            sky_color: Color::srgb(0.45, 0.65, 0.95),
-            fog_color: Color::srgb(0.78, 0.85, 0.95),
+            sky_color: Color::srgb(0.64, 0.78, 0.96),
+            fog_color: Color::srgb(0.82, 0.90, 0.94),
             fog_start: 130.0,
             fog_end: 360.0,
             auto_orbit: false,
@@ -70,7 +72,7 @@ impl Default for RenderConfig {
             mouse_look: false,
 
             smooth_terrain: true,
-            smooth_passes: 4,
+            smooth_passes: 2,
             ground_step_threshold: 0.85,
         }
     }
@@ -157,6 +159,9 @@ impl Default for FreeFlyState {
 const FREEFLY_SPEED: f32 = 30.0;
 
 const FREEFLY_BOOST: f32 = 3.0;
+const TOP_DOWN_ORTHO_HEIGHT: f32 = 72.0;
+const TERRAIN_REBUILD_MIN_SECS: f32 = 4.0;
+const TERRAIN_REBUILD_RADIUS_FRACTION: f32 = 0.60;
 
 const MOUSE_SENS: f32 = 0.0022;
 const PITCH_LIMIT: f32 = 1.483;
@@ -169,6 +174,34 @@ pub struct SpawnedBlocks {
 
     pub last_player_block: [i32; 3],
     pub last_mesh_center: Option<Vec3>,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct RenderTelemetry {
+    pub smooth_mesh_builds: u32,
+    pub smooth_mesh_total_ms: f32,
+    pub smooth_mesh_max_ms: f32,
+    pub smooth_mesh_total_tris: u64,
+    pub greedy_mesh_builds: u32,
+    pub greedy_mesh_total_ms: f32,
+    pub greedy_mesh_max_ms: f32,
+    pub terrain_despawns: u32,
+    pub collider_rebuilds: u32,
+    pub frame_samples: u32,
+    pub frame_dt_max_ms: f32,
+    pub frame_dt_over_50ms: u32,
+}
+
+pub fn record_render_frame_time(time: Res<Time>, mut telemetry: ResMut<RenderTelemetry>) {
+    let dt_ms = time.delta_secs() * 1000.0;
+    telemetry.frame_samples = telemetry.frame_samples.saturating_add(1);
+    if telemetry.frame_samples < 120 {
+        return;
+    }
+    telemetry.frame_dt_max_ms = telemetry.frame_dt_max_ms.max(dt_ms);
+    if dt_ms > 50.0 {
+        telemetry.frame_dt_over_50ms = telemetry.frame_dt_over_50ms.saturating_add(1);
+    }
 }
 
 #[derive(Component)]
@@ -185,48 +218,67 @@ pub fn spawn_terrain_around_player(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
+    mut telemetry: ResMut<RenderTelemetry>,
 
     _last_warn_time: Local<f32>,
 
     mut last_mesh_wall: Local<f32>,
 ) {
     let now = time.elapsed_secs();
-    let show_terrain_visuals = !(cfg.auto_keys && *mode == CameraMode::ThirdPerson);
-    let has_spawned_terrain =
-        !spawned.visual_entities.is_empty() || !spawned.collider_entities.is_empty();
-    if *mode == CameraMode::FirstPerson && !cfg.smooth_terrain && has_spawned_terrain {
+    let show_terrain_visuals = true;
+    let mesh_center = if *mode == CameraMode::TopDown {
+        let center = constant::WORLD_SIZE as f32 * 0.5;
+        Vec3::new(center, player.block_pos[1] as f32, center)
+    } else {
+        Vec3::new(
+            player.block_pos[0] as f32,
+            player.block_pos[1] as f32,
+            player.block_pos[2] as f32,
+        )
+    };
+    if !show_terrain_visuals {
+        spawned.last_mesh_center = Some(mesh_center);
+        return;
+    }
+
+    let has_mesh_record = spawned.last_mesh_center.is_some();
+    if *mode == CameraMode::FirstPerson && !cfg.smooth_terrain && has_mesh_record {
         return;
     }
     let moved_far = if let Some(last) = spawned.last_mesh_center {
-        let dx = player.block_pos[0] as f32 - last.x;
-        let dz = player.block_pos[2] as f32 - last.z;
-        Vec2::new(dx, dz).length() > (cfg.radius as f32 * 0.35).max(8.0)
+        let dx = mesh_center.x - last.x;
+        let dz = mesh_center.z - last.z;
+        Vec2::new(dx, dz).length() > (cfg.radius as f32 * TERRAIN_REBUILD_RADIUS_FRACTION).max(24.0)
     } else {
         true
     };
-    if !moved_far && has_spawned_terrain {
+    if !moved_far && has_mesh_record {
         return;
     }
-    if now - *last_mesh_wall < 1.5 && has_spawned_terrain {
+    if now - *last_mesh_wall < TERRAIN_REBUILD_MIN_SECS && has_mesh_record {
         return;
     }
 
     for e in spawned.visual_entities.drain(..) {
         commands.entity(e).despawn();
+        telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
     }
     for e in spawned.collider_entities.drain(..) {
         commands.entity(e).despawn();
+        telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
     }
 
     let r = cfg.radius as i32;
     let py = player.block_pos[1];
     let y_min = (py - 40).max(0);
     let y_max = (py + 40).min(game_world.size as i32 - 1);
-    let min = [player.block_pos[0] - r, y_min, player.block_pos[2] - r];
-    let max = [player.block_pos[0] + r, y_max, player.block_pos[2] + r];
+    let center_x = mesh_center.x.round() as i32;
+    let center_z = mesh_center.z.round() as i32;
+    let min = [center_x - r, y_min, center_z - r];
+    let max = [center_x + r, y_max, center_z + r];
 
     if cfg.smooth_terrain {
-        let started = time.elapsed_secs();
+        let started = Instant::now();
         let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
@@ -276,18 +328,18 @@ pub fn spawn_terrain_around_player(
             }
 
             spawned.last_player_block = player.block_pos;
-            spawned.last_mesh_center = Some(Vec3::new(
-                player.block_pos[0] as f32,
-                player.block_pos[1] as f32,
-                player.block_pos[2] as f32,
-            ));
-            let mesh_secs = time.elapsed_secs() - started;
+            spawned.last_mesh_center = Some(mesh_center);
+            let mesh_secs = started.elapsed().as_secs_f32();
+            let mesh_ms = mesh_secs * 1000.0;
+            telemetry.smooth_mesh_builds = telemetry.smooth_mesh_builds.saturating_add(1);
+            telemetry.smooth_mesh_total_ms += mesh_ms;
+            telemetry.smooth_mesh_max_ms = telemetry.smooth_mesh_max_ms.max(mesh_ms);
+            telemetry.smooth_mesh_total_tris =
+                telemetry.smooth_mesh_total_tris.saturating_add(total_tris as u64);
+            telemetry.collider_rebuilds = telemetry.collider_rebuilds.saturating_add(1);
             info!(
                 "🌊 smooth mesh: {} tris, passes={}, 耗时 {:.0}ms（玩家 {:?}）",
-                total_tris,
-                cfg.smooth_passes,
-                mesh_secs * 1000.0,
-                player.block_pos
+                total_tris, cfg.smooth_passes, mesh_ms, player.block_pos
             );
         } else {
             debug!("🌊 smooth mesh: 标量场全空（无 solid 在 AABB 内）");
@@ -300,6 +352,7 @@ pub fn spawn_terrain_around_player(
     let mut mats: HashMap<BlockType, Handle<StandardMaterial>> = HashMap::new();
     for bt in [
         BlockType::Dirt,
+        BlockType::Grass,
         BlockType::Stone,
         BlockType::Sand,
         BlockType::Snow,
@@ -342,11 +395,12 @@ pub fn spawn_terrain_around_player(
         mats.insert(bt, materials.add(material));
     }
 
-    let started = time.elapsed_secs();
+    let started = Instant::now();
     let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
     let mesh_count = block_meshes.len();
     let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
-    let mesh_secs = time.elapsed_secs() - started;
+    let mesh_secs = started.elapsed().as_secs_f32();
+    let mesh_ms = mesh_secs * 1000.0;
 
     for bm in block_meshes {
         let bevy_mesh = bm.to_bevy_mesh();
@@ -372,6 +426,7 @@ pub fn spawn_terrain_around_player(
         }
 
         if show_terrain_visuals && let Some(collider) = collider_opt {
+            telemetry.collider_rebuilds = telemetry.collider_rebuilds.saturating_add(1);
             let collider_ent = commands
                 .spawn((
                     RigidBody::Static,
@@ -385,12 +440,12 @@ pub fn spawn_terrain_around_player(
     }
 
     spawned.last_player_block = player.block_pos;
+    telemetry.greedy_mesh_builds = telemetry.greedy_mesh_builds.saturating_add(1);
+    telemetry.greedy_mesh_total_ms += mesh_ms;
+    telemetry.greedy_mesh_max_ms = telemetry.greedy_mesh_max_ms.max(mesh_ms);
     debug!(
         "🧱 greedy mesh: {} type(s), {} tris, 耗时 {:.0}ms（玩家 {:?}）",
-        mesh_count,
-        total_tris,
-        mesh_secs * 1000.0,
-        player.block_pos
+        mesh_count, total_tris, mesh_ms, player.block_pos
     );
     *last_mesh_wall = time.elapsed_secs();
 }
@@ -425,64 +480,18 @@ pub fn setup_atmosphere(
     // so the player can see the sky + buildings clearly, with only a faint
     // atmospheric haze on the horizon.
     commands.spawn((
-        FogVolume { density_factor: 0.005, ..default() },
+        FogVolume { density_factor: 0.0011, ..default() },
         Transform::from_scale(Vec3::new(360.0, 60.0, 360.0))
             .with_translation(Vec3::new(48.5, 20.0, 48.5)),
     ));
 
     // Keep a dark fallback clear color so any uncovered pixels stay neutral
     // (Atmosphere covers the sky, but having a sane default helps debug).
-    commands.insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.10)));
+    commands.insert_resource(ClearColor(Color::srgb(0.56, 0.76, 0.98)));
 
     // `cfg` reserved: the legacy DistanceFog settings are no longer used, but
     // we leave them in RenderConfig for save-game / scenario compatibility.
     let _ = cfg;
-}
-
-#[derive(Component)]
-#[allow(dead_code)]
-pub struct TerrainUnderlay;
-
-#[allow(dead_code)]
-pub fn setup_terrain_underlay(
-    mut commands: Commands,
-    player: Res<PlayerState>,
-    game_world: Res<GameWorld>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let plane_mesh = meshes.add(Plane3d::default().mesh().size(220.0, 220.0));
-    let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-
-    let mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.18, 0.42, 0.16, 0.55),
-        emissive: Color::srgb(0.02, 0.05, 0.015).into(),
-        alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.95,
-        metallic: 0.0,
-        cull_mode: None,
-        ..default()
-    });
-    commands.spawn((
-        Mesh3d(plane_mesh),
-        MeshMaterial3d(mat),
-        Transform::from_translation(Vec3::new(player.pos.x, ground_y - 0.22, player.pos.z)),
-        TerrainUnderlay,
-    ));
-    info!("🟫 兜底盖板 100x100 plane 已 spawn（player 脚下 -5m 跟随）");
-}
-
-#[allow(dead_code)]
-pub fn underlay_follow_player(
-    mut q: Query<&mut Transform, With<TerrainUnderlay>>,
-    player: Res<PlayerState>,
-    game_world: Res<GameWorld>,
-) {
-    let Ok(mut tf) = q.single_mut() else {
-        return;
-    };
-    let ground_y = effective_ground_height(&game_world, player.block_pos[0], player.block_pos[2]);
-    tf.translation = Vec3::new(player.pos.x, ground_y - 0.22, player.pos.z);
 }
 
 #[derive(Component)]
@@ -555,7 +564,7 @@ pub fn mouse_look_system(
     angles.pitch = angles.pitch.clamp(-PITCH_LIMIT, PITCH_LIMIT);
 }
 
-pub fn freefly_toggle(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<CameraMode>) {
+pub fn top_down_camera_toggle(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<CameraMode>) {
     if !keys.just_pressed(KeyCode::F3) {
         return;
     }
@@ -569,6 +578,50 @@ pub fn freefly_toggle(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<CameraMo
             CameraMode::TopDown
         }
     };
+}
+
+pub fn toggle_freefly(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut freefly: ResMut<FreeFlyState>,
+    mut mode: ResMut<CameraMode>,
+    camera: Query<&Transform, With<Camera3d>>,
+) {
+    if !keys.just_pressed(KeyCode::F4) {
+        return;
+    }
+    freefly.enabled = !freefly.enabled;
+    if freefly.enabled {
+        if let Ok(tf) = camera.single() {
+            freefly.position = tf.translation;
+        }
+        *mode = CameraMode::FirstPerson;
+        info!("freefly enabled");
+    } else {
+        info!("freefly disabled");
+    }
+}
+
+pub fn sync_camera_projection(
+    mode: Res<CameraMode>,
+    mut q: Query<&mut Projection, With<Camera3d>>,
+) {
+    if !mode.is_changed() {
+        return;
+    }
+    let Ok(mut projection) = q.single_mut() else {
+        return;
+    };
+    match *mode {
+        CameraMode::TopDown => {
+            *projection = Projection::Orthographic(OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical { viewport_height: TOP_DOWN_ORTHO_HEIGHT },
+                ..OrthographicProjection::default_3d()
+            });
+        }
+        CameraMode::FirstPerson | CameraMode::ThirdPerson => {
+            *projection = Projection::Perspective(PerspectiveProjection::default());
+        }
+    }
 }
 
 pub fn camera_mode_toggle(
@@ -756,12 +809,17 @@ pub struct AnimalIndicatorText;
 pub fn update_animal_indicator(
     mut q_text: Query<&mut Text, With<AnimalIndicatorText>>,
     player: Res<PlayerState>,
+    mode: Res<CameraMode>,
     camera: Query<&Transform, With<Camera3d>>,
     creatures: Query<&Creature>,
 ) {
     let Ok(mut text) = q_text.single_mut() else {
         return;
     };
+    if *mode == CameraMode::TopDown {
+        text.0.clear();
+        return;
+    }
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
 
@@ -827,12 +885,10 @@ pub fn update_animal_indicator(
 }
 
 const NEST_MARKER_SIZE: (f32, f32, f32) = (0.4, 4.0, 0.4);
+const THIRD_PERSON_NEST_MARKER_SIZE: (f32, f32, f32) = (0.45, 0.55, 0.45);
 
 #[derive(Component)]
-pub struct NestMarker {
-    pub offset_x: f32,
-    pub offset_z: f32,
-}
+pub struct NestMarker;
 
 #[derive(Resource, Default)]
 pub struct NestMarkerCount(pub u32);
@@ -840,7 +896,7 @@ pub struct NestMarkerCount(pub u32);
 pub fn spawn_nest_markers(
     mut commands: Commands,
     monsters: Res<MonsterEcosystem>,
-    player: Res<PlayerState>,
+    _player: Res<PlayerState>,
     mode: Res<CameraMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -851,8 +907,6 @@ pub fn spawn_nest_markers(
         return;
     }
 
-    let px = player.block_pos[0] as f32 + 0.5;
-    let pz = player.block_pos[2] as f32 + 0.5;
     let mut spawned = 0_u32;
 
     for (_kid, kingdom) in monsters.kingdoms.iter() {
@@ -873,23 +927,25 @@ pub fn spawn_nest_markers(
                 ..default()
             });
 
-            let mesh = meshes.add(Cuboid::new(
-                NEST_MARKER_SIZE.0,
-                NEST_MARKER_SIZE.1,
-                NEST_MARKER_SIZE.2,
-            ));
+            let marker_size = if *mode == CameraMode::TopDown {
+                NEST_MARKER_SIZE
+            } else {
+                THIRD_PERSON_NEST_MARKER_SIZE
+            };
+            let mesh = meshes.add(Cuboid::new(marker_size.0, marker_size.1, marker_size.2));
 
             let nx = nest.center[0] as f32 + 0.5;
             let nz = nest.center[2] as f32 + 0.5;
-            let ny = nest.center[1] as f32 + 5.0;
-            let offset_x = nx - px;
-            let offset_z = nz - pz;
-
+            let ny = if *mode == CameraMode::TopDown {
+                nest.center[1] as f32 + 5.0
+            } else {
+                nest.center[1] as f32 + marker_size.1 * 0.5
+            };
             commands.spawn((
-                NestMarker { offset_x, offset_z },
+                NestMarker,
                 Mesh3d(mesh),
                 MeshMaterial3d(mat),
-                Transform::from_translation(Vec3::new(px + offset_x, ny, pz + offset_z)),
+                Transform::from_translation(Vec3::new(nx, ny, nz)),
             ));
             spawned += 1;
         }
@@ -902,30 +958,23 @@ pub fn spawn_nest_markers(
     );
 }
 
-pub fn update_nest_marker_positions(
-    mut q: Query<(&NestMarker, &mut Transform)>,
-    player: Res<PlayerState>,
-) {
-    let px = player.pos.x;
-    let pz = player.pos.z;
-    for (m, mut tf) in q.iter_mut() {
-        tf.translation.x = px + m.offset_x;
-        tf.translation.z = pz + m.offset_z;
-    }
-}
-
 #[derive(Component)]
 pub struct NestIndicatorText;
 
 pub fn update_nest_indicator(
     mut q_text: Query<&mut Text, With<NestIndicatorText>>,
     player: Res<PlayerState>,
+    mode: Res<CameraMode>,
     camera: Query<&Transform, With<Camera3d>>,
     monsters: Res<MonsterEcosystem>,
 ) {
     let Ok(mut text) = q_text.single_mut() else {
         return;
     };
+    if *mode == CameraMode::TopDown {
+        text.0.clear();
+        return;
+    }
     let px = player.block_pos[0] as f32 + 0.5;
     let pz = player.block_pos[2] as f32 + 0.5;
 
@@ -1332,11 +1381,28 @@ fn try_player_air_move_continuous(
 
 fn player_volume_clear_at(game_world: &GameWorld, pos: Vec3) -> bool {
     let foot_y = pos.y.floor() as i32;
+    if !player_body_clear(
+        game_world,
+        pos.x.floor() as i32,
+        foot_y,
+        pos.z.floor() as i32,
+    ) {
+        return false;
+    }
     for y in foot_y..=(foot_y + 1) {
         for ox in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
             for oz in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
                 let x = (pos.x + ox).floor() as i32;
                 let z = (pos.z + oz).floor() as i32;
+                if x < 0
+                    || x >= game_world.size
+                    || y < 0
+                    || y >= game_world.size
+                    || z < 0
+                    || z >= game_world.size
+                {
+                    return false;
+                }
                 if game_world.get(x, y, z).is_solid() {
                     return false;
                 }
@@ -1690,6 +1756,7 @@ pub fn auto_demo(
                     tracing::warn!("[auto-demo walk] 到达 walk_target 但建新国失败: {}", e);
                 }
             }
+            *walk_target = None;
         }
     }
 
@@ -1780,9 +1847,13 @@ pub fn first_person_camera(
     }
 
     if *mode == CameraMode::TopDown {
-        let (sy, cy) = angles.yaw.sin_cos();
-        let target = player.pos + Vec3::Y * 0.8;
-        let camera_offset = Vec3::new(-sy * 8.0, 42.0, cy * 8.0);
+        let ground_top = effective_ground_height(
+            &world,
+            player.pos.x.floor() as i32,
+            player.pos.z.floor() as i32,
+        );
+        let target = Vec3::new(player.pos.x, ground_top + 0.8, player.pos.z);
+        let camera_offset = Vec3::new(-48.0, 64.0, 38.0);
         tf.translation = target + camera_offset;
         tf.look_at(target, Vec3::Y);
         return;
@@ -1964,5 +2035,18 @@ mod tests {
 
         assert!(moved, "{reason}");
         assert!(player.pos.x > pos.x);
+    }
+
+    #[test]
+    fn continuous_move_blocks_world_edge_escape() {
+        let world = flat_test_world();
+        let mut player =
+            PlayerState { pos: Vec3::new(7.5, 1.0, 3.5), block_pos: [7, 1, 3], ..default() };
+
+        let (_moved, _reason) =
+            try_player_move_continuous(&mut player, &world, Vec3::X, 0.75, 0.85);
+
+        assert!(player.pos.x < world.size as f32);
+        assert!(player.block_pos[0] < world.size);
     }
 }

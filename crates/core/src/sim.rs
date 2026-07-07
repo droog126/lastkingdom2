@@ -109,13 +109,19 @@ mod tests {
         let mut pool = GlobalResourcePool::default();
         let mut monsters = MonsterEcosystem::default();
         let mut eco = EcoCycle {
+            clouds: Vec::new(),
             rabbits: Vec::new(),
             berries: Vec::new(),
             wildlife: Vec::new(),
             plants: Vec::new(),
             co2: 0.0,
+            rain: 0.0,
+            rainfall: 0.0,
             fruit_eaten: 0,
             fruit_grown: 0,
+            plants_grown: 0,
+            rabbits_born: 0,
+            wildlife_born: 0,
         };
         let mut obs = TickObserver::default();
 

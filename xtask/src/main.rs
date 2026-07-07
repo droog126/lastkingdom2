@@ -6,9 +6,34 @@ mod model_iter;
 mod motion;
 mod tdd;
 
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{
+    env,
+    path::PathBuf,
+    process::{Command, ExitCode},
+};
 
 type Result<T> = std::result::Result<T, String>;
+
+pub(crate) fn workspace_command(root: &std::path::Path, program: &str) -> Command {
+    let mut command = Command::new(program);
+    command.current_dir(root);
+    if program.eq_ignore_ascii_case("cargo") {
+        drop_xtask_target_dir(root, &mut command);
+    }
+    command
+}
+
+fn drop_xtask_target_dir(root: &std::path::Path, command: &mut Command) {
+    let Ok(target_dir) = env::var("CARGO_TARGET_DIR") else {
+        return;
+    };
+    let target_path = std::path::PathBuf::from(target_dir);
+    if target_path == std::path::PathBuf::from(".tmp/xtask-target")
+        || target_path == root.join(".tmp/xtask-target")
+    {
+        command.env_remove("CARGO_TARGET_DIR");
+    }
+}
 
 fn main() -> ExitCode {
     let root = match project_root() {
@@ -35,9 +60,8 @@ fn main() -> ExitCode {
         "dev" => run_dev(&root, &args),
         "audit-tdd" => audit::tdd(&root),
         "audit-architecture" => audit::architecture(&root),
-        "model-preview-all" | "model-preview-iterate" => {
-            model_iter::run(&root, &args)
-        }
+        "audit-visual" => audit::visual(&root),
+        "model-preview-all" | "model-preview-iterate" => model_iter::run(&root, &args),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -74,6 +98,7 @@ fn print_help() {
     println!("  tdd --scope core|changed|client|server|workspace|fmt|clippy|audit");
     println!("  dev build|stage-runtime|test|core|clippy|fmt|loop|health|help");
     println!("  health [iter_NN|path]");
+    println!("  audit-visual");
     println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
     println!("  scenario --json scenarios/*.json");
     println!("  model-preview-all [--only=<stem>] [--limit=N] [--skip-build]");
@@ -88,17 +113,10 @@ fn run_dev(root: &std::path::Path, args: &[String]) -> Result<()> {
         "build" => tdd::run_step(
             root,
             "client build",
-            &[
-                "cargo",
-                "build",
-                "-p",
-                "lk2-client",
-                "--features",
-                "dev-dynamic-linking,lk2-core/dev-dynamic-linking",
-            ],
+            &["cargo", "build", "-p", "lk2-client"],
         )
-        .and_then(|_| loop_cmd::stage_windows_runtime_files(root)),
-        "stage-runtime" => loop_cmd::stage_windows_runtime_files(root),
+        .and_then(|_| loop_cmd::stage_default_windows_runtime_files(root)),
+        "stage-runtime" => loop_cmd::stage_default_windows_runtime_files(root),
         "test" => tdd::run_step(root, "workspace tests", &["cargo", "test", "--workspace"]),
         "core" => tdd::run_step(root, "core tests", &["cargo", "test", "-p", "lk2-core"]),
         "clippy" => tdd::run_step(
