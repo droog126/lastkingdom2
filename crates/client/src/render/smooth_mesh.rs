@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use super::marching_cubes::{McVertex, build_mesh as mc_build_mesh};
 use super::scalar_field::build_density_field;
-use lk2_core::world::World as GameWorld;
+use lk2_core::world::{Biome, BlockType, World as GameWorld};
 
 pub struct SmoothMesh {
     pub mesh: Mesh,
@@ -39,7 +39,7 @@ pub fn build_smooth_mesh(
 
     let (positions, normals) = smooth_normals(&vertices, &indices);
 
-    let colors: Vec<[f32; 4]> = positions.iter().map(|p| terrain_color(*p)).collect();
+    let colors: Vec<[f32; 4]> = positions.iter().map(|p| terrain_color(world, *p)).collect();
 
     let uvs: Vec<[f32; 2]> = positions.iter().map(|p| [p[0] * 0.10, p[2] * 0.10]).collect();
 
@@ -56,7 +56,7 @@ pub fn build_smooth_mesh(
     Some(SmoothMesh { mesh, collider_trimesh: positions, collider_indices: indices })
 }
 
-fn terrain_color(p: [f32; 3]) -> [f32; 4] {
+fn terrain_color(world: &GameWorld, p: [f32; 3]) -> [f32; 4] {
     const GRASS_DARK: [f32; 3] = [0.28, 0.52, 0.18];
     const GRASS: [f32; 3] = [0.36, 0.66, 0.22];
     const GRASS_LIGHT: [f32; 3] = [0.50, 0.78, 0.30];
@@ -66,7 +66,12 @@ fn terrain_color(p: [f32; 3]) -> [f32; 4] {
     const STONE_DARK: [f32; 3] = [0.45, 0.43, 0.40];
     const SAND: [f32; 3] = [0.80, 0.72, 0.50];
     const MOSS: [f32; 3] = [0.28, 0.52, 0.22];
+    const SNOW: [f32; 3] = [0.88, 0.93, 0.96];
+    const SNOW_BLUE: [f32; 3] = [0.68, 0.82, 0.90];
+    const WATER_EDGE: [f32; 3] = [0.30, 0.55, 0.72];
 
+    let block = surface_block_near(world, p);
+    let biome = Biome::from_xz_infinite(p[0].floor() as i32, p[2].floor() as i32);
     let zone_n = (p[0] * 0.06 + p[2] * 0.08).sin() * 0.5 + 0.5;
     let macro_n = (p[0] * 0.015 + p[2] * 0.018).sin() * 0.5 + 0.5;
     let patch_n = (p[0] * 0.32 + p[2] * 0.28).sin() * 0.5 + 0.5;
@@ -74,42 +79,79 @@ fn terrain_color(p: [f32; 3]) -> [f32; 4] {
     let micro_n = (p[0] * 1.7 + p[2] * 1.3).sin() * 0.5 + 0.5;
     let height_t = ((p[1] - 2.0) / 35.0).clamp(0.0, 1.0);
 
-    let (base_rgb, base_w) = if macro_n > 0.88 {
-        (SAND, 0.60)
-    } else if height_t < 0.30 {
-        (GRASS, 0.78)
-    } else if height_t < 0.55 {
-        (GRASS_DARK, 0.68)
-    } else if height_t < 0.72 {
-        (DIRT, 0.65)
-    } else {
-        (STONE, 0.70)
-    };
-
-    let (sec_rgb, sec_w) = if macro_n > 0.88 {
-        (if patch_n > 0.5 { GRASS_LIGHT } else { SAND }, 0.30)
-    } else if height_t < 0.30 {
-        (
-            if patch_n > 0.5 {
+    let (base_rgb, base_w, sec_rgb, sec_w) = match block {
+        BlockType::Grass | BlockType::Leaves | BlockType::BerryThicket => {
+            let grass_base = if height_t > 0.58 { GRASS_DARK } else { GRASS };
+            let detail_rgb = if patch_n > 0.78 {
+                DIRT_DARK
+            } else if patch_n > 0.48 {
                 GRASS_LIGHT
+            } else {
+                MOSS
+            };
+            (grass_base, 0.78, detail_rgb, 0.26)
+        }
+        BlockType::Dirt => {
+            if biome == Biome::Jungle {
+                (
+                    MOSS,
+                    0.64,
+                    if patch_n > 0.45 { GRASS_DARK } else { DIRT },
+                    0.28,
+                )
+            } else {
+                (
+                    DIRT,
+                    0.70,
+                    if patch_n > 0.55 {
+                        GRASS_DARK
+                    } else {
+                        DIRT_DARK
+                    },
+                    0.25,
+                )
+            }
+        }
+        BlockType::Sand => (
+            SAND,
+            0.76,
+            if patch_n > 0.62 { GRASS_LIGHT } else { DIRT },
+            0.18,
+        ),
+        BlockType::Snow => (
+            SNOW,
+            0.78,
+            if patch_n > 0.50 { SNOW_BLUE } else { STONE },
+            0.20,
+        ),
+        BlockType::Stone
+        | BlockType::IronOre
+        | BlockType::SunstoneOre
+        | BlockType::FrostcoreOre
+        | BlockType::LivingRoot => (
+            STONE,
+            0.72,
+            if patch_n > 0.58 {
+                STONE_DARK
             } else {
                 DIRT_DARK
             },
-            0.30,
-        )
-    } else if height_t < 0.55 {
-        (if patch_n > 0.5 { GRASS } else { MOSS }, 0.32)
-    } else if height_t < 0.72 {
-        (
-            if patch_n > 0.5 {
-                GRASS_DARK
+            0.22,
+        ),
+        BlockType::Water => (WATER_EDGE, 0.70, SAND, 0.16),
+        BlockType::Wood => (DIRT_DARK, 0.70, GRASS_DARK, 0.18),
+        BlockType::Air => {
+            if macro_n > 0.90 {
+                (SAND, 0.60, GRASS_LIGHT, 0.22)
             } else {
-                STONE_DARK
-            },
-            0.32,
-        )
-    } else {
-        (if patch_n > 0.5 { STONE_DARK } else { DIRT_DARK }, 0.30)
+                (
+                    GRASS,
+                    0.70,
+                    if patch_n > 0.55 { GRASS_LIGHT } else { MOSS },
+                    0.24,
+                )
+            }
+        }
     };
 
     let detail = micro_n * 0.10 + fine_n * 0.08;
@@ -130,6 +172,21 @@ fn terrain_color(p: [f32; 3]) -> [f32; 4] {
     }
 
     [r * zone_tint, g * zone_tint, b * zone_tint, 1.0]
+}
+
+fn surface_block_near(world: &GameWorld, p: [f32; 3]) -> BlockType {
+    let x = p[0].floor() as i32;
+    let z = p[2].floor() as i32;
+    let y = p[1].round() as i32;
+
+    for dy in [0, -1, 1, -2, 2] {
+        let block = world.get(x, y + dy, z);
+        if block.is_solid() {
+            return block;
+        }
+    }
+
+    BlockType::Air
 }
 
 fn laplacian_smooth(vertices: Vec<McVertex>, indices: &[u32], passes: u32) -> Vec<McVertex> {

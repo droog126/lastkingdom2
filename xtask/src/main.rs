@@ -54,6 +54,9 @@ fn main() -> ExitCode {
     let result = match command.to_ascii_lowercase().as_str() {
         "loop" => loop_cmd::run(&root, &args),
         "health" => loop_cmd::health(&root, &args),
+        "flicker-probe" | "flicker" => loop_cmd::flicker_probe(&root, &args),
+        "play" => loop_cmd::play(&root, &args),
+        "clean-runs" | "clean-logs" => loop_cmd::clean_runs(&root),
         "motion-analyze" => motion::analyze(&root, &args),
         "scenario" | "run-scenario" => loop_cmd::scenario(&root, &args),
         "tdd" => tdd::run(&root, &args),
@@ -95,8 +98,13 @@ fn project_root() -> Result<PathBuf> {
 fn print_help() {
     println!("xtask commands:");
     println!("  loop [--offline] [--seconds N]");
+    println!(
+        "  flicker-probe [--seconds N] [--interval S] [--period S] [--warmup S] [--gpu-backend dx12|vulkan]"
+    );
+    println!("  play [--skip-build] [--online] [client flags...]");
+    println!("  clean-runs");
     println!("  tdd --scope core|changed|client|server|workspace|fmt|clippy|audit");
-    println!("  dev build|stage-runtime|test|core|clippy|fmt|loop|health|help");
+    println!("  dev build|stage-runtime|test|core|clippy|fmt|loop|health|play|help");
     println!("  health [iter_NN|path]");
     println!("  audit-visual");
     println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
@@ -131,6 +139,9 @@ fn run_dev(root: &std::path::Path, args: &[String]) -> Result<()> {
         ),
         "loop" => loop_cmd::run(root, &args[1..]),
         "health" => loop_cmd::health(root, &args[1..]),
+        "flicker-probe" | "flicker" => loop_cmd::flicker_probe(root, &args[1..]),
+        "play" => loop_cmd::play(root, &args[1..]),
+        "clean-runs" | "clean-logs" => loop_cmd::clean_runs(root),
         "help" => {
             print_help();
             Ok(())

@@ -104,11 +104,11 @@ impl TerrainModule for SpawnHillModule {
         ctx.surface_y = Some(surface);
         ctx.biome = Some(Biome::Jungle);
 
-        if ctx.y > surface {
+        if ctx.y >= surface {
             return Some(BlockType::Air);
         }
-        if ctx.y == surface {
-            return Some(BlockType::Leaves);
+        if ctx.y == surface - 1 {
+            return Some(BlockType::Grass);
         }
         if ctx.y >= surface - 3 {
             return Some(BlockType::Dirt);
@@ -296,7 +296,7 @@ impl HeightmapModule {
     pub fn surface_block(&self, biome: Biome) -> BlockType {
         match biome {
             Biome::Desert => BlockType::Sand,
-            Biome::Jungle => BlockType::Dirt,
+            Biome::Jungle => BlockType::Grass,
             Biome::Tundra => BlockType::Snow,
         }
     }
@@ -677,7 +677,7 @@ pub mod presets {
             name: "spawn_island".into(),
             weight: 9.5,
             fill: shapes::FillMode::AdaptiveSurface {
-                surface: BlockType::Leaves,
+                surface: BlockType::Grass,
                 subsurface: BlockType::Dirt,
             },
             shapes: vec![shapes::ShapeSpec::Hill(shapes::HillShape {
@@ -929,6 +929,30 @@ mod tests {
             ground_at_spawn - 16.0 >= 10.0,
             "spawn ground ({}) 应比 auto-demo 硬编码 y=16 高至少 10m, 否则玩家仍站在空气里",
             ground_at_spawn
+        );
+    }
+
+    #[test]
+    fn jungle_heightmap_surface_is_grass() {
+        let h = HeightmapModule::default();
+
+        assert_eq!(
+            h.surface_block(Biome::Jungle),
+            BlockType::Grass,
+            "jungle terrain should expose a grass gameplay surface, not dirt"
+        );
+    }
+
+    #[test]
+    fn default_spawn_island_surface_is_grass() {
+        let pipeline = presets::by_name("default");
+        let surface = pipeline.surface_f32(48, 48).expect("default spawn island has a surface");
+        let y = surface.round() as i32 - 1;
+
+        assert_eq!(
+            pipeline.generate(48, y, 48),
+            BlockType::Grass,
+            "the authored spawn island top should be grass so visual terrain and block semantics match"
         );
     }
 

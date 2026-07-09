@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde_json::Value;
@@ -14,6 +14,10 @@ use serde_json::json;
 use crate::{Result, args, audit, health as rust_health};
 
 const DEV_DYNAMIC_FEATURES: &[&str] = &["dev-dynamic-linking", "lk2-core/dev-dynamic-linking"];
+
+fn default_gpu_backend() -> &'static str {
+    if cfg!(windows) { "dx12" } else { "vulkan" }
+}
 
 #[derive(Debug)]
 struct LoopArgs {
@@ -32,6 +36,29 @@ struct LoopArgs {
     legacy_voxel: bool,
     hold_forward_test: bool,
     refresh_after_fail: bool,
+}
+
+#[derive(Debug)]
+struct PlayArgs {
+    skip_build: bool,
+    rust_log: String,
+    gpu_backend: String,
+    online: bool,
+    server_addr: String,
+    client_args: Vec<String>,
+}
+
+#[derive(Debug)]
+struct FlickerProbeArgs {
+    seconds: u64,
+    interval: f64,
+    period: f64,
+    warmup: f64,
+    warn_threshold: f64,
+    fail_threshold: f64,
+    skip_build: bool,
+    rust_log: String,
+    gpu_backend: String,
 }
 
 impl Default for LoopArgs {
@@ -54,6 +81,37 @@ impl Default for LoopArgs {
             legacy_voxel: false,
             hold_forward_test: false,
             refresh_after_fail: false,
+        }
+    }
+}
+
+impl Default for PlayArgs {
+    fn default() -> Self {
+        Self {
+            skip_build: false,
+            rust_log: env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+            gpu_backend: env::var("WGPU_BACKEND")
+                .unwrap_or_else(|_| default_gpu_backend().to_string()),
+            online: false,
+            server_addr: "127.0.0.1:5000".to_string(),
+            client_args: vec!["--offline".to_string(), "--no-scenario".to_string()],
+        }
+    }
+}
+
+impl Default for FlickerProbeArgs {
+    fn default() -> Self {
+        Self {
+            seconds: 20,
+            interval: 0.2,
+            period: 8.0,
+            warmup: 5.0,
+            warn_threshold: 20.0,
+            fail_threshold: 35.0,
+            skip_build: false,
+            rust_log: env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+            gpu_backend: env::var("WGPU_BACKEND")
+                .unwrap_or_else(|_| default_gpu_backend().to_string()),
         }
     }
 }
@@ -249,6 +307,217 @@ pub fn health(root: &Path, raw: &[String]) -> Result<()> {
     Ok(())
 }
 
+pub fn flicker_probe(root: &Path, raw: &[String]) -> Result<()> {
+    if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
+        println!(
+            "xtask flicker-probe --seconds 20 --interval 0.2 --period 8 --warmup 5 --gpu-backend dx12 --skip-build"
+        );
+        println!("  captures frame_*.png plus state_*.json under screenshots/flicker_probe/");
+        println!("  fails when adjacent sampled luma delta exceeds the fail threshold");
+        return Ok(());
+    }
+
+    let parsed = parse_flicker_probe(raw);
+    fs::create_dir_all(root.join("run-logs")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root.join("screenshots/flicker_probe")).map_err(|e| e.to_string())?;
+
+    let target_dir = root.join("target");
+    let mut envs = play_runtime_env(
+        runtime_env(root, &target_dir, &parsed.rust_log)?,
+        &parsed.gpu_backend,
+    );
+    let probe_dir = next_flicker_probe_dir(root, &parsed.gpu_backend)?;
+    set_env_pair(&mut envs, "LK2_CAPTURE", "1");
+    set_env_pair(
+        &mut envs,
+        "LK2_FLICKER_PROBE_DIR",
+        &probe_dir.display().to_string(),
+    );
+    set_env_pair(
+        &mut envs,
+        "LK2_SCREENSHOT_INTERVAL",
+        &parsed.interval.to_string(),
+    );
+    set_env_pair(
+        &mut envs,
+        "LK2_DAY_NIGHT_PERIOD_SECS",
+        &parsed.period.to_string(),
+    );
+
+    let client_exe = exe_path(&target_dir, "lk2-client");
+    if !parsed.skip_build || !client_exe.exists() {
+        cargo_build_with_fallback(root, "lk2-client", &[], &envs)?;
+    }
+    if !client_exe.exists() {
+        return Err(format!("binary not found: {}", client_exe.display()));
+    }
+    ensure_binary_fresh(
+        root,
+        &client_exe,
+        &[
+            "crates/client/src/main.rs",
+            "crates/client/src/capture.rs",
+            "crates/client/src/render/mod.rs",
+        ],
+    )?;
+    stage_windows_runtime_files(root, &target_dir)?;
+
+    stop_processes(&["lk2-client"]);
+    thread::sleep(Duration::from_millis(500));
+
+    let log = root.join("run-logs/flicker_probe.log");
+    let client_args = vec!["--offline".to_string(), "--no-scenario".to_string()];
+    println!(
+        ">>> Running flicker probe for {}s; dir={}",
+        parsed.seconds,
+        audit::rel(root, &probe_dir)
+    );
+    let mut child = spawn_logged(root, &client_exe, &client_args, &envs, &log)?;
+    let started = Instant::now();
+    let mut process_status = None;
+    while started.elapsed() < Duration::from_secs(parsed.seconds) {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            process_status = Some(status.to_string());
+            break;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    if process_status.is_none() {
+        stop_child(&mut child);
+    }
+    thread::sleep(Duration::from_millis(500));
+
+    let stderr_path = PathBuf::from(format!("{}.err", log.display()));
+    let stderr_tail = read_tail(&stderr_path, 80);
+    let summary = analyze_flicker_probe(&probe_dir, &parsed, process_status.as_deref())?;
+    write_flicker_probe_summary(&probe_dir, &summary, &stderr_tail)?;
+
+    println!(
+        ">>> Flicker probe {}: frames={} max_delta={} worst_pair={}",
+        summary.get("verdict").and_then(Value::as_str).unwrap_or("UNKNOWN"),
+        summary.get("frames").and_then(Value::as_u64).unwrap_or(0),
+        summary.get("max_luma_delta").and_then(Value::as_f64).unwrap_or(0.0),
+        summary
+            .get("worst_pair")
+            .and_then(Value::as_array)
+            .map(|pair| { pair.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" -> ") })
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        ">>> Summary: {}",
+        audit::rel(root, &probe_dir.join("summary.json"))
+    );
+
+    match summary.get("verdict").and_then(Value::as_str).unwrap_or("UNKNOWN") {
+        "OK" | "WARN" => Ok(()),
+        verdict => Err(format!(
+            "flicker probe verdict {verdict}; see {}",
+            audit::rel(root, &probe_dir.join("summary.json"))
+        )),
+    }
+}
+
+pub fn clean_runs(root: &Path) -> Result<()> {
+    for rel in ["run-logs", "screenshots"] {
+        let path = root.join(rel);
+        ensure_clean_target(root, &path)?;
+        if path.exists() {
+            fs::remove_dir_all(&path)
+                .map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
+            println!("removed {rel}/");
+        } else {
+            println!("already clean: {rel}/");
+        }
+    }
+    Ok(())
+}
+
+pub fn play(root: &Path, raw: &[String]) -> Result<()> {
+    if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
+        println!(
+            "xtask play [--skip-build] [--gpu-backend vulkan|dx12] [--online] [--server-addr ADDR] [client flags...]"
+        );
+        println!("  default client flags: --offline --no-scenario");
+        println!("  default gpu backend: {}", default_gpu_backend());
+        println!("  logs: run-logs/play.log and run-logs/play.log.err");
+        println!(
+            "  online logs also include run-logs/play_server.log and run-logs/play_server.log.err"
+        );
+        return Ok(());
+    }
+    let parsed = parse_play(raw);
+    let run_logs = root.join("run-logs");
+    fs::create_dir_all(&run_logs).map_err(|e| e.to_string())?;
+
+    let target_dir = root.join("target");
+    let envs = play_runtime_env(
+        runtime_env(root, &target_dir, &parsed.rust_log)?,
+        &parsed.gpu_backend,
+    );
+    let client_exe = exe_path(&target_dir, "lk2-client");
+    let server_exe = exe_path(&target_dir, "lk2-server");
+    if !parsed.skip_build || !client_exe.exists() {
+        cargo_build_with_fallback(root, "lk2-client", &[], &envs)?;
+    }
+    if parsed.online && (!parsed.skip_build || !server_exe.exists()) {
+        cargo_build_with_fallback(root, "lk2-server", &[], &envs)?;
+    }
+    if !client_exe.exists() {
+        return Err(format!("binary not found: {}", client_exe.display()));
+    }
+    if parsed.online && !server_exe.exists() {
+        return Err(format!("binary not found: {}", server_exe.display()));
+    }
+    stage_default_windows_runtime_files(root)?;
+
+    let mut server_proc = None;
+    let server_log = run_logs.join("play_server.log");
+    if parsed.online {
+        println!(
+            ">>> Starting play server; stdout={}",
+            audit::rel(root, &server_log)
+        );
+        server_proc = Some(spawn_logged(root, &server_exe, &[], &envs, &server_log)?);
+        thread::sleep(Duration::from_secs(2));
+    }
+
+    let log = run_logs.join("play.log");
+    println!(
+        ">>> Starting normal play; stdout={}",
+        audit::rel(root, &log)
+    );
+    println!(
+        ">>> Crash/error stderr will be written to {}",
+        audit::rel(root, &PathBuf::from(format!("{}.err", log.display())))
+    );
+    let mut child = spawn_logged(root, &client_exe, &parsed.client_args, &envs, &log)?;
+    let status =
+        child.wait().map_err(|e| format!("failed to wait for {}: {e}", client_exe.display()))?;
+    if let Some(mut child) = server_proc {
+        stop_child(&mut child);
+    }
+
+    let mut archive_files = vec![log.clone(), PathBuf::from(format!("{}.err", log.display()))];
+    if parsed.online {
+        archive_files.push(server_log.clone());
+        archive_files.push(PathBuf::from(format!("{}.err", server_log.display())));
+    }
+    let summary = rust_health::archive_error_logs_for_files(root, &run_logs, &archive_files)?;
+    println!(
+        ">>> Archived {} error lines from {} log files to run-logs/error_logs.json and run-logs/error_logs.txt",
+        summary.error_line_count, summary.files_scanned
+    );
+
+    if status.success() {
+        Ok(())
+    } else {
+        let stderr_tail = read_tail(&PathBuf::from(format!("{}.err", log.display())), 80);
+        Err(format!(
+            "lk2-client exited with {status}; see run-logs/play.log.err\nstderr tail:\n{stderr_tail}"
+        ))
+    }
+}
+
 pub fn scenario(root: &Path, raw: &[String]) -> Result<()> {
     let mut json = "scenarios/*.json".to_string();
     let mut seconds = 60;
@@ -357,6 +626,173 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
     parsed
 }
 
+fn parse_flicker_probe(raw: &[String]) -> FlickerProbeArgs {
+    let mut parsed = FlickerProbeArgs::default();
+    let mut i = 0;
+    while i < raw.len() {
+        let (name, inline) = args::split_flag(&raw[i]);
+        match name.as_deref() {
+            Some("seconds") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.seconds = value.parse().unwrap_or(parsed.seconds);
+                }
+            }
+            Some("interval") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.interval = value.parse().unwrap_or(parsed.interval);
+                }
+            }
+            Some("period") | Some("daynightperiod") | Some("day-night-period") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.period = value.parse().unwrap_or(parsed.period);
+                }
+            }
+            Some("warmup") | Some("warmupsecs") | Some("warmup-secs") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.warmup = value.parse().unwrap_or(parsed.warmup);
+                }
+            }
+            Some("warnthreshold") | Some("warn-threshold") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.warn_threshold = value.parse().unwrap_or(parsed.warn_threshold);
+                }
+            }
+            Some("threshold") | Some("failthreshold") | Some("fail-threshold") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.fail_threshold = value.parse().unwrap_or(parsed.fail_threshold);
+                }
+            }
+            Some("skipbuild") | Some("skip-build") => parsed.skip_build = true,
+            Some("rustlog") | Some("rust-log") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.rust_log = value;
+                }
+            }
+            Some("gpubackend") | Some("gpu-backend") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.gpu_backend = value;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    parsed.interval = parsed.interval.max(0.05);
+    parsed.period = parsed.period.max(0.2);
+    parsed.warmup = parsed.warmup.max(0.0);
+    parsed.warn_threshold = parsed.warn_threshold.max(0.0);
+    parsed.fail_threshold = parsed.fail_threshold.max(parsed.warn_threshold);
+    parsed
+}
+
+fn parse_play(raw: &[String]) -> PlayArgs {
+    let mut parsed = PlayArgs::default();
+    let mut client_args = Vec::new();
+    let mut passthrough = false;
+    let mut i = 0;
+    while i < raw.len() {
+        if passthrough {
+            client_args.push(raw[i].clone());
+            i += 1;
+            continue;
+        }
+        if raw[i] == "--" {
+            passthrough = true;
+            i += 1;
+            continue;
+        }
+        let (name, inline) = args::split_flag(&raw[i]);
+        match name.as_deref() {
+            Some("skipbuild") | Some("skip-build") => parsed.skip_build = true,
+            Some("online") => parsed.online = true,
+            Some("serveraddr") | Some("server-addr") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.server_addr = value;
+                }
+            }
+            Some("rustlog") | Some("rust-log") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.rust_log = value;
+                }
+            }
+            Some("gpubackend") | Some("gpu-backend") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.gpu_backend = value;
+                }
+            }
+            _ => client_args.push(raw[i].clone()),
+        }
+        i += 1;
+    }
+    if parsed.online {
+        let has_connect = client_args.iter().any(|arg| arg.starts_with("--connect"));
+        parsed.client_args = if has_connect {
+            client_args
+        } else {
+            let mut args = vec![format!("--connect={}", parsed.server_addr)];
+            args.extend(client_args);
+            args
+        };
+        return parsed;
+    }
+    if client_args.is_empty() {
+        return parsed;
+    }
+    if client_args.iter().any(|arg| {
+        arg == "--offline"
+            || arg == "-Offline"
+            || arg.starts_with("--connect")
+            || arg.starts_with("-Connect")
+            || arg == "--model-preview"
+            || arg == "--terrain-preview"
+    }) {
+        parsed.client_args = client_args;
+    } else {
+        parsed.client_args.extend(client_args);
+    }
+    parsed
+}
+
+fn play_runtime_env(mut envs: Vec<(String, String)>, gpu_backend: &str) -> Vec<(String, String)> {
+    set_env_pair(&mut envs, "WGPU_BACKEND", gpu_backend);
+    envs
+}
+
+fn set_env_pair(envs: &mut Vec<(String, String)>, key: &str, value: &str) {
+    if let Some((_, existing)) = envs.iter_mut().find(|(k, _)| k == key) {
+        *existing = value.to_string();
+    } else {
+        envs.push((key.to_string(), value.to_string()));
+    }
+}
+
+fn ensure_clean_target(root: &Path, path: &Path) -> Result<()> {
+    let root_abs =
+        root.canonicalize().map_err(|e| format!("failed to resolve {}: {e}", root.display()))?;
+    let parent =
+        path.parent().ok_or_else(|| format!("invalid cleanup path: {}", path.display()))?;
+    let parent_abs = parent
+        .canonicalize()
+        .map_err(|e| format!("failed to resolve {}: {e}", parent.display()))?;
+    if parent_abs != root_abs {
+        return Err(format!(
+            "refusing to clean outside workspace: {}",
+            path.display()
+        ));
+    }
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("invalid cleanup path: {}", path.display()))?;
+    if name != "run-logs" && name != "screenshots" {
+        return Err(format!(
+            "refusing to clean unexpected path: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 pub fn loop_target_dir(root: &Path) -> PathBuf {
     root.join(".tmp").join("loop-target")
 }
@@ -410,7 +846,10 @@ fn runtime_env(root: &Path, target_dir: &Path, rust_log: &str) -> Result<Vec<(St
             target_dir.display().to_string(),
         ),
         ("PATH".to_string(), path_str),
-        ("WGPU_BACKEND".to_string(), "dx12".to_string()),
+        (
+            "WGPU_BACKEND".to_string(),
+            default_gpu_backend().to_string(),
+        ),
     ])
 }
 
@@ -859,6 +1298,9 @@ next:\n\
     );
     let run_logs = root.join("run-logs");
     fs::create_dir_all(&run_logs).map_err(|e| e.to_string())?;
+    if let Err(err) = rust_health::archive_error_logs(root, &run_logs) {
+        println!(">>> [warn] failed to archive error logs: {err}");
+    }
     fs::write(run_logs.join("loop_decision.md"), &body).map_err(|e| e.to_string())?;
 
     if let Some(iter) = latest_iter(root) {
@@ -1352,6 +1794,259 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
     }
 }
 
+fn next_flicker_probe_dir(root: &Path, backend: &str) -> Result<PathBuf> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let backend = sanitize_path_segment(backend);
+    let base =
+        root.join("screenshots").join("flicker_probe").join(format!("probe_{stamp}_{backend}"));
+    if !base.exists() {
+        return Ok(base);
+    }
+    Ok(root
+        .join("screenshots")
+        .join("flicker_probe")
+        .join(format!("probe_{stamp}_{backend}_{}", std::process::id())))
+}
+
+fn sanitize_path_segment(value: &str) -> String {
+    let cleaned =
+        value.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>();
+    if cleaned.is_empty() {
+        "default".to_string()
+    } else {
+        cleaned
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FlickerFrameSample {
+    name: String,
+    luma_mean: f64,
+    state: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct FlickerSequenceStats {
+    max_delta: f64,
+    worst_pair: Option<(usize, usize)>,
+    verdict: &'static str,
+}
+
+fn analyze_flicker_probe(
+    probe_dir: &Path,
+    args: &FlickerProbeArgs,
+    process_status: Option<&str>,
+) -> Result<Value> {
+    let mut pngs = fs::read_dir(probe_dir)
+        .map_err(|e| format!("failed to read {}: {e}", probe_dir.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(OsStr::to_str)
+                .map(|name| name.starts_with("frame_") && name.ends_with(".png"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    pngs.sort();
+
+    let mut samples = Vec::new();
+    let mut errors = Vec::new();
+    for path in pngs {
+        let name = path.file_name().and_then(OsStr::to_str).unwrap_or("frame.png").to_string();
+        match decode_sampled_luma_mean(&path, 48) {
+            Ok(luma_mean) => {
+                let state = flicker_state_for_frame(probe_dir, &name);
+                samples.push(FlickerFrameSample { name, luma_mean, state });
+            }
+            Err(err) => errors.push(json!({
+                "frame": name,
+                "error": err,
+            })),
+        }
+    }
+
+    let captured_frames = samples.len();
+    let analyzed_samples = samples
+        .iter()
+        .filter(|sample| {
+            flicker_sample_wall_secs(sample)
+                .map(|wall_secs| wall_secs >= args.warmup)
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut stats =
+        analyze_flicker_sequence(&analyzed_samples, args.warn_threshold, args.fail_threshold);
+    if process_status.is_some() && stats.verdict != "FLICKER" {
+        stats.verdict = "CRASH";
+    }
+    if analyzed_samples.len() < 2 && stats.verdict == "OK" {
+        stats.verdict = "INSUFFICIENT";
+    }
+
+    let (worst_pair, worst_states) = stats
+        .worst_pair
+        .map(|(from, to)| {
+            (
+                json!([analyzed_samples[from].name, analyzed_samples[to].name]),
+                json!({
+                    "from": analyzed_samples[from].state,
+                    "to": analyzed_samples[to].state,
+                    "from_luma_mean": round1_local(analyzed_samples[from].luma_mean),
+                    "to_luma_mean": round1_local(analyzed_samples[to].luma_mean),
+                }),
+            )
+        })
+        .unwrap_or_else(|| (json!([]), json!(null)));
+
+    Ok(json!({
+        "verdict": stats.verdict,
+        "backend": args.gpu_backend,
+        "seconds": args.seconds,
+        "interval": args.interval,
+        "day_night_period_secs": args.period,
+        "warmup_secs": args.warmup,
+        "captured_frames": captured_frames,
+        "frames": analyzed_samples.len(),
+        "decode_errors": errors,
+        "max_luma_delta": round1_local(stats.max_delta),
+        "warn_threshold": args.warn_threshold,
+        "fail_threshold": args.fail_threshold,
+        "worst_pair": worst_pair,
+        "worst_pair_state": worst_states,
+        "process_status": process_status,
+        "frames_sample": analyzed_samples.iter().take(8).map(|sample| json!({
+            "frame": sample.name,
+            "luma_mean": round1_local(sample.luma_mean),
+            "state": sample.state,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+fn flicker_sample_wall_secs(sample: &FlickerFrameSample) -> Option<f64> {
+    sample.state.as_ref().and_then(|state| state.get("wall_secs")).and_then(Value::as_f64)
+}
+
+fn analyze_flicker_sequence(
+    samples: &[FlickerFrameSample],
+    warn_threshold: f64,
+    fail_threshold: f64,
+) -> FlickerSequenceStats {
+    let mut max_delta = 0.0;
+    let mut worst_pair = None;
+    for idx in 1..samples.len() {
+        let delta = (samples[idx].luma_mean - samples[idx - 1].luma_mean).abs();
+        if delta > max_delta {
+            max_delta = delta;
+            worst_pair = Some((idx - 1, idx));
+        }
+    }
+    let verdict = if max_delta >= fail_threshold {
+        "FLICKER"
+    } else if max_delta >= warn_threshold {
+        "WARN"
+    } else {
+        "OK"
+    };
+    FlickerSequenceStats { max_delta, worst_pair, verdict }
+}
+
+fn flicker_state_for_frame(probe_dir: &Path, frame_name: &str) -> Option<Value> {
+    let id = frame_name.strip_prefix("frame_").and_then(|name| name.strip_suffix(".png"))?;
+    let state_path = probe_dir.join(format!("state_{id}.json"));
+    let text = fs::read_to_string(state_path).ok()?;
+    let state = serde_json::from_str::<Value>(&text).ok()?;
+    let lighting = state.get("render").and_then(|render| render.get("lighting")).cloned();
+    Some(json!({
+        "tick": state.get("tick").cloned(),
+        "wall_secs": state.get("wall_secs").cloned(),
+        "lighting": lighting,
+    }))
+}
+
+fn write_flicker_probe_summary(probe_dir: &Path, summary: &Value, stderr_tail: &str) -> Result<()> {
+    fs::create_dir_all(probe_dir).map_err(|e| e.to_string())?;
+    fs::write(
+        probe_dir.join("summary.json"),
+        serde_json::to_string_pretty(summary).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+    let verdict = summary.get("verdict").and_then(Value::as_str).unwrap_or("UNKNOWN");
+    let frames = summary.get("frames").and_then(Value::as_u64).unwrap_or(0);
+    let max_delta = summary.get("max_luma_delta").and_then(Value::as_f64).unwrap_or(0.0);
+    let worst_pair = summary
+        .get("worst_pair")
+        .and_then(Value::as_array)
+        .map(|pair| pair.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" -> "))
+        .unwrap_or_default();
+    let md = format!(
+        "# flicker probe\n\nresult: {verdict}\nframes: {frames}\nmax_luma_delta: {max_delta}\nworst_pair: {worst_pair}\n\nstderr_tail:\n```text\n{stderr_tail}\n```\n"
+    );
+    fs::write(probe_dir.join("summary.md"), md).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn decode_sampled_luma_mean(path: &Path, sample: usize) -> Result<f64> {
+    let (w, h, pixels) = decode_png_rgb_local(path)?;
+    if w == 0 || h == 0 || pixels.is_empty() {
+        return Err("empty PNG".to_string());
+    }
+    let w = w as usize;
+    let h = h as usize;
+    let mut sum = 0.0;
+    let mut count = 0.0;
+    for sy in 0..sample {
+        let y = ((sy as f64 + 0.5) * h as f64 / sample as f64).floor() as usize;
+        for sx in 0..sample {
+            let x = ((sx as f64 + 0.5) * w as f64 / sample as f64).floor() as usize;
+            let [r, g, b] = pixels[y.min(h - 1) * w + x.min(w - 1)];
+            sum += 0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64;
+            count += 1.0;
+        }
+    }
+    Ok(sum / count)
+}
+
+fn decode_png_rgb_local(path: &Path) -> Result<(u32, u32, Vec<[u8; 3]>)> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let decoder = png::Decoder::new(file);
+    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
+    let bytes = &buf[..info.buffer_size()];
+    let mut pixels = Vec::with_capacity((info.width * info.height) as usize);
+    match info.color_type {
+        png::ColorType::Rgb => {
+            for chunk in bytes.chunks_exact(3) {
+                pixels.push([chunk[0], chunk[1], chunk[2]]);
+            }
+        }
+        png::ColorType::Rgba => {
+            for chunk in bytes.chunks_exact(4) {
+                pixels.push([chunk[0], chunk[1], chunk[2]]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for v in bytes {
+                pixels.push([*v, *v, *v]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for chunk in bytes.chunks_exact(2) {
+                pixels.push([chunk[0], chunk[0], chunk[0]]);
+            }
+        }
+        png::ColorType::Indexed => {
+            return Err("indexed PNG is not supported by flicker probe".to_string());
+        }
+    }
+    Ok((info.width, info.height, pixels))
+}
+
+fn round1_local(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1371,6 +2066,155 @@ mod tests {
         assert!(!parsed.dynamic);
         assert!(parsed.first_person);
         assert!(parsed.legacy_voxel);
+    }
+
+    #[test]
+    fn play_args_default_to_offline_no_scenario() {
+        let parsed = parse_play(&[]);
+
+        assert!(!parsed.skip_build);
+        assert_eq!(parsed.gpu_backend, default_gpu_backend());
+        assert_eq!(parsed.client_args, vec!["--offline", "--no-scenario"]);
+    }
+
+    #[test]
+    fn play_args_accept_gpu_backend_override() {
+        let parsed = parse_play(&["--gpu-backend=dx12".into()]);
+
+        assert_eq!(parsed.gpu_backend, "dx12");
+        assert_eq!(parsed.client_args, vec!["--offline", "--no-scenario"]);
+    }
+
+    #[test]
+    fn play_args_keep_extra_client_flags_and_skip_build() {
+        let parsed = parse_play(&[
+            "--skip-build".into(),
+            "--first-person".into(),
+            "--legacy-voxel".into(),
+        ]);
+
+        assert!(parsed.skip_build);
+        assert_eq!(
+            parsed.client_args,
+            vec![
+                "--offline",
+                "--no-scenario",
+                "--first-person",
+                "--legacy-voxel"
+            ]
+        );
+    }
+
+    #[test]
+    fn play_args_do_not_force_offline_when_connecting() {
+        let parsed = parse_play(&["--connect=127.0.0.1:5000".into()]);
+
+        assert_eq!(parsed.client_args, vec!["--connect=127.0.0.1:5000"]);
+    }
+
+    #[test]
+    fn play_args_online_starts_server_and_connects_client() {
+        let parsed = parse_play(&["--online".into(), "--first-person".into()]);
+
+        assert!(parsed.online);
+        assert_eq!(
+            parsed.client_args,
+            vec!["--connect=127.0.0.1:5000", "--first-person"]
+        );
+    }
+
+    #[test]
+    fn play_args_online_accepts_custom_server_addr() {
+        let parsed = parse_play(&[
+            "--online".into(),
+            "--server-addr".into(),
+            "127.0.0.1:6000".into(),
+        ]);
+
+        assert!(parsed.online);
+        assert_eq!(parsed.server_addr, "127.0.0.1:6000");
+        assert_eq!(parsed.client_args, vec!["--connect=127.0.0.1:6000"]);
+    }
+
+    #[test]
+    fn flicker_probe_args_parse_thresholds_and_backend() {
+        let parsed = parse_flicker_probe(&[
+            "--seconds=12".into(),
+            "--interval".into(),
+            "0.25".into(),
+            "--period=6".into(),
+            "--warmup=4.5".into(),
+            "--warn-threshold=10".into(),
+            "--threshold=30".into(),
+            "--gpu-backend=vulkan".into(),
+            "--skip-build".into(),
+        ]);
+
+        assert_eq!(parsed.seconds, 12);
+        assert_eq!(parsed.interval, 0.25);
+        assert_eq!(parsed.period, 6.0);
+        assert_eq!(parsed.warmup, 4.5);
+        assert_eq!(parsed.warn_threshold, 10.0);
+        assert_eq!(parsed.fail_threshold, 30.0);
+        assert_eq!(parsed.gpu_backend, "vulkan");
+        assert!(parsed.skip_build);
+    }
+
+    #[test]
+    fn flicker_sequence_finds_worst_adjacent_delta() {
+        let samples = vec![
+            FlickerFrameSample { name: "frame_0001.png".into(), luma_mean: 80.0, state: None },
+            FlickerFrameSample { name: "frame_0002.png".into(), luma_mean: 84.0, state: None },
+            FlickerFrameSample { name: "frame_0003.png".into(), luma_mean: 121.5, state: None },
+        ];
+
+        let stats = analyze_flicker_sequence(&samples, 20.0, 35.0);
+
+        assert_eq!(stats.verdict, "FLICKER");
+        assert_eq!(round1_local(stats.max_delta), 37.5);
+        assert_eq!(stats.worst_pair, Some((1, 2)));
+    }
+
+    #[test]
+    fn flicker_sequence_warns_below_fail_threshold() {
+        let samples = vec![
+            FlickerFrameSample { name: "frame_0001.png".into(), luma_mean: 80.0, state: None },
+            FlickerFrameSample { name: "frame_0002.png".into(), luma_mean: 104.0, state: None },
+        ];
+
+        let stats = analyze_flicker_sequence(&samples, 20.0, 35.0);
+
+        assert_eq!(stats.verdict, "WARN");
+        assert_eq!(round1_local(stats.max_delta), 24.0);
+    }
+
+    #[test]
+    fn sanitize_path_segment_keeps_probe_dir_portable() {
+        assert_eq!(sanitize_path_segment("dx12"), "dx12");
+        assert_eq!(sanitize_path_segment("vulkan/dev"), "vulkan_dev");
+        assert_eq!(sanitize_path_segment(""), "default");
+    }
+
+    #[test]
+    fn set_env_pair_replaces_existing_value() {
+        let mut envs = vec![("WGPU_BACKEND".to_string(), "vulkan".to_string())];
+
+        set_env_pair(&mut envs, "WGPU_BACKEND", "dx12");
+
+        assert_eq!(envs, vec![("WGPU_BACKEND".to_string(), "dx12".to_string())]);
+    }
+
+    #[test]
+    fn play_runtime_env_uses_requested_gpu_backend() {
+        let envs = play_runtime_env(
+            vec![("WGPU_BACKEND".to_string(), "vulkan".to_string())],
+            "dx12",
+        );
+
+        assert_eq!(
+            envs.iter().find(|(k, _)| k == "WGPU_BACKEND").map(|(_, v)| v.as_str()),
+            Some("dx12")
+        );
     }
 
     #[test]
@@ -1493,6 +2337,23 @@ mod tests {
 
         assert_eq!(read_tail(&path, 2), "c\nd");
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clean_runs_removes_only_runtime_outputs() {
+        let root = temp_root("xtask_clean_runs");
+        fs::create_dir_all(root.join("run-logs")).unwrap();
+        fs::create_dir_all(root.join("screenshots/iter_1")).unwrap();
+        fs::write(root.join("run-logs/play.log"), "log").unwrap();
+        fs::write(root.join("screenshots/iter_1/health.json"), "{}").unwrap();
+        fs::write(root.join("keep.txt"), "keep").unwrap();
+
+        clean_runs(&root).unwrap();
+
+        assert!(!root.join("run-logs").exists());
+        assert!(!root.join("screenshots").exists());
+        assert!(root.join("keep.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 

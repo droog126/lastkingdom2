@@ -1,7 +1,11 @@
 [package]
 name = "lk2-core"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -18,5 +22,8 @@ rand = { workspace = true }
 lightyear = { version = "0.28.0", default-features = false, features = ["std", "leafwing", "replication"] }
 lightyear_inputs_leafwing = { version = "0.28.0", default-features = false, features = ["std"] }
 leafwing-input-manager = { version = "0.21.0", default-features = false, features = ["keyboard"] }
+
+[lints]
+workspace = true
 
 [dev-dependencies]

@@ -1,15 +1,15 @@
-use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::{IntoScheduleConfigs, common_conditions::resource_equals};
-use bevy::light::{AtmosphereEnvironmentMapLight, VolumetricFog, VolumetricLight};
-use bevy::pbr::{
-    AtmosphereSettings, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
-    ScreenSpaceReflections,
-};
+use bevy::light::VolumetricLight;
+use bevy::pbr::AtmosphereSettings;
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
+use bevy::{
+    feathers::{FeathersPlugins, dark_theme::create_dark_theme, theme::UiTheme},
+    scene::prelude::SpawnListSystem,
+};
 
 use avian3d::prelude::{Collider, Gravity, LinearVelocity, PhysicsPlugins, RigidBody};
 use serde_json::json;
@@ -29,7 +29,7 @@ use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::creature::{
     CreatureSpawnerDone, despawn_dead_creatures,
-    player_attack_creatures as offline_player_attack_creatures, spawn_creatures, update_creatures,
+    player_attack_creatures as offline_player_attack_creatures, update_creatures,
 };
 use lk2_core::eco_cycle::EcoCycle;
 use lk2_core::monster::MonsterEcosystem;
@@ -50,8 +50,7 @@ use crate::capture::{
 };
 use crate::pretty::{
     PlayerAnimState, PrettyConfig, animate_avatar, animate_cloud_puffs, animate_monsters,
-    follow_monster_cubes, spawn_eco_visuals, spawn_pretty, sync_eco_visual_spawns,
-    update_eco_visuals, update_player_anim_state,
+    follow_monster_cubes, spawn_pretty, update_player_anim_state,
 };
 use crate::pvp_systems::{
     HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
@@ -60,16 +59,20 @@ use crate::pvp_systems::{
 };
 use crate::render::{
     AntiStuckState, CameraAngles, CameraMode, FreeFlyState, JumpState, LastMoveDirection,
-    NestMarkerCount, Player, RenderConfig, RenderTelemetry, SpawnedBlocks, SwordSwing, auto_demo,
-    camera_mode_toggle, cycle_terrain_preset, emergency_teleport, first_person_camera,
-    freefly_movement, held_weapon_follow, maintain_cursor_grab, mouse_look_system,
-    offline_anti_stuck, player_input, record_render_frame_time, setup_atmosphere,
-    setup_cursor_grab, spawn_nest_markers, spawn_terrain_around_player, sync_camera_projection,
-    toggle_cursor_grab_on_esc, toggle_freefly, top_down_camera_toggle, update_animal_indicator,
-    update_nest_indicator,
+    NestMarkerCount, Player, RenderConfig, RenderFeatureSettings, RenderLightingTelemetry,
+    RenderTelemetry, SpawnedBlocks, SwordSwing, auto_demo, camera_mode_toggle,
+    cycle_terrain_preset, emergency_teleport, first_person_camera, freefly_movement,
+    held_weapon_follow, maintain_cursor_grab, mouse_look_system, offline_anti_stuck, player_input,
+    record_render_frame_time, setup_atmosphere, setup_cursor_grab, spawn_terrain_around_player,
+    sync_camera_projection, sync_render_feature_settings, toggle_cursor_grab_on_esc,
+    toggle_freefly, top_down_camera_toggle, update_animal_indicator, update_nest_indicator,
 };
 use crate::ui::{
-    ClientRunMode, setup_fonts, setup_hud, update_hud, update_nest_radar, update_tutorial_overlay,
+    ClientRunMode, GameMenuState, feathers_tools_scene, handle_feathers_tools_buttons,
+    handle_render_toggle_buttons, setup_fonts, setup_game_menu, setup_hud,
+    sync_game_menu_visibility, toggle_game_menu_input, update_feathers_tools_buttons,
+    update_feathers_tools_status, update_hud, update_nest_radar, update_render_toggle_buttons,
+    update_tutorial_overlay,
 };
 
 const AUTO_DEMO_WAIT_TICKS: u64 = 50_000;
@@ -215,6 +218,7 @@ fn main() {
     let hidden_window = args.iter().any(|a| a == "--hidden-window");
     let model_preview_mode = args.iter().any(|a| a == "--model-preview");
     let terrain_preview_mode = args.iter().any(|a| a == "--terrain-preview");
+    let transform_gizmo_mode = args.iter().any(|a| a == "--transform-gizmo");
 
     if model_preview_mode {
         // --model-preview takes a separate code path: no physics, no network,
@@ -336,17 +340,17 @@ fn main() {
 
     app.insert_resource(bevy::winit::WinitSettings::continuous());
 
-    // iter_456: switch to the deferred opaque renderer. The deferred pipeline is
-    // required for bevy 0.19's volumetric fog raymarch to sample the G-buffer
-    // properly. The forward path renders fog as a flat color. Atmosphere
-    // scattering itself works either way; we just want volumetric god rays to
-    // work too.
-    app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
-
     app.add_plugins(PhysicsPlugins::default()).insert_resource(Gravity::default());
+
+    app.add_plugins(FeathersPlugins).insert_resource(UiTheme(create_dark_theme()));
 
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
+    if transform_gizmo_mode {
+        app.add_plugins(bevy::picking::mesh_picking::MeshPickingPlugin);
+        app.add_plugins(bevy::gizmos::prelude::TransformGizmoPlugin);
+        app.insert_resource(TransformGizmoEditor::default());
+    }
 
     app.init_resource::<lightyear::prelude::PeerMetadata>()
         .init_resource::<lk2_core::pvp::FixedTick>()
@@ -393,6 +397,11 @@ fn main() {
         render_config.auto_keys = false;
         tracing::info!("--hold-forward-test: simulating held W without OS input");
     }
+    if transform_gizmo_mode {
+        render_config.mouse_look = false;
+        render_config.auto_walk = false;
+        tracing::info!("--transform-gizmo: enabled Bevy transform gizmo editor controls");
+    }
 
     let camera_angles = if auto_demo_mode && !first_person_mode {
         CameraAngles { yaw: std::f32::consts::FRAC_PI_2, pitch: -0.22 }
@@ -412,6 +421,7 @@ fn main() {
         })
         .init_resource::<SpawnedBlocks>()
         .init_resource::<RenderTelemetry>()
+        .init_resource::<RenderLightingTelemetry>()
         .init_resource::<PrettyConfig>()
         .init_resource::<PlayerState>()
         .init_resource::<SimClock>()
@@ -429,6 +439,8 @@ fn main() {
         .init_resource::<AntiStuckState>()
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<FixedTick>()
+        .init_resource::<RenderFeatureSettings>()
+        .init_resource::<GameMenuState>()
         .init_resource::<ReplicatedSnapshot>()
         .init_resource::<NetworkSmoothingState>()
         .init_resource::<OnlineMotionTrace>()
@@ -463,11 +475,11 @@ fn main() {
             setup_atmosphere,
             setup_cursor_grab,
             setup_world,
-            spawn_nest_markers,
+            setup_transform_gizmo_cursor,
             spawn_pretty,
-            spawn_eco_visuals,
-            spawn_creatures,
             setup_hud,
+            setup_game_menu,
+            feathers_tools_scene.spawn(),
             setup_player_pvp,
             lk2_core::objectives::setup_default_objectives,
         )
@@ -528,12 +540,28 @@ fn main() {
             top_down_camera_toggle,
             toggle_freefly,
             camera_mode_toggle,
+            transform_gizmo_input,
             sync_camera_projection,
             sync_top_down_lighting,
+            sync_render_feature_settings,
             emergency_teleport,
             cycle_terrain_preset,
         )
             .chain(),
+    );
+    app.add_systems(
+        Update,
+        (
+            toggle_game_menu_input,
+            sync_game_menu_visibility,
+            handle_render_toggle_buttons,
+            update_render_toggle_buttons,
+        )
+            .chain(),
+    );
+    app.add_systems(
+        PostUpdate,
+        sync_transform_gizmo_player.after(bevy::gizmos::prelude::TransformGizmoSystems),
     );
     app.add_systems(
         Update,
@@ -563,10 +591,11 @@ fn main() {
         Update,
         (
             simulation_tick.run_if(resource_equals(ClientRunMode::Offline)),
-            sync_eco_visual_spawns,
-            update_eco_visuals,
             end_tick_system.run_if(resource_equals(ClientRunMode::Offline)),
             update_hud,
+            handle_feathers_tools_buttons,
+            update_feathers_tools_status,
+            update_feathers_tools_buttons,
             update_nest_radar,
             update_tutorial_overlay,
             update_animal_indicator,
@@ -1158,33 +1187,110 @@ fn sync_top_down_lighting(
 }
 
 fn setup_camera(mut commands: Commands) {
-    // iter_456: wire the bevy 0.19 atmosphere + post-process stack onto the camera
-    // so the rendered scene actually uses atmospheric scattering, volumetric fog,
-    // bloom, screen-space reflections, and TAA instead of a flat clear color.
+    // Keep the main gameplay camera on the forward opaque path. The deferred
+    // depth-equal path can produce visible flicker on some Vulkan drivers.
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-        // AtmosphereSettings is required so the renderer actually reads the nearest
-        // Atmosphere entity. Default uses the lookup-texture path (cheap).
         AtmosphereSettings::default(),
-        // Lets the atmosphere drive ambient lighting + IBL for this view.
-        AtmosphereEnvironmentMapLight::default(),
-        // RAW_SUNLIGHT + Atmospheric scattering requires a higher exposure than the
-        // standard 13.0 EV recommended by the official atmosphere example.
         Exposure { ev100: 13.0 },
         Tonemapping::AcesFitted,
         Bloom::NATURAL,
-        // ambient_intensity 0 so the fog isn't tinted by ambient light; the scene
-        // already has a global ambient light setup, we just want the god-ray tint.
-        VolumetricFog { ambient_intensity: 0.0, ..default() },
         Msaa::Off,
-        TemporalAntiAliasing::default(),
-        ScreenSpaceReflections { min_perceptual_roughness: 0.0..0.0, ..default() },
-        ScreenSpaceAmbientOcclusion {
-            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
-            ..default()
-        },
     ));
+}
+
+#[derive(Resource, Debug, Clone, Copy)]
+struct TransformGizmoEditor {
+    enabled: bool,
+}
+
+impl Default for TransformGizmoEditor {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+fn setup_transform_gizmo_cursor(
+    editor: Option<Res<TransformGizmoEditor>>,
+    cameras: Query<Entity, With<Camera3d>>,
+    players: Query<Entity, With<Player>>,
+    mut commands: Commands,
+) {
+    if editor.is_none() {
+        return;
+    }
+    if let Ok(camera) = cameras.single() {
+        commands.entity(camera).insert(bevy::gizmos::prelude::TransformGizmoCamera);
+    }
+    if let Ok(player) = players.single() {
+        commands.entity(player).insert((
+            bevy::gizmos::prelude::TransformGizmoFocus,
+            bevy::picking::Pickable::default(),
+        ));
+    }
+}
+
+fn transform_gizmo_input(
+    editor: Option<Res<TransformGizmoEditor>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    settings: Option<ResMut<bevy::gizmos::prelude::TransformGizmoSettings>>,
+) {
+    let Some(editor) = editor else {
+        return;
+    };
+    if !editor.enabled {
+        return;
+    }
+    let Some(mut settings) = settings else {
+        return;
+    };
+    if keys.just_pressed(KeyCode::Digit1) {
+        settings.mode = bevy::gizmos::prelude::TransformGizmoMode::Translate;
+    } else if keys.just_pressed(KeyCode::Digit2) {
+        settings.mode = bevy::gizmos::prelude::TransformGizmoMode::Rotate;
+    } else if keys.just_pressed(KeyCode::Digit3) {
+        settings.mode = bevy::gizmos::prelude::TransformGizmoMode::Scale;
+    } else if keys.just_pressed(KeyCode::KeyX) {
+        settings.space = match settings.space {
+            bevy::gizmos::prelude::TransformGizmoSpace::World => {
+                bevy::gizmos::prelude::TransformGizmoSpace::Local
+            }
+            bevy::gizmos::prelude::TransformGizmoSpace::Local => {
+                bevy::gizmos::prelude::TransformGizmoSpace::World
+            }
+        };
+    }
+}
+
+fn sync_transform_gizmo_player(
+    editor: Option<Res<TransformGizmoEditor>>,
+    mut player: ResMut<PlayerState>,
+    mut anti_stuck: ResMut<AntiStuckState>,
+    player_tf: Query<&Transform, With<Player>>,
+) {
+    let Some(editor) = editor else {
+        return;
+    };
+    if !editor.enabled {
+        return;
+    }
+    let Ok(transform) = player_tf.single() else {
+        return;
+    };
+    let pos = transform.translation;
+    if !pos.is_finite() || player.pos.distance_squared(pos) <= 0.0001 {
+        return;
+    }
+    player.pos = pos;
+    player.block_pos = [
+        pos.x.floor() as i32,
+        pos.y.floor() as i32,
+        pos.z.floor() as i32,
+    ];
+    anti_stuck.last_safe_pos = pos;
+    anti_stuck.last_safe_block = player.block_pos;
+    anti_stuck.unsafe_ticks = 0;
 }
 
 fn setup_light(mut commands: Commands) {
@@ -1223,6 +1329,7 @@ fn setup_light(mut commands: Commands) {
 pub fn day_night_cycle(
     time: Res<Time>,
     mut tod: ResMut<TimeOfDay>,
+    mut telemetry: ResMut<RenderLightingTelemetry>,
     mut sun: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut fill: Query<&mut DirectionalLight, (Without<Sun>, With<DirectionalLight>)>,
     mode: Res<CameraMode>,
@@ -1235,35 +1342,80 @@ pub fn day_night_cycle(
     if std::env::args().any(|a| a == "--auto-demo") {
         tod.0 = 0.42;
     } else {
-        tod.0 = (tod.0 + time.delta_secs() / 60.0) % 1.0;
+        tod.0 = (tod.0 + time.delta_secs() / day_night_period_secs()) % 1.0;
     }
     let t = tod.0;
     let dayness = (std::f32::consts::PI * t).sin().max(0.0);
+    let third_person_readable_floor = 0.72;
     let readable_dayness = if *mode == CameraMode::ThirdPerson {
-        dayness.max(0.72)
+        dayness.max(third_person_readable_floor)
     } else {
         dayness
     };
     let sunset_glow = (1.0 - (2.0 * t - 1.0).abs()).powi(3);
 
     let dist = 80.0;
-    let sun_pos = Vec3::new((t - 0.5) * 2.0 * dist, dayness * dist + 5.0, 0.0);
+    let (atmosphere_time_of_day, atmosphere_dayness) =
+        if *mode == CameraMode::ThirdPerson && dayness < third_person_readable_floor {
+            let floor_t = third_person_readable_floor.asin() / std::f32::consts::PI;
+            let clamped_t = if t <= 0.5 { floor_t } else { 1.0 - floor_t };
+            (clamped_t, third_person_readable_floor)
+        } else {
+            (t, dayness)
+        };
+    let atmosphere_dayness = if *mode == CameraMode::ThirdPerson {
+        atmosphere_dayness.max(readable_dayness)
+    } else {
+        atmosphere_dayness
+    };
+    let sun_pos = Vec3::new(
+        (atmosphere_time_of_day - 0.5) * 2.0 * dist,
+        atmosphere_dayness * dist + 5.0,
+        0.0,
+    );
+    let sun_illuminance =
+        bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * readable_dayness);
     if let Ok((mut tf, mut l)) = sun.single_mut() {
         *tf = Transform::from_translation(sun_pos).looking_at(Vec3::ZERO, Vec3::Y);
         // RAW_SUNLIGHT at full day; ramp down to near-moonless at night so the
         // Atmosphere's Mie phase renders the sun correctly without blowing out
         // the camera exposure.
-        l.illuminance =
-            bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * readable_dayness);
+        l.illuminance = sun_illuminance;
         l.color = Color::srgb(
             1.0 - 0.15 * sunset_glow,
             0.95 - 0.35 * sunset_glow,
             0.85 - 0.65 * sunset_glow,
         );
     }
+    let fill_illuminance = 6_000.0 * readable_dayness + 1_200.0;
     if let Ok(mut l) = fill.single_mut() {
-        l.illuminance = 6_000.0 * readable_dayness + 1_200.0;
+        l.illuminance = fill_illuminance;
     }
+    telemetry.time_of_day = t;
+    telemetry.dayness = dayness;
+    telemetry.atmosphere_time_of_day = atmosphere_time_of_day;
+    telemetry.atmosphere_dayness = atmosphere_dayness;
+    telemetry.readable_dayness = readable_dayness;
+    telemetry.sunset_glow = sunset_glow;
+    telemetry.sun_illuminance = sun_illuminance;
+    telemetry.fill_illuminance = fill_illuminance;
+    telemetry.camera_mode = match *mode {
+        CameraMode::TopDown => "TopDown",
+        CameraMode::ThirdPerson => "ThirdPerson",
+        CameraMode::FirstPerson => "FirstPerson",
+    };
+}
+
+fn day_night_period_secs() -> f32 {
+    use std::sync::OnceLock;
+    static PERIOD: OnceLock<f32> = OnceLock::new();
+    *PERIOD.get_or_init(|| {
+        std::env::var("LK2_DAY_NIGHT_PERIOD_SECS")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| *value > 0.1)
+            .unwrap_or(60.0)
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1525,12 +1677,15 @@ fn end_tick_system(
     }
 }
 
-fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>, cfg: Res<RenderConfig>) {
+fn exit_on_esc(keys: Res<ButtonInput<KeyCode>>, cfg: Res<RenderConfig>, menu: Res<GameMenuState>) {
     if cfg.mouse_look {
         return;
     }
+    if menu.open {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
-        std::process::exit(0);
+        info!("Esc opens the game menu. Close the window to quit.");
     }
 }
 

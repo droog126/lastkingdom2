@@ -1,8 +1,15 @@
 use bevy::camera::ScalingMode;
+use bevy::core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass, NormalPrepass};
 use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::light::{FogVolume, VolumetricFog, VolumetricLight};
+use bevy::pbr::{
+    AtmosphereSettings, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
+    ScreenSpaceReflections,
+};
 use bevy::prelude::*;
+use bevy::render::camera::{MipBias, TemporalJitter};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use avian3d::prelude::{Collider, RigidBody};
@@ -75,6 +82,21 @@ impl Default for RenderConfig {
             smooth_passes: 2,
             ground_step_threshold: 0.85,
         }
+    }
+}
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderFeatureSettings {
+    pub atmosphere: bool,
+    pub taa: bool,
+    pub ssr: bool,
+    pub ssao: bool,
+    pub volumetric_fog: bool,
+}
+
+impl Default for RenderFeatureSettings {
+    fn default() -> Self {
+        Self { atmosphere: true, taa: false, ssr: false, ssao: false, volumetric_fog: false }
     }
 }
 
@@ -162,6 +184,8 @@ const FREEFLY_BOOST: f32 = 3.0;
 const TOP_DOWN_ORTHO_HEIGHT: f32 = 72.0;
 const TERRAIN_REBUILD_MIN_SECS: f32 = 4.0;
 const TERRAIN_REBUILD_RADIUS_FRACTION: f32 = 0.60;
+const SMOOTH_TERRAIN_CHUNK_SIZE: i32 = 16;
+const SMOOTH_TERRAIN_CHUNKS_PER_FRAME: usize = 1;
 
 const MOUSE_SENS: f32 = 0.0022;
 const PITCH_LIMIT: f32 = 1.483;
@@ -171,9 +195,28 @@ const YAW_QE_STEP: f32 = 22.5_f32.to_radians();
 pub struct SpawnedBlocks {
     pub visual_entities: Vec<Entity>,
     pub collider_entities: Vec<Entity>,
+    pub generated_meshes: Vec<Handle<Mesh>>,
+    pub generated_materials: Vec<Handle<StandardMaterial>>,
+    pub smooth_chunks: HashMap<SmoothTerrainChunkKey, SmoothTerrainChunk>,
+    pub smooth_empty_chunks: HashSet<SmoothTerrainChunkKey>,
+    pub smooth_material: Option<Handle<StandardMaterial>>,
 
     pub last_player_block: [i32; 3],
     pub last_mesh_center: Option<Vec3>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SmoothTerrainChunkKey {
+    pub x: i32,
+    pub z: i32,
+    pub y_min: i32,
+    pub y_max: i32,
+}
+
+pub struct SmoothTerrainChunk {
+    pub visual_entity: Entity,
+    pub collider_entity: Entity,
+    pub mesh_handle: Handle<Mesh>,
 }
 
 #[derive(Resource, Default, Debug, Clone)]
@@ -192,6 +235,35 @@ pub struct RenderTelemetry {
     pub frame_dt_over_50ms: u32,
 }
 
+#[derive(Resource, Debug, Clone)]
+pub struct RenderLightingTelemetry {
+    pub time_of_day: f32,
+    pub dayness: f32,
+    pub atmosphere_time_of_day: f32,
+    pub atmosphere_dayness: f32,
+    pub readable_dayness: f32,
+    pub sunset_glow: f32,
+    pub sun_illuminance: f32,
+    pub fill_illuminance: f32,
+    pub camera_mode: &'static str,
+}
+
+impl Default for RenderLightingTelemetry {
+    fn default() -> Self {
+        Self {
+            time_of_day: 0.42,
+            dayness: 0.0,
+            atmosphere_time_of_day: 0.42,
+            atmosphere_dayness: 0.0,
+            readable_dayness: 0.0,
+            sunset_glow: 0.0,
+            sun_illuminance: 0.0,
+            fill_illuminance: 0.0,
+            camera_mode: "Unknown",
+        }
+    }
+}
+
 pub fn record_render_frame_time(time: Res<Time>, mut telemetry: ResMut<RenderTelemetry>) {
     let dt_ms = time.delta_secs() * 1000.0;
     telemetry.frame_samples = telemetry.frame_samples.saturating_add(1);
@@ -202,6 +274,116 @@ pub fn record_render_frame_time(time: Res<Time>, mut telemetry: ResMut<RenderTel
     if dt_ms > 50.0 {
         telemetry.frame_dt_over_50ms = telemetry.frame_dt_over_50ms.saturating_add(1);
     }
+}
+
+fn despawn_and_release_generated_terrain(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    telemetry: &mut RenderTelemetry,
+    visual_entities: Vec<Entity>,
+    collider_entities: Vec<Entity>,
+    mesh_handles: Vec<Handle<Mesh>>,
+    material_handles: Vec<Handle<StandardMaterial>>,
+) {
+    for e in visual_entities {
+        commands.entity(e).despawn();
+        telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
+    }
+    for e in collider_entities {
+        commands.entity(e).despawn();
+        telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
+    }
+    for handle in mesh_handles {
+        meshes.remove(&handle);
+    }
+    for handle in material_handles {
+        materials.remove(&handle);
+    }
+}
+
+fn despawn_and_release_smooth_chunk(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    telemetry: &mut RenderTelemetry,
+    chunk: SmoothTerrainChunk,
+) {
+    commands.entity(chunk.visual_entity).despawn();
+    telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
+    commands.entity(chunk.collider_entity).despawn();
+    telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
+    meshes.remove(&chunk.mesh_handle);
+}
+
+fn clear_smooth_terrain_chunks(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    telemetry: &mut RenderTelemetry,
+    spawned: &mut SpawnedBlocks,
+) {
+    let chunks: Vec<SmoothTerrainChunk> =
+        spawned.smooth_chunks.drain().map(|(_, chunk)| chunk).collect();
+    for chunk in chunks {
+        despawn_and_release_smooth_chunk(commands, meshes, telemetry, chunk);
+    }
+    spawned.smooth_empty_chunks.clear();
+    if let Some(material) = spawned.smooth_material.take() {
+        materials.remove(&material);
+    }
+}
+
+fn ensure_smooth_terrain_material(
+    materials: &mut Assets<StandardMaterial>,
+    spawned: &mut SpawnedBlocks,
+) -> Handle<StandardMaterial> {
+    if let Some(material) = spawned.smooth_material.clone() {
+        return material;
+    }
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        emissive: Color::srgb(0.04, 0.05, 0.03).into(),
+        unlit: false,
+        perceptual_roughness: 0.95,
+        metallic: 0.0,
+        cull_mode: Some(bevy::render::render_resource::Face::Back),
+        double_sided: false,
+        ..default()
+    });
+    spawned.smooth_material = Some(material.clone());
+    material
+}
+
+fn smooth_chunk_keys_for_aabb(
+    min: [i32; 3],
+    max: [i32; 3],
+    mesh_center: Vec3,
+) -> Vec<SmoothTerrainChunkKey> {
+    let x0 = min[0].div_euclid(SMOOTH_TERRAIN_CHUNK_SIZE);
+    let x1 = (max[0] - 1).div_euclid(SMOOTH_TERRAIN_CHUNK_SIZE);
+    let z0 = min[2].div_euclid(SMOOTH_TERRAIN_CHUNK_SIZE);
+    let z1 = (max[2] - 1).div_euclid(SMOOTH_TERRAIN_CHUNK_SIZE);
+    let y_min = min[1];
+    let y_max = max[1];
+    let mut keys = Vec::new();
+    for z in z0..=z1 {
+        for x in x0..=x1 {
+            keys.push(SmoothTerrainChunkKey { x, z, y_min, y_max });
+        }
+    }
+    keys.sort_by(|a, b| {
+        let ac = Vec2::new(
+            (a.x * SMOOTH_TERRAIN_CHUNK_SIZE) as f32 + SMOOTH_TERRAIN_CHUNK_SIZE as f32 * 0.5,
+            (a.z * SMOOTH_TERRAIN_CHUNK_SIZE) as f32 + SMOOTH_TERRAIN_CHUNK_SIZE as f32 * 0.5,
+        );
+        let bc = Vec2::new(
+            (b.x * SMOOTH_TERRAIN_CHUNK_SIZE) as f32 + SMOOTH_TERRAIN_CHUNK_SIZE as f32 * 0.5,
+            (b.z * SMOOTH_TERRAIN_CHUNK_SIZE) as f32 + SMOOTH_TERRAIN_CHUNK_SIZE as f32 * 0.5,
+        );
+        let pc = Vec2::new(mesh_center.x, mesh_center.z);
+        ac.distance_squared(pc).total_cmp(&bc.distance_squared(pc))
+    });
+    keys
 }
 
 #[derive(Component)]
@@ -241,6 +423,7 @@ pub fn spawn_terrain_around_player(
         return;
     }
 
+    let invalidated = spawned.last_player_block == [i32::MIN; 3];
     let has_mesh_record = spawned.last_mesh_center.is_some();
     if *mode == CameraMode::FirstPerson && !cfg.smooth_terrain && has_mesh_record {
         return;
@@ -248,40 +431,185 @@ pub fn spawn_terrain_around_player(
     let moved_far = if let Some(last) = spawned.last_mesh_center {
         let dx = mesh_center.x - last.x;
         let dz = mesh_center.z - last.z;
-        Vec2::new(dx, dz).length() > (cfg.radius as f32 * TERRAIN_REBUILD_RADIUS_FRACTION).max(24.0)
+        invalidated
+            || Vec2::new(dx, dz).length()
+                > (cfg.radius as f32 * TERRAIN_REBUILD_RADIUS_FRACTION).max(24.0)
     } else {
         true
     };
-    if !moved_far && has_mesh_record {
-        return;
-    }
-    if now - *last_mesh_wall < TERRAIN_REBUILD_MIN_SECS && has_mesh_record {
-        return;
-    }
-
-    for e in spawned.visual_entities.drain(..) {
-        commands.entity(e).despawn();
-        telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
-    }
-    for e in spawned.collider_entities.drain(..) {
-        commands.entity(e).despawn();
-        telemetry.terrain_despawns = telemetry.terrain_despawns.saturating_add(1);
+    if cfg.smooth_terrain {
+        if moved_far && now - *last_mesh_wall < TERRAIN_REBUILD_MIN_SECS && has_mesh_record {
+            return;
+        }
+    } else {
+        if !moved_far && has_mesh_record {
+            return;
+        }
+        if now - *last_mesh_wall < TERRAIN_REBUILD_MIN_SECS && has_mesh_record {
+            return;
+        }
     }
 
-    let r = cfg.radius as i32;
+    let first_person_mode = *mode == CameraMode::FirstPerson;
+    let r = if first_person_mode {
+        cfg.radius.min(28)
+    } else {
+        cfg.radius
+    } as i32;
     let py = player.block_pos[1];
-    let y_min = (py - 40).max(0);
-    let y_max = (py + 40).min(game_world.size as i32 - 1);
+    let y_span = if first_person_mode { 24 } else { 40 };
+    let y_min = (py - y_span).max(0);
+    let y_max = (py + y_span).min(game_world.size as i32 - 1);
     let center_x = mesh_center.x.round() as i32;
     let center_z = mesh_center.z.round() as i32;
     let min = [center_x - r, y_min, center_z - r];
     let max = [center_x + r, y_max, center_z + r];
 
     if cfg.smooth_terrain {
+        if invalidated {
+            clear_smooth_terrain_chunks(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut telemetry,
+                &mut spawned,
+            );
+        }
+
+        let desired_keys = smooth_chunk_keys_for_aabb(min, max, mesh_center);
+        let desired_set: HashSet<SmoothTerrainChunkKey> = desired_keys.iter().copied().collect();
+        let stale_keys: Vec<SmoothTerrainChunkKey> = spawned
+            .smooth_chunks
+            .keys()
+            .copied()
+            .filter(|key| !desired_set.contains(key))
+            .collect();
+        for key in stale_keys {
+            if let Some(chunk) = spawned.smooth_chunks.remove(&key) {
+                despawn_and_release_smooth_chunk(&mut commands, &mut meshes, &mut telemetry, chunk);
+            }
+        }
+        spawned.smooth_empty_chunks.retain(|key| desired_set.contains(key));
+
+        let material = ensure_smooth_terrain_material(&mut materials, &mut spawned);
+        let mut built_this_frame = 0usize;
+        let mut built_tris = 0usize;
+        let mut built_ms = 0.0_f32;
+        for key in desired_keys {
+            if spawned.smooth_chunks.contains_key(&key)
+                || spawned.smooth_empty_chunks.contains(&key)
+            {
+                continue;
+            }
+            if built_this_frame >= SMOOTH_TERRAIN_CHUNKS_PER_FRAME {
+                break;
+            }
+
+            let chunk_min = [
+                key.x * SMOOTH_TERRAIN_CHUNK_SIZE,
+                key.y_min,
+                key.z * SMOOTH_TERRAIN_CHUNK_SIZE,
+            ];
+            let chunk_max = [
+                chunk_min[0] + SMOOTH_TERRAIN_CHUNK_SIZE,
+                key.y_max,
+                chunk_min[2] + SMOOTH_TERRAIN_CHUNK_SIZE,
+            ];
+            let started = Instant::now();
+            let Some(sm) = smooth_mesh::build_smooth_mesh(
+                &game_world,
+                chunk_min,
+                chunk_max,
+                0.5,
+                cfg.smooth_passes,
+            ) else {
+                spawned.smooth_empty_chunks.insert(key);
+                continue;
+            };
+            let mesh_ms = started.elapsed().as_secs_f32() * 1000.0;
+            let total_tris = sm.collider_indices.len() / 3;
+
+            let mesh_handle = meshes.add(sm.mesh);
+            let visual = commands
+                .spawn((
+                    Mesh3d(mesh_handle.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                    TerrainChunk,
+                ))
+                .id();
+
+            let collider_verts: Vec<Vec3> =
+                sm.collider_trimesh.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+            let collider_indices: Vec<[u32; 3]> = sm
+                .collider_indices
+                .chunks(3)
+                .filter(|c| c.len() == 3)
+                .map(|c| [c[0], c[1], c[2]])
+                .collect();
+            let collider = Collider::trimesh(collider_verts, collider_indices);
+            let collider_entity = commands
+                .spawn((
+                    RigidBody::Static,
+                    collider,
+                    Transform::from_translation(Vec3::new(0.0, cfg.y_offset, 0.0)),
+                    TerrainChunk,
+                ))
+                .id();
+
+            spawned.smooth_chunks.insert(
+                key,
+                SmoothTerrainChunk { visual_entity: visual, collider_entity, mesh_handle },
+            );
+
+            built_this_frame += 1;
+            built_tris += total_tris;
+            built_ms += mesh_ms;
+            telemetry.smooth_mesh_total_ms += mesh_ms;
+            telemetry.smooth_mesh_max_ms = telemetry.smooth_mesh_max_ms.max(mesh_ms);
+            telemetry.smooth_mesh_total_tris =
+                telemetry.smooth_mesh_total_tris.saturating_add(total_tris as u64);
+            telemetry.collider_rebuilds = telemetry.collider_rebuilds.saturating_add(1);
+        }
+
+        if built_this_frame > 0 {
+            if moved_far || !has_mesh_record {
+                telemetry.smooth_mesh_builds = telemetry.smooth_mesh_builds.saturating_add(1);
+            }
+            debug!(
+                "smooth chunks: built {} chunk(s), {} tris, {:.0}ms total, {} cached around {:?}",
+                built_this_frame,
+                built_tris,
+                built_ms,
+                spawned.smooth_chunks.len(),
+                player.block_pos
+            );
+        }
+        spawned.last_player_block = player.block_pos;
+        spawned.last_mesh_center = Some(mesh_center);
+        *last_mesh_wall = time.elapsed_secs();
+        return;
+    }
+
+    if !spawned.smooth_chunks.is_empty() || spawned.smooth_material.is_some() {
+        clear_smooth_terrain_chunks(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut telemetry,
+            &mut spawned,
+        );
+    }
+
+    if cfg.smooth_terrain {
         let started = Instant::now();
         let sm = smooth_mesh::build_smooth_mesh(&game_world, min, max, 0.5, cfg.smooth_passes);
         if let Some(sm) = sm {
             let total_tris = sm.collider_indices.len() / 3;
+            let old_visual_entities = std::mem::take(&mut spawned.visual_entities);
+            let old_collider_entities = std::mem::take(&mut spawned.collider_entities);
+            let old_mesh_handles = std::mem::take(&mut spawned.generated_meshes);
+            let old_material_handles = std::mem::take(&mut spawned.generated_materials);
 
             let mat = materials.add(StandardMaterial {
                 base_color: Color::WHITE,
@@ -293,8 +621,10 @@ pub fn spawn_terrain_around_player(
                 double_sided: false,
                 ..default()
             });
+            spawned.generated_materials.push(mat.clone());
             if show_terrain_visuals {
                 let mesh_handle = meshes.add(sm.mesh.clone());
+                spawned.generated_meshes.push(mesh_handle.clone());
                 let visual = commands
                     .spawn((
                         Mesh3d(mesh_handle),
@@ -327,6 +657,17 @@ pub fn spawn_terrain_around_player(
                 spawned.collider_entities.push(collider_ent);
             }
 
+            despawn_and_release_generated_terrain(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut telemetry,
+                old_visual_entities,
+                old_collider_entities,
+                old_mesh_handles,
+                old_material_handles,
+            );
+
             spawned.last_player_block = player.block_pos;
             spawned.last_mesh_center = Some(mesh_center);
             let mesh_secs = started.elapsed().as_secs_f32();
@@ -348,6 +689,25 @@ pub fn spawn_terrain_around_player(
         *last_mesh_wall = time.elapsed_secs();
         return;
     }
+
+    let started = Instant::now();
+    let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
+    let mesh_count = block_meshes.len();
+    let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
+    let mesh_secs = started.elapsed().as_secs_f32();
+    let mesh_ms = mesh_secs * 1000.0;
+    if block_meshes.is_empty() {
+        debug!(
+            "terrain mesh rebuild produced no meshes; keeping previous terrain visible (player {:?})",
+            player.block_pos
+        );
+        *last_mesh_wall = time.elapsed_secs();
+        return;
+    }
+    let old_visual_entities = std::mem::take(&mut spawned.visual_entities);
+    let old_collider_entities = std::mem::take(&mut spawned.collider_entities);
+    let old_mesh_handles = std::mem::take(&mut spawned.generated_meshes);
+    let old_material_handles = std::mem::take(&mut spawned.generated_materials);
 
     let mut mats: HashMap<BlockType, Handle<StandardMaterial>> = HashMap::new();
     for bt in [
@@ -392,15 +752,10 @@ pub fn spawn_terrain_around_player(
                 ..default()
             }
         };
-        mats.insert(bt, materials.add(material));
+        let handle = materials.add(material);
+        spawned.generated_materials.push(handle.clone());
+        mats.insert(bt, handle);
     }
-
-    let started = Instant::now();
-    let block_meshes = build_all_terrain_meshes_aabb(&game_world, min, max);
-    let mesh_count = block_meshes.len();
-    let total_tris: usize = block_meshes.iter().map(|m| m.indices.len() / 3).sum();
-    let mesh_secs = started.elapsed().as_secs_f32();
-    let mesh_ms = mesh_secs * 1000.0;
 
     for bm in block_meshes {
         let bevy_mesh = bm.to_bevy_mesh();
@@ -414,6 +769,7 @@ pub fn spawn_terrain_around_player(
         if show_terrain_visuals {
             let mat = mats[&bm.block_type].clone();
             let mesh_handle = meshes.add(bevy_mesh.clone());
+            spawned.generated_meshes.push(mesh_handle.clone());
             let visual = commands
                 .spawn((
                     Mesh3d(mesh_handle),
@@ -439,6 +795,17 @@ pub fn spawn_terrain_around_player(
         }
     }
 
+    despawn_and_release_generated_terrain(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut telemetry,
+        old_visual_entities,
+        old_collider_entities,
+        old_mesh_handles,
+        old_material_handles,
+    );
+
     spawned.last_player_block = player.block_pos;
     telemetry.greedy_mesh_builds = telemetry.greedy_mesh_builds.saturating_add(1);
     telemetry.greedy_mesh_total_ms += mesh_ms;
@@ -453,6 +820,9 @@ pub fn spawn_terrain_around_player(
 #[derive(Component)]
 pub struct TerrainChunk;
 
+#[derive(Component)]
+pub struct GameplayFogVolume;
+
 pub fn setup_atmosphere(
     mut commands: Commands,
     cfg: Res<RenderConfig>,
@@ -461,8 +831,8 @@ pub fn setup_atmosphere(
     _materials: ResMut<Assets<StandardMaterial>>,
     _camera: Query<Entity, With<Camera3d>>,
 ) {
+    use bevy::light::Atmosphere;
     use bevy::light::atmosphere::ScatteringMedium;
-    use bevy::light::{Atmosphere, FogVolume};
 
     // iter_456: clear color is now black-ish because the Atmosphere entity
     // occupies the entire sky as a procedural scattering sphere. The
@@ -483,6 +853,7 @@ pub fn setup_atmosphere(
         FogVolume { density_factor: 0.0011, ..default() },
         Transform::from_scale(Vec3::new(360.0, 60.0, 360.0))
             .with_translation(Vec3::new(48.5, 20.0, 48.5)),
+        GameplayFogVolume,
     ));
 
     // Keep a dark fallback clear color so any uncovered pixels stay neutral
@@ -492,6 +863,103 @@ pub fn setup_atmosphere(
     // `cfg` reserved: the legacy DistanceFog settings are no longer used, but
     // we leave them in RenderConfig for save-game / scenario compatibility.
     let _ = cfg;
+}
+
+pub fn sync_render_feature_settings(
+    mut commands: Commands,
+    settings: Res<RenderFeatureSettings>,
+    cameras: Query<
+        (
+            Entity,
+            Has<AtmosphereSettings>,
+            Has<bevy::anti_alias::taa::TemporalAntiAliasing>,
+            Has<ScreenSpaceReflections>,
+            Has<ScreenSpaceAmbientOcclusion>,
+            Has<VolumetricFog>,
+        ),
+        With<Camera3d>,
+    >,
+    fog_volumes: Query<Entity, With<GameplayFogVolume>>,
+    volumetric_lights: Query<Entity, With<VolumetricLight>>,
+    mut initialized: Local<bool>,
+) {
+    if !settings.is_changed() && *initialized {
+        return;
+    }
+    *initialized = true;
+
+    for (camera, has_atmosphere_settings, has_taa, has_ssr, has_ssao, has_volumetric_fog) in
+        cameras.iter()
+    {
+        let mut entity = commands.entity(camera);
+        if settings.atmosphere {
+            if !has_atmosphere_settings {
+                entity.insert(AtmosphereSettings::default());
+            }
+        } else {
+            entity.remove::<AtmosphereSettings>();
+        }
+
+        if settings.taa {
+            if !has_taa {
+                entity.insert(bevy::anti_alias::taa::TemporalAntiAliasing::default());
+            }
+        } else if has_taa {
+            entity.remove::<(
+                bevy::anti_alias::taa::TemporalAntiAliasing,
+                TemporalJitter,
+                MipBias,
+                DepthPrepass,
+                MotionVectorPrepass,
+            )>();
+        }
+
+        if settings.ssr {
+            if !has_ssr {
+                entity.insert(ScreenSpaceReflections {
+                    min_perceptual_roughness: 0.0..0.0,
+                    ..default()
+                });
+            }
+        } else if has_ssr {
+            entity.remove::<(ScreenSpaceReflections, DepthPrepass)>();
+        }
+
+        if settings.ssao {
+            if !has_ssao {
+                entity.insert(ScreenSpaceAmbientOcclusion {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+                    ..default()
+                });
+            }
+        } else if has_ssao {
+            entity.remove::<(ScreenSpaceAmbientOcclusion, NormalPrepass, DepthPrepass)>();
+        }
+
+        if settings.volumetric_fog {
+            if !has_volumetric_fog {
+                entity.insert(VolumetricFog { step_count: 48, ..default() });
+            }
+        } else if has_volumetric_fog {
+            entity.remove::<VolumetricFog>();
+        }
+    }
+
+    for entity in fog_volumes.iter() {
+        commands.entity(entity).insert(if settings.volumetric_fog {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
+
+    for entity in volumetric_lights.iter() {
+        if settings.volumetric_fog {
+            commands.entity(entity).insert(VolumetricLight);
+        } else {
+            commands.entity(entity).remove::<VolumetricLight>();
+        }
+    }
 }
 
 #[derive(Component)]
@@ -884,15 +1352,19 @@ pub fn update_animal_indicator(
     text.0 = format!("{}  {}  {:.1}m", arrow, label, dist);
 }
 
+#[allow(dead_code)]
 const NEST_MARKER_SIZE: (f32, f32, f32) = (0.4, 4.0, 0.4);
+#[allow(dead_code)]
 const THIRD_PERSON_NEST_MARKER_SIZE: (f32, f32, f32) = (0.45, 0.55, 0.45);
 
 #[derive(Component)]
 pub struct NestMarker;
 
 #[derive(Resource, Default)]
+#[allow(dead_code)]
 pub struct NestMarkerCount(pub u32);
 
+#[allow(dead_code)]
 pub fn spawn_nest_markers(
     mut commands: Commands,
     monsters: Res<MonsterEcosystem>,
@@ -1602,6 +2074,10 @@ pub fn auto_demo(
     *walk_timer = 0.0;
     *walk_step += 1;
 
+    if !nations.can_found_new() {
+        *walk_target = None;
+    }
+
     let need_refresh = match *walk_target {
         None => true,
         Some(t) => {
@@ -1610,7 +2086,7 @@ pub fn auto_demo(
             dx * dx + dz * dz < 1.5 * 1.5
         }
     };
-    if need_refresh {
+    if need_refresh && nations.can_found_new() {
         const MIN_WALK_SPREAD: f32 = 25.0;
         let mut best: Option<(f32, [i32; 3])> = None;
         let p = player.block_pos;
@@ -1724,6 +2200,11 @@ pub fn auto_demo(
         let dx = (player.block_pos[0] - target[0]) as f32;
         let dz = (player.block_pos[2] - target[2]) as f32;
         if dx * dx + dz * dz <= 1.5 * 1.5 {
+            if !nations.can_found_new() {
+                *walk_target = None;
+                return;
+            }
+
             let cost = nations.next_flag_cost();
 
             if cfg.auto_keys {

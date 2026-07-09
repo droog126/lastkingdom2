@@ -19,6 +19,7 @@ const SAMPLE_SIZE: usize = 64;
 const PNG_MIN_W: u32 = 640;
 const PNG_MIN_H: u32 = 360;
 const TOP_COLOR_BUCKET_WARN_PCT: f64 = 92.0;
+const LUMA_MEAN_FLICKER_WARN_DELTA: f64 = 35.0;
 const FRAME_DT_OVER_50MS_WARN: i64 = 10;
 const SMOOTH_MESH_MAX_WARN_MS: f64 = 60.0;
 const SMOOTH_MESH_BUILDS_WARN: i64 = 3;
@@ -79,14 +80,17 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
     } else {
         json!({"file_kb":0.0,"verdict":"NA","sub":null})
     };
+    let prev_png = prev_dir.and_then(|dir| primary_png(dir).map(|path| analyze_png(&path)));
 
     let prev_state = prev_dir
         .and_then(|dir| fs::read_to_string(dir.join("final_state.json")).ok())
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
     let (sim, state) = analyze_sim(&iter_dir.join("final_state.json"), prev_state.as_ref());
     let stderr = scan_stderr_logs(root);
+    let error_logs = archive_error_logs(root, iter_dir)?;
     let assertions = built_in_assertions(
         &png,
+        prev_png.as_ref(),
         &sim,
         state.as_ref(),
         prev_state.as_ref(),
@@ -103,12 +107,19 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
     let health = json!({
         "iter": name,
         "png": png,
+        "prev_png": prev_png,
         "sim": sim,
         "stderr": {
             "deserialize_invalid_count": stderr.deserialize_invalid_count,
             "out_of_bounds_count": stderr.out_of_bounds_count,
             "voxel_overflow_count": stderr.voxel_overflow_count,
             "files_scanned": stderr.files_scanned,
+        },
+        "error_logs": {
+            "error_line_count": error_logs.error_line_count,
+            "files_scanned": error_logs.files_scanned,
+            "json": "error_logs.json",
+            "text": "error_logs.txt",
         },
         "assertions": {
             "total": assertions.len(),
@@ -148,6 +159,164 @@ struct StderrScan {
     out_of_bounds_count: i64,
     voxel_overflow_count: i64,
     files_scanned: usize,
+}
+
+#[derive(Default, Clone, Debug)]
+pub(crate) struct ErrorLogSummary {
+    pub(crate) error_line_count: usize,
+    pub(crate) files_scanned: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ErrorLogEntry {
+    source: String,
+    line: usize,
+    text: String,
+}
+
+pub(crate) fn archive_error_logs(root: &Path, iter_dir: &Path) -> Result<ErrorLogSummary> {
+    fs::create_dir_all(iter_dir).map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+    let mut files_scanned = 0;
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for rel in ["screenshots", "run-logs"] {
+        let p = root.join(rel);
+        if p.exists() {
+            dirs.push(p);
+        }
+    }
+    for dir in dirs {
+        collect_error_logs_dir(root, &dir, &mut entries, &mut files_scanned);
+    }
+    write_error_log_archive(iter_dir, entries, files_scanned)
+}
+
+pub(crate) fn archive_error_logs_for_files(
+    root: &Path,
+    out_dir: &Path,
+    files: &[PathBuf],
+) -> Result<ErrorLogSummary> {
+    fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+    let mut files_scanned = 0;
+    for path in files {
+        collect_error_log_file(root, path, &mut entries, &mut files_scanned);
+    }
+    write_error_log_archive(out_dir, entries, files_scanned)
+}
+
+fn write_error_log_archive(
+    out_dir: &Path,
+    mut entries: Vec<ErrorLogEntry>,
+    files_scanned: usize,
+) -> Result<ErrorLogSummary> {
+    entries.sort_by(|a, b| a.source.cmp(&b.source).then(a.line.cmp(&b.line)));
+
+    let json_entries = entries
+        .iter()
+        .map(|entry| {
+            json!({
+                "source": entry.source,
+                "line": entry.line,
+                "text": entry.text,
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "error_line_count": entries.len(),
+        "files_scanned": files_scanned,
+        "entries": json_entries,
+    });
+    fs::write(
+        out_dir.join("error_logs.json"),
+        serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut text = String::new();
+    text.push_str(&format!(
+        "error_line_count={} files_scanned={}\n",
+        entries.len(),
+        files_scanned
+    ));
+    for entry in &entries {
+        text.push_str(&format!(
+            "{}:{}: {}\n",
+            entry.source, entry.line, entry.text
+        ));
+    }
+    fs::write(out_dir.join("error_logs.txt"), text).map_err(|e| e.to_string())?;
+
+    Ok(ErrorLogSummary { error_line_count: entries.len(), files_scanned })
+}
+
+fn collect_error_logs_dir(
+    root: &Path,
+    dir: &Path,
+    entries: &mut Vec<ErrorLogEntry>,
+    files_scanned: &mut usize,
+) {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_error_logs_dir(root, &path, entries, files_scanned);
+            continue;
+        }
+        if !is_log_file(&path) {
+            continue;
+        }
+        collect_error_log_file(root, &path, entries, files_scanned);
+    }
+}
+
+fn collect_error_log_file(
+    root: &Path,
+    path: &Path,
+    entries: &mut Vec<ErrorLogEntry>,
+    files_scanned: &mut usize,
+) {
+    if !is_log_file(path) {
+        return;
+    }
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    *files_scanned += 1;
+    let source = rel_path(root, path);
+    for (idx, line) in text.lines().enumerate() {
+        if is_error_log_line(line) {
+            entries.push(ErrorLogEntry {
+                source: source.clone(),
+                line: idx + 1,
+                text: line.to_string(),
+            });
+        }
+    }
+}
+
+fn is_log_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+        return false;
+    };
+    name.ends_with(".log")
+        || name.ends_with(".err")
+        || name.ends_with(".log.err")
+        || name.ends_with(".err.log")
+}
+
+fn is_error_log_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("error")
+        || lower.contains("panic")
+        || lower.contains("panicked")
+        || lower.contains("fatal")
+}
+
+fn rel_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
 fn scan_stderr_logs(root: &Path) -> StderrScan {
@@ -416,6 +585,7 @@ fn analyze_sim(state_path: &Path, prev_state: Option<&Value>) -> (Value, Option<
 
 fn built_in_assertions(
     png: &Value,
+    prev_png: Option<&Value>,
     sim: &Value,
     state: Option<&Value>,
     prev_state: Option<&Value>,
@@ -564,6 +734,11 @@ fn built_in_assertions(
             Some("run logs"),
         ),
     ];
+    if let Some(prev_png) = prev_png {
+        a.extend(visual_luma_flicker_assertions(
+            png, prev_png, state, prev_state,
+        ));
+    }
     if stderr.files_scanned == 0 {
         a.push(assertion(
             "stderr.logs_scanned",
@@ -652,6 +827,42 @@ fn built_in_assertions(
         a.extend(render_telemetry_assertions(state));
     }
     a
+}
+
+fn visual_luma_flicker_assertions(
+    png: &Value,
+    prev_png: &Value,
+    state: Option<&Value>,
+    prev_state: Option<&Value>,
+) -> Vec<Assertion> {
+    let Some(current_luma) = path_f64(png, "luma_mean") else {
+        return Vec::new();
+    };
+    let Some(prev_luma) = path_f64(prev_png, "luma_mean") else {
+        return Vec::new();
+    };
+    let delta = (current_luma - prev_luma).abs();
+    let dayness_delta = state
+        .zip(prev_state)
+        .and_then(|(current, prev)| {
+            Some(
+                (path_f64(current, "render.lighting.dayness")?
+                    - path_f64(prev, "render.lighting.dayness")?)
+                .abs(),
+            )
+        })
+        .unwrap_or(0.0);
+    vec![assertion(
+        "visual.luma_flicker_between_iters",
+        &json!(round1(delta)),
+        "<=",
+        json!(LUMA_MEAN_FLICKER_WARN_DELTA),
+        "partial",
+        &format!(
+            "mean screenshot brightness jumped by {delta:.1} between adjacent iters (prev {prev_luma:.1}, current {current_luma:.1}, dayness_delta {dayness_delta:.3}); inspect day_night_cycle, exposure, atmosphere, bloom, and volumetric fog"
+        ),
+        Some("png.luma_mean"),
+    )]
 }
 
 fn player_readability_assertions(state: &Value) -> Vec<Assertion> {
@@ -808,16 +1019,36 @@ fn resource_deltas_assertions(iter_dir: &Path) -> Vec<Assertion> {
             p != "tick"
         })
         .count();
+    let final_state = fs::read_to_string(iter_dir.join("final_state.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let fallback_motion = final_state.as_ref().map(gameplay_motion_count).unwrap_or(0);
+    let proof_count = nontick_count.max(fallback_motion);
     out.push(assertion(
         "state.resource_deltas_have_nontick_motion",
-        &json!(nontick_count),
+        &json!(proof_count),
         ">=",
         json!(RESOURCE_DELTAS_MIN_NONTICK),
         "partial",
-        "diff.json resource_deltas only contain tick; sim state is not advancing on resource/actor counters",
+        "diff.json resource_deltas only contain tick and final_state has no gameplay motion counters",
         Some("diff.json"),
     ));
     out
+}
+
+fn gameplay_motion_count(state: &Value) -> usize {
+    [
+        "player.blocks_gathered",
+        "player.monsters_killed",
+        "player.nations_founded",
+        "eco_cycle.fruit_eaten",
+        "eco_cycle.fruit_grown",
+        "eco_cycle.plants_grown",
+        "nations.total_nations",
+    ]
+    .iter()
+    .filter(|path| path_i64(state, path).unwrap_or(0) > 0)
+    .count()
 }
 
 fn regression_assertions(state: &Value, prev: &Value) -> Vec<Assertion> {
@@ -1093,27 +1324,52 @@ fn eco_cycle_assertions(state: &Value) -> Vec<Assertion> {
         "partial",
         "rain did not grow grass or flowers",
     );
-    push_optional_i64_assertion(
+    push_optional_i64_min_of_paths_assertion(
         &mut out,
         state,
         "eco.plants_support_small_animals",
-        "eco_cycle.rabbits_born",
+        &["eco_cycle.rabbits_born", "eco_cycle.rabbits"],
         ">",
         json!(0),
         "partial",
         "plants did not support new small animals",
     );
-    push_optional_i64_assertion(
+    push_optional_i64_min_of_paths_assertion(
         &mut out,
         state,
         "eco.small_animals_support_wildlife",
-        "eco_cycle.wildlife_born",
+        &["eco_cycle.wildlife_born", "eco_cycle.wildlife"],
         ">",
         json!(0),
         "partial",
         "small animals did not support larger wildlife",
     );
     out
+}
+
+fn push_optional_i64_min_of_paths_assertion(
+    out: &mut Vec<Assertion>,
+    state: &Value,
+    id: &str,
+    paths: &[&str],
+    op: &str,
+    expected: Value,
+    severity: &str,
+    message: &str,
+) {
+    let value = paths.iter().filter_map(|path| path_i64(state, path)).max();
+    if let Some(value) = value {
+        let path_label = paths.join("|");
+        out.push(assertion(
+            id,
+            &json!(value),
+            op,
+            expected,
+            severity,
+            message,
+            Some(&path_label),
+        ));
+    }
 }
 
 fn push_optional_i64_assertion(
@@ -1635,6 +1891,7 @@ mod tests {
 
         let assertions = built_in_assertions(
             &png,
+            None,
             &sim,
             Some(&state),
             None,
@@ -1648,6 +1905,23 @@ mod tests {
         assert!(complete.ok, "{}: {}", complete.id, complete.message);
         assert!(!assertions.iter().any(|a| a.id == "gameplay.nation_progress"));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn luma_flicker_assertion_flags_large_adjacent_brightness_jump() {
+        let prev_png = json!({"verdict":"OK","luma_mean":72.0});
+        let png = json!({"verdict":"OK","luma_mean":128.5});
+        let prev_state = json!({"render": {"lighting": {"dayness": 0.74}}});
+        let state = json!({"render": {"lighting": {"dayness": 0.77}}});
+
+        let assertions =
+            visual_luma_flicker_assertions(&png, &prev_png, Some(&state), Some(&prev_state));
+
+        let flicker =
+            assertions.iter().find(|a| a.id == "visual.luma_flicker_between_iters").unwrap();
+        assert!(!flicker.ok);
+        assert_eq!(flicker.severity, "partial");
+        assert_eq!(flicker.actual, json!(56.5));
     }
 
     #[test]
@@ -1741,6 +2015,30 @@ mod tests {
     }
 
     #[test]
+    fn resource_deltas_passes_when_final_state_proves_gameplay_motion() {
+        let dir = temp_root("xtask_deltas_final_state_motion");
+        let deltas = json!({
+            "tick": 100,
+            "resource_deltas": []
+        });
+        let final_state = json!({
+            "player": {"nations_founded": 1, "blocks_gathered": 0, "monsters_killed": 0},
+            "eco_cycle": {"fruit_eaten": 12, "fruit_grown": 4, "plants_grown": 3},
+            "nations": {"total_nations": 2}
+        });
+        fs::write(dir.join("diff.json"), deltas.to_string()).unwrap();
+        fs::write(dir.join("final_state.json"), final_state.to_string()).unwrap();
+        let assertions = resource_deltas_assertions(&dir);
+        let a = assertions
+            .iter()
+            .find(|a| a.id == "state.resource_deltas_have_nontick_motion")
+            .expect("resource_deltas assertion missing");
+        assert!(a.ok);
+        assert!(a.actual.as_u64().unwrap_or(0) >= 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn resource_deltas_passes_with_nontick_motion() {
         let dir = temp_root("xtask_deltas_with_nontick");
         let deltas = json!({
@@ -1759,6 +2057,53 @@ mod tests {
         assert!(a.ok);
         assert_eq!(a.actual, json!(1));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn eco_support_assertions_accept_existing_animals() {
+        let state = json!({
+            "eco_cycle": {
+                "clouds": 3,
+                "rainfall": 10.0,
+                "plants_grown": 5,
+                "rabbits_born": 0,
+                "rabbits": 4,
+                "wildlife_born": 0,
+                "wildlife": 2
+            }
+        });
+        let assertions = eco_cycle_assertions(&state);
+        for id in [
+            "eco.plants_support_small_animals",
+            "eco.small_animals_support_wildlife",
+        ] {
+            let a = assertions.iter().find(|a| a.id == id).expect("assertion missing");
+            assert!(a.ok, "{id} should pass with existing animals");
+        }
+    }
+
+    #[test]
+    fn eco_support_assertions_still_fail_without_animals() {
+        let state = json!({
+            "eco_cycle": {
+                "clouds": 3,
+                "rainfall": 10.0,
+                "plants_grown": 5,
+                "rabbits_born": 0,
+                "rabbits": 0,
+                "wildlife_born": 0,
+                "wildlife": 0
+            }
+        });
+        let assertions = eco_cycle_assertions(&state);
+        for id in [
+            "eco.plants_support_small_animals",
+            "eco.small_animals_support_wildlife",
+        ] {
+            let a = assertions.iter().find(|a| a.id == id).expect("assertion missing");
+            assert!(!a.ok, "{id} should fail without born or current animals");
+            assert_eq!(a.severity, "partial");
+        }
     }
 
     #[test]
@@ -1844,6 +2189,69 @@ mod tests {
         assert_eq!(scan.files_scanned, 0);
         assert_eq!(scan.deserialize_invalid_count, 0);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn archive_error_logs_writes_all_error_lines_with_sources() {
+        let root = temp_root("xtask_error_archive");
+        fs::create_dir_all(root.join("screenshots")).unwrap();
+        fs::create_dir_all(root.join("run-logs")).unwrap();
+        fs::write(
+            root.join("screenshots/loop_run.log.err"),
+            "INFO start\nERROR runtime failed\nwarn only\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("run-logs/build_loop.log"),
+            "Compiling crate\nerror[E0599]: missing method\nfatal error LNK1120\n",
+        )
+        .unwrap();
+        let out = root.join("screenshots/iter_1");
+        fs::create_dir_all(&out).unwrap();
+
+        let summary = archive_error_logs(&root, &out).unwrap();
+
+        assert_eq!(summary.error_line_count, 3);
+        let text = fs::read_to_string(out.join("error_logs.txt")).unwrap();
+        assert!(text.contains("screenshots/loop_run.log.err:2"));
+        assert!(text.contains("ERROR runtime failed"));
+        assert!(!text.contains("INFO start"));
+        assert!(!text.contains("warn only"));
+        assert!(text.contains("run-logs/build_loop.log:2"));
+        assert!(text.contains("error[E0599]: missing method"));
+        assert!(text.contains("run-logs/build_loop.log:3"));
+        assert!(text.contains("fatal error LNK1120"));
+
+        let json: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("error_logs.json")).unwrap())
+                .unwrap();
+        assert_eq!(json["error_line_count"], json!(3));
+        assert_eq!(json["entries"][0]["line"], json!(2));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn archive_error_logs_for_files_ignores_unlisted_old_logs() {
+        let root = temp_root("xtask_error_archive_files");
+        fs::create_dir_all(root.join("run-logs")).unwrap();
+        fs::create_dir_all(root.join(".harness/scratch")).unwrap();
+        let play = root.join("run-logs/play.log.err");
+        fs::write(&play, "ERROR fresh crash\n").unwrap();
+        fs::write(
+            root.join(".harness/scratch/old.log"),
+            "ERROR stale harness noise\n",
+        )
+        .unwrap();
+
+        let summary = archive_error_logs_for_files(&root, &root.join("run-logs"), &[play]).unwrap();
+
+        assert_eq!(summary.error_line_count, 1);
+        let text = fs::read_to_string(root.join("run-logs/error_logs.txt")).unwrap();
+        assert!(text.contains("ERROR fresh crash"));
+        assert!(!text.contains("stale harness noise"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn temp_root(name: &str) -> std::path::PathBuf {

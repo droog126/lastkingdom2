@@ -193,19 +193,35 @@ mod tests {
     }
 
     #[test]
-    fn protection_remove_observer_fires_once_per_removal() {
+    fn protection_remove_observer_respects_run_conditions() {
         use bevy::ecs::lifecycle::Remove;
 
         #[derive(Resource, Default)]
         struct Hits(u32);
 
+        #[derive(Resource, Default)]
+        struct ObserverEnabled(bool);
+
         let mut app = App::new();
-        app.init_resource::<Hits>().add_observer(
-            |trigger: On<Remove, Protection>, mut hits: ResMut<Hits>| {
+        app.init_resource::<Hits>().init_resource::<ObserverEnabled>().add_observer(
+            (|trigger: On<Remove, Protection>, mut hits: ResMut<Hits>| {
                 hits.0 += 1;
                 let _ = trigger.event_target();
-            },
+            })
+            .run_if(|enabled: Res<ObserverEnabled>| enabled.0),
         );
+
+        let blocked = app.world_mut().spawn(Protection::opening()).id();
+        app.world_mut().entity_mut(blocked).remove::<Protection>();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Hits>().0,
+            0,
+            "observer run condition should skip removal handling while disabled"
+        );
+
+        app.world_mut().resource_mut::<ObserverEnabled>().0 = true;
 
         let e1 = app.world_mut().spawn(Protection::opening()).id();
         let e2 = app.world_mut().spawn(Protection::mid_join()).id();
@@ -218,6 +234,55 @@ mod tests {
             app.world().resource::<Hits>().0,
             1,
             "observer should fire only on plain removal, not on overwrite"
+        );
+    }
+
+    #[test]
+    fn protection_remove_observer_can_chain_run_conditions() {
+        use bevy::ecs::lifecycle::Remove;
+
+        #[derive(Resource, Default)]
+        struct Hits(u32);
+
+        #[derive(Resource, Default)]
+        struct ObserverEnabled(bool);
+
+        #[derive(Resource, Default)]
+        struct ObserverArmed(bool);
+
+        let mut app = App::new();
+        app.init_resource::<Hits>()
+            .insert_resource(ObserverEnabled(true))
+            .init_resource::<ObserverArmed>()
+            .add_observer(
+                (|trigger: On<Remove, Protection>, mut hits: ResMut<Hits>| {
+                    hits.0 += 1;
+                    let _ = trigger.event_target();
+                })
+                .run_if(|enabled: Res<ObserverEnabled>| enabled.0)
+                .run_if(|armed: Res<ObserverArmed>| armed.0),
+            );
+
+        let blocked = app.world_mut().spawn(Protection::opening()).id();
+        app.world_mut().entity_mut(blocked).remove::<Protection>();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Hits>().0,
+            0,
+            "observer should skip when any chained run condition is false"
+        );
+
+        app.world_mut().resource_mut::<ObserverArmed>().0 = true;
+
+        let observed = app.world_mut().spawn(Protection::opening()).id();
+        app.world_mut().entity_mut(observed).remove::<Protection>();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Hits>().0,
+            1,
+            "observer should run after all chained run conditions are true"
         );
     }
 }

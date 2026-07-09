@@ -13,19 +13,19 @@ Use this skill after `$closed-loop-ai-dev` identifies that PNG review is needed,
 
 ## Required Inputs
 
-Minimum:
+Required:
 
 - current screenshot PNG path
 - current `health.json` (must include `assertions.failed`, `assertions.hard_failed`, `assertions.partial_failed`, `verdict`, and the `stderr` block: `deserialize_invalid_count`, `out_of_bounds_count`, `voxel_overflow_count`, `files_scanned`)
+- current `regression.json` (must include `newly_failed`, `still_failing`, `newly_passed` — list every newly-failed assertion in the verdict)
+- `.harness/KNOWN_ISSUES.md` "Open" section (must cross-check: did this iter fix any open issue?)
 
 Preferred:
 
 - current `assertions.json` (full assertion list with id + severity + actual + expected)
-- current `regression.json` (must include `newly_failed`, `still_failing`, `newly_passed` — list every newly-failed assertion in the verdict)
 - current `final_state.json` (must include `camera.mode`, `camera.first_person_eye`, `monsters.current`, `nations.total_nations`, `network_command.move_world_sent`, `role`)
 - current `diff.json` (`resource_deltas` for sim-motion evidence)
 - previous comparable screenshot, `health.json`, and `diff.json`
-- `.harness/KNOWN_ISSUES.md` "Open" section (must cross-check: did this iter fix any open issue?)
 - current task goal (from `decision.md` task: line or `task:` field)
 
 If a required visual cannot be inspected, score only artifact-backed categories and mark visual categories as blocked with the reason.

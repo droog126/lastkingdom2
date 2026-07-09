@@ -6,7 +6,7 @@ use lk2_core::ecology::{
     EcologyKind, ResourceDropKind, ResourceNodeKind, TreeKind, WildlifeKind, ecology_entry,
 };
 use lk2_core::player::PlayerState;
-use lk2_core::world::World as GameWorld;
+use lk2_core::world::{BlockType, World as GameWorld};
 
 use crate::render::scalar_field::effective_ground_height;
 use crate::render::{CameraAngles, CameraMode};
@@ -33,16 +33,17 @@ impl Default for PrettyConfig {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 pub struct PlayerAvatarModel;
 
-#[derive(Component)]
+#[derive(Component, Clone, Default)]
 pub struct PlayerReadabilityMarker {
     pub part: PlayerReadabilityMarkerPart,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PlayerReadabilityMarkerPart {
+    #[default]
     Ring,
     Arrow,
 }
@@ -71,6 +72,7 @@ pub struct MonsterCube {
     pub base: Vec3,
 }
 
+#[allow(dead_code)]
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EcoVisual {
     Cloud { id: u32 },
@@ -83,10 +85,12 @@ pub enum EcoVisual {
     Co2Bubble { index: u32 },
 }
 
+#[allow(dead_code)]
 pub fn eco_fruit_marker_count(fruit: u32) -> u32 {
     fruit.clamp(1, 3)
 }
 
+#[allow(dead_code)]
 const ECO_CO2_BUBBLE_COUNT: u32 = 6;
 
 // Animation-speed normalization baseline (PlayerState.pos delta m/s => smoothed_speed ~1.0).
@@ -153,11 +157,17 @@ pub fn update_player_anim_state(
     state.last_pos_y = player.pos.y;
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct CloudPuff {
     pub base: Vec3,
 
     pub phase: f32,
+}
+
+impl Default for CloudPuff {
+    fn default() -> Self {
+        Self { base: Vec3::ZERO, phase: 0.0 }
+    }
 }
 
 fn cloud_puff_translation(base: Vec3, phase: f32, elapsed_secs: f32) -> Vec3 {
@@ -167,7 +177,7 @@ fn cloud_puff_translation(base: Vec3, phase: f32, elapsed_secs: f32) -> Vec3 {
     base + Vec3::new(drift_x, bob_y, drift_z)
 }
 
-#[allow(unreachable_code)]
+#[allow(unreachable_code, unused_variables)]
 pub fn spawn_pretty(
     mut commands: Commands,
     game_world: Res<GameWorld>,
@@ -203,6 +213,20 @@ pub fn spawn_pretty(
     let auto_demo_mode = std::env::args().any(|a| a == "--auto-demo");
     let world_center = lk2_core::constant::WORLD_SIZE as f32 * 0.5 + 0.5;
     let world_anchor = Vec3::new(world_center, player.pos.y, world_center);
+
+    spawn_fresh_grass_scene(
+        &mut commands,
+        &game_world,
+        player.pos,
+        &asset_server,
+        camera_angles.yaw,
+        first_person_mode,
+        &mut meshes,
+        &mut materials,
+    );
+    // The old dense village/ecology presentation is intentionally bypassed:
+    // this startup scene is authored through Bevy 0.19 BSN and kept minimal.
+    return;
 
     if cfg.show_water {
         let s = 14.0_f32;
@@ -557,17 +581,15 @@ fn spawn_player_readability_marker(
 ) {
     let marker_y = avatar_translation.y + PLAYER_MARKER_Y_OFFSET;
     let marker_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.12, 0.28, 0.95, 0.82),
+        base_color: Color::srgb(0.12, 0.28, 0.95),
         emissive: Color::srgb(0.08, 0.16, 0.55).into(),
-        alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.65,
         metallic: 0.0,
         ..default()
     });
     let arrow_mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(1.0, 0.92, 0.22, 0.95),
+        base_color: Color::srgb(1.0, 0.92, 0.22),
         emissive: Color::srgb(0.55, 0.38, 0.04).into(),
-        alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.55,
         metallic: 0.0,
         ..default()
@@ -576,40 +598,439 @@ fn spawn_player_readability_marker(
         major_radius: PLAYER_MARKER_RING_RADIUS,
         minor_radius: PLAYER_MARKER_RING_THICKNESS,
     });
-    commands.spawn((
-        Mesh3d(ring_mesh),
-        MeshMaterial3d(marker_mat),
-        Transform::from_translation(Vec3::new(
-            avatar_translation.x,
-            marker_y,
-            avatar_translation.z,
-        )),
-        PlayerReadabilityMarker { part: PlayerReadabilityMarkerPart::Ring },
-        Visibility::Visible,
-    ));
+    commands.spawn_scene(bsn! {
+        #FreshScenePlayerRing
+        Mesh3d({ring_mesh})
+        MeshMaterial3d::<StandardMaterial>({marker_mat})
+        Transform {
+            translation: Vec3::new(avatar_translation.x, marker_y, avatar_translation.z),
+        }
+        PlayerReadabilityMarker {
+            part: PlayerReadabilityMarkerPart::Ring,
+        }
+        Visibility::Visible
+    });
     let arrow_mesh = meshes.add(Cuboid::new(
         PLAYER_MARKER_ARROW_WIDTH,
         PLAYER_MARKER_RING_THICKNESS * 1.8,
         PLAYER_MARKER_ARROW_LENGTH,
     ));
     let forward = Quat::from_rotation_y(yaw).mul_vec3(Vec3::Z);
-    commands.spawn((
-        Mesh3d(arrow_mesh),
-        MeshMaterial3d(arrow_mat),
-        Transform::from_translation(
-            Vec3::new(avatar_translation.x, marker_y + 0.03, avatar_translation.z)
-                + forward * (PLAYER_MARKER_RING_RADIUS + PLAYER_MARKER_ARROW_LENGTH * 0.42),
-        )
-        .with_rotation(Quat::from_rotation_y(yaw)),
-        PlayerReadabilityMarker { part: PlayerReadabilityMarkerPart::Arrow },
-        Visibility::Visible,
-    ));
+    let arrow_translation = Vec3::new(avatar_translation.x, marker_y + 0.03, avatar_translation.z)
+        + forward * (PLAYER_MARKER_RING_RADIUS + PLAYER_MARKER_ARROW_LENGTH * 0.42);
+    commands.spawn_scene(bsn! {
+        #FreshScenePlayerArrow
+        Mesh3d({arrow_mesh})
+        MeshMaterial3d::<StandardMaterial>({arrow_mat})
+        Transform {
+            translation: arrow_translation,
+            rotation: Quat::from_rotation_y(yaw),
+        }
+        PlayerReadabilityMarker {
+            part: PlayerReadabilityMarkerPart::Arrow,
+        }
+        Visibility::Visible
+    });
 }
 
 fn local_offset_from_yaw(offset: Vec3, yaw: f32) -> Vec3 {
     let forward = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
     let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
     right * offset.x + Vec3::Y * offset.y + forward * offset.z
+}
+
+fn supports_grass_detail(game_world: &GameWorld, x: i32, z: i32, ground_y: f32) -> bool {
+    let surface_y = ground_y.floor() as i32 - 1;
+    matches!(
+        game_world.get(x, surface_y, z),
+        BlockType::Grass | BlockType::Dirt | BlockType::Leaves | BlockType::BerryThicket
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_fresh_grass_scene(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    asset_server: &Res<AssetServer>,
+    yaw: f32,
+    first_person_mode: bool,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let center = Vec3::new(player_pos.x, player_pos.y, player_pos.z);
+    spawn_grass_meadow(commands, game_world, center, yaw, meshes, materials);
+
+    if !first_person_mode {
+        let ground_top = effective_ground_height(
+            game_world,
+            player_pos.x.floor() as i32,
+            player_pos.z.floor() as i32,
+        );
+        let avatar_translation =
+            player_avatar_translation(player_pos.x, ground_top, player_pos.z, 0.0);
+        let gatherer_scene = asset_server
+            .load(GltfAssetLabel::Scene(0).from_asset("procedural/pretty/sokpop_gatherer.glb"));
+        commands.queue_spawn_scene(bsn! {
+            #FreshScenePlayer
+            Name("fresh_scene_player")
+            WorldAssetRoot({gatherer_scene})
+            Transform {
+                translation: avatar_translation,
+                rotation: Quat::from_rotation_y(yaw),
+                scale: Vec3::splat(PLAYER_AVATAR_SCALE),
+            }
+            PlayerAvatarModel
+        });
+        spawn_player_readability_marker(commands, meshes, materials, avatar_translation, yaw);
+    }
+
+    spawn_simple_tree(
+        commands,
+        game_world,
+        center,
+        local_offset_from_yaw(Vec3::new(-8.8, 0.0, 8.2), yaw),
+        1.0,
+        true,
+        yaw,
+        meshes,
+        materials,
+    );
+    spawn_simple_tree(
+        commands,
+        game_world,
+        center,
+        local_offset_from_yaw(Vec3::new(9.4, 0.0, 9.8), yaw),
+        0.9,
+        false,
+        yaw,
+        meshes,
+        materials,
+    );
+    spawn_berry_bush(
+        commands,
+        game_world,
+        center,
+        local_offset_from_yaw(Vec3::new(3.6, 0.0, 4.8), yaw),
+        meshes,
+        materials,
+    );
+    spawn_scene_rabbit(
+        commands,
+        game_world,
+        center,
+        local_offset_from_yaw(Vec3::new(-3.4, 0.0, 4.4), yaw),
+        yaw,
+        asset_server,
+    );
+    spawn_scene_cloud(
+        commands,
+        center + local_offset_from_yaw(Vec3::new(0.0, 0.0, 14.0), yaw) + Vec3::Y * 11.5,
+        meshes,
+        materials,
+    );
+}
+
+fn spawn_grass_meadow(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    center: Vec3,
+    yaw: f32,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let grass_dark = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.25, 0.55, 0.20),
+        emissive: Color::srgb(0.020, 0.055, 0.014).into(),
+        perceptual_roughness: 0.98,
+        metallic: 0.0,
+        ..default()
+    });
+    let flower_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.78, 0.24),
+        emissive: Color::srgb(0.13, 0.08, 0.015).into(),
+        perceptual_roughness: 0.82,
+        metallic: 0.0,
+        ..default()
+    });
+    let blade_mesh = meshes.add(Cuboid::new(0.12, 0.42, 0.10));
+
+    for i in 0..58 {
+        let angle = i as f32 * 2.3999631;
+        let radius = 1.8 + (i % 13) as f32 * 0.86;
+        let local = Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius * 0.78);
+        let offset = local_offset_from_yaw(local, yaw);
+        let x = center.x + offset.x;
+        let z = center.z + offset.z;
+        let bx = x.floor() as i32;
+        let bz = z.floor() as i32;
+        let ground_y = effective_ground_height(game_world, bx, bz);
+        if !supports_grass_detail(game_world, bx, bz, ground_y) {
+            continue;
+        }
+        let mat = if i % 11 == 0 {
+            flower_mat.clone()
+        } else {
+            grass_dark.clone()
+        };
+        let height = if i % 11 == 0 {
+            0.30
+        } else {
+            0.28 + (i % 5) as f32 * 0.045
+        };
+        commands.spawn_scene(bsn! {
+            #FreshSceneGrassBlade
+            Name("fresh_scene_grass_blade")
+            Mesh3d({blade_mesh.clone()})
+            MeshMaterial3d::<StandardMaterial>({mat})
+            Transform {
+                translation: Vec3::new(x, ground_y + height * 0.5 + 0.04, z),
+                rotation: Quat::from_rotation_y(yaw + angle),
+                scale: Vec3::new(0.75, height / 0.42, 0.75),
+            }
+        });
+    }
+}
+
+fn spawn_simple_tree(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    center: Vec3,
+    offset: Vec3,
+    scale: f32,
+    drops_branches: bool,
+    yaw: f32,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let trunk = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.48, 0.29, 0.12),
+        perceptual_roughness: 0.86,
+        metallic: 0.0,
+        ..default()
+    });
+    let leaf = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.20, 0.60, 0.22),
+        emissive: Color::srgb(0.020, 0.070, 0.016).into(),
+        perceptual_roughness: 0.92,
+        metallic: 0.0,
+        ..default()
+    });
+    let trunk_mesh = meshes.add(Cuboid::new(0.72, 2.6, 0.72));
+    let leaf_mesh = meshes.add(Sphere::new(1.35));
+    let x = center.x + offset.x;
+    let z = center.z + offset.z;
+    let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+
+    commands.spawn_scene(bsn! {
+        #FreshSceneTreeTrunk
+        Name("fresh_scene_tree_trunk")
+        Mesh3d({trunk_mesh})
+        MeshMaterial3d::<StandardMaterial>({trunk})
+        Transform {
+            translation: Vec3::new(x, ground_y + 1.30 * scale, z),
+            scale: Vec3::new(scale, scale, scale),
+        }
+    });
+    for (lx, ly, lz, s) in [
+        (0.0, 2.85, 0.0, 1.15),
+        (-0.72, 2.55, 0.10, 0.82),
+        (0.72, 2.48, -0.05, 0.78),
+        (0.08, 3.35, 0.10, 0.72),
+    ] {
+        commands.spawn_scene(bsn! {
+            #FreshSceneTreeLeaf
+            Name("fresh_scene_tree_leaf")
+            Mesh3d({leaf_mesh.clone()})
+            MeshMaterial3d::<StandardMaterial>({leaf.clone()})
+            Transform {
+                translation: Vec3::new(x + lx * scale, ground_y + ly * scale, z + lz * scale),
+                scale: Vec3::splat(s * scale),
+            }
+        });
+    }
+    if drops_branches {
+        spawn_fallen_branches(
+            commands,
+            game_world,
+            Vec3::new(x, ground_y, z),
+            yaw,
+            scale,
+            meshes,
+            materials,
+        );
+    }
+}
+
+fn spawn_fallen_branches(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    tree_base: Vec3,
+    yaw: f32,
+    tree_scale: f32,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let branch_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.44, 0.27, 0.12),
+        perceptual_roughness: 0.9,
+        metallic: 0.0,
+        ..default()
+    });
+    let branch_mesh = meshes.add(Cuboid::new(1.0, 0.12, 0.16));
+    for (local_x, local_z, length, angle) in [
+        (-1.10, 0.92, 1.65, 0.35),
+        (0.88, -0.76, 1.18, -0.55),
+        (1.38, 0.62, 0.82, 0.95),
+    ] {
+        let offset = local_offset_from_yaw(
+            Vec3::new(local_x * tree_scale, 0.0, local_z * tree_scale),
+            yaw,
+        );
+        let x = tree_base.x + offset.x;
+        let z = tree_base.z + offset.z;
+        let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+        commands.spawn_scene(bsn! {
+            #FreshSceneFallenBranch
+            Name("fresh_scene_fallen_branch")
+            Mesh3d({branch_mesh.clone()})
+            MeshMaterial3d::<StandardMaterial>({branch_mat.clone()})
+            Transform {
+                translation: Vec3::new(x, ground_y + 0.08, z),
+                rotation: Quat::from_rotation_y(yaw + angle),
+                scale: Vec3::new(length * tree_scale, 1.0, 1.0),
+            }
+        });
+    }
+}
+
+fn spawn_berry_bush(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    center: Vec3,
+    offset: Vec3,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let bush_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.18, 0.50, 0.20),
+        emissive: Color::srgb(0.018, 0.060, 0.015).into(),
+        perceptual_roughness: 0.94,
+        metallic: 0.0,
+        ..default()
+    });
+    let berry_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.86, 0.08, 0.18),
+        emissive: Color::srgb(0.16, 0.015, 0.025).into(),
+        perceptual_roughness: 0.62,
+        metallic: 0.0,
+        ..default()
+    });
+    let bush_mesh = meshes.add(Sphere::new(0.68));
+    let berry_mesh = meshes.add(Sphere::new(0.13));
+    let x = center.x + offset.x;
+    let z = center.z + offset.z;
+    let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+
+    for (bx, bz, s) in [(0.0, 0.0, 1.0), (-0.38, 0.12, 0.72), (0.42, -0.10, 0.68)] {
+        commands.spawn_scene(bsn! {
+            #FreshSceneBerryBush
+            Name("fresh_scene_berry_bush")
+            Mesh3d({bush_mesh.clone()})
+            MeshMaterial3d::<StandardMaterial>({bush_mat.clone()})
+            Transform {
+                translation: Vec3::new(x + bx, ground_y + 0.52 * s, z + bz),
+                scale: Vec3::new(1.0 * s, 0.72 * s, 1.0 * s),
+            }
+        });
+    }
+    for (bx, by, bz) in [
+        (-0.32, 0.78, 0.18),
+        (0.22, 0.88, -0.28),
+        (0.48, 0.62, 0.16),
+        (-0.06, 1.02, 0.34),
+        (-0.50, 0.58, -0.20),
+    ] {
+        commands.spawn_scene(bsn! {
+            #FreshSceneBerry
+            Name("fresh_scene_berry")
+            Mesh3d({berry_mesh.clone()})
+            MeshMaterial3d::<StandardMaterial>({berry_mat.clone()})
+            Transform {
+                translation: Vec3::new(x + bx, ground_y + by, z + bz),
+            }
+        });
+    }
+}
+
+fn spawn_scene_rabbit(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    center: Vec3,
+    offset: Vec3,
+    yaw: f32,
+    asset_server: &Res<AssetServer>,
+) {
+    let x = center.x + offset.x;
+    let z = center.z + offset.z;
+    let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+    let rabbit_entry = ecology_entry(EcologyKind::Wildlife(WildlifeKind::Rabbit));
+    let rabbit_scale = rabbit_entry.visual_scale;
+    let rabbit_scene =
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset(rabbit_entry.model_path));
+    commands.queue_spawn_scene(bsn! {
+        #FreshSceneRabbit
+        Name("fresh_scene_rabbit")
+        WorldAssetRoot({rabbit_scene})
+        Transform {
+            translation: Vec3::new(x, ground_y + 0.03, z),
+            rotation: Quat::from_rotation_y(yaw - 0.45),
+            scale: rabbit_scale,
+        }
+    });
+}
+
+fn spawn_scene_cloud(
+    commands: &mut Commands,
+    base: Vec3,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let cloud_color = Color::srgb(0.94, 0.97, 1.0);
+    let cloud_mat = materials.add(StandardMaterial {
+        base_color: cloud_color,
+        emissive: (cloud_color.to_linear() * 0.20).into(),
+        perceptual_roughness: 0.96,
+        metallic: 0.0,
+        ..default()
+    });
+    let puff_mesh = meshes.add(Sphere::new(1.0));
+    for (i, (x, y, z, sx, sy, sz)) in [
+        (0.0, 0.0, 0.0, 1.65, 0.58, 0.92),
+        (-1.15, -0.05, 0.05, 1.05, 0.50, 0.74),
+        (1.20, -0.08, -0.08, 1.20, 0.48, 0.80),
+        (0.20, 0.52, 0.08, 0.88, 0.58, 0.66),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let puff_base = base + Vec3::new(x, y, z);
+        let phase = i as f32 * 1.1;
+        commands.spawn_scene(bsn! {
+            #FreshSceneCloud
+            Name("fresh_scene_cloud")
+            Mesh3d({puff_mesh.clone()})
+            MeshMaterial3d::<StandardMaterial>({cloud_mat.clone()})
+            Transform {
+                translation: puff_base,
+                scale: Vec3::new(sx, sy, sz),
+            }
+            CloudPuff {
+                base: puff_base,
+                phase,
+            }
+        });
+    }
 }
 
 fn spawn_playable_village_diorama(
@@ -1180,6 +1601,7 @@ fn spawn_cube(
         .id()
 }
 
+#[allow(dead_code)]
 pub fn spawn_eco_visuals(
     mut commands: Commands,
     eco: Res<EcoCycle>,
@@ -1318,6 +1740,7 @@ pub fn spawn_eco_visuals(
     );
 }
 
+#[allow(dead_code)]
 fn spawn_eco_scene_visual(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
@@ -1333,6 +1756,7 @@ fn spawn_eco_scene_visual(
     ));
 }
 
+#[allow(dead_code)]
 fn spawn_eco_visual_part(
     commands: &mut Commands,
     mesh: Handle<Mesh>,
@@ -1349,6 +1773,7 @@ fn spawn_eco_visual_part(
     ));
 }
 
+#[allow(dead_code)]
 pub fn update_eco_visuals(
     time: Res<Time>,
     eco: Res<EcoCycle>,
@@ -1496,6 +1921,7 @@ pub fn update_eco_visuals(
     }
 }
 
+#[allow(dead_code)]
 pub fn sync_eco_visual_spawns(
     mut commands: Commands,
     eco: Res<EcoCycle>,

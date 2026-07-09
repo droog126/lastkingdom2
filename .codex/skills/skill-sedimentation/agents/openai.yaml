@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Sedimentation"
+  short_description: "Turn repeated agent mistakes or 沉淀 requests into routed reusable skills"
+  default_prompt: "Use $skill-sedimentation to turn this repeated failure or 沉淀 request into a routed reusable skill."

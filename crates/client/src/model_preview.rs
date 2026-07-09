@@ -28,6 +28,7 @@ use bevy::pbr::{
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, WindowResolution};
 use bevy_world_serialization::WorldAsset;
 
@@ -441,7 +442,14 @@ fn setup_overlay(mut commands: Commands, state: Res<ModelPreviewState>) {
         BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.62)),
         children![(
             Text::new(preview_overlay_text(&state, focused)),
-            TextFont { font_size: FontSize::Px(15.0), ..default() },
+            TextFont {
+                font: FontSource::UiMonospace,
+                font_size: FontSize::Rem(0.94),
+                weight: FontWeight::SEMIBOLD,
+                width: FontWidth::SEMI_CONDENSED,
+                ..default()
+            },
+            LetterSpacing::Px(0.3),
             TextColor(Color::WHITE),
             PreviewOverlayText,
         )],

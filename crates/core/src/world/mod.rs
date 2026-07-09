@@ -300,8 +300,8 @@ impl World {
         self.edited.insert((x, y, z));
     }
 
-    pub fn in_bounds(&self, _x: i32, y: i32, _z: i32) -> bool {
-        y >= 0 && y < self.size
+    pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
+        x >= 0 && x < self.size && y >= 0 && y < self.size && z >= 0 && z < self.size
     }
 
     pub fn for_each_solid<F: FnMut(i32, i32, i32, BlockType)>(&self, mut f: F) {
@@ -706,7 +706,13 @@ pub const PLAYER_BODY_CLEARANCE_BLOCKS: i32 = 2;
 pub const MAX_SMOOTH_DROP: f32 = 6.0;
 
 pub fn player_body_clear(world: &World, x: i32, foot_y: i32, z: i32) -> bool {
-    if foot_y < 0 || foot_y + PLAYER_BODY_CLEARANCE_BLOCKS > world.size {
+    if x < 0
+        || x >= world.size
+        || z < 0
+        || z >= world.size
+        || foot_y < 0
+        || foot_y + PLAYER_BODY_CLEARANCE_BLOCKS > world.size
+    {
         return false;
     }
     for y in foot_y..(foot_y + PLAYER_BODY_CLEARANCE_BLOCKS) {
@@ -718,6 +724,9 @@ pub fn player_body_clear(world: &World, x: i32, foot_y: i32, z: i32) -> bool {
 }
 
 fn standable_foot_y(world: &World, x: i32, z: i32, near_y: f32, max_step_up: f32) -> Option<i32> {
+    if x < 0 || x >= world.size || z < 0 || z >= world.size {
+        return None;
+    }
     let min_y = ((near_y - MAX_SMOOTH_DROP).floor() as i32).max(1);
     let max_y = ((near_y + max_step_up).ceil() as i32).min(world.size - 2);
     (min_y..=max_y)
@@ -732,6 +741,9 @@ fn standable_foot_y(world: &World, x: i32, z: i32, near_y: f32, max_step_up: f32
 }
 
 fn standable_foot_y_any_height(world: &World, x: i32, z: i32) -> Option<i32> {
+    if x < 0 || x >= world.size || z < 0 || z >= world.size {
+        return None;
+    }
     (1..(world.size - 2)).rev().find(|foot_y| {
         world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
     })
@@ -798,7 +810,10 @@ pub fn player_position_is_safe(world: &World, pos: Vec3) -> bool {
     let x = pos.x.floor() as i32;
     let z = pos.z.floor() as i32;
     let foot_y = pos.y.floor() as i32;
-    foot_y > 0 && world.get(x, foot_y - 1, z).is_solid() && player_body_clear(world, x, foot_y, z)
+    world.in_bounds(x, foot_y, z)
+        && foot_y > 0
+        && world.get(x, foot_y - 1, z).is_solid()
+        && player_body_clear(world, x, foot_y, z)
 }
 
 pub fn resolve_player_stuck_near(
@@ -1086,6 +1101,14 @@ mod tests {
     }
 
     #[test]
+    fn player_stand_position_rejects_world_edge_overflow() {
+        let w = generate_world(&WorldConfig::default());
+
+        assert!(player_stand_position_at(&w, WORLD_SIZE, 0, 15.0, 1.0).is_none());
+        assert!(player_stand_position_at(&w, 0, -1, SEA_LEVEL as f32, 1.0).is_none());
+    }
+
+    #[test]
     fn generate_world_uses_shared_config_and_spawn_platform() {
         let config = WorldConfig::default();
 
@@ -1145,6 +1168,17 @@ mod tests {
         assert_eq!(
             w.get(block_pos[0], block_pos[1] - 1, block_pos[2]),
             BlockType::Dirt
+        );
+    }
+
+    #[test]
+    fn player_position_is_safe_rejects_procedural_xz_out_of_bounds() {
+        let w = generate_world(&WorldConfig::default());
+        let pos = Vec3::new(w.size as f32 + 0.5, 15.0, 0.5);
+
+        assert!(
+            !player_position_is_safe(&w, pos),
+            "procedural terrain may generate out-of-range voxels, but player safety must stay inside world bounds"
         );
     }
 

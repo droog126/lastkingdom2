@@ -85,11 +85,22 @@ screenshots/iter_NN/
   assertions.json
   health.json
   health.txt
+  error_logs.json
+  error_logs.txt
   decision.template.md
   decision.md
 ```
 
 Read `health.json` first. A new loop run should not start until the previous iteration has a `decision.md`.
+Normal client entry points in `justfile` route through `xtask play`, including offline, online,
+model preview, and terrain preview. They write `run-logs/play.log`, `run-logs/play.log.err`, and
+`run-logs/error_logs.{json,txt}` after the client exits; online play also writes
+`run-logs/play_server.log(.err)`. The `error_logs.*` archive contains only error-class lines
+(`error`, `panic`, or `fatal`) from stdout/stderr logs, including Bevy engine errors.
+On Windows, `xtask play` defaults to Vulkan for normal play. Use
+`just play --gpu-backend=dx12` as a fallback when comparing driver-specific render failures.
+Stale global Vulkan implicit layers, such as removed Steam overlay manifests, must be fixed at the
+Windows registry level if Vulkan is tested directly.
 
 ## Next Refactor Order
 

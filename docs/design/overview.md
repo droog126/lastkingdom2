@@ -115,7 +115,7 @@
 ### 开发环境搭建
 
 ```powershell
-# 1. 安装 Rust (需要 1.75+)
+# 1. 安装 Rust (需要 1.85+)
 # 参考 https://www.rust-lang.org/tools/install
 
 # 2. 进入项目目录

@@ -28,11 +28,12 @@ Use this skill for gameplay-facing and engine-facing changes. Combine it with `$
 - Keep visual state tied to simulation state unless the task is explicitly presentation-only.
 - In normal client gameplay, terrain must come from real world/voxel terrain systems. Do not add large fake ground planes, underlays, or player-foot discs that follow the player unless they are explicitly debug/preview-only and default off.
 - If a visual helper follows the player, keep it small, intentional, and named as a helper. Large world-scale meshes must be static in world space or generated from world state, never attached to player movement.
+- Avoid z-fighting in gameplay visuals: do not place large coplanar or near-coplanar planes/thin cuboids over terrain for grass, roads, decals, highlights, or biome patches. Prefer baking color/material variation into the terrain mesh/material; when an overlay is genuinely needed, use an explicit decal/depth-bias/render-layer strategy, keep it non-overlapping, and validate from movement screenshots that it does not flicker.
 
 ## Dependency Guardrails
 
 - `Cargo.toml` pins `compt = ">=1.9, <1.10"` because broccoli 0.6 does not compile with compt 1.10. Do not bump it.
-- Rust edition is 2024 and the repo expects Rust 1.75+.
+- Rust edition is 2024 and the repo expects Rust 1.85+ or newer.
 
 ## Priority Order
 

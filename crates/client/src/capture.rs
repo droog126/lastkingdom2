@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -14,12 +14,17 @@ use lk2_core::world::World as GameWorld;
 
 use crate::OnlineCommandDiagnostics;
 use crate::pretty::{PlayerReadabilityMarker, WorldGroundFallback};
-use crate::render::{CameraAngles, CameraMode, NestMarker, RenderTelemetry, TerrainChunk};
+use crate::render::{
+    CameraAngles, CameraMode, NestMarker, RenderLightingTelemetry, RenderTelemetry, TerrainChunk,
+};
 use crate::ui::ClientRunMode;
 
 pub const FIRST_SCREENSHOT_MIN_PROGRESS: u64 = 100;
 const FIRST_SCREENSHOT_MIN_WALL_SECS: f32 = 4.0;
 const SCREENSHOT_DIR: &str = "screenshots";
+const OBSERVATION_TRACE: &str = "screenshots/observation_trace.jsonl";
+const EVENT_TRACE: &str = "screenshots/event_trace.jsonl";
+const ACTION_TRACE: &str = "screenshots/action_trace.jsonl";
 
 fn capture_enabled() -> bool {
     std::env::var("LK2_CAPTURE").is_ok() || std::env::args().any(|a| a == "--auto-demo")
@@ -56,6 +61,12 @@ pub struct TickRecorder {
     pub current_iter: u32,
 }
 
+#[derive(Default)]
+pub(crate) struct PerceptionTraceState {
+    sample_index: u64,
+    last_observation: Option<serde_json::Value>,
+}
+
 #[derive(Resource, Default, Clone)]
 pub struct StaticWorldVisualSnapshot {
     pub first_player_pos: Option<Vec3>,
@@ -83,6 +94,7 @@ pub struct CaptureStateParams<'w> {
     online_commands: Res<'w, OnlineCommandDiagnostics>,
     static_world_visuals: Res<'w, StaticWorldVisualSnapshot>,
     render_telemetry: Res<'w, RenderTelemetry>,
+    lighting_telemetry: Res<'w, RenderLightingTelemetry>,
 }
 
 pub fn update_static_world_visual_snapshot(
@@ -141,24 +153,38 @@ pub fn periodic_screenshot(
         start.elapsed().as_secs_f32()
     };
     let _ = &params.time;
+    let flicker_probe_dir = std::env::var("LK2_FLICKER_PROBE_DIR").ok();
     let first_progress = first_screenshot_min_progress();
     let capture_tick = if *params.run_mode == ClientRunMode::Offline {
         clock.tick
     } else {
         clock.frame_tick
     };
-    if capture_tick == first_progress {
+    if flicker_probe_dir.is_none() && capture_tick == first_progress {
         eprintln!(
             "[shot] gate reached frame={} sim_tick={} capture_tick={} wall={:.1} mode={:?}",
             clock.frame_tick, clock.tick, capture_tick, now, *params.camera_mode
         );
     }
 
-    if capture_tick >= first_progress && now - clock.last_screenshot_wall >= 4.0 {
+    if flicker_probe_dir.is_none()
+        && capture_tick >= first_progress
+        && now - clock.last_screenshot_wall >= 4.0
+    {
         eprintln!(
             "[shot] fire frame={} sim_tick={} capture_tick={} wall={:.1} last={:.1}",
             clock.frame_tick, clock.tick, capture_tick, now, clock.last_screenshot_wall
         );
+    }
+
+    if let Some(probe_dir) = flicker_probe_dir.as_deref() {
+        if now < 1.0 {
+            return;
+        }
+        if !write_flicker_probe_capture(&mut clock, &mut commands, &params, probe_dir, now) {
+            return;
+        }
+        return;
     }
 
     if !screenshot_gate_ready(*params.run_mode, capture_tick, first_progress, now) {
@@ -187,6 +213,7 @@ pub fn periodic_screenshot(
     let png_path: PathBuf = format!("{}/iter_{:02}.png", iter_dir, iter_id).into();
     let state_path = format!("{}/final_state.json", iter_dir);
     let diff_path = format!("{}/diff.json", iter_dir);
+    let perception_manifest_path = format!("{}/perception_manifest.json", iter_dir);
 
     info!("📸 截图 #{} → {}", iter_id, png_path.display());
     commands
@@ -209,6 +236,7 @@ pub fn periodic_screenshot(
         &params.online_commands,
         &params.static_world_visuals,
         &params.render_telemetry,
+        &params.lighting_telemetry,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
@@ -226,12 +254,72 @@ pub fn periodic_screenshot(
             }
         }
     }
+    let perception_manifest = build_perception_manifest(iter_id, &state);
+    if let Ok(s) = serde_json::to_string_pretty(&perception_manifest) {
+        if let Err(e) = std::fs::write(&perception_manifest_path, s) {
+            warn!("write perception_manifest.json failed: {}", e);
+        } else {
+            info!("perception manifest dumped -> {}", perception_manifest_path);
+        }
+    }
+}
+
+fn write_flicker_probe_capture(
+    clock: &mut SimClock,
+    commands: &mut Commands,
+    params: &CaptureStateParams<'_>,
+    probe_dir: &str,
+    now: f32,
+) -> bool {
+    let interval = std::env::var("LK2_SCREENSHOT_INTERVAL")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.25);
+    if now - clock.last_screenshot_wall < interval {
+        return false;
+    }
+    clock.last_screenshot_wall = now;
+    clock.screenshot_count = clock.screenshot_count.saturating_add(1);
+    let sample_id = clock.screenshot_count;
+    let _ = std::fs::create_dir_all(probe_dir);
+    let png_path: PathBuf = format!("{probe_dir}/frame_{sample_id:04}.png").into();
+    let state_path = format!("{probe_dir}/state_{sample_id:04}.json");
+
+    commands
+        .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+        .observe(bevy::render::view::screenshot::save_to_disk(png_path));
+
+    let state = build_state_json(
+        &params.time,
+        clock,
+        &params.player,
+        &params.pool,
+        &params.nations,
+        &params.monsters,
+        &params.eco,
+        &params.obs,
+        &params.game_world,
+        *params.run_mode,
+        &params.camera_angles,
+        *params.camera_mode,
+        &params.online_commands,
+        &params.static_world_visuals,
+        &params.render_telemetry,
+        &params.lighting_telemetry,
+    );
+    if let Ok(s) = serde_json::to_string_pretty(&state)
+        && let Err(e) = std::fs::write(&state_path, s)
+    {
+        warn!("write flicker probe state failed: {}", e);
+    }
+    true
 }
 
 pub fn tick_recorder(
     mut rec: ResMut<TickRecorder>,
     clock: Res<SimClock>,
     params: CaptureStateParams,
+    mut perception: Local<PerceptionTraceState>,
 ) {
     if !capture_enabled() {
         return;
@@ -263,11 +351,13 @@ pub fn tick_recorder(
         &params.online_commands,
         &params.static_world_visuals,
         &params.render_telemetry,
+        &params.lighting_telemetry,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
         info!("📝 tick state dumped → {}", path);
     }
+    record_perception_tick(&mut perception, sample_tick, &state);
 }
 
 fn latest_existing_iter_id() -> Option<u32> {
@@ -300,6 +390,7 @@ fn build_state_json(
     online_commands: &OnlineCommandDiagnostics,
     static_world_visuals: &StaticWorldVisualSnapshot,
     render_telemetry: &RenderTelemetry,
+    lighting_telemetry: &RenderLightingTelemetry,
 ) -> serde_json::Value {
     let mut state = lk2_core::diagnostics::build_state_json(
         time,
@@ -364,7 +455,7 @@ fn build_state_json(
         );
         obj.insert(
             "render".to_string(),
-            render_telemetry_json(render_telemetry),
+            render_telemetry_json(render_telemetry, lighting_telemetry),
         );
     }
     state
@@ -394,7 +485,10 @@ fn movement_probe_json(snapshot: &StaticWorldVisualSnapshot) -> serde_json::Valu
     })
 }
 
-fn render_telemetry_json(telemetry: &RenderTelemetry) -> serde_json::Value {
+fn render_telemetry_json(
+    telemetry: &RenderTelemetry,
+    lighting: &RenderLightingTelemetry,
+) -> serde_json::Value {
     serde_json::json!({
         "frame": {
             "samples": telemetry.frame_samples,
@@ -411,12 +505,243 @@ fn render_telemetry_json(telemetry: &RenderTelemetry) -> serde_json::Value {
             "greedy_mesh_max_ms": telemetry.greedy_mesh_max_ms,
             "terrain_despawns": telemetry.terrain_despawns,
             "collider_rebuilds": telemetry.collider_rebuilds,
+        },
+        "lighting": {
+            "time_of_day": lighting.time_of_day,
+            "dayness": lighting.dayness,
+            "atmosphere_time_of_day": lighting.atmosphere_time_of_day,
+            "atmosphere_dayness": lighting.atmosphere_dayness,
+            "readable_dayness": lighting.readable_dayness,
+            "sunset_glow": lighting.sunset_glow,
+            "sun_illuminance": lighting.sun_illuminance,
+            "fill_illuminance": lighting.fill_illuminance,
+            "camera_mode": lighting.camera_mode,
         }
     })
 }
 
 fn vec3_json(v: Vec3) -> serde_json::Value {
     serde_json::json!([v.x, v.y, v.z])
+}
+
+fn build_perception_manifest(iter_id: u32, state: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "lk2.perception.manifest.v1",
+        "iter": iter_id,
+        "tick": value_at_path(state, "tick").and_then(|v| v.as_u64()),
+        "frame_tick": value_at_path(state, "frame_tick").and_then(|v| v.as_u64()),
+        "observation_trace": OBSERVATION_TRACE,
+        "event_trace": EVENT_TRACE,
+        "action_trace": ACTION_TRACE,
+        "snapshot_observation": build_observation_sample(iter_id as u64, 0, state),
+    })
+}
+
+fn record_perception_tick(
+    trace: &mut PerceptionTraceState,
+    sample_tick: u64,
+    state: &serde_json::Value,
+) {
+    let observation = build_observation_sample(trace.sample_index, sample_tick, state);
+    if let Some(prev) = trace.last_observation.as_ref() {
+        for event in infer_perception_events(prev, &observation) {
+            append_jsonl(EVENT_TRACE, &event);
+        }
+        if let Some(action) = infer_perception_action(prev, &observation) {
+            append_jsonl(ACTION_TRACE, &action);
+        }
+    }
+    append_jsonl(OBSERVATION_TRACE, &observation);
+    trace.sample_index = trace.sample_index.saturating_add(1);
+    trace.last_observation = Some(observation);
+}
+
+fn build_observation_sample(
+    sample_index: u64,
+    sample_tick: u64,
+    state: &serde_json::Value,
+) -> serde_json::Value {
+    let pool = value_at_path(state, "pool").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let nations = value_at_path(state, "nations").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let monsters =
+        value_at_path(state, "monsters").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let creatures =
+        value_at_path(state, "creatures").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let observer =
+        value_at_path(state, "observer").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let network_command =
+        value_at_path(state, "network_command").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let render = value_at_path(state, "render").cloned().unwrap_or_else(|| serde_json::json!({}));
+
+    serde_json::json!({
+        "schema": "lk2.perception.observation.v1",
+        "sample_index": sample_index,
+        "sample_tick": sample_tick,
+        "tick": value_at_path(state, "tick").and_then(|v| v.as_u64()),
+        "frame_tick": value_at_path(state, "frame_tick").and_then(|v| v.as_u64()),
+        "wall_secs": value_at_path(state, "wall_secs").and_then(|v| v.as_f64()),
+        "role": value_at_path(state, "role").and_then(|v| v.as_str()),
+        "player": {
+            "pos": value_at_path(state, "player.pos").cloned(),
+            "block_pos": value_at_path(state, "player.block_pos").cloned(),
+            "nation_id": value_at_path(state, "player.nation_id").cloned(),
+        },
+        "camera": value_at_path(state, "camera").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "metrics": {
+            "pool": pool,
+            "nations": nations,
+            "monsters": monsters,
+            "creatures": creatures,
+            "observer": observer,
+            "network_command": network_command,
+        },
+        "render": render,
+        "valid_actions": valid_actions_for_state(state),
+    })
+}
+
+fn valid_actions_for_state(state: &serde_json::Value) -> Vec<&'static str> {
+    let mut actions = vec!["wait", "look", "walk_forward", "turn", "gather_foot_block"];
+    let wood = value_at_path(state, "pool.wood").and_then(|v| v.as_i64()).unwrap_or(0);
+    if wood > 0 {
+        actions.push("place_wood_foot_block");
+    }
+    actions.push("found_nation");
+    if value_at_path(state, "monsters.current").and_then(|v| v.as_u64()).unwrap_or(0) > 0 {
+        actions.push("attack_nearest");
+    }
+    if value_at_path(state, "role").and_then(|v| v.as_str()) == Some("client_online") {
+        actions.push("send_move_world");
+    }
+    actions
+}
+
+fn infer_perception_action(
+    prev: &serde_json::Value,
+    current: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let tick = value_at_path(current, "tick").and_then(|v| v.as_u64());
+    let sent_move =
+        numeric_delta(prev, current, "metrics.network_command.move_world_sent").unwrap_or(0.0);
+    if sent_move > 0.0 {
+        return Some(serde_json::json!({
+            "schema": "lk2.perception.action.v1",
+            "tick": tick,
+            "action": "send_move_world",
+            "status": "sent",
+            "count_delta": sent_move,
+        }));
+    }
+
+    if let Some(distance) = position_distance(prev, current, "player.pos") {
+        if distance > 0.05 {
+            return Some(serde_json::json!({
+                "schema": "lk2.perception.action.v1",
+                "tick": tick,
+                "action": "walk_forward",
+                "status": "observed_progress",
+                "distance": distance,
+            }));
+        }
+    }
+
+    if numeric_delta(prev, current, "tick").unwrap_or(0.0) > 0.0 {
+        return Some(serde_json::json!({
+            "schema": "lk2.perception.action.v1",
+            "tick": tick,
+            "action": "wait",
+            "status": "tick_progress",
+        }));
+    }
+    None
+}
+
+fn infer_perception_events(
+    prev: &serde_json::Value,
+    current: &serde_json::Value,
+) -> Vec<serde_json::Value> {
+    let tick = value_at_path(current, "tick").and_then(|v| v.as_u64());
+    let mut events = Vec::new();
+    if let Some(distance) = position_distance(prev, current, "player.pos") {
+        if distance > 0.05 {
+            events.push(serde_json::json!({
+                "schema": "lk2.perception.event.v1",
+                "tick": tick,
+                "event": "player_moved",
+                "distance": distance,
+                "from": value_at_path(prev, "player.pos").cloned(),
+                "to": value_at_path(current, "player.pos").cloned(),
+            }));
+        }
+    }
+
+    for (path, event) in [
+        ("metrics.pool.wood", "pool_wood_changed"),
+        ("metrics.pool.food", "pool_food_changed"),
+        ("metrics.pool.apple", "pool_apple_changed"),
+        ("metrics.pool.soul", "pool_soul_changed"),
+        ("metrics.nations.flag_count", "flag_count_changed"),
+        ("metrics.nations.total_nations", "nation_count_changed"),
+        ("metrics.monsters.current", "monster_count_changed"),
+        (
+            "metrics.creatures.passive_current",
+            "creature_count_changed",
+        ),
+        ("metrics.observer.anomalies", "observer_anomalies_changed"),
+        (
+            "metrics.observer.invariant_violations",
+            "observer_invariant_violations_changed",
+        ),
+    ] {
+        if let Some(delta) = numeric_delta(prev, current, path) {
+            if delta.abs() > f64::EPSILON {
+                events.push(serde_json::json!({
+                    "schema": "lk2.perception.event.v1",
+                    "tick": tick,
+                    "event": event,
+                    "path": path,
+                    "delta": delta,
+                    "previous": value_at_path(prev, path).cloned(),
+                    "current": value_at_path(current, path).cloned(),
+                }));
+            }
+        }
+    }
+    events
+}
+
+fn numeric_delta(prev: &serde_json::Value, current: &serde_json::Value, path: &str) -> Option<f64> {
+    Some(value_at_path(current, path)?.as_f64()? - value_at_path(prev, path)?.as_f64()?)
+}
+
+fn position_distance(
+    prev: &serde_json::Value,
+    current: &serde_json::Value,
+    path: &str,
+) -> Option<f64> {
+    let prev = value_at_path(prev, path)?.as_array()?;
+    let current = value_at_path(current, path)?.as_array()?;
+    if prev.len() != 3 || current.len() != 3 {
+        return None;
+    }
+    let dx = current[0].as_f64()? - prev[0].as_f64()?;
+    let dy = current[1].as_f64()? - prev[1].as_f64()?;
+    let dz = current[2].as_f64()? - prev[2].as_f64()?;
+    Some((dx * dx + dy * dy + dz * dz).sqrt())
+}
+
+fn append_jsonl(path: &str, value: &serde_json::Value) {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{value}") {
+                warn!("append {path} failed: {e}");
+            }
+        }
+        Err(e) => warn!("open {path} failed: {e}"),
+    }
 }
 
 fn first_person_forward(yaw: f32, pitch: f32) -> Vec3 {
@@ -539,6 +864,131 @@ fn value_at_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a ser
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn perception_test_state() -> serde_json::Value {
+        serde_json::json!({
+            "frame_tick": 600,
+            "tick": 100,
+            "wall_secs": 5.0,
+            "role": "client_offline",
+            "player": {
+                "block_pos": [10, 20, 30],
+                "pos": [10.0, 20.0, 30.0],
+                "nation_id": null,
+            },
+            "pool": {
+                "wood": 3,
+                "food": 9,
+                "apple": 1,
+                "soul": 0,
+            },
+            "nations": {
+                "flag_count": 1,
+                "total_nations": 1,
+            },
+            "monsters": {
+                "current": 2,
+                "kingdoms": 1,
+                "nests": 1,
+            },
+            "creatures": {
+                "passive_current": 4,
+            },
+            "observer": {
+                "anomalies": 0,
+                "invariant_violations": 0,
+            },
+            "camera": {
+                "mode": "TopDown",
+                "center_ray_hit": {
+                    "block": "Grass",
+                    "distance": 12.0,
+                },
+            },
+            "network_command": {
+                "move_world_sent": 0,
+            },
+            "render": {
+                "lighting": {
+                    "time_of_day": 0.42,
+                    "dayness": 0.97,
+                    "readable_dayness": 0.97,
+                    "sunset_glow": 0.59,
+                    "sun_illuminance": 110000.0,
+                    "fill_illuminance": 7000.0,
+                    "camera_mode": "TopDown"
+                }
+            },
+        })
+    }
+
+    #[test]
+    fn observation_sample_exposes_semantic_state_and_valid_actions() {
+        let obs = build_observation_sample(7, 105, &perception_test_state());
+
+        assert_eq!(obs["schema"], "lk2.perception.observation.v1");
+        assert_eq!(obs["sample_index"], 7);
+        assert_eq!(obs["sample_tick"], 105);
+        assert_eq!(obs["player"]["block_pos"], serde_json::json!([10, 20, 30]));
+        assert_eq!(obs["camera"]["mode"], "TopDown");
+        assert_eq!(obs["metrics"]["pool"]["wood"], 3);
+        assert_eq!(obs["render"]["lighting"]["time_of_day"], 0.42);
+        assert_eq!(obs["render"]["lighting"]["camera_mode"], "TopDown");
+        let actions = obs["valid_actions"].as_array().unwrap();
+        assert!(actions.iter().any(|a| a == "walk_forward"));
+        assert!(actions.iter().any(|a| a == "place_wood_foot_block"));
+        assert!(actions.iter().any(|a| a == "attack_nearest"));
+    }
+
+    #[test]
+    fn perception_events_report_movement_and_metric_deltas() {
+        let prev = build_observation_sample(0, 100, &perception_test_state());
+        let mut changed_state = perception_test_state();
+        changed_state["tick"] = serde_json::json!(105);
+        changed_state["player"]["pos"] = serde_json::json!([11.0, 20.0, 30.0]);
+        changed_state["pool"]["wood"] = serde_json::json!(1);
+        changed_state["nations"]["total_nations"] = serde_json::json!(2);
+        let current = build_observation_sample(1, 105, &changed_state);
+
+        let events = infer_perception_events(&prev, &current);
+        let names = events.iter().map(|e| e["event"].as_str().unwrap()).collect::<Vec<_>>();
+        assert!(names.contains(&"player_moved"));
+        assert!(names.contains(&"pool_wood_changed"));
+        assert!(names.contains(&"nation_count_changed"));
+
+        let wood = events.iter().find(|e| e["event"] == "pool_wood_changed").unwrap();
+        assert_eq!(wood["delta"], -2.0);
+    }
+
+    #[test]
+    fn perception_action_prefers_explicit_online_move_then_movement() {
+        let mut prev_state = perception_test_state();
+        prev_state["role"] = serde_json::json!("client_online");
+        prev_state["network_command"]["move_world_sent"] = serde_json::json!(2);
+        let prev = build_observation_sample(0, 100, &prev_state);
+
+        let mut current_state = prev_state.clone();
+        current_state["tick"] = serde_json::json!(105);
+        current_state["network_command"]["move_world_sent"] = serde_json::json!(3);
+        current_state["player"]["pos"] = serde_json::json!([11.0, 20.0, 30.0]);
+        let current = build_observation_sample(1, 105, &current_state);
+
+        let action = infer_perception_action(&prev, &current).unwrap();
+        assert_eq!(action["action"], "send_move_world");
+        assert_eq!(action["status"], "sent");
+
+        let mut moved_state = perception_test_state();
+        moved_state["tick"] = serde_json::json!(105);
+        moved_state["player"]["pos"] = serde_json::json!([10.0, 20.0, 31.0]);
+        let moved = build_observation_sample(1, 105, &moved_state);
+        let action = infer_perception_action(
+            &build_observation_sample(0, 100, &perception_test_state()),
+            &moved,
+        )
+        .unwrap();
+        assert_eq!(action["action"], "walk_forward");
+        assert_eq!(action["status"], "observed_progress");
+    }
 
     #[test]
     fn first_screenshot_progress_env_cannot_disable_offline_progress_gate() {

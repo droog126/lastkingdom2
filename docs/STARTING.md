@@ -11,7 +11,7 @@ cd F:\rustProject\lastkingdom2
 just build
 ```
 
-> Rust edition 2024，需要 Rust 1.75+。`Cargo.toml` 已固定 `compt = ">=1.9, <1.10"`（broccoli 0.6 配套版本）— **不要 bump 它**。
+> Rust edition 2024，需要 Rust 1.85+。`Cargo.toml` 已固定 `compt = ">=1.9, <1.10"`（broccoli 0.6 配套版本）— **不要 bump 它**。
 
 ### 国内镜像加速（可选）
 

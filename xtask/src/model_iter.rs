@@ -10,15 +10,16 @@
 //! the closed-loop skill.
 
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::Instant,
 };
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, args};
+use crate::{Result, args, health as rust_health};
 
 const DEV_DYNAMIC_FEATURES: &[&str] = &["dev-dynamic-linking", "lk2-core/dev-dynamic-linking"];
 const OUTPUT_DIR: &str = "screenshots/model_preview";
@@ -86,6 +87,9 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     }
 
     fs::create_dir_all(root.join(OUTPUT_DIR)).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root.join("run-logs")).map_err(|e| e.to_string())?;
+    fs::write(root.join("run-logs/model_preview_all.log"), "").map_err(|e| e.to_string())?;
+    fs::write(root.join("run-logs/model_preview_all.log.err"), "").map_err(|e| e.to_string())?;
     let client_exe = exe_path(root, "lk2-client");
     let envs = runtime_env(root)?;
     if !client_exe.exists() {
@@ -175,12 +179,24 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let summary = summarize(&entries);
     write_results(root, &entries, &summary)?;
     write_decision(root, &entries, &summary, started.elapsed())?;
+    let error_summary = rust_health::archive_error_logs_for_files(
+        root,
+        &root.join("run-logs"),
+        &[
+            root.join("run-logs/model_preview_all.log"),
+            root.join("run-logs/model_preview_all.log.err"),
+        ],
+    )?;
     println!(
         "\n>>> model-preview-all done: {}/{} rendered, mean={:.1}/10 in {:.1}s",
         summary.rendered,
         summary.total,
         summary.mean_score,
         started.elapsed().as_secs_f32()
+    );
+    println!(
+        ">>> archived {} error lines from {} log files to run-logs/error_logs.json and run-logs/error_logs.txt",
+        error_summary.error_line_count, error_summary.files_scanned
     );
     println!(">>> see {OUTPUT_DIR}/decision.md");
     Ok(())
@@ -198,8 +214,24 @@ fn run_one(
         format!("--model-preview-one={stem}"),
         "--model-preview-shot".to_string(),
     ];
+    append_run_header(root, stem, &args)?;
+    let stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("run-logs/model_preview_all.log"))
+        .map_err(|e| e.to_string())?;
+    let stderr = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("run-logs/model_preview_all.log.err"))
+        .map_err(|e| e.to_string())?;
     let mut cmd = Command::new(client_exe);
-    cmd.args(&args).current_dir(root).env_remove("PATH").stdin(std::process::Stdio::null());
+    cmd.args(&args)
+        .current_dir(root)
+        .env_remove("PATH")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
     for (k, v) in envs {
         cmd.env(k, v);
     }
@@ -232,6 +264,22 @@ fn run_one(
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
+    Ok(())
+}
+
+fn append_run_header(root: &Path, stem: &str, args: &[String]) -> Result<()> {
+    let mut stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("run-logs/model_preview_all.log"))
+        .map_err(|e| e.to_string())?;
+    let mut stderr = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("run-logs/model_preview_all.log.err"))
+        .map_err(|e| e.to_string())?;
+    writeln!(stdout, "\n=== model-preview {stem} {:?} ===", args).map_err(|e| e.to_string())?;
+    writeln!(stderr, "\n=== model-preview {stem} {:?} ===", args).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -658,6 +706,7 @@ fn runtime_env(root: &Path) -> Result<Vec<(String, String)>> {
         ("RUST_LOG".to_string(), "warn,lk2_client=info".to_string()),
         ("CARGO_MANIFEST_DIR".to_string(), root.display().to_string()),
         ("PATH".to_string(), path_str),
+        ("WGPU_BACKEND".to_string(), "vulkan".to_string()),
     ])
 }
 

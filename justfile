@@ -22,13 +22,16 @@ server:
     cargo run -p lk2-server
 
 client:
-    just offline-fast
+    just play
 
 clint:
     just client
 
+play *ARGS:
+    just xtask play {{ARGS}}
+
 model-preview:
-    cargo run -p lk2-client -- --model-preview
+    just play --model-preview
 
 # Iterate every GLB under assets/, screenshot each individually, and write a
 # self-evaluation summary to screenshots/model_preview/decision.md. Use this
@@ -42,27 +45,25 @@ model-preview-all-only MODEL:
     just xtask model-preview-all --only={{MODEL}}
 
 model-preview-one MODEL:
-    cargo run -p lk2-client -- --model-preview --model-preview-one={{MODEL}}
+    just play --model-preview --model-preview-one={{MODEL}}
 
 model-preview-shot MODEL:
-    cargo run -p lk2-client -- --model-preview --model-preview-one={{MODEL}} --model-preview-shot
+    just play --model-preview --model-preview-one={{MODEL}} --model-preview-shot
 
 terrain-preview:
-    cargo run -p lk2-client -- --terrain-preview
+    just play --terrain-preview
 
 terrain-preview-shot:
-    cargo run -p lk2-client -- --terrain-preview --terrain-preview-shot
+    just play --terrain-preview --terrain-preview-shot
 
 client-online:
-    just kill-build
-    $env:BEVY_DISABLE_ACCESSIBILITY="1"; $env:WGPU_BACKEND="dx12"; cargo build -p lk2-server -p lk2-client; Start-Process -FilePath .\target\debug\lk2-server.exe -WorkingDirectory (Get-Location) -WindowStyle Hidden; Start-Sleep -Seconds 2; .\target\debug\lk2-client.exe --connect=127.0.0.1:5000 --first-person
+    just play --online --first-person
 
 offline:
-    $env:BEVY_DISABLE_ACCESSIBILITY="1"; $env:WGPU_BACKEND="dx12"; cargo run -p lk2-client -- --offline --no-scenario
+    just play
 
 offline-fast:
-    just xtask dev build
-    $env:BEVY_DISABLE_ACCESSIBILITY="1"; $env:WGPU_BACKEND="dx12"; .\target\debug\lk2-client.exe --offline --no-scenario
+    just play --skip-build
 
 build-server:
     cargo build -p lk2-server
@@ -107,6 +108,9 @@ clippy:
 
 clean:
     cargo clean
+
+clean-runs:
+    just xtask clean-runs
 
 loop:
     just xtask loop --offline --seconds 60

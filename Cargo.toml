@@ -1,6 +1,38 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+authors = ["Lastkingdom2 Contributors"]
+description = "Wanguo Origins: Last Kingdom Diamond — Bevy voxel multiplayer sandbox"
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/lastkingdom2"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+similar_names = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
+needless_pass_by_value = "allow"
+inline_always = "allow"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+unused_qualifications = "warn"
 
 [workspace.dependencies]
 bevy = "0.19"

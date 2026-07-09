@@ -1,7 +1,15 @@
+use bevy::feathers::{
+    theme::{ThemeBackgroundColor, ThemedText},
+    tokens,
+};
 use bevy::prelude::*;
+use bevy::text::{FontCx, LetterSpacing, RemSize};
 
 use crate::pvp_systems::HealthHudMarker;
-use crate::render::{AnimalIndicatorText, CameraAngles, CameraMode, NestIndicatorText, Player};
+use crate::render::{
+    AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, NestIndicatorText, Player,
+    RenderFeatureSettings,
+};
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::combat::{
@@ -52,9 +60,85 @@ pub struct NestRadarDot {
     pub slot: usize,
 }
 
-#[derive(Resource)]
-pub struct UiFonts {
-    pub cn: Handle<Font>,
+#[derive(Component, Default, Clone)]
+pub struct FeathersCameraModeText;
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct FeathersCameraButton {
+    pub mode: CameraMode,
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct FeathersFreeflyButton;
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameMenuState {
+    pub open: bool,
+}
+
+impl Default for GameMenuState {
+    fn default() -> Self {
+        Self { open: false }
+    }
+}
+
+#[derive(Component)]
+pub struct GameMenuRoot;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderToggle {
+    Atmosphere,
+    Taa,
+    Ssr,
+    Ssao,
+    VolumetricFog,
+}
+
+impl RenderToggle {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Atmosphere => "Atmosphere Sky",
+            Self::Taa => "TAA",
+            Self::Ssr => "SSR",
+            Self::Ssao => "SSAO",
+            Self::VolumetricFog => "Volumetric Fog",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Atmosphere => "procedural sky",
+            Self::Taa => "temporal anti-aliasing",
+            Self::Ssr => "screen reflections",
+            Self::Ssao => "contact shadowing",
+            Self::VolumetricFog => "raymarched fog",
+        }
+    }
+
+    fn is_enabled(self, settings: &RenderFeatureSettings) -> bool {
+        match self {
+            Self::Atmosphere => settings.atmosphere,
+            Self::Taa => settings.taa,
+            Self::Ssr => settings.ssr,
+            Self::Ssao => settings.ssao,
+            Self::VolumetricFog => settings.volumetric_fog,
+        }
+    }
+
+    fn toggle(self, settings: &mut RenderFeatureSettings) {
+        match self {
+            Self::Atmosphere => settings.atmosphere = !settings.atmosphere,
+            Self::Taa => settings.taa = !settings.taa,
+            Self::Ssr => settings.ssr = !settings.ssr,
+            Self::Ssao => settings.ssao = !settings.ssao,
+            Self::VolumetricFog => settings.volumetric_fog = !settings.volumetric_fog,
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct RenderToggleStatus {
+    pub toggle: RenderToggle,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,19 +163,469 @@ impl ClientRunMode {
     }
 }
 
-pub fn setup_fonts(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.insert_resource(UiFonts { cn: asset_server.load("fonts/NotoSansCJKsc-Regular.otf") });
+pub fn setup_fonts(mut commands: Commands, mut font_cx: ResMut<FontCx>) {
+    let _ = font_cx.set_system_ui_family("Noto Sans CJK SC");
+    let _ = font_cx.set_sans_serif_family("Noto Sans CJK SC");
+    let _ = font_cx.set_ui_sans_serif_family("Noto Sans CJK SC");
+    let _ = font_cx.set_monospace_family("Cascadia Mono");
+    let _ = font_cx.set_ui_monospace_family("Cascadia Mono");
+    commands.insert_resource(RemSize(15.0));
 }
 
-fn ui_text_font(font: &Handle<Font>, size: f32) -> TextFont {
-    TextFont { font: FontSource::Handle(font.clone()), font_size: FontSize::Px(size), ..default() }
+fn hud_mono_font(size: FontSize) -> TextFont {
+    TextFont {
+        font: FontSource::UiMonospace,
+        font_size: size,
+        width: FontWidth::SEMI_CONDENSED,
+        ..default()
+    }
+}
+
+fn hud_label_font(size: FontSize) -> TextFont {
+    TextFont {
+        font: FontSource::SystemUi,
+        font_size: size,
+        weight: FontWeight::SEMIBOLD,
+        ..default()
+    }
 }
 
 fn ui_text_layout(justify: Justify) -> TextLayout {
     TextLayout::new(justify, LineBreak::AnyCharacter)
 }
 
-pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
+pub fn feathers_tools_scene() -> impl SceneList {
+    bsn_list![feathers_tools_panel()]
+}
+
+fn feathers_tools_panel() -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            right: px(12),
+            bottom: px(92),
+            width: px(270),
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
+            row_gap: px(6),
+            padding: px(8),
+            border_radius: BorderRadius::all(px(4)),
+        }
+        ThemeBackgroundColor(tokens::PANE_BODY_BG)
+        Children [
+            (Text("Feathers Tools") ThemedText),
+            (Text("Camera: --") ThemedText FeathersCameraModeText),
+            (
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: px(4),
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        Button
+                        FeathersCameraButton { mode: CameraMode::FirstPerson }
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: px(28),
+                            display: Display::Flex,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::left(px(4)),
+                        }
+                        BackgroundColor(Color::srgba(0.23, 0.25, 0.29, 0.95))
+                        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.08))
+                        Children [(Text("1P") ThemedText)]
+                    ),
+                    (
+                        Button
+                        FeathersCameraButton { mode: CameraMode::ThirdPerson }
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: px(28),
+                            display: Display::Flex,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::ZERO,
+                        }
+                        BackgroundColor(Color::srgba(0.23, 0.25, 0.29, 0.95))
+                        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.08))
+                        Children [(Text("3P") ThemedText)]
+                    ),
+                    (
+                        Button
+                        FeathersCameraButton { mode: CameraMode::TopDown }
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: px(28),
+                            display: Display::Flex,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::right(px(4)),
+                        }
+                        BackgroundColor(Color::srgba(0.23, 0.25, 0.29, 0.95))
+                        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.08))
+                        Children [(Text("Top") ThemedText)]
+                    )
+                ]
+            ),
+            (
+                Button
+                FeathersFreeflyButton
+                Node {
+                    min_height: px(28),
+                    display: Display::Flex,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(4)),
+                }
+                BackgroundColor(Color::srgba(0.23, 0.25, 0.29, 0.95))
+                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.08))
+                Children [(Text("Toggle freefly") ThemedText)]
+            )
+        ]
+    }
+}
+
+pub fn handle_feathers_tools_buttons(
+    mut interactions: Query<
+        (
+            &Interaction,
+            Option<&FeathersCameraButton>,
+            Option<&FeathersFreeflyButton>,
+        ),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut mode: ResMut<CameraMode>,
+    mut freefly: ResMut<FreeFlyState>,
+) {
+    for (interaction, camera_button, freefly_button) in interactions.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Some(button) = camera_button {
+            freefly.enabled = false;
+            *mode = button.mode;
+            info!("Feathers Tools: CameraMode -> {:?}", button.mode);
+        }
+        if freefly_button.is_some() {
+            freefly.enabled = !freefly.enabled;
+            if freefly.enabled {
+                *mode = CameraMode::FirstPerson;
+                info!("Feathers Tools: freefly enabled");
+            } else {
+                info!("Feathers Tools: freefly disabled");
+            }
+        }
+    }
+}
+
+pub fn update_feathers_tools_status(
+    mut q: Query<&mut Text, With<FeathersCameraModeText>>,
+    mode: Res<CameraMode>,
+    freefly: Res<FreeFlyState>,
+) {
+    let label = if freefly.enabled {
+        "Camera: Freefly".to_string()
+    } else {
+        format!("Camera: {:?}", *mode)
+    };
+    for mut text in q.iter_mut() {
+        text.0 = label.clone();
+    }
+}
+
+pub fn update_feathers_tools_buttons(
+    mode: Res<CameraMode>,
+    freefly: Res<FreeFlyState>,
+    mut camera_buttons: Query<
+        (
+            &FeathersCameraButton,
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        Without<FeathersFreeflyButton>,
+    >,
+    mut freefly_buttons: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        With<FeathersFreeflyButton>,
+    >,
+    mut text: Query<(&mut TextColor, Option<&mut Text>)>,
+) {
+    for (button, interaction, mut background, mut border, children) in camera_buttons.iter_mut() {
+        let active = !freefly.enabled && *mode == button.mode;
+        style_tool_button(
+            active,
+            *interaction,
+            &mut background,
+            &mut border,
+            children,
+            &mut text,
+        );
+    }
+    for (interaction, mut background, mut border, children) in freefly_buttons.iter_mut() {
+        style_tool_button(
+            freefly.enabled,
+            *interaction,
+            &mut background,
+            &mut border,
+            children,
+            &mut text,
+        );
+    }
+}
+
+fn style_tool_button(
+    active: bool,
+    interaction: Interaction,
+    background: &mut BackgroundColor,
+    border: &mut BorderColor,
+    children: &Children,
+    text: &mut Query<(&mut TextColor, Option<&mut Text>)>,
+) {
+    let base = if active {
+        Color::srgba(0.08, 0.42, 0.82, 0.98)
+    } else {
+        Color::srgba(0.25, 0.27, 0.31, 0.94)
+    };
+    background.0 = match interaction {
+        Interaction::Pressed => Color::srgba(0.06, 0.32, 0.66, 1.0),
+        Interaction::Hovered => base.with_alpha(1.0),
+        Interaction::None => base,
+    };
+    *border = BorderColor::all(if active {
+        Color::srgba(0.48, 0.78, 1.0, 0.62)
+    } else {
+        Color::srgba(1.0, 1.0, 1.0, 0.08)
+    });
+    for child in children.iter() {
+        if let Ok((mut color, _)) = text.get_mut(child) {
+            color.0 = if active {
+                Color::srgb(0.96, 0.99, 1.0)
+            } else {
+                Color::srgb(0.86, 0.88, 0.91)
+            };
+        }
+    }
+}
+
+pub fn setup_game_menu(mut commands: Commands) {
+    let toggles = [
+        RenderToggle::Atmosphere,
+        RenderToggle::Taa,
+        RenderToggle::Ssr,
+        RenderToggle::Ssao,
+        RenderToggle::VolumetricFog,
+    ];
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(px(16)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.02, 0.03, 0.04, 0.54)),
+            GlobalZIndex(50),
+            GameMenuRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: px(420),
+                    max_width: percent(92),
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(10),
+                    padding: UiRect::all(px(14)),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(6)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.08, 0.10, 0.12, 0.94)),
+                BorderColor::all(Color::srgba(0.72, 0.83, 0.92, 0.22)),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new("Game Menu"),
+                    hud_label_font(FontSize::Rem(1.04)),
+                    TextColor(Color::srgb(0.94, 0.97, 1.0)),
+                ));
+                panel.spawn((
+                    Text::new("Render"),
+                    hud_label_font(FontSize::Rem(0.82)),
+                    TextColor(Color::srgb(0.70, 0.82, 0.90)),
+                ));
+                for toggle in toggles {
+                    panel.spawn(render_toggle_row(toggle));
+                }
+                panel.spawn((
+                    Text::new("M / Esc closes menu"),
+                    hud_mono_font(FontSize::Rem(0.62)),
+                    TextColor(Color::srgba(0.82, 0.88, 0.92, 0.72)),
+                ));
+            });
+        });
+}
+
+fn render_toggle_row(toggle: RenderToggle) -> impl Bundle {
+    (
+        Button,
+        RenderToggleStatus { toggle },
+        Node {
+            min_height: px(42),
+            display: Display::Flex,
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: px(10),
+            padding: UiRect::axes(px(10), px(6)),
+            border: UiRect::all(px(1)),
+            border_radius: BorderRadius::all(px(4)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.13, 0.16, 0.18, 0.88)),
+        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.10)),
+        children![
+            (
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(2),
+                    flex_grow: 1.0,
+                    ..default()
+                },
+                children![
+                    (
+                        Text::new(toggle.label()),
+                        hud_label_font(FontSize::Rem(0.78)),
+                        TextColor(Color::srgb(0.94, 0.96, 0.98)),
+                    ),
+                    (
+                        Text::new(toggle.description()),
+                        hud_mono_font(FontSize::Rem(0.58)),
+                        TextColor(Color::srgba(0.74, 0.80, 0.84, 0.78)),
+                    )
+                ],
+            ),
+            (
+                Text::new("OFF"),
+                hud_mono_font(FontSize::Rem(0.72)),
+                TextColor(Color::srgb(0.78, 0.82, 0.86)),
+            )
+        ],
+    )
+}
+
+pub fn toggle_game_menu_input(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<GameMenuState>) {
+    if keys.just_pressed(KeyCode::KeyM) || keys.just_pressed(KeyCode::Escape) {
+        state.open = !state.open;
+    }
+}
+
+pub fn sync_game_menu_visibility(
+    state: Res<GameMenuState>,
+    mut roots: Query<&mut Node, With<GameMenuRoot>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    for mut node in roots.iter_mut() {
+        node.display = if state.open {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+}
+
+pub fn handle_render_toggle_buttons(
+    mut interactions: Query<
+        (&Interaction, &RenderToggleStatus),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut settings: ResMut<RenderFeatureSettings>,
+) {
+    for (interaction, toggle) in interactions.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        toggle.toggle.toggle(&mut settings);
+        info!(
+            "Render menu: {} -> {}",
+            toggle.toggle.label(),
+            toggle.toggle.is_enabled(&settings)
+        );
+    }
+}
+
+pub fn update_render_toggle_buttons(
+    settings: Res<RenderFeatureSettings>,
+    mut buttons: Query<(
+        &RenderToggleStatus,
+        &Interaction,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &Children,
+    )>,
+    mut text: Query<(&mut Text, &mut TextColor)>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+
+    for (toggle, interaction, mut background, mut border, children) in buttons.iter_mut() {
+        let enabled = toggle.toggle.is_enabled(&settings);
+        let base = if enabled {
+            Color::srgba(0.12, 0.34, 0.24, 0.92)
+        } else {
+            Color::srgba(0.13, 0.16, 0.18, 0.88)
+        };
+        background.0 = match *interaction {
+            Interaction::Pressed => Color::srgba(0.20, 0.44, 0.34, 0.96),
+            Interaction::Hovered => base.with_alpha(1.0),
+            Interaction::None => base,
+        };
+        *border = BorderColor::all(if enabled {
+            Color::srgba(0.48, 0.92, 0.68, 0.46)
+        } else {
+            Color::srgba(1.0, 1.0, 1.0, 0.10)
+        });
+
+        if let Some(status_entity) = children.iter().last()
+            && let Ok((mut status, mut color)) = text.get_mut(status_entity)
+        {
+            status.0 = if enabled { "ON" } else { "OFF" }.to_string();
+            color.0 = if enabled {
+                Color::srgb(0.62, 1.0, 0.72)
+            } else {
+                Color::srgb(0.78, 0.82, 0.86)
+            };
+        }
+    }
+}
+
+pub fn setup_hud(mut commands: Commands) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -104,9 +638,10 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.62)),
         children![(
             Text::new("WANGUO ORIGINS loading..."),
-            ui_text_font(&fonts.cn, 10.0),
+            hud_mono_font(FontSize::Rem(0.68)),
             ui_text_layout(Justify::Left),
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.96)),
+            LetterSpacing::Px(0.6),
             TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
             HudText,
         )],
@@ -152,7 +687,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
 
     commands.spawn((
         Text::new(""),
-        ui_text_font(&fonts.cn, 10.0),
+        hud_label_font(FontSize::Rem(0.68)),
         ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.95, 0.95, 0.7)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
@@ -165,7 +700,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
             "WASD move | Mouse Left attack | E pick up\n\
              ECO: 5 rabbits eat 10 berry bushes, emit CO2, berries regrow fruit",
         ),
-        ui_text_font(&fonts.cn, 10.0),
+        hud_label_font(FontSize::Vh(1.65)),
         TextColor(Color::srgba(0.95, 0.95, 0.95, 1.0)),
         ui_text_layout(Justify::Center),
         TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
@@ -192,7 +727,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         },
         children![(
             Text::new(""),
-            ui_text_font(&fonts.cn, 12.0),
+            hud_label_font(FontSize::Rem(0.76)),
             ui_text_layout(Justify::Center),
             TextColor(Color::srgba(1.0, 0.9, 0.4, 0.7)),
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
@@ -212,7 +747,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
         },
         children![(
             Text::new(""),
-            ui_text_font(&fonts.cn, 10.0),
+            hud_label_font(FontSize::Rem(0.68)),
             ui_text_layout(Justify::Center),
             TextColor(Color::srgba(1.0, 0.6, 0.4, 0.6)),
             TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
@@ -222,9 +757,16 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
 
     commands.spawn((
         Text::new("HP 100/100"),
-        ui_text_font(&fonts.cn, 16.0),
+        TextFont {
+            font: FontSource::SystemUi,
+            font_size: FontSize::Rem(1.05),
+            weight: FontWeight::BOLD,
+            width: FontWidth::SEMI_CONDENSED,
+            ..default()
+        },
         ui_text_layout(Justify::Left),
         TextColor(Color::srgb(1.0, 0.4, 0.4)),
+        LetterSpacing::Px(0.4),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(12), right: px(12), ..default() },
         HudHpText,
@@ -232,9 +774,10 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new("STA 100/100"),
-        ui_text_font(&fonts.cn, 12.0),
+        hud_mono_font(FontSize::Rem(0.78)),
         ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.4, 0.8, 1.0)),
+        LetterSpacing::Px(0.3),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(38), right: px(12), ..default() },
         HudStaText,
@@ -284,7 +827,12 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new("Phase: --"),
-        ui_text_font(&fonts.cn, 10.0),
+        TextFont {
+            font: FontSource::Family("Noto Sans CJK SC".into()),
+            font_size: FontSize::Rem(0.68),
+            weight: FontWeight::SEMIBOLD,
+            ..default()
+        },
         ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.9, 0.9, 0.5)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
@@ -293,15 +841,16 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new("I/O=Light/Heavy  L=Thrust\nU=Block  Y=Parry"),
-        ui_text_font(&fonts.cn, 10.0),
+        hud_mono_font(FontSize::Rem(0.66)),
         ui_text_layout(Justify::Left),
         TextColor(Color::srgba(0.85, 0.85, 0.85, 0.85)),
+        LetterSpacing::Px(0.2),
         TextShadow { offset: Vec2::new(1.0, 1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, bottom: px(56), right: px(12), ..default() },
     ));
     commands.spawn((
         Text::new("Objective: -"),
-        ui_text_font(&fonts.cn, 12.0),
+        hud_label_font(FontSize::Rem(0.76)),
         ui_text_layout(Justify::Left),
         TextColor(Color::srgb(0.85, 0.95, 1.0)),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
@@ -310,9 +859,17 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     ));
     commands.spawn((
         Text::new(""),
-        ui_text_font(&fonts.cn, 28.0),
+        TextFont {
+            font: FontSource::SystemUi,
+            font_size: FontSize::Vh(4.2),
+            weight: FontWeight::EXTRA_BOLD,
+            style: FontStyle::Italic,
+            width: FontWidth::SEMI_EXPANDED,
+            ..default()
+        },
         ui_text_layout(Justify::Center),
         TextColor(Color::srgba(1.0, 0.95, 0.4, 0.95)),
+        LetterSpacing::Px(1.0),
         TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
         Node {
             position_type: PositionType::Absolute,
