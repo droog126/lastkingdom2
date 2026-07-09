@@ -20,6 +20,7 @@ mod capture;
 mod model_preview;
 mod pretty;
 mod pvp_systems;
+mod ray_aabb;
 mod render;
 mod terrain_preview;
 mod ui;
@@ -64,15 +65,16 @@ use crate::render::{
     cycle_terrain_preset, emergency_teleport, first_person_camera, freefly_movement,
     held_weapon_follow, maintain_cursor_grab, mouse_look_system, offline_anti_stuck, player_input,
     record_render_frame_time, setup_atmosphere, setup_cursor_grab, spawn_terrain_around_player,
-    sync_camera_projection, sync_render_feature_settings, toggle_cursor_grab_on_esc,
-    toggle_freefly, top_down_camera_toggle, update_animal_indicator, update_nest_indicator,
+    stable_scene_baseline_enabled, sync_camera_projection, sync_render_feature_settings,
+    toggle_cursor_grab_on_esc, toggle_freefly, top_down_camera_toggle, update_animal_indicator,
+    update_nest_indicator,
 };
 use crate::ui::{
     ClientRunMode, GameMenuState, feathers_tools_scene, handle_feathers_tools_buttons,
     handle_render_toggle_buttons, setup_fonts, setup_game_menu, setup_hud,
     sync_game_menu_visibility, toggle_game_menu_input, update_feathers_tools_buttons,
-    update_feathers_tools_status, update_hud, update_nest_radar, update_render_toggle_buttons,
-    update_tutorial_overlay,
+    update_feathers_tools_status, update_feedback_toast_text, update_hud, update_nest_radar,
+    update_render_toggle_buttons, update_tutorial_overlay,
 };
 
 const AUTO_DEMO_WAIT_TICKS: u64 = 50_000;
@@ -87,8 +89,13 @@ use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{
     EcoSnapshot, GameplayHudState, Health, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
 };
-use lk2_core::protocol::messages::{BuildRecipe, GameplayCommand, GameplayCommandKind};
+use lk2_core::protocol::messages::{
+    BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback, PingMessage, PongMessage,
+};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
+use lk2_core::transport::{
+    CLIENT_SEND_INTERVAL, NETCODE_CLIENT_TIMEOUT_SECS, PING_INTERVAL, PRIVATE_KEY, PROTOCOL_ID,
+};
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct OnlineCommandDiagnostics {
@@ -96,6 +103,84 @@ pub struct OnlineCommandDiagnostics {
     pub move_world_sent: u64,
     pub last_dx_milli: i16,
     pub last_dz_milli: i16,
+    pub gameplay_udp_active: bool,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct OnlineConnectionDiagnostics {
+    pub server_addr: Option<std::net::SocketAddr>,
+    pub client_id: u64,
+    pub snapshot_count: u64,
+    pub server_pos_updates: u64,
+    pub ping_sequence: u64,
+    pub ping_ms: Option<f64>,
+    pub last_snapshot_secs: Option<f32>,
+    pub last_server_pos_secs: Option<f32>,
+    pub last_pong_secs: Option<f32>,
+    pub last_server_tick: u32,
+    pub last_server_drift: f32,
+    pub last_server_correction: f32,
+}
+
+impl OnlineConnectionDiagnostics {
+    pub fn snapshot_age_secs(&self, now_secs: f32) -> Option<f32> {
+        self.last_snapshot_secs.map(|secs| (now_secs - secs).max(0.0))
+    }
+
+    pub fn server_pos_age_secs(&self, now_secs: f32) -> Option<f32> {
+        self.last_server_pos_secs.map(|secs| (now_secs - secs).max(0.0))
+    }
+
+    pub fn pong_age_secs(&self, now_secs: f32) -> Option<f32> {
+        self.last_pong_secs.map(|secs| (now_secs - secs).max(0.0))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NetworkStatus {
+    #[default]
+    Offline,
+    Connecting,
+    Connected,
+    Stale,
+    Disconnected,
+}
+
+impl NetworkStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Offline => "offline",
+            Self::Connecting => "syncing",
+            Self::Connected => "live",
+            Self::Stale => "stale",
+            Self::Disconnected => "disconnected",
+        }
+    }
+}
+
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct OnlineNetworkStatus {
+    pub status: NetworkStatus,
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct GameplayFeedbackToast {
+    pub ok: bool,
+    pub summary: String,
+    pub shown_at_secs: f32,
+}
+
+impl Default for GameplayFeedbackToast {
+    fn default() -> Self {
+        Self { ok: true, summary: String::new(), shown_at_secs: -100.0 }
+    }
+}
+
+impl GameplayFeedbackToast {
+    pub fn visible_summary(&self, now_secs: f32) -> Option<&str> {
+        (!self.summary.is_empty() && now_secs - self.shown_at_secs <= 3.0)
+            .then_some(self.summary.as_str())
+    }
 }
 
 #[derive(Resource)]
@@ -356,7 +441,10 @@ fn main() {
         .init_resource::<lk2_core::pvp::FixedTick>()
         .init_resource::<TimeOfDay>();
 
-    app.add_message::<GameplayCommand>();
+    app.add_message::<GameplayCommand>()
+        .add_message::<GameplayFeedback>()
+        .add_message::<PingMessage>()
+        .add_message::<PongMessage>();
 
     if network_mode {
         let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
@@ -447,6 +535,9 @@ fn main() {
         .init_resource::<NestMarkerCount>()
         .init_resource::<PlayerAnimState>()
         .init_resource::<OnlineCommandDiagnostics>()
+        .init_resource::<OnlineConnectionDiagnostics>()
+        .init_resource::<OnlineNetworkStatus>()
+        .init_resource::<GameplayFeedbackToast>()
         .insert_resource(if network_mode {
             ClientRunMode::Online
         } else {
@@ -497,8 +588,12 @@ fn main() {
                 .run_if(resource_equals(ClientRunMode::Offline)),
             apply_networked_position,
             apply_server_pos_update,
+            send_ping_messages,
+            receive_pong_messages,
+            receive_gameplay_feedback,
             debug_dump_replicated_entities,
             apply_authoritative_snapshot,
+            update_online_network_status,
             apply_voxel_chunk_snapshot,
             apply_voxel_delta,
         )
@@ -593,6 +688,7 @@ fn main() {
             simulation_tick.run_if(resource_equals(ClientRunMode::Offline)),
             end_tick_system.run_if(resource_equals(ClientRunMode::Offline)),
             update_hud,
+            update_feedback_toast_text,
             handle_feathers_tools_buttons,
             update_feathers_tools_status,
             update_feathers_tools_buttons,
@@ -637,17 +733,26 @@ fn spawn_networked_client(
         server_addr
     );
 
-    let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
-    let protocol_id: u64 = 0x4C4B3256_4E455457;
     let netcode_client = NetcodeClient::new(
-        Authentication::Manual { server_addr, client_id: client_id_seed, private_key, protocol_id },
-        NetcodeConfig::default(),
+        Authentication::Manual {
+            server_addr,
+            client_id: client_id_seed,
+            private_key: PRIVATE_KEY,
+            protocol_id: PROTOCOL_ID,
+        },
+        NetcodeConfig { client_timeout_secs: NETCODE_CLIENT_TIMEOUT_SECS, ..default() },
     )
     .expect("NetcodeClient::new(Manual) failed");
     info!(
         "[net] NetcodeClient initialized for server={}, client_id={}, protocol_id=0x{:x}",
-        server_addr, client_id_seed, protocol_id
+        server_addr, client_id_seed, PROTOCOL_ID
     );
+
+    commands.insert_resource(OnlineConnectionDiagnostics {
+        server_addr: Some(server_addr),
+        client_id: client_id_seed,
+        ..default()
+    });
 
     let client_id = commands
         .spawn((
@@ -658,6 +763,8 @@ fn spawn_networked_client(
             PeerAddr(server_addr),
             netcode_client,
             MessageReceiver::<ServerPosUpdate>::default(),
+            MessageReceiver::<PongMessage>::default(),
+            MessageReceiver::<GameplayFeedback>::default(),
         ))
         .id();
 
@@ -737,11 +844,13 @@ fn debug_dump_replicated_entities(
 
 fn apply_server_pos_update(
     run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
     mut receiver_q: Query<
         &mut lightyear::prelude::MessageReceiver<lk2_core::protocol::messages::ServerPosUpdate>,
     >,
     mut player: ResMut<PlayerState>,
     mut trace: ResMut<OnlineMotionTrace>,
+    mut diagnostics: ResMut<OnlineConnectionDiagnostics>,
 ) {
     if *run_mode != ClientRunMode::Online {
         for mut receiver in receiver_q.iter_mut() {
@@ -766,6 +875,12 @@ fn apply_server_pos_update(
         let drift = player.pos.distance(last_pos);
         trace.last_server_pos = Some(last_pos);
         trace.last_server_correction = 0.0;
+        diagnostics.server_pos_updates =
+            diagnostics.server_pos_updates.saturating_add(count as u64);
+        diagnostics.last_server_pos_secs = Some(time.elapsed_secs());
+        diagnostics.last_server_tick = last_tick;
+        diagnostics.last_server_drift = drift;
+        diagnostics.last_server_correction = 0.0;
         if drift > 1.5 {
             player.pos = last_pos;
             player.block_pos = [
@@ -774,6 +889,7 @@ fn apply_server_pos_update(
                 last_pos.z.floor() as i32,
             ];
             trace.last_server_correction = drift;
+            diagnostics.last_server_correction = drift;
         }
         tracing::debug!(
             "[net] drained {} ServerPosUpdate messages; tick={} pos={:?}",
@@ -786,9 +902,11 @@ fn apply_server_pos_update(
 
 fn apply_authoritative_snapshot(
     run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
     hud_q: Query<&GameplayHudState>,
     eco_q: Query<&EcoSnapshot>,
     mut snapshot: ResMut<ReplicatedSnapshot>,
+    mut connection: ResMut<OnlineConnectionDiagnostics>,
     mut clock: ResMut<SimClock>,
     mut player: ResMut<PlayerState>,
     mut pool: ResMut<GlobalResourcePool>,
@@ -805,6 +923,8 @@ fn apply_authoritative_snapshot(
 
     snapshot.has_data = true;
     snapshot.tick = hud.tick;
+    connection.snapshot_count = connection.snapshot_count.saturating_add(1);
+    connection.last_snapshot_secs = Some(time.elapsed_secs());
     snapshot.player_block_pos = hud.player_block_pos;
     snapshot.player_pos = hud.player_pos;
     snapshot.nation_id = hud.nation_id;
@@ -851,6 +971,120 @@ fn apply_authoritative_snapshot(
         snapshot.eco_wildlife = eco_state.wildlife.len();
         snapshot.eco_berries = eco_state.berries.len();
         snapshot.eco_plants = eco_state.plants.len();
+    }
+}
+
+fn send_ping_messages(
+    run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
+    mut connection: ResMut<OnlineConnectionDiagnostics>,
+    writer: Option<MessageWriter<PingMessage>>,
+    mut next_ping_secs: Local<f32>,
+) {
+    if *run_mode != ClientRunMode::Online || time.elapsed_secs() < *next_ping_secs {
+        return;
+    }
+    *next_ping_secs = time.elapsed_secs() + PING_INTERVAL.as_secs_f32();
+    let Some(mut writer) = writer else { return };
+
+    connection.ping_sequence = connection.ping_sequence.saturating_add(1);
+    writer.write(PingMessage {
+        client_id: connection.client_id,
+        sequence: connection.ping_sequence,
+        client_time_secs: time.elapsed_secs_f64(),
+    });
+}
+
+fn receive_pong_messages(
+    run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
+    mut connection: ResMut<OnlineConnectionDiagnostics>,
+    mut receivers: Query<&mut lightyear::prelude::MessageReceiver<PongMessage>>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        for mut receiver in receivers.iter_mut() {
+            for _ in receiver.receive() {}
+        }
+        return;
+    }
+
+    let client_id = connection.client_id;
+    let ping_sequence = connection.ping_sequence;
+    for mut receiver in receivers.iter_mut() {
+        for pong in receiver.receive() {
+            if pong.client_id != client_id || pong.sequence > ping_sequence || !pong.is_finite() {
+                continue;
+            }
+            connection.ping_ms =
+                Some(((time.elapsed_secs_f64() - pong.client_time_secs) * 1_000.0).max(0.0));
+            connection.last_pong_secs = Some(time.elapsed_secs());
+            connection.last_server_tick = pong.server_tick;
+        }
+    }
+}
+
+fn receive_gameplay_feedback(
+    run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
+    mut toast: ResMut<GameplayFeedbackToast>,
+    mut receivers: Query<&mut lightyear::prelude::MessageReceiver<GameplayFeedback>>,
+) {
+    if *run_mode != ClientRunMode::Online {
+        for mut receiver in receivers.iter_mut() {
+            for _ in receiver.receive() {}
+        }
+        return;
+    }
+
+    for mut receiver in receivers.iter_mut() {
+        for feedback in receiver.receive() {
+            if feedback.summary == "moved" {
+                continue;
+            }
+            toast.ok = feedback.ok;
+            toast.summary = feedback.summary;
+            toast.shown_at_secs = time.elapsed_secs();
+        }
+    }
+}
+
+fn update_online_network_status(
+    run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
+    connection: Res<OnlineConnectionDiagnostics>,
+    mut status: ResMut<OnlineNetworkStatus>,
+) {
+    status.status = classify_network_status(*run_mode, time.elapsed_secs(), &connection);
+}
+
+fn classify_network_status(
+    run_mode: ClientRunMode,
+    now_secs: f32,
+    connection: &OnlineConnectionDiagnostics,
+) -> NetworkStatus {
+    if run_mode == ClientRunMode::Offline {
+        return NetworkStatus::Offline;
+    }
+    if connection.snapshot_count == 0
+        && connection.server_pos_updates == 0
+        && connection.ping_ms.is_none()
+    {
+        return NetworkStatus::Connecting;
+    }
+    let freshest_age = [
+        connection.snapshot_age_secs(now_secs),
+        connection.server_pos_age_secs(now_secs),
+        connection.pong_age_secs(now_secs),
+    ]
+    .into_iter()
+    .flatten()
+    .min_by(f32::total_cmp);
+
+    match freshest_age {
+        Some(age) if age <= 1.5 => NetworkStatus::Connected,
+        Some(age) if age <= NETCODE_CLIENT_TIMEOUT_SECS as f32 => NetworkStatus::Stale,
+        Some(_) => NetworkStatus::Disconnected,
+        None => NetworkStatus::Connecting,
     }
 }
 
@@ -1020,6 +1254,7 @@ fn record_online_motion_trace(
 
 fn send_online_gameplay_commands(
     run_mode: Res<ClientRunMode>,
+    time: Res<Time>,
     cfg: Res<RenderConfig>,
     keys: Res<ButtonInput<KeyCode>>,
     player: Res<PlayerState>,
@@ -1028,11 +1263,13 @@ fn send_online_gameplay_commands(
     mut diagnostics: ResMut<OnlineCommandDiagnostics>,
     gameplay_udp: Option<Res<OnlineGameplayUdp>>,
     writer: Option<MessageWriter<GameplayCommand>>,
+    mut next_move_send_secs: Local<f32>,
 ) {
     if *run_mode != ClientRunMode::Online {
         return;
     }
     diagnostics.sender_entities = usize::from(writer.is_some());
+    diagnostics.gameplay_udp_active = gameplay_udp.is_some();
     let mut writer = writer;
 
     let mut send = |kind: GameplayCommandKind| {
@@ -1058,7 +1295,8 @@ fn send_online_gameplay_commands(
     if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
         move_input.x += 1.0;
     }
-    if move_input.length_squared() > 0.0001 {
+    if move_input.length_squared() > 0.0001 && time.elapsed_secs() >= *next_move_send_secs {
+        *next_move_send_secs = time.elapsed_secs() + CLIENT_SEND_INTERVAL.as_secs_f32();
         let move_input = move_input.normalize_or_zero();
         let (sy, cy) = angles.yaw.sin_cos();
         let forward = Vec3::new(sy, 0.0, -cy).normalize_or_zero();
@@ -1171,6 +1409,18 @@ fn sync_top_down_lighting(
     mut fill: Query<&mut DirectionalLight, (Without<Sun>, With<DirectionalLight>)>,
     mut ambient: ResMut<GlobalAmbientLight>,
 ) {
+    if stable_scene_baseline_enabled() {
+        if let Ok(mut light) = sun.single_mut() {
+            light.shadow_maps_enabled = true;
+            light.illuminance = 14_000.0;
+        }
+        if let Ok(mut light) = fill.single_mut() {
+            light.illuminance = 4_500.0;
+        }
+        ambient.brightness = 1.3;
+        return;
+    }
+
     let top_down = *mode == CameraMode::TopDown;
     if let Ok(mut light) = sun.single_mut() {
         light.shadow_maps_enabled = !top_down;
@@ -1189,6 +1439,17 @@ fn sync_top_down_lighting(
 fn setup_camera(mut commands: Commands) {
     // Keep the main gameplay camera on the forward opaque path. The deferred
     // depth-equal path can produce visible flicker on some Vulkan drivers.
+    if stable_scene_baseline_enabled() {
+        commands.spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+            Exposure { ev100: 13.0 },
+            Tonemapping::None,
+            Msaa::Off,
+        ));
+        return;
+    }
+
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -1294,6 +1555,36 @@ fn sync_transform_gizmo_player(
 }
 
 fn setup_light(mut commands: Commands) {
+    if stable_scene_baseline_enabled() {
+        commands.spawn((
+            DirectionalLight {
+                illuminance: 14_000.0,
+                shadow_maps_enabled: true,
+                color: Color::srgb(1.0, 0.96, 0.86),
+                ..default()
+            },
+            Transform::from_xyz(28.0, 44.0, 22.0).looking_at(Vec3::ZERO, Vec3::Y),
+            Sun,
+        ));
+
+        commands.spawn((
+            DirectionalLight {
+                illuminance: 4_500.0,
+                shadow_maps_enabled: false,
+                color: Color::srgb(0.70, 0.80, 1.0),
+                ..default()
+            },
+            Transform::from_xyz(-24.0, 32.0, -20.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ));
+
+        commands.insert_resource(GlobalAmbientLight {
+            color: Color::srgb(0.86, 0.92, 1.0),
+            brightness: 1.3,
+            affects_lightmapped_meshes: true,
+        });
+        return;
+    }
+
     // iter_456: Sun must use `lux::RAW_SUNLIGHT` + the `VolumetricLight` marker for
     // bevy 0.19's atmospheric scattering to compute the sun's contribution to the
     // sky and to cast volumetric god-rays through the volumetric fog.
@@ -1334,6 +1625,31 @@ pub fn day_night_cycle(
     mut fill: Query<&mut DirectionalLight, (Without<Sun>, With<DirectionalLight>)>,
     mode: Res<CameraMode>,
 ) {
+    if stable_scene_baseline_enabled() {
+        tod.0 = 0.42;
+        if let Ok((mut tf, mut light)) = sun.single_mut() {
+            *tf = Transform::from_xyz(28.0, 44.0, 22.0).looking_at(Vec3::ZERO, Vec3::Y);
+            light.illuminance = 14_000.0;
+        }
+        if let Ok(mut light) = fill.single_mut() {
+            light.illuminance = 4_500.0;
+        }
+        telemetry.time_of_day = tod.0;
+        telemetry.dayness = 1.0;
+        telemetry.atmosphere_time_of_day = tod.0;
+        telemetry.atmosphere_dayness = 1.0;
+        telemetry.readable_dayness = 1.0;
+        telemetry.sunset_glow = 0.0;
+        telemetry.sun_illuminance = 14_000.0;
+        telemetry.fill_illuminance = 4_500.0;
+        telemetry.camera_mode = match *mode {
+            CameraMode::FirstPerson => "FirstPerson",
+            CameraMode::ThirdPerson => "ThirdPerson",
+            CameraMode::TopDown => "TopDown",
+        };
+        return;
+    }
+
     // iter_456: the legacy `mut clear: ResMut<ClearColor>` is gone. Bevy 0.19's
     // `Atmosphere` entity computes the sky color procedurally from the sun
     // direction, so the clear color is no longer the sky. We still drive the
@@ -1355,24 +1671,14 @@ pub fn day_night_cycle(
     let sunset_glow = (1.0 - (2.0 * t - 1.0).abs()).powi(3);
 
     let dist = 80.0;
-    let (atmosphere_time_of_day, atmosphere_dayness) =
-        if *mode == CameraMode::ThirdPerson && dayness < third_person_readable_floor {
-            let floor_t = third_person_readable_floor.asin() / std::f32::consts::PI;
-            let clamped_t = if t <= 0.5 { floor_t } else { 1.0 - floor_t };
-            (clamped_t, third_person_readable_floor)
-        } else {
-            (t, dayness)
-        };
+    let atmosphere_time_of_day = t;
     let atmosphere_dayness = if *mode == CameraMode::ThirdPerson {
-        atmosphere_dayness.max(readable_dayness)
+        readable_dayness
     } else {
-        atmosphere_dayness
+        dayness
     };
-    let sun_pos = Vec3::new(
-        (atmosphere_time_of_day - 0.5) * 2.0 * dist,
-        atmosphere_dayness * dist + 5.0,
-        0.0,
-    );
+    let sun_x = (std::f32::consts::TAU * (atmosphere_time_of_day - 0.25)).sin() * dist;
+    let sun_pos = Vec3::new(sun_x, atmosphere_dayness * dist + 5.0, 0.0);
     let sun_illuminance =
         bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * readable_dayness);
     if let Ok((mut tf, mut l)) = sun.single_mut() {
@@ -1770,5 +2076,59 @@ mod tests {
     #[test]
     fn first_screenshot_waits_for_meaningful_sim_progress() {
         assert!(FIRST_SCREENSHOT_MIN_PROGRESS >= 100);
+    }
+
+    #[test]
+    fn network_status_classification_tracks_freshness() {
+        let empty = OnlineConnectionDiagnostics::default();
+        assert_eq!(
+            classify_network_status(ClientRunMode::Offline, 10.0, &empty),
+            NetworkStatus::Offline
+        );
+        assert_eq!(
+            classify_network_status(ClientRunMode::Online, 10.0, &empty),
+            NetworkStatus::Connecting
+        );
+
+        let live = OnlineConnectionDiagnostics {
+            snapshot_count: 1,
+            last_snapshot_secs: Some(9.0),
+            ..default()
+        };
+        assert_eq!(
+            classify_network_status(ClientRunMode::Online, 10.0, &live),
+            NetworkStatus::Connected
+        );
+
+        let stale = OnlineConnectionDiagnostics {
+            snapshot_count: 1,
+            last_snapshot_secs: Some(5.0),
+            ..default()
+        };
+        assert_eq!(
+            classify_network_status(ClientRunMode::Online, 10.0, &stale),
+            NetworkStatus::Stale
+        );
+
+        let disconnected = OnlineConnectionDiagnostics {
+            snapshot_count: 1,
+            last_snapshot_secs: Some(-(NETCODE_CLIENT_TIMEOUT_SECS as f32 + 1.0)),
+            ..default()
+        };
+        assert_eq!(
+            classify_network_status(ClientRunMode::Online, 10.0, &disconnected),
+            NetworkStatus::Disconnected
+        );
+    }
+
+    #[test]
+    fn gameplay_feedback_toast_expires_after_three_seconds() {
+        let toast = GameplayFeedbackToast {
+            ok: false,
+            summary: "not enough wood".into(),
+            shown_at_secs: 10.0,
+        };
+        assert_eq!(toast.visible_summary(12.0), Some("not enough wood"));
+        assert_eq!(toast.visible_summary(13.1), None);
     }
 }

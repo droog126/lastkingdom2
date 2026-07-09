@@ -36,6 +36,20 @@ mod marching_cubes;
 pub mod scalar_field;
 mod smooth_mesh;
 
+pub fn stable_scene_baseline_enabled() -> bool {
+    stable_scene_baseline_enabled_from(
+        std::env::args().map(|arg| arg == "--stable-scene"),
+        std::env::var_os("LK2_STABLE_SCENE").is_some(),
+    )
+}
+
+fn stable_scene_baseline_enabled_from(
+    mut arg_matches: impl Iterator<Item = bool>,
+    env_enabled: bool,
+) -> bool {
+    env_enabled || arg_matches.any(|matched| matched)
+}
+
 #[derive(Resource, Debug, Clone)]
 #[allow(dead_code)]
 pub struct RenderConfig {
@@ -341,9 +355,9 @@ fn ensure_smooth_terrain_material(
         return material;
     }
     let material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        emissive: Color::srgb(0.04, 0.05, 0.03).into(),
-        unlit: false,
+        base_color: Color::srgb(0.56, 0.78, 0.34),
+        emissive: Color::srgb(0.08, 0.13, 0.04).into(),
+        unlit: true,
         perceptual_roughness: 0.95,
         metallic: 0.0,
         cull_mode: Some(bevy::render::render_resource::Face::Back),
@@ -834,6 +848,13 @@ pub fn setup_atmosphere(
     use bevy::light::Atmosphere;
     use bevy::light::atmosphere::ScatteringMedium;
 
+    if stable_scene_baseline_enabled() {
+        commands.insert_resource(ClearColor(Color::srgb(0.54, 0.73, 0.92)));
+        info!("stable-scene: skipped Atmosphere and FogVolume setup");
+        let _ = cfg;
+        return;
+    }
+
     // iter_456: clear color is now black-ish because the Atmosphere entity
     // occupies the entire sky as a procedural scattering sphere. The
     // `Atmosphere::earth` helper installs the right earth-radius defaults.
@@ -887,12 +908,13 @@ pub fn sync_render_feature_settings(
         return;
     }
     *initialized = true;
+    let stable_scene = stable_scene_baseline_enabled();
 
     for (camera, has_atmosphere_settings, has_taa, has_ssr, has_ssao, has_volumetric_fog) in
         cameras.iter()
     {
         let mut entity = commands.entity(camera);
-        if settings.atmosphere {
+        if settings.atmosphere && !stable_scene {
             if !has_atmosphere_settings {
                 entity.insert(AtmosphereSettings::default());
             }
@@ -900,7 +922,7 @@ pub fn sync_render_feature_settings(
             entity.remove::<AtmosphereSettings>();
         }
 
-        if settings.taa {
+        if settings.taa && !stable_scene {
             if !has_taa {
                 entity.insert(bevy::anti_alias::taa::TemporalAntiAliasing::default());
             }
@@ -914,7 +936,7 @@ pub fn sync_render_feature_settings(
             )>();
         }
 
-        if settings.ssr {
+        if settings.ssr && !stable_scene {
             if !has_ssr {
                 entity.insert(ScreenSpaceReflections {
                     min_perceptual_roughness: 0.0..0.0,
@@ -925,7 +947,7 @@ pub fn sync_render_feature_settings(
             entity.remove::<(ScreenSpaceReflections, DepthPrepass)>();
         }
 
-        if settings.ssao {
+        if settings.ssao && !stable_scene {
             if !has_ssao {
                 entity.insert(ScreenSpaceAmbientOcclusion {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
@@ -936,7 +958,7 @@ pub fn sync_render_feature_settings(
             entity.remove::<(ScreenSpaceAmbientOcclusion, NormalPrepass, DepthPrepass)>();
         }
 
-        if settings.volumetric_fog {
+        if settings.volumetric_fog && !stable_scene {
             if !has_volumetric_fog {
                 entity.insert(VolumetricFog { step_count: 48, ..default() });
             }
@@ -946,7 +968,7 @@ pub fn sync_render_feature_settings(
     }
 
     for entity in fog_volumes.iter() {
-        commands.entity(entity).insert(if settings.volumetric_fog {
+        commands.entity(entity).insert(if settings.volumetric_fog && !stable_scene {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -954,7 +976,7 @@ pub fn sync_render_feature_settings(
     }
 
     for entity in volumetric_lights.iter() {
-        if settings.volumetric_fog {
+        if settings.volumetric_fog && !stable_scene {
             commands.entity(entity).insert(VolumetricLight);
         } else {
             commands.entity(entity).remove::<VolumetricLight>();
@@ -2412,6 +2434,22 @@ pub fn first_person_camera(
 mod tests {
     use super::*;
     use lk2_core::world::{WorldConfig, generate_world, player_spawn_position_at};
+
+    #[test]
+    fn stable_scene_baseline_can_be_enabled_by_arg_or_env() {
+        assert!(!stable_scene_baseline_enabled_from(
+            [false, false].into_iter(),
+            false
+        ));
+        assert!(stable_scene_baseline_enabled_from(
+            [false, true].into_iter(),
+            false
+        ));
+        assert!(stable_scene_baseline_enabled_from(
+            [false, false].into_iter(),
+            true
+        ));
+    }
 
     fn flat_test_world() -> GameWorld {
         let mut world = GameWorld::new(8);

@@ -12,7 +12,7 @@ use lk2_core::protocol::components::{
     EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
 };
 use lk2_core::protocol::messages::{
-    BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback,
+    BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback, PingMessage, PongMessage,
 };
 
 use lightyear::prelude::PeerMetadata;
@@ -37,11 +37,12 @@ use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
+use lk2_core::transport::{PRIVATE_KEY, PROTOCOL_ID, SERVER_POS_UPDATE_INTERVAL_TICKS};
 use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{
-    World as GameWorld, WorldConfig, WorldGenerator, generate_world, player_body_clear,
-    player_position_is_safe, player_spawn_position_near, player_stand_position_at,
-    resolve_player_stuck_near,
+    World as GameWorld, WorldConfig, WorldGenerator, fallback_spawn_ring_offsets, generate_world,
+    player_body_clear, player_position_is_safe, player_spawn_position_at,
+    player_spawn_position_near, player_stand_position_at, resolve_player_stuck_near,
 };
 
 use crate::pvp_systems::{
@@ -616,6 +617,64 @@ fn apply_udp_gameplay_commands(
         };
 }
 
+fn echo_ping_messages(
+    clock: Res<SimClock>,
+    mut receivers: Query<
+        &mut lightyear::prelude::MessageReceiver<PingMessage>,
+        With<lightyear_connection::client_of::ClientOf>,
+    >,
+    server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
+    mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
+) {
+    let Ok(server) = server_q.single() else {
+        return;
+    };
+
+    for mut receiver in receivers.iter_mut() {
+        for ping in receiver.receive() {
+            if !ping.is_finite() {
+                warn!(
+                    "[net] ignoring non-finite PingMessage from client {}",
+                    ping.client_id
+                );
+                continue;
+            }
+            let pong = PongMessage {
+                client_id: ping.client_id,
+                sequence: ping.sequence,
+                client_time_secs: ping.client_time_secs,
+                server_tick: clock.tick as u32,
+            };
+            let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(
+                &pong,
+                server,
+                &lightyear::prelude::NetworkTarget::All,
+            );
+        }
+    }
+}
+
+fn broadcast_gameplay_feedback(
+    mut feedback: MessageReader<GameplayFeedback>,
+    server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
+    mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
+) {
+    let Ok(server) = server_q.single() else {
+        return;
+    };
+
+    for msg in feedback.read() {
+        if msg.summary == "moved" {
+            continue;
+        }
+        let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(
+            msg,
+            server,
+            &lightyear::prelude::NetworkTarget::All,
+        );
+    }
+}
+
 fn maintain_anti_stuck(
     world: &GameWorld,
     player: &mut PlayerState,
@@ -937,6 +996,8 @@ fn main() {
         .add_message::<lk2_core::protocol::messages::AttackInput>()
         .add_message::<lk2_core::protocol::messages::GameplayCommand>()
         .add_message::<lk2_core::protocol::messages::GameplayFeedback>()
+        .add_message::<PingMessage>()
+        .add_message::<PongMessage>()
         .add_message::<lk2_core::protocol::messages::HitConfirm>()
         .add_message::<lk2_core::protocol::messages::KnockbackEvent>()
         .add_message::<lk2_core::protocol::messages::DamageResult>()
@@ -1009,6 +1070,8 @@ fn main() {
             (
                 apply_gameplay_commands,
                 apply_udp_gameplay_commands,
+                echo_ping_messages,
+                broadcast_gameplay_feedback,
                 sync_authoritative_snapshot_components,
                 broadcast_player_pos,
                 read_attack_inputs,
@@ -1046,14 +1109,12 @@ fn spawn_server(mut commands: Commands) {
         server_addr
     );
 
-    let private_key: lightyear_netcode::Key = [0xAA; lightyear_netcode::PRIVATE_KEY_BYTES];
-    let protocol_id: u64 = 0x4C4B3256_4E455457;
     let netcode_server = NetcodeServer::new(
-        NetcodeConfig::default().with_protocol_id(protocol_id).with_key(private_key),
+        NetcodeConfig::default().with_protocol_id(PROTOCOL_ID).with_key(PRIVATE_KEY),
     );
     info!(
         "[net] NetcodeServer initialized: protocol_id=0x{:x}, key=<fixed-dev>",
-        protocol_id
+        PROTOCOL_ID
     );
 
     let server_id = commands
@@ -1080,6 +1141,18 @@ fn spawn_player(
     let sz = constant::WORLD_SIZE / 2;
     let (spawn, spawn_block) = player_spawn_position_near(&game_world, sx, sz, 14, 2)
         .unwrap_or_else(|| {
+            // Primary search failed (e.g. procedural terrain has no
+            // standable block in radius). Walk the golab-style deterministic
+            // ring of [dx, dz] offsets and snap to the first one that stands
+            // safely. Only if the entire ring is unstandable do we drop the
+            // player onto a hard-coded column above sea level.
+            for offset in fallback_spawn_ring_offsets(0) {
+                if let Some((pos, block)) =
+                    player_spawn_position_at(&game_world, sx + offset[0], sz + offset[1])
+                {
+                    return (pos, block);
+                }
+            }
             let fallback = bevy::math::Vec3::new(
                 sx as f32 + 0.5,
                 (constant::SEA_LEVEL + 2) as f32 + 0.5,
@@ -1127,7 +1200,10 @@ fn replicate_player_for_connected(
         client_of_entity
     );
 
-    commands.entity(client_of_entity).insert(lightyear::prelude::ReplicationSender::default());
+    commands.entity(client_of_entity).insert((
+        lightyear::prelude::ReplicationSender::default(),
+        lightyear::prelude::MessageReceiver::<PingMessage>::default(),
+    ));
     info!(
         "[net] ReplicationSender attached to ClientOf entity {:?} — now this client can receive replicated entities",
         client_of_entity
@@ -1159,7 +1235,7 @@ fn broadcast_player_pos(
 ) {
     tick.0 = tick.0.wrapping_add(1);
 
-    if tick.0 % 2 != 0 {
+    if tick.0 % SERVER_POS_UPDATE_INTERVAL_TICKS != 0 {
         return;
     }
     let Ok(server) = server_q.single() else {
@@ -1167,9 +1243,18 @@ fn broadcast_player_pos(
     };
 
     for transform in q.iter() {
-        let msg = lk2_core::protocol::messages::ServerPosUpdate {
-            server_tick: tick.0,
-            pos: transform.translation,
+        // golab's lesson: a single NaN sneaking into the wire corrupts every
+        // downstream Bevy transform on every client. Build the message
+        // through the finite-checked helper so corrupted engine state never
+        // reaches the wire; the next tick will repopulate a sane value.
+        let Some(msg) =
+            lk2_core::protocol::wire_format::try_make_server_pos_update(&transform, tick.0)
+        else {
+            error!(
+                "[net] dropping non-finite ServerPosUpdate from broadcast: pos={:?}, tick={}",
+                transform.translation, tick.0
+            );
+            continue;
         };
 
         let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(

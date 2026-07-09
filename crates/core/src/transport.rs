@@ -1,8 +1,14 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 
 pub const DEFAULT_PORT: u16 = 5000;
 
 pub const PROTOCOL_ID: u64 = 0x1cbe_4f9e_d4a0_4c2b;
+pub const PRIVATE_KEY: [u8; 32] = [0xAA; 32];
+pub const NETCODE_CLIENT_TIMEOUT_SECS: i32 = 60;
+pub const CLIENT_SEND_INTERVAL: Duration = Duration::from_millis(33);
+pub const PING_INTERVAL: Duration = Duration::from_secs(1);
+pub const SERVER_POS_UPDATE_INTERVAL_TICKS: u32 = 2;
 
 pub fn server_listen_addr() -> SocketAddr {
     let port = server_listen_port_from_env(std::env::var("LK2_PORT").ok().as_deref());
@@ -80,6 +86,19 @@ mod tests {
     #[test]
     fn protocol_id_is_nonzero() {
         assert_ne!(PROTOCOL_ID, 0);
+    }
+
+    #[test]
+    fn private_key_has_netcode_length() {
+        assert_eq!(PRIVATE_KEY.len(), 32);
+    }
+
+    #[test]
+    fn network_intervals_are_reasonable() {
+        assert!(CLIENT_SEND_INTERVAL.as_millis() <= 50);
+        assert_eq!(PING_INTERVAL.as_secs(), 1);
+        assert!(SERVER_POS_UPDATE_INTERVAL_TICKS > 0);
+        assert!(NETCODE_CLIENT_TIMEOUT_SECS >= 10);
     }
 
     #[test]

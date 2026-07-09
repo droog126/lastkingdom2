@@ -177,16 +177,23 @@ fn terrain_color(world: &GameWorld, p: [f32; 3]) -> [f32; 4] {
 fn surface_block_near(world: &GameWorld, p: [f32; 3]) -> BlockType {
     let x = p[0].floor() as i32;
     let z = p[2].floor() as i32;
-    let y = p[1].round() as i32;
+    let y = p[1].floor() as i32;
+    let mut fallback = None;
 
-    for dy in [0, -1, 1, -2, 2] {
-        let block = world.get(x, y + dy, z);
-        if block.is_solid() {
-            return block;
+    for (dx, dz) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
+        for sy in ((y - 4)..=(y + 4)).rev() {
+            let block = world.get(x + dx, sy, z + dz);
+            if !block.is_solid() {
+                continue;
+            }
+            fallback.get_or_insert(block);
+            if !world.get(x + dx, sy + 1, z + dz).is_solid() {
+                return block;
+            }
         }
     }
 
-    BlockType::Air
+    fallback.unwrap_or(BlockType::Air)
 }
 
 fn laplacian_smooth(vertices: Vec<McVertex>, indices: &[u32], passes: u32) -> Vec<McVertex> {
@@ -247,7 +254,7 @@ fn smooth_normals(vertices: &[McVertex], _indices: &[u32]) -> (Vec<[f32; 3]>, Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lk2_core::world::World as GameWorld;
+    use lk2_core::world::{World as GameWorld, install_huge_spawn_platform, terrain::presets};
 
     #[test]
     fn empty_world_no_mesh() {
@@ -256,5 +263,23 @@ mod tests {
         let result = build_smooth_mesh(&world, [40, 0, 40], [60, 30, 60], 0.5, 0);
 
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn default_spawn_surface_samples_as_green_grass() {
+        let pipeline = presets::by_name("default");
+        let mut world = GameWorld::with_pipeline(96, pipeline);
+        install_huge_spawn_platform(&mut world);
+
+        let block = surface_block_near(&world, [48.5, 14.55, 48.5]);
+        let low_smoothed_block = surface_block_near(&world, [48.5, 12.20, 48.5]);
+        let color = terrain_color(&world, [48.5, 14.55, 48.5]);
+
+        assert_eq!(block, BlockType::Grass);
+        assert_eq!(low_smoothed_block, BlockType::Grass);
+        assert!(
+            color[1] > color[0] && color[1] > color[2],
+            "grass terrain should be green-dominant, got rgba={color:?}"
+        );
     }
 }

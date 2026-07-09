@@ -93,6 +93,21 @@ pub mod messages {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct PingMessage {
+        pub client_id: u64,
+        pub sequence: u64,
+        pub client_time_secs: f64,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct PongMessage {
+        pub client_id: u64,
+        pub sequence: u64,
+        pub client_time_secs: f64,
+        pub server_tick: u32,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct ServerPosUpdate {
         pub server_tick: u32,
         pub pos: Vec3,
@@ -299,6 +314,10 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<messages::GameplayFeedback>()
             .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<messages::PingMessage>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<messages::PongMessage>()
+            .add_direction(NetworkDirection::ServerToClient);
 
         app.register_message::<messages::ServerPosUpdate>()
             .add_direction(NetworkDirection::ServerToClient);
@@ -316,6 +335,432 @@ impl Plugin for ProtocolPlugin {
         app.component::<components::EcoSnapshot>().replicate();
         app.component::<components::VoxelDelta>().replicate();
         app.component::<components::VoxelChunkSnapshot>().replicate();
+    }
+}
+
+/// Wire-format helpers shared by client and server.
+///
+/// golab teaches the lesson that floats crossing the network need an explicit
+/// `is_finite()` boundary — a single NaN sneaking through serde will corrupt
+/// every downstream Bevy transform. These helpers expose the same check on
+/// every wire type in `messages` / `components`, so the server can drop bad
+/// packets before they hit authoritative state and the client can guard
+/// replicated components before they touch render code.
+pub mod wire_format {
+
+    use super::components::{
+        EcoBerryNet, EcoCloudNet, EcoPlantNet, EcoRabbitNet, EcoSnapshot, EcoWildlifeNet,
+        PlayerPos, VoxelDelta,
+    };
+    use super::messages::{
+        AttackInput, DamageResult, HitConfirm, KnockbackEvent, PingMessage, PongMessage,
+        ServerPosUpdate,
+    };
+
+    /// True iff every component of `v` is a finite float (no NaN, no Infinity).
+    #[must_use]
+    pub fn is_finite_vec3(v: &bevy::prelude::Vec3) -> bool {
+        v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+    }
+
+    /// True iff `value` is a finite f32 (no NaN, no Infinity).
+    #[must_use]
+    pub fn is_finite_f32(value: f32) -> bool {
+        value.is_finite()
+    }
+
+    /// True iff `value` is a finite f64 (no NaN, no Infinity).
+    #[must_use]
+    pub fn is_finite_f64(value: f64) -> bool {
+        value.is_finite()
+    }
+
+    /// True iff every element of `slice` is a finite float.
+    #[must_use]
+    pub fn is_finite_f32_slice(slice: &[f32]) -> bool {
+        slice.iter().all(|value| value.is_finite())
+    }
+
+    impl PlayerPos {
+        /// True iff the inner position is finite (no NaN/Inf).
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_vec3(&self.0)
+        }
+    }
+
+    impl ServerPosUpdate {
+        /// True iff the wire-position payload is finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_vec3(&self.pos)
+        }
+    }
+
+    impl AttackInput {
+        /// True iff the input direction vector is finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_vec3(&self.input_dir)
+        }
+    }
+
+    impl HitConfirm {
+        /// True iff the world-space hit position and damage amount are both
+        /// finite. A NaN damage value would propagate into the HUD HP bar
+        /// and the knockback velocity — drop the message at the network
+        /// boundary instead of letting it corrupt authoritative state.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_vec3(&self.hit_pos) && is_finite_f32(self.damage)
+        }
+    }
+
+    impl KnockbackEvent {
+        /// True iff the knockback velocity vector is finite. A NaN velocity
+        /// would freeze the victim in place or send them to (0,0,0) every
+        /// frame after reconciliation, so it must be filtered at the wire.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_vec3(&self.velocity)
+        }
+    }
+
+    impl DamageResult {
+        /// True iff the resulting health value is finite. The HUD reads this
+        /// directly, so a NaN health makes the bar disappear or render as
+        /// gibberish.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.new_health)
+        }
+    }
+
+    impl PingMessage {
+        /// True iff the timestamp payload is finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            self.client_time_secs.is_finite()
+        }
+    }
+
+    impl PongMessage {
+        /// True iff the timestamp payload is finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            self.client_time_secs.is_finite()
+        }
+    }
+
+    impl VoxelDelta {
+        /// `VoxelDelta` carries only `u64` / `i32` / `u8` fields, which
+        /// cannot be NaN or Inf. The method exists so every replicated
+        /// component participates in the same finite-check contract; today
+        /// it is a compile-time guarantee, not a runtime branch.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            true
+        }
+    }
+
+    impl EcoRabbitNet {
+        /// True iff x, z, and energy are finite. Positions and energy flow
+        /// from server-side simulation; a NaN coordinate would teleport the
+        /// rabbit to `(0, 0)` or render it inside a chunk each frame.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.x) && is_finite_f32(self.z) && is_finite_f32(self.energy)
+        }
+    }
+
+    impl EcoWildlifeNet {
+        /// True iff x, z, and energy are finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.x) && is_finite_f32(self.z) && is_finite_f32(self.energy)
+        }
+    }
+
+    impl EcoBerryNet {
+        /// True iff x and z are finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.x) && is_finite_f32(self.z)
+        }
+    }
+
+    impl EcoPlantNet {
+        /// True iff x and z are finite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.x) && is_finite_f32(self.z)
+        }
+    }
+
+    impl EcoCloudNet {
+        /// True iff position, rain, and phase are finite. The cloud animator
+        /// drives `rain` from accumulated precipitation; if a divider hits
+        /// zero it can spill NaN into the loop and freeze the rain sprite.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.x)
+                && is_finite_f32(self.z)
+                && is_finite_f32(self.rain)
+                && is_finite_f32(self.phase)
+        }
+    }
+
+    impl EcoSnapshot {
+        /// True iff every per-tick float (co2, rain, rainfall) is finite.
+        /// Counter fields are integers and cannot misbehave. Cloud/berry/
+        /// plant/inner lists are validated by their own `is_finite()` and
+        /// are not re-checked here — the call site can iterate `clouds`,
+        /// `rabbits`, etc. independently.
+        #[must_use]
+        pub fn is_finite(&self) -> bool {
+            is_finite_f32(self.co2) && is_finite_f32(self.rain) && is_finite_f32(self.rainfall)
+        }
+    }
+
+    /// Build a `ServerPosUpdate` from a Bevy transform, returning `None`
+    /// when the translation contains NaN or Infinity. Call at every server
+    /// broadcast boundary so corrupted engine state never reaches the wire.
+    ///
+    /// golab does the same `if !is_finite(...) { skip }` check inline in
+    /// `broadcast_snapshot`; promoting it to a free function keeps the call
+    /// site tidy and lets the unit tests cover the contract once.
+    #[must_use]
+    pub fn try_make_server_pos_update(
+        transform: &bevy::prelude::Transform,
+        server_tick: u32,
+    ) -> Option<ServerPosUpdate> {
+        let pos = transform.translation;
+        if !is_finite_vec3(&pos) {
+            return None;
+        }
+        Some(ServerPosUpdate { server_tick, pos })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use bevy::prelude::Vec3;
+
+        #[test]
+        fn finite_vec3_passes() {
+            assert!(is_finite_vec3(&Vec3::ZERO));
+            assert!(is_finite_vec3(&Vec3::new(1.0, -2.5, 3.14)));
+        }
+
+        #[test]
+        fn nan_or_inf_vec3_fails() {
+            assert!(!is_finite_vec3(&Vec3::new(f32::NAN, 0.0, 0.0)));
+            assert!(!is_finite_vec3(&Vec3::new(0.0, f32::INFINITY, 0.0)));
+            assert!(!is_finite_vec3(&Vec3::new(0.0, 0.0, f32::NEG_INFINITY)));
+        }
+
+        #[test]
+        fn finite_f32_slice_passes() {
+            assert!(is_finite_f32_slice(&[1.0, 2.0, 3.0]));
+            assert!(is_finite_f32_slice(&[]));
+            assert!(!is_finite_f32_slice(&[1.0, f32::NAN]));
+        }
+
+        #[test]
+        fn player_pos_is_finite_matches_inner() {
+            assert!(PlayerPos(Vec3::new(1.0, 2.0, 3.0)).is_finite());
+            assert!(!PlayerPos(Vec3::new(f32::NAN, 0.0, 0.0)).is_finite());
+        }
+
+        #[test]
+        fn server_pos_update_is_finite_matches_inner() {
+            let ok = ServerPosUpdate { server_tick: 1, pos: Vec3::new(0.5, 1.5, 2.5) };
+            assert!(ok.is_finite());
+            let bad = ServerPosUpdate { server_tick: 1, pos: Vec3::new(f32::INFINITY, 0.0, 0.0) };
+            assert!(!bad.is_finite());
+        }
+
+        #[test]
+        fn voxel_delta_is_always_finite() {
+            let d = VoxelDelta { revision: 0, x: 0, y: 0, z: 0, block: 0 };
+            assert!(d.is_finite());
+        }
+
+        #[test]
+        fn ping_pong_finite_checks_timestamp() {
+            assert!(PingMessage { client_id: 7, sequence: 1, client_time_secs: 1.0 }.is_finite());
+            assert!(
+                !PingMessage { client_id: 7, sequence: 1, client_time_secs: f64::NAN }.is_finite()
+            );
+            assert!(
+                PongMessage { client_id: 7, sequence: 1, client_time_secs: 1.0, server_tick: 2 }
+                    .is_finite()
+            );
+            assert!(
+                !PongMessage {
+                    client_id: 7,
+                    sequence: 1,
+                    client_time_secs: f64::INFINITY,
+                    server_tick: 2,
+                }
+                .is_finite()
+            );
+        }
+
+        #[test]
+        fn try_make_server_pos_update_accepts_finite_transform() {
+            let t = bevy::prelude::Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
+            let msg = try_make_server_pos_update(&t, 42).expect("finite transform must succeed");
+            assert_eq!(msg.server_tick, 42);
+            assert_eq!(msg.pos, Vec3::new(1.0, 2.0, 3.0));
+        }
+
+        #[test]
+        fn try_make_server_pos_update_rejects_nan_translation() {
+            let t = bevy::prelude::Transform::from_translation(Vec3::new(f32::NAN, 0.0, 0.0));
+            assert!(try_make_server_pos_update(&t, 1).is_none());
+        }
+
+        #[test]
+        fn try_make_server_pos_update_rejects_infinity_translation() {
+            let t = bevy::prelude::Transform::from_translation(Vec3::new(0.0, f32::INFINITY, 0.0));
+            assert!(try_make_server_pos_update(&t, 1).is_none());
+        }
+
+        #[test]
+        fn hit_confirm_is_finite_checks_position_and_damage() {
+            use super::super::messages::HitConfirm;
+            use lightyear::prelude::PeerId;
+            let ok = HitConfirm {
+                victim_id: PeerId::Netcode(1),
+                damage: 20.0,
+                is_critical: false,
+                hit_pos: Vec3::new(1.0, 2.0, 3.0),
+                server_tick: 0,
+            };
+            assert!(ok.is_finite());
+            let bad_pos = HitConfirm { hit_pos: Vec3::new(f32::NAN, 0.0, 0.0), ..ok.clone() };
+            assert!(!bad_pos.is_finite());
+            let bad_damage = HitConfirm { damage: f32::INFINITY, ..ok };
+            assert!(!bad_damage.is_finite());
+        }
+
+        #[test]
+        fn knockback_event_is_finite_checks_velocity() {
+            use super::super::messages::KnockbackEvent;
+            use lightyear::prelude::PeerId;
+            let ok = KnockbackEvent {
+                victim_id: PeerId::Netcode(1),
+                velocity: Vec3::new(1.0, 0.0, 0.0),
+                server_tick: 0,
+            };
+            assert!(ok.is_finite());
+            let bad = KnockbackEvent { velocity: Vec3::new(0.0, f32::INFINITY, 0.0), ..ok };
+            assert!(!bad.is_finite());
+        }
+
+        #[test]
+        fn damage_result_is_finite_checks_health() {
+            use super::super::messages::DamageResult;
+            use lightyear::prelude::PeerId;
+            let ok = DamageResult {
+                victim_id: PeerId::Netcode(1),
+                new_health: 80.0,
+                is_dead: false,
+                server_tick: 0,
+            };
+            assert!(ok.is_finite());
+            let bad = DamageResult { new_health: f32::NAN, ..ok };
+            assert!(!bad.is_finite());
+        }
+
+        #[test]
+        fn eco_rabbit_net_is_finite_checks_position_and_energy() {
+            use super::super::components::EcoRabbitNet;
+            let ok = EcoRabbitNet { id: 1, x: 0.0, z: 0.0, energy: 1.0 };
+            assert!(ok.is_finite());
+            let bad = EcoRabbitNet { x: f32::NAN, ..ok };
+            assert!(!bad.is_finite());
+            let bad_e = EcoRabbitNet {
+                energy: f32::INFINITY,
+                ..EcoRabbitNet { id: 2, x: 0.0, z: 0.0, energy: 1.0 }
+            };
+            assert!(!bad_e.is_finite());
+        }
+
+        #[test]
+        fn eco_wildlife_net_is_finite_checks_position_and_energy() {
+            use super::super::components::EcoWildlifeNet;
+            let ok = EcoWildlifeNet { id: 1, kind: 0, x: 1.0, z: 2.0, energy: 0.5 };
+            assert!(ok.is_finite());
+            let bad = EcoWildlifeNet { z: f32::NAN, ..ok };
+            assert!(!bad.is_finite());
+        }
+
+        #[test]
+        fn eco_berry_net_is_finite_checks_position() {
+            use super::super::components::EcoBerryNet;
+            let ok = EcoBerryNet { id: 1, x: 0.0, z: 0.0, fruit: 5 };
+            assert!(ok.is_finite());
+            let bad = EcoBerryNet { x: f32::INFINITY, ..ok };
+            assert!(!bad.is_finite());
+        }
+
+        #[test]
+        fn eco_plant_net_is_finite_checks_position() {
+            use super::super::components::EcoPlantNet;
+            let ok = EcoPlantNet { id: 1, kind: 0, x: 0.0, z: 0.0, stock: 3 };
+            assert!(ok.is_finite());
+            let bad = EcoPlantNet { z: f32::NAN, ..ok };
+            assert!(!bad.is_finite());
+        }
+
+        #[test]
+        fn eco_cloud_net_is_finite_checks_rain_and_phase() {
+            use super::super::components::EcoCloudNet;
+            let ok = EcoCloudNet { id: 1, x: 0.0, z: 0.0, rain: 0.5, phase: 1.2 };
+            assert!(ok.is_finite());
+            let bad_rain = EcoCloudNet { rain: f32::NAN, ..ok };
+            assert!(!bad_rain.is_finite());
+            let bad_phase = EcoCloudNet {
+                phase: f32::INFINITY,
+                ..EcoCloudNet { id: 2, x: 0.0, z: 0.0, rain: 0.0, phase: 0.0 }
+            };
+            assert!(!bad_phase.is_finite());
+        }
+
+        #[test]
+        fn eco_snapshot_is_finite_checks_aggregate_floats() {
+            use super::super::components::{EcoCloudNet, EcoSnapshot};
+            let ok = EcoSnapshot {
+                tick: 0,
+                co2: 400.0,
+                rain: 0.0,
+                rainfall: 0.1,
+                fruit_eaten: 0,
+                fruit_grown: 0,
+                plants_grown: 0,
+                rabbits_born: 0,
+                wildlife_born: 0,
+                clouds: Vec::new(),
+                rabbits: Vec::new(),
+                wildlife: Vec::new(),
+                berries: Vec::new(),
+                plants: Vec::new(),
+            };
+            assert!(ok.is_finite());
+            let bad = EcoSnapshot { co2: f32::NAN, ..ok.clone() };
+            assert!(!bad.is_finite());
+            // A non-finite inner cloud invalidates the snapshot when iterated,
+            // even though `is_finite()` only spot-checks the aggregate fields.
+            let cloud_with_nan = EcoCloudNet { id: 1, x: 0.0, z: 0.0, rain: f32::NAN, phase: 0.0 };
+            let snapshot_with_nan_cloud = EcoSnapshot { clouds: vec![cloud_with_nan], ..ok };
+            assert!(
+                snapshot_with_nan_cloud.is_finite(),
+                "aggregate check ignores inner lists"
+            );
+            assert!(!snapshot_with_nan_cloud.clouds.iter().all(|c| c.is_finite()));
+        }
     }
 }
 
@@ -419,6 +864,29 @@ mod tests {
         assert_eq!(decoded.tick, 1000);
         assert_eq!(decoded.player_block, [16, 8, 32]);
         assert!(matches!(decoded.kind, GameplayCommandKind::FoundNation));
+    }
+
+    #[test]
+    fn ping_pong_json_roundtrip() {
+        let ping = messages::PingMessage { client_id: 9, sequence: 77, client_time_secs: 12.5 };
+        let json = serde_json::to_string(&ping).unwrap();
+        let decoded: messages::PingMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.client_id, 9);
+        assert_eq!(decoded.sequence, 77);
+        assert_eq!(decoded.client_time_secs, 12.5);
+
+        let pong = messages::PongMessage {
+            client_id: 9,
+            sequence: 77,
+            client_time_secs: 12.5,
+            server_tick: 1234,
+        };
+        let json = serde_json::to_string(&pong).unwrap();
+        let decoded: messages::PongMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.client_id, 9);
+        assert_eq!(decoded.sequence, 77);
+        assert_eq!(decoded.client_time_secs, 12.5);
+        assert_eq!(decoded.server_tick, 1234);
     }
 
     #[test]

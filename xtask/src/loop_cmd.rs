@@ -24,6 +24,7 @@ struct LoopArgs {
     seconds: u64,
     max_extra_wait: u64,
     rust_log: String,
+    gpu_backend: String,
     skip_build: bool,
     dynamic: bool,
     online: bool,
@@ -69,6 +70,8 @@ impl Default for LoopArgs {
             rust_log: env::var("RUST_LOG").unwrap_or_else(|_| {
                 "info,lightyear_replication=debug,lightyear_connection=debug,lightyear_send=debug,lightyear_receive=debug".to_string()
             }),
+            gpu_backend: env::var("WGPU_BACKEND")
+                .unwrap_or_else(|_| default_gpu_backend().to_string()),
             skip_build: false,
             dynamic: !cfg!(windows),
             online: false,
@@ -119,7 +122,7 @@ impl Default for FlickerProbeArgs {
 pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
         println!(
-            "xtask loop --offline --seconds 12 --skip-build --no-dynamic --first-person --refresh-after-fail"
+            "xtask loop --offline --seconds 12 --skip-build --no-dynamic --first-person --refresh-after-fail --gpu-backend vulkan"
         );
         return Ok(());
     }
@@ -132,7 +135,10 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
 
     let use_offline = parsed.offline || (!parsed.online && !parsed.no_server);
     let target_dir = loop_target_dir(root);
-    let mut envs = runtime_env(root, &target_dir, &parsed.rust_log)?;
+    let mut envs = play_runtime_env(
+        runtime_env(root, &target_dir, &parsed.rust_log)?,
+        &parsed.gpu_backend,
+    );
     if parsed.no_kenney {
         envs.push(("LK2_DISABLE_KENNEY".to_string(), "1".to_string()));
         println!(">>> Kenney gameplay models OFF <<<");
@@ -596,6 +602,11 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
             Some("rustlog") | Some("rust-log") => {
                 if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
                     parsed.rust_log = value;
+                }
+            }
+            Some("gpubackend") | Some("gpu-backend") => {
+                if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
+                    parsed.gpu_backend = value;
                 }
             }
             Some("skipbuild") | Some("skip-build") => parsed.skip_build = true,
@@ -2066,6 +2077,13 @@ mod tests {
         assert!(!parsed.dynamic);
         assert!(parsed.first_person);
         assert!(parsed.legacy_voxel);
+    }
+
+    #[test]
+    fn loop_args_accept_gpu_backend_override() {
+        let parsed = parse_loop(&["--gpu-backend=vulkan".into()]);
+
+        assert_eq!(parsed.gpu_backend, "vulkan");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::feathers::{
     theme::{ThemeBackgroundColor, ThemedText},
     tokens,
@@ -10,8 +11,10 @@ use crate::render::{
     AnimalIndicatorText, CameraAngles, CameraMode, FreeFlyState, NestIndicatorText, Player,
     RenderFeatureSettings,
 };
-use lk2_core::ai::TickObserver;
-use lk2_core::clock::SimClock;
+use crate::{
+    GameplayFeedbackToast, OnlineCommandDiagnostics, OnlineConnectionDiagnostics,
+    OnlineNetworkStatus,
+};
 use lk2_core::combat::{
     AttackPhase, AttackState as CombatAttackState, Downed as CombatDowned, Health as CombatHealth,
     ParryWindow as CombatParryWindow, Stamina as CombatStamina, StunState as CombatStunState,
@@ -31,6 +34,23 @@ pub struct HudText;
 
 #[derive(Component)]
 pub struct HudFooter;
+
+#[derive(SystemParam)]
+pub struct HudReadParams<'w> {
+    player: Res<'w, PlayerState>,
+    pool: Res<'w, GlobalResourcePool>,
+    eco: Res<'w, EcoCycle>,
+    nations: Res<'w, NationRegistry>,
+    monsters: Res<'w, MonsterEcosystem>,
+    objectives: Res<'w, Objectives>,
+    time: Res<'w, Time>,
+    run_mode: Res<'w, ClientRunMode>,
+    online_commands: Res<'w, OnlineCommandDiagnostics>,
+    online_connection: Res<'w, OnlineConnectionDiagnostics>,
+    online_status: Res<'w, OnlineNetworkStatus>,
+    match_clock: Res<'w, MatchClock>,
+    camera_mode: Res<'w, CameraMode>,
+}
 
 #[derive(Component)]
 pub struct HudHpText;
@@ -54,6 +74,9 @@ pub struct HudObjectiveFlashText {
     pub shown_at_secs: f32,
     pub text: String,
 }
+
+#[derive(Component)]
+pub struct HudFeedbackToastText;
 
 #[derive(Component)]
 pub struct NestRadarDot {
@@ -881,6 +904,23 @@ pub fn setup_hud(mut commands: Commands) {
         },
         HudObjectiveFlashText { shown_at_secs: -100.0, text: String::new() },
     ));
+
+    commands.spawn((
+        Text::new(""),
+        hud_label_font(FontSize::Rem(0.84)),
+        ui_text_layout(Justify::Center),
+        TextColor(Color::srgba(0.86, 0.96, 1.0, 0.0)),
+        TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(112),
+            left: Val::Percent(0.0),
+            right: Val::Percent(0.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        HudFeedbackToastText,
+    ));
 }
 
 fn radar_dot(slot: usize) -> impl Bundle {
@@ -971,19 +1011,9 @@ pub fn update_hud(
         Query<(&mut Text, &mut HudObjectiveFlashText), Without<HudText>>,
         Query<&mut Text, (With<HudObjectiveText>, Without<HudObjectiveFlashText>)>,
     )>,
-    _clock: Res<SimClock>,
-    player: Res<PlayerState>,
-    pool: Res<GlobalResourcePool>,
-    eco: Res<EcoCycle>,
-    nations: Res<NationRegistry>,
-    monsters: Res<MonsterEcosystem>,
-    objectives: Res<Objectives>,
+    hud: HudReadParams,
     mut completed_events: MessageReader<lk2_core::objectives::ObjectiveCompleted>,
-    _obs: Res<TickObserver>,
-    time: Res<Time>,
-    run_mode: Res<ClientRunMode>,
     hud_state_q: Query<&GameplayHudState>,
-    match_clock: Res<MatchClock>,
     q_player_combat: Query<
         (
             &CombatHealth,
@@ -995,9 +1025,8 @@ pub fn update_hud(
         ),
         With<Player>,
     >,
-    camera_mode: Res<CameraMode>,
 ) {
-    if *camera_mode == CameraMode::TopDown {
+    if *hud.camera_mode == CameraMode::TopDown {
         if let Ok(mut text) = q_hud.p0().single_mut() {
             text.0.clear();
         }
@@ -1023,31 +1052,40 @@ pub fn update_hud(
         return;
     }
 
-    let fps = (1.0 / time.delta_secs().max(0.001)).round() as i32;
+    let fps = (1.0 / hud.time.delta_secs().max(0.001)).round() as i32;
     let hud_state = hud_state_q.iter().next();
-    let wood = hud_state.map(|s| s.pool_wood).unwrap_or(pool.get(ResourceKind::Wood));
-    let food = hud_state.map(|s| s.pool_food).unwrap_or(pool.get(ResourceKind::Food));
-    let apple = hud_state.map(|s| s.pool_apple).unwrap_or(pool.get(ResourceKind::Apple));
-    let soul = hud_state.map(|s| s.pool_soul).unwrap_or(pool.get(ResourceKind::Soul));
-    let flags = hud_state.map(|s| s.flag_count).unwrap_or(nations.flag_count);
-    let monster_count = hud_state.map(|s| s.monster_count).unwrap_or(monsters.current_individuals);
+    let wood = hud_state.map(|s| s.pool_wood).unwrap_or(hud.pool.get(ResourceKind::Wood));
+    let food = hud_state.map(|s| s.pool_food).unwrap_or(hud.pool.get(ResourceKind::Food));
+    let apple = hud_state.map(|s| s.pool_apple).unwrap_or(hud.pool.get(ResourceKind::Apple));
+    let soul = hud_state.map(|s| s.pool_soul).unwrap_or(hud.pool.get(ResourceKind::Soul));
+    let flags = hud_state.map(|s| s.flag_count).unwrap_or(hud.nations.flag_count);
+    let monster_count =
+        hud_state.map(|s| s.monster_count).unwrap_or(hud.monsters.current_individuals);
+    let network_line = format_network_hud_line(
+        *hud.run_mode,
+        OnlineNetworkStatus { status: hud.online_status.status },
+        hud.time.elapsed_secs(),
+        &hud.online_connection,
+        &hud.online_commands,
+    );
 
     if let Ok(mut text) = q_hud.p0().single_mut() {
-        let phase_remaining = match_clock.phase_remaining_secs();
+        let phase_remaining = hud.match_clock.phase_remaining_secs();
         let m = (phase_remaining / 60.0).floor() as i32;
         let s = (phase_remaining - m as f32 * 60.0).floor() as i32;
         let phase_line = format!(
             "Phase: {}  T-{:02}:{:02}",
-            match_clock.phase.label_zh(),
+            hud.match_clock.phase.label_zh(),
             m,
             s
         );
         **text = format_main_hud(
-            run_mode.label(),
+            hud.run_mode.label(),
             fps,
-            player.pos,
-            player.block_pos,
+            hud.player.pos,
+            hud.player.block_pos,
             &phase_line,
+            network_line.as_deref(),
             wood,
             food,
             apple,
@@ -1055,16 +1093,16 @@ pub fn update_hud(
             flags,
             8,
             monster_count,
-            eco.rabbit_count(),
-            eco.berry_count(),
-            eco.total_fruit(),
-            eco.co2,
-            eco.fruit_eaten,
-            eco.fruit_grown,
+            hud.eco.rabbit_count(),
+            hud.eco.berry_count(),
+            hud.eco.total_fruit(),
+            hud.eco.co2,
+            hud.eco.fruit_eaten,
+            hud.eco.fruit_grown,
         );
     }
 
-    let (goal_text, status) = if let Some(obj) = objectives.current() {
+    let (goal_text, status) = if let Some(obj) = hud.objectives.current() {
         let progress = match &obj.progress {
             ObjectiveProgress::Count(n) => format!(
                 "{}/{}",
@@ -1124,18 +1162,18 @@ pub fn update_hud(
     if let Ok(mut text) = q_hud.p6().single_mut() {
         **text = format!(
             "ECO LOOP: clouds {} rain {:.1} -> plants {}(+{}) -> rabbits {}(+{}) -> wildlife {}(+{})",
-            eco.clouds.len(),
-            eco.rainfall,
-            eco.plant_count(),
-            eco.plants_grown,
-            eco.rabbit_count(),
-            eco.rabbits_born,
-            eco.wildlife_count(),
-            eco.wildlife_born
+            hud.eco.clouds.len(),
+            hud.eco.rainfall,
+            hud.eco.plant_count(),
+            hud.eco.plants_grown,
+            hud.eco.rabbit_count(),
+            hud.eco.rabbits_born,
+            hud.eco.wildlife_count(),
+            hud.eco.wildlife_born
         );
     }
 
-    let now_secs = time.elapsed_secs();
+    let now_secs = hud.time.elapsed_secs();
     for ev in completed_events.read() {
         if let Ok((mut text, mut flash)) = q_hud.p5().single_mut() {
             flash.shown_at_secs = now_secs;
@@ -1171,12 +1209,39 @@ pub fn update_tutorial_overlay(
     }
 }
 
+pub fn update_feedback_toast_text(
+    time: Res<Time>,
+    toast: Res<GameplayFeedbackToast>,
+    mut q: Query<(&mut Text, &mut TextColor), With<HudFeedbackToastText>>,
+) {
+    let Ok((mut text, mut color)) = q.single_mut() else {
+        return;
+    };
+    let Some(summary) = toast.visible_summary(time.elapsed_secs()) else {
+        text.0.clear();
+        color.0 = color.0.with_alpha(0.0);
+        return;
+    };
+
+    text.0 = if toast.ok {
+        summary.to_string()
+    } else {
+        format!("Blocked: {summary}")
+    };
+    color.0 = if toast.ok {
+        Color::srgba(0.72, 1.0, 0.78, 0.92)
+    } else {
+        Color::srgba(1.0, 0.62, 0.48, 0.92)
+    };
+}
+
 pub fn format_main_hud(
     run_mode_label: &str,
     fps: i32,
     player_pos: Vec3,
     player_block_pos: [i32; 3],
     phase_line: &str,
+    network_line: Option<&str>,
     wood: i64,
     food: i64,
     apple: i64,
@@ -1191,12 +1256,14 @@ pub fn format_main_hud(
     fruit_eaten: u64,
     fruit_grown: u64,
 ) -> String {
+    let network_line =
+        network_line.map_or_else(String::new, |line| format!("\n         > NET {line}"));
     format!(
         "> WANGUO ORIGINS v0.4 | {run_mode_label} | {fps} fps | {phase_line}\n\
          > POS x {x:.1} y {y:.1} z {z:.1} | block {bx},{by},{bz}\n\
          > RES wood {wood} food {food} apple {apple} soul {soul}\n\
          > WORLD flags {flags}/{flag_cap} monsters {monsters}\n\
-         > ECO rabbits {rabbits}/5 berries {berry_bushes}/10 fruit {fruit} CO2 {co2:.1} eat/grow {fruit_eaten}/{fruit_grown}",
+         > ECO rabbits {rabbits}/5 berries {berry_bushes}/10 fruit {fruit} CO2 {co2:.1} eat/grow {fruit_eaten}/{fruit_grown}{network_line}",
         x = player_pos.x,
         y = player_pos.y,
         z = player_pos.z,
@@ -1206,9 +1273,57 @@ pub fn format_main_hud(
     )
 }
 
+pub fn format_network_hud_line(
+    run_mode: ClientRunMode,
+    status: OnlineNetworkStatus,
+    now_secs: f32,
+    connection: &OnlineConnectionDiagnostics,
+    commands: &OnlineCommandDiagnostics,
+) -> Option<String> {
+    if run_mode != ClientRunMode::Online {
+        return None;
+    }
+
+    let snapshot_age = connection
+        .snapshot_age_secs(now_secs)
+        .map_or_else(|| "--".to_string(), |age| format!("{age:.1}s"));
+    let pos_age = connection
+        .server_pos_age_secs(now_secs)
+        .map_or_else(|| "--".to_string(), |age| format!("{age:.1}s"));
+    let pong_age = connection
+        .pong_age_secs(now_secs)
+        .map_or_else(|| "--".to_string(), |age| format!("{age:.1}s"));
+    let ping =
+        connection.ping_ms.map_or_else(|| "--".to_string(), |ping_ms| format!("{ping_ms:.0}ms"));
+    let server =
+        connection.server_addr.map_or_else(|| "server ?".to_string(), |addr| addr.to_string());
+    let command_path = if commands.gameplay_udp_active {
+        "udp"
+    } else if commands.sender_entities > 0 {
+        "msg"
+    } else {
+        "idle"
+    };
+
+    Some(format!(
+        "{} {server} id {:04} ping {ping} pong {pong_age} snap {snapshot_age} pos {pos_age} tick {} drift {:.2} corr {:.2} | {command_path} sent {} dir {},{}",
+        status.status.label(),
+        connection.client_id % 10_000,
+        connection.last_server_tick,
+        connection.last_server_drift,
+        connection.last_server_correction,
+        commands.move_world_sent,
+        commands.last_dx_milli,
+        commands.last_dz_milli,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_main_hud, radar_project};
+    use super::{ClientRunMode, format_main_hud, format_network_hud_line, radar_project};
+    use crate::{
+        NetworkStatus, OnlineCommandDiagnostics, OnlineConnectionDiagnostics, OnlineNetworkStatus,
+    };
     use bevy::prelude::{Vec2, Vec3};
 
     #[test]
@@ -1219,6 +1334,7 @@ mod tests {
             Vec3::new(48.5, 16.0, 48.5),
             [48, 16, 48],
             "Phase: x",
+            None,
             1,
             2,
             3,
@@ -1239,6 +1355,76 @@ mod tests {
         assert!(s.contains("berries 10/10"));
         assert!(s.contains("CO2 0.8"));
         assert!(s.contains("eat/grow 11/12"));
+        assert!(!s.contains("> NET"));
+    }
+
+    #[test]
+    fn format_main_hud_can_include_online_status() {
+        let s = format_main_hud(
+            "ONLINE",
+            60,
+            Vec3::new(1.0, 2.0, 3.0),
+            [1, 2, 3],
+            "Phase: x",
+            Some("live 127.0.0.1:5000"),
+            1,
+            2,
+            3,
+            4,
+            1,
+            8,
+            60,
+            5,
+            10,
+            7,
+            0.8,
+            11,
+            12,
+        );
+        assert_eq!(s.matches('\n').count(), 5);
+        assert!(s.contains("> NET live 127.0.0.1:5000"));
+    }
+
+    #[test]
+    fn format_network_hud_line_tracks_online_freshness() {
+        let connection = OnlineConnectionDiagnostics {
+            server_addr: Some("127.0.0.1:5000".parse().unwrap()),
+            client_id: 12_345,
+            snapshot_count: 3,
+            server_pos_updates: 9,
+            ping_sequence: 4,
+            ping_ms: Some(31.5),
+            last_snapshot_secs: Some(9.5),
+            last_server_pos_secs: Some(9.75),
+            last_pong_secs: Some(9.9),
+            last_server_tick: 42,
+            last_server_drift: 0.25,
+            last_server_correction: 0.0,
+        };
+        let commands = OnlineCommandDiagnostics {
+            sender_entities: 1,
+            move_world_sent: 7,
+            last_dx_milli: 1000,
+            last_dz_milli: -250,
+            gameplay_udp_active: true,
+        };
+        let status = OnlineNetworkStatus { status: NetworkStatus::Connected };
+
+        let line = format_network_hud_line(
+            ClientRunMode::Online,
+            status.clone(),
+            10.0,
+            &connection,
+            &commands,
+        )
+        .unwrap();
+        assert!(line.contains("live 127.0.0.1:5000 id 2345 ping 32ms"));
+        assert!(line.contains("pong 0.1s snap 0.5s pos 0.2s"));
+        assert!(line.contains("udp sent 7 dir 1000,-250"));
+        assert!(
+            format_network_hud_line(ClientRunMode::Offline, status, 10.0, &connection, &commands,)
+                .is_none()
+        );
     }
 
     #[test]

@@ -29,8 +29,10 @@ use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::text::LetterSpacing;
-use bevy::window::{PresentMode, WindowResolution};
+use bevy::window::{PresentMode, PrimaryWindow, WindowResolution};
 use bevy_world_serialization::WorldAsset;
+
+use crate::ray_aabb::{RayAabb, nearest_ray_aabb_hit};
 
 const FEATURED_MODELS: &[&str] = &[
     "procedural/pretty/sokpop_gatherer.glb",
@@ -43,6 +45,8 @@ pub const MODEL_PREVIEW_OUTPUT_DIR: &str = "screenshots/model_preview";
 const CELL_SIZE: f32 = 3.6;
 const CELLS_PER_ROW: usize = 4;
 const STABILIZATION_FRAMES: u64 = 90;
+const PREVIEW_AABB_RADIUS: f32 = 1.35;
+const PREVIEW_AABB_HEIGHT: f32 = 2.7;
 
 #[derive(Resource)]
 pub struct ModelPreviewState {
@@ -57,6 +61,7 @@ pub struct ModelPreviewState {
     pub models: Vec<PreviewEntry>,
     pub single_filter: Option<String>,
     pub focused_index: usize,
+    pub hovered_index: Option<usize>,
     pub auto_rotate: bool,
 }
 
@@ -79,6 +84,8 @@ pub struct PreviewEntry {
     pub file_size_kb: u64,
     pub cell: [usize; 2],
     pub world_pos: [f32; 3],
+    pub aabb_min: [f32; 3],
+    pub aabb_max: [f32; 3],
 }
 
 #[derive(Component)]
@@ -87,7 +94,16 @@ pub struct PreviewModelRoot {
 }
 
 #[derive(Component)]
-pub struct PreviewBaseDisc;
+pub struct PreviewBaseDisc {
+    index: usize,
+}
+
+#[derive(Resource, Clone)]
+struct PreviewBaseMaterials {
+    normal: Handle<StandardMaterial>,
+    hovered: Handle<StandardMaterial>,
+    focused: Handle<StandardMaterial>,
+}
 
 #[derive(Component)]
 struct PreviewCameraMarker;
@@ -154,6 +170,7 @@ pub fn run_model_preview() {
         models: Vec::new(),
         single_filter,
         focused_index: 0,
+        hovered_index: None,
         auto_rotate: true,
     });
     app.insert_resource(ShowAllModels(show_all));
@@ -174,8 +191,10 @@ pub fn run_model_preview() {
         Update,
         (
             camera_controls,
+            ray_aabb_focus_controls,
             focus_controls,
             rotate_focused_model,
+            update_preview_base_highlights,
             update_overlay,
             maybe_take_screenshot,
             exit_model_preview,
@@ -338,6 +357,21 @@ fn spawn_models(
         perceptual_roughness: 0.78,
         ..default()
     });
+    let hovered_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.84, 0.75, 0.43),
+        perceptual_roughness: 0.72,
+        ..default()
+    });
+    let focused_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.35, 0.68, 0.78),
+        perceptual_roughness: 0.70,
+        ..default()
+    });
+    commands.insert_resource(PreviewBaseMaterials {
+        normal: base_mat.clone(),
+        hovered: hovered_mat,
+        focused: focused_mat,
+    });
 
     for (idx, (asset_path, category)) in glbs.iter().enumerate() {
         let col = idx % CELLS_PER_ROW;
@@ -361,7 +395,7 @@ fn spawn_models(
             Mesh3d(base_mesh.clone()),
             MeshMaterial3d(base_mat.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, 0.02, 0.0)),
-            PreviewBaseDisc,
+            PreviewBaseDisc { index: idx },
         ));
 
         let display_name = asset_path
@@ -373,6 +407,7 @@ fn spawn_models(
         let file_size_kb = std::fs::metadata(state.asset_root.join(asset_path))
             .map(|m| (m.len() + 1023) / 1024)
             .unwrap_or(0);
+        let aabb = preview_model_aabb(pos);
         state.models.push(PreviewEntry {
             path: asset_path.clone(),
             display_name,
@@ -380,6 +415,8 @@ fn spawn_models(
             file_size_kb,
             cell: [col, row],
             world_pos: [pos.x, pos.y, pos.z],
+            aabb_min: [aabb.min.x, aabb.min.y, aabb.min.z],
+            aabb_max: [aabb.max.x, aabb.max.y, aabb.max.z],
         });
     }
 
@@ -387,6 +424,24 @@ fn spawn_models(
         let _ = std::fs::write(&state.manifest_path, json);
     }
     info!("[model-preview] spawned {} models", state.models.len());
+}
+
+fn preview_model_aabb(pos: Vec3) -> RayAabb {
+    RayAabb::new(
+        pos + Vec3::new(-PREVIEW_AABB_RADIUS, 0.0, -PREVIEW_AABB_RADIUS),
+        pos + Vec3::new(
+            PREVIEW_AABB_RADIUS,
+            PREVIEW_AABB_HEIGHT,
+            PREVIEW_AABB_RADIUS,
+        ),
+    )
+}
+
+fn preview_entry_aabb(entry: &PreviewEntry) -> RayAabb {
+    RayAabb::new(
+        Vec3::new(entry.aabb_min[0], entry.aabb_min[1], entry.aabb_min[2]),
+        Vec3::new(entry.aabb_max[0], entry.aabb_max[1], entry.aabb_max[2]),
+    )
 }
 
 fn setup_camera(mut commands: Commands, state: Res<ModelPreviewState>) {
@@ -459,8 +514,9 @@ fn setup_overlay(mut commands: Commands, state: Res<ModelPreviewState>) {
 fn preview_overlay_text(state: &ModelPreviewState, fallback: &str) -> String {
     match state.models.get(state.focused_index) {
         Some(model) => format!(
-            "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\n[/] focus model  Space autorotate  J/L rotate model\nFocused: {}\nPath: {}\nCategory: {}  Size: {} KB  Index: {}/{}",
+            "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\nMouse hover/click Ray-AABB  [/] focus model  Space autorotate  J/L rotate model\nFocused: {}\nHovered: {}\nPath: {}\nCategory: {}  Size: {} KB  Index: {}/{}",
             model.display_name,
+            hovered_model_name(state),
             model.path,
             model.category,
             model.file_size_kb,
@@ -468,9 +524,17 @@ fn preview_overlay_text(state: &ModelPreviewState, fallback: &str) -> String {
             state.models.len()
         ),
         None => format!(
-            "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\n[/] focus model  Space autorotate  J/L rotate model\nFocused: {fallback}"
+            "MODEL PREVIEW\nA/D orbit  W/S zoom  Q/E height  R reset\nMouse hover/click Ray-AABB  [/] focus model  Space autorotate  J/L rotate model\nFocused: {fallback}"
         ),
     }
+}
+
+fn hovered_model_name(state: &ModelPreviewState) -> &str {
+    state
+        .hovered_index
+        .and_then(|index| state.models.get(index))
+        .map(|model| model.display_name.as_str())
+        .unwrap_or("none")
 }
 
 fn update_overlay(
@@ -482,6 +546,81 @@ fn update_overlay(
     }
     if let Ok(mut text) = q.single_mut() {
         text.0 = preview_overlay_text(&state, "none");
+    }
+}
+
+fn focus_preview_index(index: usize, state: &mut ModelPreviewState, camera: &mut PreviewCamera) {
+    let Some(model) = state.models.get(index) else {
+        return;
+    };
+    state.focused_index = index;
+    camera.center = Vec3::new(
+        model.world_pos[0],
+        model.world_pos[1] + 1.2,
+        model.world_pos[2],
+    );
+    camera.distance = 4.8;
+    camera.height = 3.7;
+}
+
+fn ray_aabb_focus_controls(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<PreviewCameraMarker>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut state: ResMut<ModelPreviewState>,
+    mut preview_camera: ResMut<PreviewCamera>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        if state.hovered_index.is_some() {
+            state.hovered_index = None;
+        }
+        return;
+    };
+    let Ok((camera, camera_transform)) = cameras.single() else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) else {
+        return;
+    };
+    let hovered = nearest_ray_aabb_hit(
+        ray.origin,
+        *ray.direction,
+        state.models.iter().enumerate().map(|(index, entry)| (index, preview_entry_aabb(entry))),
+    )
+    .map(|(index, _)| index);
+
+    if state.hovered_index != hovered {
+        state.hovered_index = hovered;
+    }
+    if mouse.just_pressed(MouseButton::Left)
+        && let Some(index) = hovered
+    {
+        focus_preview_index(index, &mut state, &mut preview_camera);
+    }
+}
+
+fn update_preview_base_highlights(
+    state: Res<ModelPreviewState>,
+    materials: Option<Res<PreviewBaseMaterials>>,
+    mut bases: Query<(&PreviewBaseDisc, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let Some(materials) = materials else {
+        return;
+    };
+    for (base, mut material) in &mut bases {
+        material.0 = if base.index == state.focused_index {
+            materials.focused.clone()
+        } else if Some(base.index) == state.hovered_index {
+            materials.hovered.clone()
+        } else {
+            materials.normal.clone()
+        };
     }
 }
 
@@ -557,15 +696,7 @@ fn focus_controls(
         state.auto_rotate = !state.auto_rotate;
     }
     if changed {
-        if let Some(model) = state.models.get(state.focused_index) {
-            camera.center = Vec3::new(
-                model.world_pos[0],
-                model.world_pos[1] + 1.2,
-                model.world_pos[2],
-            );
-            camera.distance = 4.8;
-            camera.height = 3.7;
-        }
+        focus_preview_index(state.focused_index, &mut state, &mut camera);
     }
 }
 

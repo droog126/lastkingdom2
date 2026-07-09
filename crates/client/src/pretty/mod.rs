@@ -9,7 +9,7 @@ use lk2_core::player::PlayerState;
 use lk2_core::world::{BlockType, World as GameWorld};
 
 use crate::render::scalar_field::effective_ground_height;
-use crate::render::{CameraAngles, CameraMode};
+use crate::render::{CameraAngles, CameraMode, stable_scene_baseline_enabled};
 
 #[cfg(feature = "audit-pretty-models")]
 mod audit_pretty;
@@ -192,6 +192,11 @@ pub fn spawn_pretty(
     // First-person hides only camera-obstructing presentation actors. Low
     // ground props stay visible so the map does not look empty.
     let first_person_mode = *camera_mode == CameraMode::FirstPerson;
+
+    if stable_scene_baseline_enabled() {
+        info!("stable-scene: skipped pretty startup decorations");
+        return;
+    }
 
     #[cfg(feature = "audit-pretty-models")]
     #[allow(unused_variables, unreachable_code)]

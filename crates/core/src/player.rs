@@ -4,6 +4,26 @@ use std::collections::HashMap;
 use crate::nation::NationId;
 use crate::resource::ResourceKind;
 
+/// Maximum number of characters allowed in a player display name across the wire.
+pub const PLAYER_NAME_MAX_CHARS: usize = 20;
+
+/// Strip control characters and non-ASCII bytes from a player-supplied name,
+/// trim the result, and clamp it to [`PLAYER_NAME_MAX_CHARS`] characters.
+///
+/// This is the same defensive chain golab's `shared::sanitize_player_name`
+/// uses; here it lives on `lk2-core` so both client and server agree on the
+/// canonical form before names ever touch the network.
+#[must_use]
+pub fn sanitize_player_name(input: &str) -> String {
+    input
+        .chars()
+        .filter(|character| character.is_ascii() && !character.is_ascii_control())
+        .take(PLAYER_NAME_MAX_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 #[derive(Resource, Default)]
 pub struct PlayerState {
     pub pos: Vec3,
@@ -91,5 +111,22 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         map.insert(tag1, "value");
         assert_eq!(map.get(&tag2), Some(&"value"));
+    }
+
+    #[test]
+    fn sanitize_player_name_strips_controls_and_clamps() {
+        assert_eq!(sanitize_player_name("Alice"), "Alice");
+        assert_eq!(sanitize_player_name("  Bob\n"), "Bob");
+        assert_eq!(sanitize_player_name("Eve\u{0000}\u{0007}"), "Eve");
+        assert_eq!(sanitize_player_name("Caesar"), "Caesar");
+        // ASCII clamp at PLAYER_NAME_MAX_CHARS.
+        let long = "a".repeat(PLAYER_NAME_MAX_CHARS + 50);
+        let cleaned = sanitize_player_name(&long);
+        assert_eq!(cleaned.len(), PLAYER_NAME_MAX_CHARS);
+        // Non-ASCII characters are filtered out (must_use ASCII only).
+        assert_eq!(sanitize_player_name("中文名"), "");
+        assert_eq!(sanitize_player_name(""), "");
+        // Trim still runs after take() so leading whitespace goes away.
+        assert_eq!(sanitize_player_name("   trailing   "), "trailing");
     }
 }

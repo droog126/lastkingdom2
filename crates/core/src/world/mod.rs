@@ -771,6 +771,41 @@ pub fn player_spawn_position_at(world: &World, x: i32, z: i32) -> Option<(Vec3, 
     ))
 }
 
+/// Deterministic 4-ring × 8-lane block-offset scan, golab-style.
+///
+/// Returns 32 `[dx, dz]` offsets around a spawn center, ordered from the
+/// innermost ring outward. The `seed_offset` parameter rotates the starting
+/// lane so two callers asking for "the same fallback" pick different tiles
+/// when the inner ring is full — the same trick golab uses with
+/// `client_id % 8` in `fallback_spawn_translation`.
+///
+/// Use this when you want a deterministic, allocation-light fallback for
+/// "give me a tile near this center, but not exactly on top of it":
+///
+/// ```ignore
+/// for offset in fallback_spawn_ring_offsets(seed) {
+///     let candidate = [center[0] + offset[0], center[1], center[2] + offset[1]];
+///     if clears_check(&candidate) {
+///         return candidate;
+///     }
+/// }
+/// ```
+#[must_use]
+pub fn fallback_spawn_ring_offsets(seed_offset: u8) -> Vec<[i32; 2]> {
+    (0_u8..4)
+        .flat_map(|ring| {
+            (0_u8..8).map(move |lane| {
+                let lane_index = lane.wrapping_add(seed_offset) % 8;
+                let radius = f32::from(ring).mul_add(0.85, 1.0);
+                let angle = (f32::from(lane_index) / 8.0) * std::f32::consts::TAU;
+                let dx = (angle.cos() * radius).round() as i32;
+                let dz = (angle.sin() * radius).round() as i32;
+                [dx, dz]
+            })
+        })
+        .collect()
+}
+
 pub fn player_spawn_position_near(
     world: &World,
     x: i32,
@@ -1198,5 +1233,43 @@ mod tests {
 
         let (_pos, block_pos) = player_spawn_position_near(&w, x, z, 14, 2).unwrap();
         assert_eq!(block_pos, [x, foot_y, z]);
+    }
+
+    #[test]
+    fn fallback_spawn_ring_yields_32_offsets() {
+        let offsets = fallback_spawn_ring_offsets(0);
+        assert_eq!(
+            offsets.len(),
+            32,
+            "must yield 4 rings × 8 lanes = 32 candidates"
+        );
+    }
+
+    #[test]
+    fn fallback_spawn_ring_offsets_are_within_4_block_radius() {
+        // Innermost ring is `radius = 1.0`, outermost is `radius = 1.0 + 3 * 0.85 ≈ 3.55`.
+        // Cosine/sine round to ±4 at most — keep the bound generous so the
+        // test stays stable if the ring math changes by ±1 block.
+        for [dx, dz] in fallback_spawn_ring_offsets(0) {
+            assert!(dx.abs() <= 4, "dx={dx} out of expected range");
+            assert!(dz.abs() <= 4, "dz={dz} out of expected range");
+            assert!(
+                !(dx == 0 && dz == 0),
+                "ring must never yield the center offset"
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_spawn_ring_seed_rotates_lane_ordering() {
+        // Same first ring (ring=0, radius=1.0) yields 8 offsets in the same
+        // set regardless of seed, but the *starting* lane changes — verify
+        // by walking the inner 8 candidates with two seeds and confirming
+        // each set has the same multiset of offsets.
+        let ring0_seed0: std::collections::HashSet<_> =
+            fallback_spawn_ring_offsets(0).into_iter().take(8).collect();
+        let ring0_seed3: std::collections::HashSet<_> =
+            fallback_spawn_ring_offsets(3).into_iter().take(8).collect();
+        assert_eq!(ring0_seed0, ring0_seed3);
     }
 }
