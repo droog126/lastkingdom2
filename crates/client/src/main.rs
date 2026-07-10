@@ -94,7 +94,8 @@ use lk2_core::protocol::messages::{
 };
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
 use lk2_core::transport::{
-    CLIENT_SEND_INTERVAL, NETCODE_CLIENT_TIMEOUT_SECS, PING_INTERVAL, PRIVATE_KEY, PROTOCOL_ID,
+    CLIENT_SEND_INTERVAL, NETCODE_CLIENT_TIMEOUT_SECS, NETCODE_TOKEN_EXPIRE_SECS, PING_INTERVAL,
+    PRIVATE_KEY, PROTOCOL_ID, gameplay_addr_for_server, generate_client_id,
 };
 
 #[derive(Resource, Default, Debug, Clone)]
@@ -450,18 +451,14 @@ fn main() {
         let server_addr = connect_addr.expect("network_mode=true implies connect_addr is Some");
         if let Ok(socket) = std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], 0)))
         {
-            let mut gameplay_addr = server_addr;
-            gameplay_addr.set_port(gameplay_addr.port().saturating_add(1));
+            let gameplay_addr = gameplay_addr_for_server(server_addr);
             if socket.connect(gameplay_addr).is_ok() {
                 let _ = socket.set_nonblocking(true);
                 app.insert_resource(OnlineGameplayUdp { socket });
             }
         }
         app.add_systems(Startup, move |commands: Commands| {
-            let client_id_seed: u64 = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64 & 0xFFFF_FFFF_FFFF_FFFF)
-                .unwrap_or(0xC11E_71);
+            let client_id_seed = generate_client_id();
             spawn_networked_client(commands, server_addr, client_id_seed);
         });
     }
@@ -740,7 +737,11 @@ fn spawn_networked_client(
             private_key: PRIVATE_KEY,
             protocol_id: PROTOCOL_ID,
         },
-        NetcodeConfig { client_timeout_secs: NETCODE_CLIENT_TIMEOUT_SECS, ..default() },
+        NetcodeConfig {
+            client_timeout_secs: NETCODE_CLIENT_TIMEOUT_SECS,
+            token_expire_secs: NETCODE_TOKEN_EXPIRE_SECS,
+            ..default()
+        },
     )
     .expect("NetcodeClient::new(Manual) failed");
     info!(

@@ -37,7 +37,10 @@ use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
-use lk2_core::transport::{PRIVATE_KEY, PROTOCOL_ID, SERVER_POS_UPDATE_INTERVAL_TICKS};
+use lk2_core::transport::{
+    DEFAULT_PORT, NETCODE_CLIENT_TIMEOUT_SECS, PRIVATE_KEY, PROTOCOL_ID,
+    SERVER_POS_UPDATE_INTERVAL_TICKS, gameplay_port_for,
+};
 use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{
     World as GameWorld, WorldConfig, WorldGenerator, fallback_spawn_ring_offsets, generate_world,
@@ -939,12 +942,13 @@ fn main() {
         )
         .init();
 
-    let port: u16 = std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000);
+    let port: u16 =
+        std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_PORT);
     if !server_ports_available(port) {
         error!(
             "[server] UDP port {} or {} is already in use. Stop the existing lk2-server process or set LK2_PORT to a free port.",
             port,
-            port.saturating_add(1)
+            gameplay_port_for(port)
         );
         return;
     }
@@ -970,7 +974,7 @@ fn main() {
 
     let _ = std::fs::create_dir_all("screenshots");
     let gameplay_udp = {
-        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port.saturating_add(1)));
+        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], gameplay_port_for(port)));
         std::net::UdpSocket::bind(addr).ok().and_then(|socket| {
             socket.set_nonblocking(true).ok()?;
             Some(GameplayCommandUdp { socket })
@@ -1089,7 +1093,7 @@ fn server_ports_available(port: u16) -> bool {
     let main = std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], port)));
     let gameplay = std::net::UdpSocket::bind(std::net::SocketAddr::from((
         [0, 0, 0, 0],
-        port.saturating_add(1),
+        gameplay_port_for(port),
     )));
     main.is_ok() && gameplay.is_ok()
 }
@@ -1110,7 +1114,10 @@ fn spawn_server(mut commands: Commands) {
     );
 
     let netcode_server = NetcodeServer::new(
-        NetcodeConfig::default().with_protocol_id(PROTOCOL_ID).with_key(PRIVATE_KEY),
+        NetcodeConfig::default()
+            .with_protocol_id(PROTOCOL_ID)
+            .with_key(PRIVATE_KEY)
+            .with_client_timeout_secs(NETCODE_CLIENT_TIMEOUT_SECS),
     );
     info!(
         "[net] NetcodeServer initialized: protocol_id=0x{:x}, key=<fixed-dev>",

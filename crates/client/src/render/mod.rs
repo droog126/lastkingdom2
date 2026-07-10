@@ -491,19 +491,6 @@ pub fn spawn_terrain_around_player(
         }
 
         let desired_keys = smooth_chunk_keys_for_aabb(min, max, mesh_center);
-        let desired_set: HashSet<SmoothTerrainChunkKey> = desired_keys.iter().copied().collect();
-        let stale_keys: Vec<SmoothTerrainChunkKey> = spawned
-            .smooth_chunks
-            .keys()
-            .copied()
-            .filter(|key| !desired_set.contains(key))
-            .collect();
-        for key in stale_keys {
-            if let Some(chunk) = spawned.smooth_chunks.remove(&key) {
-                despawn_and_release_smooth_chunk(&mut commands, &mut meshes, &mut telemetry, chunk);
-            }
-        }
-        spawned.smooth_empty_chunks.retain(|key| desired_set.contains(key));
 
         let material = ensure_smooth_terrain_material(&mut materials, &mut spawned);
         let mut built_this_frame = 0usize;
