@@ -1,5 +1,8 @@
 //! Server-owned adapter around the shared deterministic world step.
 
+use lk2_core::eco_cycle::EcoCycle;
+use lk2_core::resource::GlobalResourcePool;
+use lk2_core::simulation::{TickReport, WorldInput, step_world};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -67,5 +70,38 @@ impl<W: WorldStepper> AuthorityDriver<W> {
             snapshot,
             events,
         })
+    }
+}
+
+/// Concrete online authority owner for the shared natural-world simulation.
+pub struct NatureAuthority {
+    ecology: EcoCycle,
+    resources: GlobalResourcePool,
+    last_tick: Option<u64>,
+}
+
+impl NatureAuthority {
+    pub fn new(ecology: EcoCycle, resources: GlobalResourcePool) -> Self {
+        Self { ecology, resources, last_tick: None }
+    }
+
+    pub fn advance(&mut self, input: WorldInput) -> Result<TickReport, &'static str> {
+        if self.last_tick.is_some_and(|last| input.tick <= last) {
+            return Err("authority tick must increase monotonically");
+        }
+        let report = step_world(input, &mut self.ecology, &mut self.resources);
+        if !report.snapshot.is_finite() {
+            return Err("shared world step produced a non-finite snapshot");
+        }
+        self.last_tick = Some(report.tick);
+        Ok(report)
+    }
+
+    pub fn ecology(&self) -> &EcoCycle {
+        &self.ecology
+    }
+
+    pub fn resources(&self) -> &GlobalResourcePool {
+        &self.resources
     }
 }

@@ -1,5 +1,6 @@
 //! Read-only replication boundary. It owns no simulation state.
 
+use lk2_core::simulation::{NatureEvent, NatureSnapshot, TickReport};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -31,5 +32,11 @@ impl<S, E> ReplicationBatch<S, E> {
 
     pub fn tick(&self) -> u64 {
         self.snapshot.tick
+    }
+}
+
+impl ReplicationBatch<NatureSnapshot, NatureEvent> {
+    pub fn from_tick_report(report: TickReport) -> Self {
+        Self::new(report.tick, report.snapshot, report.events)
     }
 }
