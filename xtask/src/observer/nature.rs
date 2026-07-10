@@ -42,6 +42,8 @@ pub fn observe_value(
                 "/nature/clouds",
                 "/nature_snapshot/clouds",
                 "/eco_cycle/clouds",
+                "/cloud_count",
+                "/clouds",
             ],
         ),
         rainfall: first_f64(
@@ -50,6 +52,7 @@ pub fn observe_value(
                 "/nature/rainfall",
                 "/nature_snapshot/rainfall",
                 "/eco_cycle/rainfall",
+                "/rainfall",
             ],
         ),
         soil_moisture: first_f64(
@@ -58,6 +61,7 @@ pub fn observe_value(
                 "/nature/soil_moisture",
                 "/nature_snapshot/soil_moisture",
                 "/hydrology/soil_moisture",
+                "/soil_moisture",
             ],
         ),
         plants: first_count(
@@ -68,6 +72,8 @@ pub fn observe_value(
                 "/nature_snapshot/plants",
                 "/eco_cycle/plants",
                 "/eco_cycle/plants_grown",
+                "/plant_count",
+                "/plants",
             ],
         ),
         animals: first_count(
@@ -78,6 +84,8 @@ pub fn observe_value(
                 "/nature_snapshot/animals",
                 "/eco_cycle/animals",
                 "/eco_cycle/wildlife",
+                "/animal_count",
+                "/animals",
             ],
         ),
         animal_food_available: first_f64(
@@ -86,6 +94,7 @@ pub fn observe_value(
                 "/nature/animal_food_available",
                 "/nature_snapshot/animal_food_available",
                 "/ecology/animal_food_available",
+                "/animal_food_available",
             ],
         ),
         presented_clouds: first_count(state, &["/presentation/nature/clouds"]),
@@ -233,5 +242,21 @@ mod tests {
         mark_stale_against(&previous, &mut current);
         assert!(current.stale);
         assert!(current.missing_fields.contains(&"soil_moisture".to_owned()));
+    }
+
+    #[test]
+    fn accepts_flat_initial_nature_artifact() {
+        let state = json!({
+            "tick": 1,
+            "cloud_count": 1,
+            "rainfall": 0.2,
+            "soil_moisture": 0.1,
+            "plant_count": 2,
+            "animal_count": 1,
+            "animal_food_available": 3
+        });
+        let observation = observe_value(&state, "nature_initial.json", Vec::new());
+        assert!(observation.metrics.required_fields_present());
+        assert!(observation.missing_fields.is_empty());
     }
 }

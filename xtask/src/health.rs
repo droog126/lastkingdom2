@@ -102,8 +102,9 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         &stderr,
         iter_dir,
     );
-    let nature =
-        state.as_ref().map(|state| build_nature_artifact(iter_dir, state, prev_state.as_ref()));
+    let nature = state
+        .as_ref()
+        .map(|state| build_nature_artifact(root, iter_dir, state, prev_state.as_ref()));
     if let Some(artifact) = &nature {
         assertions.extend(artifact.assertions.iter().map(|item| Assertion {
             id: item.id.clone(),
@@ -178,12 +179,14 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
 }
 
 fn build_nature_artifact(
+    root: &Path,
     iter_dir: &Path,
     state: &Value,
     prev_state: Option<&Value>,
 ) -> NatureArtifact {
-    let errors_path = iter_dir.join("error_logs.txt");
-    let errors = scan_error_logs(&[errors_path.as_path()]);
+    let client_errors = root.join("screenshots/loop_run.log.err");
+    let server_errors = root.join("screenshots/loop_server.log.err");
+    let errors = scan_error_logs(&[client_errors.as_path(), server_errors.as_path()]);
     let mut after = observe_value(state, "final_state.json", errors);
     let initial = fs::read_to_string(iter_dir.join("nature_initial.json"))
         .ok()
@@ -2334,6 +2337,31 @@ mod tests {
         assert!(text.contains("ERROR fresh crash"));
         assert!(!text.contains("stale harness noise"));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn nature_artifact_ignores_aggregate_archived_error_log() {
+        let root = temp_root("nature_current_errors");
+        let iter_dir = root.join("screenshots/iter_01");
+        fs::create_dir_all(&iter_dir).unwrap();
+        fs::write(iter_dir.join("error_logs.txt"), "old-preview.log: ERROR stale failure\n")
+            .unwrap();
+        let state = json!({
+            "nature": {
+                "tick": 2,
+                "cloud_count": 1,
+                "rainfall": 1.0,
+                "soil_moisture": 1.0,
+                "plant_count": 1,
+                "animal_count": 1,
+                "animal_food_available": 1
+            }
+        });
+
+        let artifact = build_nature_artifact(&root, &iter_dir, &state, None);
+
+        assert!(artifact.after.errors.is_empty());
         let _ = fs::remove_dir_all(root);
     }
 
