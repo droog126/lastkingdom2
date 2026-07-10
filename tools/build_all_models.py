@@ -11,14 +11,14 @@ sys.path.insert(0, str(HERE))
 
 from models_lib import (
     clear_scene,
-    cube,
-    cone,
-    cylinder,
+    cube_y_up as cube,
+    cone_y_up as cone,
+    cylinder_y_up as cylinder,
     export_glb,
-    ico_sphere,
+    ico_sphere_y_up as ico_sphere,
     mat,
     merge_into,
-    uv_sphere,
+    uv_sphere_y_up as uv_sphere,
     OUT_DIR,
 )
 
@@ -144,11 +144,11 @@ def make_rock(name: str, color, scale_hint: float = 0.7) -> None:
 
     ico_sphere("rock_top", (0.06, 0.20 * scale_hint, -0.04),
                (0.18 * scale_hint, 0.14 * scale_hint, 0.18 * scale_hint),
-               accent, subdivisions=0)
+               accent, subdivisions=1)
 
     ico_sphere("rock_base", (-0.10, -0.12 * scale_hint, 0.08),
                (0.22 * scale_hint, 0.10 * scale_hint, 0.22 * scale_hint),
-               body, subdivisions=0)
+               body, subdivisions=1)
     export_glb(f"rock_{name}")
 
 def make_flower(color, idx: int) -> None:
@@ -188,7 +188,7 @@ def make_poi_pillar(name: str, base_color, glow_color) -> None:
     body = mat(f"poi_{name}_body", base_color, roughness=0.62,
                emissive=(glow_color[0] * 0.3, glow_color[1] * 0.3, glow_color[2] * 0.3))
     glow = mat(f"poi_{name}_glow", glow_color, roughness=0.38,
-               emissive=(glow_color[0] * 1.15, glow_color[1] * 1.15, glow_color[2] * 1.15))
+               emissive=glow_color)
 
     cube("pillar", (0.0, 0.0, 0.0), (0.45, 2.8, 0.45), body)
 

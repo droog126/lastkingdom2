@@ -27,14 +27,14 @@ def make_rabbit():
     nose = mat("rose_nose", (0.8, 0.25, 0.32), 0.7)
     whisker = mat("dark_whisker", (0.10, 0.08, 0.06), 0.75)
 
-    uv_sphere("body", (0.0, 0.02, 0.42), (0.50, 0.70, 0.36), fur, 32, 16)
-    uv_sphere("belly_patch", (0.0, -0.48, 0.43), (0.34, 0.12, 0.26), belly, 24, 12)
-    uv_sphere("head", (0.0, -0.66, 0.82), (0.38, 0.34, 0.32), fur, 32, 16)
-    uv_sphere("muzzle", (0.0, -0.92, 0.74), (0.20, 0.12, 0.12), belly, 24, 12)
-    uv_sphere("tail", (0.0, 0.72, 0.47), (0.18, 0.18, 0.18), belly, 20, 10)
+    uv_sphere("body", (0.0, 0.02, 0.42), (0.50, 0.70, 0.36), fur, 16, 8)
+    uv_sphere("belly_patch", (0.0, -0.48, 0.43), (0.34, 0.12, 0.26), belly, 12, 6)
+    uv_sphere("head", (0.0, -0.66, 0.82), (0.38, 0.34, 0.32), fur, 16, 8)
+    uv_sphere("muzzle", (0.0, -0.92, 0.74), (0.20, 0.12, 0.12), belly, 12, 6)
+    uv_sphere("tail", (0.0, 0.72, 0.47), (0.18, 0.18, 0.18), belly, 10, 5)
 
-    uv_sphere("left_cheek", (-0.11, -0.94, 0.70), (0.12, 0.08, 0.08), belly, 16, 8)
-    uv_sphere("right_cheek", (0.11, -0.94, 0.70), (0.12, 0.08, 0.08), belly, 16, 8)
+    uv_sphere("left_cheek", (-0.11, -0.94, 0.70), (0.12, 0.08, 0.08), belly, 8, 4)
+    uv_sphere("right_cheek", (0.11, -0.94, 0.70), (0.12, 0.08, 0.08), belly, 8, 4)
 
     for side in (-1.0, 1.0):
         ear = uv_sphere(
@@ -42,8 +42,8 @@ def make_rabbit():
             (side * 0.18, -0.63, 1.30),
             (0.095, 0.055, 0.48),
             fur,
-            24,
             12,
+            6,
         )
         ear.rotation_euler[1] = math.radians(side * 7.0)
         inner_ear = uv_sphere(
@@ -51,8 +51,8 @@ def make_rabbit():
             (side * 0.18, -0.685, 1.30),
             (0.050, 0.014, 0.36),
             inner,
-            16,
             8,
+            4,
         )
         inner_ear.rotation_euler[1] = ear.rotation_euler[1]
         uv_sphere(
@@ -60,41 +60,41 @@ def make_rabbit():
             (side * 0.19, -0.67, 1.70),
             (0.072, 0.032, 0.080),
             ear_tip,
-            14,
-            7,
+            8,
+            4,
         )
         uv_sphere(
             f"eye_patch_{side}",
             (side * 0.17, -0.985, 0.895),
             (0.085, 0.018, 0.075),
             eye_patch,
-            16,
             8,
+            4,
         )
-        uv_sphere(f"eye_{side}", (side * 0.18, -0.96, 0.90), (0.050, 0.030, 0.050), eye, 16, 8)
+        uv_sphere(f"eye_{side}", (side * 0.18, -0.96, 0.90), (0.050, 0.030, 0.050), eye, 8, 4)
         uv_sphere(
             f"side_eye_{side}",
             (side * 0.31, -0.74, 0.88),
             (0.032, 0.028, 0.032),
             eye,
-            12,
-            6,
+            8,
+            4,
         )
         uv_sphere(
             f"front_paw_{side}",
             (side * 0.22, -0.36, 0.15),
             (0.12, 0.18, 0.08),
             fur,
-            16,
             8,
+            4,
         )
         uv_sphere(
             f"hind_paw_{side}",
             (side * 0.30, 0.34, 0.13),
             (0.15, 0.24, 0.09),
             fur,
-            16,
             8,
+            4,
         )
         for row, z in enumerate((0.70, 0.75, 0.80)):
             whisk = cube(
@@ -105,7 +105,7 @@ def make_rabbit():
             )
             whisk.rotation_euler[2] = math.radians(side * (row - 1) * 8.0)
 
-    uv_sphere("nose", (0.0, -1.03, 0.78), (0.070, 0.040, 0.045), nose, 16, 8)
+    uv_sphere("nose", (0.0, -1.03, 0.78), (0.070, 0.040, 0.045), nose, 8, 4)
     export_glb("rabbit")
 
 def make_berry_bush():
@@ -127,8 +127,8 @@ def make_berry_bush():
             (x, y, 0.48 + (i % 4) * 0.08),
             (0.30, 0.24, 0.22),
             leaf if i % 2 == 0 else dark_leaf,
-            18,
-            9,
+            10,
+            5,
         )
     berry_positions = [
         (-0.30, -0.28, 0.62),
@@ -142,7 +142,7 @@ def make_berry_bush():
         (0.00, -0.08, 0.96),
     ]
     for i, pos in enumerate(berry_positions):
-        uv_sphere(f"fixed_red_berry_{i}", pos, (0.075, 0.075, 0.075), fruit, 16, 8)
+        uv_sphere(f"fixed_red_berry_{i}", pos, (0.075, 0.075, 0.075), fruit, 8, 4)
         uv_sphere(
             f"fixed_red_berry_highlight_{i}",
             (pos[0] - 0.020, pos[1] - 0.028, pos[2] + 0.026),

@@ -35,6 +35,7 @@ precedence when a current document drifts.
 ## Proposals
 
 - [Architecture evolution plan](architecture/architecture_plan_v2.md)
+- [Four-agent natural-world refactor plan](plans/natural-world-parallel-refactor.md)
 - [Configurable terrain plan](plans/configurable-terrain.md)
 - [Historical documentation and feature plan](plans/doc-todo.md)
 - [Infinite-world plan](plans/infinite-world.md)

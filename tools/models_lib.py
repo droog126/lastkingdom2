@@ -242,6 +242,47 @@ def ico_sphere(
     return obj
 
 
+def _y_up_location(value: Vec3Like) -> tuple[float, float, float]:
+    return value[0], value[2], value[1]
+
+
+def _y_up_scale(value: Vec3Like) -> tuple[float, float, float]:
+    return value[0], value[2], value[1]
+
+
+def cube_y_up(name, loc, scale, material):
+    return cube(name, _y_up_location(loc), _y_up_scale(scale), material)
+
+
+def cone_y_up(name, loc, radius1, radius2, depth, material, vertices=8):
+    return cone(name, _y_up_location(loc), radius1, radius2, depth, material, vertices)
+
+
+def cylinder_y_up(name, loc, radius, depth, material, vertices=12):
+    return cylinder(name, _y_up_location(loc), radius, depth, material, vertices)
+
+
+def ico_sphere_y_up(name, loc, scale, material, subdivisions=1):
+    return ico_sphere(
+        name,
+        _y_up_location(loc),
+        _y_up_scale(scale),
+        material,
+        subdivisions,
+    )
+
+
+def uv_sphere_y_up(name, loc, scale, material, segments=16, rings=8):
+    return uv_sphere(
+        name,
+        _y_up_location(loc),
+        _y_up_scale(scale),
+        material,
+        segments,
+        rings,
+    )
+
+
 def prism(
     name: str,
     points: Sequence[tuple[float, float]],

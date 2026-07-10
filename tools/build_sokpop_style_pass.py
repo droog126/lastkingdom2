@@ -7,7 +7,16 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from models_lib import clear_scene, cone, cube, cylinder, export_glb, ico_sphere, mat, uv_sphere
+from models_lib import (
+    clear_scene,
+    cone_y_up as cone,
+    cube_y_up as cube,
+    cylinder_y_up as cylinder,
+    export_glb,
+    ico_sphere_y_up as ico_sphere,
+    mat,
+    uv_sphere_y_up as uv_sphere,
+)
 
 
 def m(name, color, roughness=0.92, alpha=1.0):

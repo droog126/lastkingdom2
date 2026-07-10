@@ -1,53 +1,53 @@
-# AGENTS.md
+﻿# AGENTS.md
 
-This file routes agent work to project skills. Keep operational detail in the matching `SKILL.md`.
+此文件将代理工作路由到项目技能。将操作细节保留在匹配的 `SKILL.md` 中。
 
-## Source Of Truth
+## 事实来源
 
-- Use current code and `xtask` output to establish what the repository does now.
-- Use the relevant skill and `docs/architecture/engineering-baseline.md` to establish intended engineering behavior.
-- When implementation and intended behavior disagree, report the conflict instead of automatically rewriting documentation to match a likely bug.
-- Update only active docs and skill contracts directly affected by the current change. Treat `docs/archive/` and imported design notes as historical unless an active document points to them.
+- 使用当前代码和 `xtask` 输出来确定仓库当前的功能。
+- 使用相关技能和 `docs/architecture/engineering-baseline.md` 来确定预期的工程行为。
+- 当实现与预期行为不一致时，报告冲突，而不是自动重写文档以匹配可能的 bug。
+- 仅更新直接受当前更改影响的活动文档和技能契约。将 `docs/archive/` 和导入的设计笔记视为历史资料，除非活动文档指向它们。
 
-## Skill Selection
+## 技能选择
 
-- Choose the smallest sufficient set: one primary skill and, only when needed, one validation companion.
-- Use `$local-dev` as the fallback for ordinary repository work. Do not add it automatically when a more specific skill already covers the task.
-- Treat audit and review requests as read-only unless the user also asks for implementation.
-- Read every selected skill before acting.
+- 选择最小的充分集合：一个主要技能，以及仅在需要时一个验证伴随技能。
+- 使用 `$local-dev` 作为普通仓库工作的后备。当更具体的路由已经覆盖任务时，不要自动添加它。
+- 将审计和审查请求视为只读，除非用户还要求实现。
+- 在行动之前阅读每个选定的技能。
 
-## Skill Routing
+## 技能路由
 
-- Use `$local-dev` for ordinary code/docs/tooling work, validation selection, worktree hygiene, and git preparation when no more specific route applies.
-- Use `$tdd-iteration` for deterministic behavior that can be specified with a focused test before implementation: rules, state machines, parsing, invariants, scenarios, AI decisions, and regressions.
-- Use `$bevy-gameplay-dev` for Bevy 0.19 client/server/runtime work: ECS systems, rendering, input, HUD, camera, networking, simulation wiring, scenarios, performance, and logging.
-- Use `$bevy-resource-lifecycle` for runtime asset or GPU lifetime symptoms such as out-of-memory, invalid textures, repeated generated asset allocation, render rebuild leaks, or generated assets surviving entity cleanup.
-- Use `$closed-loop-ai-dev` when the task explicitly requires running or diagnosing the observe-decide-act loop, auto-demo, runtime screenshots, health artifacts, or `decision.md`.
-- Use `$screenshot-scoring` only for quantitative loop-screenshot scoring, previous/current comparison, or the score section of `decision.md`; ordinary PNG inspection does not require it.
-- Use `$ai-modeling` for reproducible Blender/GLB generation, asset manifests, model previews, poly budgets, and wiring generated models.
-- Use `$game-logic-audit` for evidence-backed, read-only audits of end-to-end game rules, authority flow, unreachable systems, or client/core/server divergence.
-- Use `$docs-governance` for documentation classification, current/reference/proposal boundaries, stale facts, broken links, command/dependency/artifact-contract guidance, and `audit-docs` failures.
-- Use `$skill-sedimentation` when the user explicitly asks to codify lessons, update skill routing, create/update a skill, or prevent a repeated agent failure through durable instructions.
+- 对于普通代码/文档/工具工作、验证选择、工作树卫生和 git 准备，当没有更具体的路由适用时，使用 `$local-dev`。
+- 对于可以在实现前用聚焦测试指定的确定性行为，使用 `$tdd-iteration`：规则、状态机、解析、不变量、场景、AI 决策和回归。
+- 对于 Bevy 0.19 客户端/服务器/运行时工作，使用 `$bevy-gameplay-dev`：ECS 系统、渲染、输入、HUD、相机、网络、模拟接线、场景、性能和日志记录。
+- 对于运行时资产或 GPU 生命周期症状，如内存不足、无效纹理、重复生成的资产分配、渲染重建泄漏或生成的资产在实体清理后仍然存在，使用 `$bevy-resource-lifecycle`。
+- 当任务明确要求运行或诊断观察-决策-行动循环、自动演示、运行时截图、健康工件或 `decision.md` 时，使用 `$closed-loop-ai-dev`。
+- 仅用于定量循环截图评分、先前/当前比较或 `decision.md` 的评分部分，使用 `$screenshot-scoring`；普通 PNG 检查不需要它。
+- 对于可复现的 Blender/GLB 生成、资产清单、模型预览、多边形预算和连接生成的模型，使用 `$ai-modeling`。
+- 对于由证据支持的、只读的端到端游戏规则、权威流、不可达系统或客户端/核心/服务器差异的审计，使用 `$game-logic-audit`。
+- 对于文档分类、当前/参考/提案边界、过时事实、损坏链接、命令/依赖/工件契约指导以及 `audit-docs` 失败，使用 `$docs-governance`。
+- 当用户明确要求将经验教训编码、更新技能路由、创建/更新技能或通过持久指令防止重复的代理失败时，使用 `$skill-sedimentation`。
 
-## Composition
+## 组合
 
-- Gameplay rule implementation: `$tdd-iteration`; add `$bevy-gameplay-dev` only when ECS scheduling or runtime wiring is part of the change.
-- Visible Bevy/runtime implementation: `$bevy-gameplay-dev`; add `$closed-loop-ai-dev` when runtime evidence is required for acceptance.
-- Resource lifetime bug: `$bevy-resource-lifecycle`; add `$closed-loop-ai-dev` only when reproduction or validation needs loop/runtime evidence.
-- Loop scoring: `$closed-loop-ai-dev` plus `$screenshot-scoring` only when a numeric score or scored `decision.md` is required.
-- Generated asset: `$ai-modeling`; add `$closed-loop-ai-dev` only after the asset is wired into the game and must be judged in the target camera.
-- Logic audit: `$game-logic-audit` alone for the report; use the implementation route in a later or explicitly combined fix task.
-- Documentation change: `$docs-governance`; add `$tdd-iteration` only when changing the `xtask` documentation audit behavior.
-- Skill changes: `$skill-sedimentation` plus the system `$skill-creator` skill.
+- 游戏玩法规则实现：`$tdd-iteration`；仅当 ECS 调度或运行时接线是更改的一部分时，添加 `$bevy-gameplay-dev`。
+- 可见的 Bevy/运行时实现：`$bevy-gameplay-dev`；当验收需要运行时证据时，添加 `$closed-loop-ai-dev`。
+- 资源生命周期 bug：`$bevy-resource-lifecycle`；仅当复现或验证需要循环/运行时证据时，添加 `$closed-loop-ai-dev`。
+- 循环评分：仅当需要数字分数或带评分的 `decision.md` 时，使用 `$closed-loop-ai-dev` 加上 `$screenshot-scoring`。
+- 生成的资产：`$ai-modeling`；仅在资产连接到游戏中并且必须在目标相机中判断之后，添加 `$closed-loop-ai-dev`。
+- 逻辑审计：单独使用 `$game-logic-audit` 生成报告；在后续或明确组合的修复任务中使用实现路由。
+- 文档更改：`$docs-governance`；仅当更改 `xtask` 文档审计行为时，添加 `$tdd-iteration`。
+- 技能更改：`$skill-sedimentation` 加上系统 `$skill-creator` 技能。
 
-## Repository Constraints
+## 仓库约束
 
-- Framework: Bevy 0.19. Visual target: small, readable, colorful, toy-like Sokpop-style presentation.
-- Put durable automation in Rust `xtask`; use Python for Blender/assets and focused analysis; keep `justfile` to short aliases.
-- Do not add root PowerShell workflow scripts or Python loop orchestration.
-- For public internet access, use SOCKS5 `127.0.0.1:7890` when the local proxy is reachable. If it is unavailable, report that fact rather than repeatedly retrying through a dead proxy.
+- 框架：Bevy 0.19。视觉目标：小型、可读、多彩、玩具般的 Sokpop 风格表现。
+- 将持久自动化放在 Rust `xtask` 中；将 Python 用于 Blender/资产和聚焦分析；将 `justfile` 保持为简短别名。
+- 不要添加根目录 PowerShell 工作流脚本或 Python 循环编排。
+- 对于公共互联网访问，当本地代理可访问时，使用 SOCKS5 `127.0.0.1:7890`。如果不可用，报告该事实，而不是通过死代理反复重试。
 
-## Skill Files
+## 技能文件
 
 - `.codex/skills/local-dev/SKILL.md`
 - `.codex/skills/tdd-iteration/SKILL.md`

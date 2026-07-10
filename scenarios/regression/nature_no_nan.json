@@ -1,0 +1,7 @@
+{
+  "name": "nature_no_nan_or_negative_resources",
+  "seed": 424242,
+  "record_window": { "ticks": 20 },
+  "purpose": "Protect against invalid or unexplained natural resource growth.",
+  "expect": ["all_numeric_values_finite", "soil_moisture_between_0_and_1", "resources_non_negative"]
+}

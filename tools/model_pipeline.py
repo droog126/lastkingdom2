@@ -36,7 +36,14 @@ def run_generator(script: str, asset: str | None, output_root: Path | None) -> N
         env["LK2_MODEL_ONLY"] = asset
     if output_root:
         env["LK2_MODEL_OUTPUT_ROOT"] = str(output_root.resolve())
-    command = [str(blender), "--background", "--python", str(ROOT / "tools" / script)]
+    command = [
+        str(blender),
+        "--background",
+        "--python-exit-code",
+        "1",
+        "--python",
+        str(ROOT / "tools" / script),
+    ]
     print(f">>> {' '.join(command)}")
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 

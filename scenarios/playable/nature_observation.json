@@ -1,0 +1,7 @@
+{
+  "name": "nature_observation",
+  "seed": 424242,
+  "record_window": { "ticks": 20 },
+  "purpose": "Minimal playable observation window for the shared natural snapshot.",
+  "expect": ["authoritative_nature_snapshot_present", "events_are_readable"]
+}
