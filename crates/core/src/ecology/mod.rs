@@ -5,6 +5,8 @@ use crate::creature::CreatureKind;
 use crate::resource::ResourceKind;
 use crate::world::{Biome, BlockType};
 
+pub mod nature;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EcologyKind {
     Creature(CreatureKind),

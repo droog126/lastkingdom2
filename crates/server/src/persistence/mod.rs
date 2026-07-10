@@ -23,4 +23,3 @@ impl<S> NatureSave<S> {
         Ok(())
     }
 }
-

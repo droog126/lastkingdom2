@@ -458,7 +458,13 @@ def _normalize_asset_scale(name: str, collection: str, root: bpy.types.Object) -
     bpy.context.view_layer.update()
     minimum, maximum = _world_bounds([root])
     dimensions = maximum - minimum
-    measured = dimensions.z if contract.metric == "height" else max(dimensions)
+    measured = (
+        dimensions.z
+        if contract.metric == "height"
+        else max(dimensions.x, dimensions.y)
+        if contract.target_height_meters is not None
+        else max(dimensions)
+    )
     if measured <= 1e-6 or not math.isfinite(measured):
         raise RuntimeError(f"cannot normalize invalid bounds for {collection}/{name}: {dimensions}")
     factor = contract.target_meters / measured
@@ -467,6 +473,15 @@ def _normalize_asset_scale(name: str, collection: str, root: bpy.types.Object) -
     root.select_set(True)
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     bpy.context.view_layer.update()
+
+    if contract.target_height_meters is not None:
+        minimum, maximum = _world_bounds([root])
+        current_height = maximum.z - minimum.z
+        if current_height <= 1e-6:
+            raise RuntimeError(f"cannot normalize zero height for {collection}/{name}")
+        root.scale.z *= contract.target_height_meters / current_height
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        bpy.context.view_layer.update()
 
     minimum, maximum = _world_bounds([root])
     center = (minimum + maximum) * 0.5
@@ -481,6 +496,8 @@ def _normalize_asset_scale(name: str, collection: str, root: bpy.types.Object) -
     normalized = (
         normalized_dimensions.z
         if contract.metric == "height"
+        else max(normalized_dimensions.x, normalized_dimensions.y)
+        if contract.target_height_meters is not None
         else max(normalized_dimensions)
     )
     if abs(normalized - contract.target_meters) > contract.target_meters * 0.005:
@@ -488,6 +505,12 @@ def _normalize_asset_scale(name: str, collection: str, root: bpy.types.Object) -
             f"failed to normalize {collection}/{name}: expected {contract.target_meters}m, "
             f"measured {normalized:.4f}m"
         )
+    if contract.target_height_meters is not None:
+        if abs(normalized_dimensions.z - contract.target_height_meters) > contract.target_height_meters * 0.005:
+            raise RuntimeError(
+                f"failed to normalize {collection}/{name} height: expected "
+                f"{contract.target_height_meters}m, measured {normalized_dimensions.z:.4f}m"
+            )
 
 
 def _assert_scene_contract(objects: Iterable[bpy.types.Object]) -> None:

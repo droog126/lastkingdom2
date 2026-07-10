@@ -14,4 +14,3 @@ pub const NATURE_SERVER_MODULES: ServerModuleRegistration = ServerModuleRegistra
     observation: true,
     persistence: true,
 };
-

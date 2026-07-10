@@ -33,3 +33,6 @@ pub mod v2;
 pub mod world;
 
 pub mod ai;
+pub mod atmosphere;
+pub mod hydrology;
+pub mod simulation;

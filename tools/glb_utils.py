@@ -234,6 +234,8 @@ def validate_glb(
         measured = (
             dimensions[1]
             if scale_contract.metric == "height"
+            else max(dimensions[0], dimensions[2])
+            if scale_contract.target_height_meters is not None
             else max(dimensions)
         )
         allowed = scale_contract.target_meters * scale_contract.tolerance
@@ -242,6 +244,13 @@ def validate_glb(
                 f"world {scale_contract.metric} {measured:.3f}m outside "
                 f"{scale_contract.target_meters:.3f}m +/- {allowed:.3f}m"
             )
+        if scale_contract.target_height_meters is not None:
+            height_allowed = scale_contract.target_height_meters * scale_contract.tolerance
+            if abs(dimensions[1] - scale_contract.target_height_meters) > height_allowed:
+                errors.append(
+                    f"world height {dimensions[1]:.3f}m outside "
+                    f"{scale_contract.target_height_meters:.3f}m +/- {height_allowed:.3f}m"
+                )
         ground_tolerance = max(0.02, scale_contract.target_meters * 0.01)
         if scale_contract.grounded and abs(bounds_min[1]) > ground_tolerance:
             errors.append(

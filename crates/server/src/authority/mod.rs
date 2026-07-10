@@ -28,3 +28,44 @@ pub trait WorldStepper {
     fn step(&mut self, input: AuthorityInput) -> (Self::Snapshot, Vec<Self::Event>);
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuthorityOutput<S, E> {
+    pub tick: AuthorityTick,
+    pub snapshot: S,
+    pub events: Vec<E>,
+}
+
+pub struct AuthorityDriver<W> {
+    world: W,
+    last_tick: Option<u64>,
+}
+
+impl<W> AuthorityDriver<W> {
+    pub fn new(world: W) -> Self {
+        Self { world, last_tick: None }
+    }
+
+    pub fn world(&self) -> &W {
+        &self.world
+    }
+}
+
+impl<W: WorldStepper> AuthorityDriver<W> {
+    pub fn advance(
+        &mut self,
+        input: AuthorityInput,
+    ) -> Result<AuthorityOutput<W::Snapshot, W::Event>, &'static str> {
+        let input = validate_input(input)?;
+        if self.last_tick.is_some_and(|last| input.tick <= last) {
+            return Err("authority tick must increase monotonically");
+        }
+
+        let (snapshot, events) = self.world.step(input);
+        self.last_tick = Some(input.tick);
+        Ok(AuthorityOutput {
+            tick: AuthorityTick { tick: input.tick, accepted: true },
+            snapshot,
+            events,
+        })
+    }
+}

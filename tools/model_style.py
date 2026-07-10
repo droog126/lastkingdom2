@@ -31,12 +31,15 @@ class ScaleContract:
     target_meters: float
     grounded: bool = True
     tolerance: float = 0.08
+    target_height_meters: float | None = None
 
     def __post_init__(self) -> None:
         if self.metric not in {"height", "max_extent"}:
             raise ValueError(f"unsupported scale metric: {self.metric}")
         if self.target_meters <= 0.0:
             raise ValueError("target_meters must be positive")
+        if self.target_height_meters is not None and self.target_height_meters <= 0.0:
+            raise ValueError("target_height_meters must be positive")
 
 
 CATEGORY_BUDGETS: dict[str, CategoryBudget] = {

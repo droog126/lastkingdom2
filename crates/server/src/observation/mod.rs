@@ -17,4 +17,3 @@ impl NatureObservation {
         self.rainfall.is_finite() && self.soil_moisture.is_finite()
     }
 }
-
