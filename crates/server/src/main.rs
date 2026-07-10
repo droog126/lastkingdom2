@@ -104,6 +104,30 @@ pub struct ServerCommandDiagnostics {
     pub udp_commands_received: u64,
 }
 
+#[derive(Resource, Default, Debug)]
+pub struct ServerConnectionDiagnostics {
+    pub active_connections: usize,
+    pub connected_total: u64,
+    pub disconnected_total: u64,
+    pub last_disconnect_reason: Option<String>,
+}
+
+impl ServerConnectionDiagnostics {
+    fn record_connected(&mut self) {
+        self.active_connections = self.active_connections.saturating_add(1);
+        self.connected_total = self.connected_total.saturating_add(1);
+    }
+
+    fn record_disconnected(&mut self, reason: Option<&str>) {
+        if self.active_connections == 0 {
+            return;
+        }
+        self.active_connections -= 1;
+        self.disconnected_total = self.disconnected_total.saturating_add(1);
+        self.last_disconnect_reason = reason.map(str::to_owned);
+    }
+}
+
 #[derive(Resource)]
 struct GameplayCommandUdp {
     socket: std::net::UdpSocket,
@@ -1024,6 +1048,7 @@ fn main() {
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
         .init_resource::<ServerCommandDiagnostics>()
+        .init_resource::<ServerConnectionDiagnostics>()
         .init_resource::<ServerJumpState>()
         .init_resource::<AntiStuckState>()
         .insert_resource(scenario_state)
@@ -1043,6 +1068,7 @@ fn main() {
                 .chain(),
         )
         .add_observer(replicate_player_for_connected)
+        .add_observer(record_disconnected_client)
         .configure_sets(
             FixedUpdate,
             (SimSet::Interaction, SimSet::ScoreAndAudit, SimSet::Snapshot).chain(),
@@ -1200,11 +1226,17 @@ fn replicate_player_for_connected(
     trigger: On<Add, lightyear_connection::client_of::ClientOf>,
     mut commands: Commands,
     player_q: Query<Entity, With<PlayerPos>>,
+    remote_ids: Query<&lightyear::prelude::RemoteId>,
+    mut diagnostics: ResMut<ServerConnectionDiagnostics>,
 ) {
     let client_of_entity = trigger.entity;
+    diagnostics.record_connected();
+    let remote_id = remote_ids
+        .get(client_of_entity)
+        .map_or_else(|_| "unknown".to_string(), |id| format!("{:?}", id.0));
     info!(
-        "[net] ClientOf entity {:?} connected, attaching ReplicationSender to it + Replicate to local Player entity",
-        client_of_entity
+        "[net] client {} connected on {:?}; active={}, connected_total={}",
+        remote_id, client_of_entity, diagnostics.active_connections, diagnostics.connected_total,
     );
 
     commands.entity(client_of_entity).insert((
@@ -1229,6 +1261,28 @@ fn replicate_player_for_connected(
             entity, client_of_entity, client_of_entity
         );
     }
+}
+
+fn record_disconnected_client(
+    trigger: On<Add, lightyear_connection::client::Disconnected>,
+    connections: Query<(
+        &lightyear_connection::client::Disconnected,
+        Option<&lightyear::prelude::RemoteId>,
+    )>,
+    mut diagnostics: ResMut<ServerConnectionDiagnostics>,
+) {
+    let Ok((disconnected, remote_id)) = connections.get(trigger.entity) else {
+        return;
+    };
+    diagnostics.record_disconnected(disconnected.reason.as_deref());
+    info!(
+        "[net] client {:?} disconnected from {:?}: {}; active={}, disconnected_total={}",
+        remote_id.map(|id| id.0),
+        trigger.entity,
+        disconnected.reason.as_deref().unwrap_or("no reason provided"),
+        diagnostics.active_connections,
+        diagnostics.disconnected_total,
+    );
 }
 
 #[derive(bevy::prelude::Resource, Default)]
@@ -1288,11 +1342,15 @@ fn setup_world(
         let _ = pool.force_add(*k, init);
     }
 
-    monsters.demo_init([
-        constant::WORLD_SIZE / 2,
-        constant::SEA_LEVEL + 1,
-        constant::WORLD_SIZE / 2,
-    ]);
+    let monster_anchor = game_world.content.as_ref().map_or(
+        [
+            constant::WORLD_SIZE / 2,
+            constant::SEA_LEVEL + 1,
+            constant::WORLD_SIZE / 2 - 8,
+        ],
+        |content| content.monster_position,
+    );
+    monsters.demo_init_at(monster_anchor);
     *eco = EcoCycle::demo_at(Vec2::new(
         constant::WORLD_SIZE as f32 * 0.5,
         constant::WORLD_SIZE as f32 * 0.5,
@@ -1516,5 +1574,21 @@ mod tests {
         assert!(!player_volume_clear_at(&world, Vec3::new(8.1, 1.0, 3.5)));
         assert!(!player_volume_clear_at(&world, Vec3::new(-0.1, 1.0, 3.5)));
         assert!(player_volume_clear_at(&world, Vec3::new(3.5, 1.0, 3.5)));
+    }
+
+    #[test]
+    fn connection_diagnostics_do_not_underflow_on_duplicate_disconnect() {
+        let mut diagnostics = ServerConnectionDiagnostics::default();
+        diagnostics.record_connected();
+        diagnostics.record_disconnected(Some("timeout"));
+        diagnostics.record_disconnected(None);
+
+        assert_eq!(diagnostics.active_connections, 0);
+        assert_eq!(diagnostics.connected_total, 1);
+        assert_eq!(diagnostics.disconnected_total, 1);
+        assert_eq!(
+            diagnostics.last_disconnect_reason.as_deref(),
+            Some("timeout")
+        );
     }
 }

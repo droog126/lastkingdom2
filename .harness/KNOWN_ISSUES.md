@@ -66,9 +66,33 @@
 - 状态: iter_197 已改到 75, 待验证稳定性
 - 优先级: P2
 
+### ISSUE-009 — auto-demo TopDown 路径 12s 截图空蓝屏
+- 来源: iter_08 PARTIAL 6.0
+- 现象: render/mod.rs:2346 hardcode `camera_offset = Vec3::new(-48, 64, 38)` + ortho
+  viewport 72m → 玩家脚下 18m 范围在 720p 截图里只占 ~10px, 完全看不到
+- 失败断言:
+  - `png.color_dominance` 95.2% 蓝主导 (空场景的派生指标)
+  - `visual.player_readability_marker_present` 0 (TopDown 模式没渲染 player marker)
+- 修复路径: 三选一
+  - (a) TopDown 相机降低到 Y=22-25m, 跟玩家 6-8m 距离
+  - (b) auto-demo 截图前切回 FirstPerson 模式 (用户视角)
+  - (c) ortho viewport height 从 72m 减到 18-25m (village-scale)
+- 优先级: P0 (跟 user 之前说"地图光秃秃"是同根, ISSUE-001 关闭前提是 ground 真渲染)
+
+
 ## Resolved
 
-(none yet)
+### ISSUE-001 — kenney landmark Y≈19-20m 高空, first-person 看不到
+- 关闭: iter_08 (2026-07-10 23:25)
+- 修法: 9d7eb15 pretty 重构 (KenneyLandmark removed, GroundDetail layer, effective_ground_height
+  贴地) + 后续 iter_199/201
+- 证据: iter_08 luma 172.8 vs iter_07 171.2 (Δ=1.6, no flicker); frame_spikes
+  109→OK, terrain_despawns 224→OK
+- 关闭人: orchestrator (本轮)
+
+### ISSUE-008 — auto-demo TopDown 截图空蓝屏, 不能验证 ground/landmark/monster
+- 关闭: iter_08 同次 close, **重新打开为 ISSUE-009 (见 Open)**, 状态变更而已
+- (此处不重复登记, 详情见 Open 段)
 
 ## Wontfix
 

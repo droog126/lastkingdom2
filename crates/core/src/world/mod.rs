@@ -176,8 +176,11 @@ pub struct World {
     pub geo_overlay: Vec<terrain::ShapeLayer>,
 
     pub geo_overlay_names: std::collections::HashSet<String>,
+
+    pub content: Option<std::sync::Arc<content::MaterializedContent>>,
 }
 
+pub mod content;
 pub mod terrain;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +189,7 @@ pub struct WorldConfig {
     pub preset: String,
     pub seed: u64,
     pub install_spawn_platform: bool,
+    pub generate_content: bool,
 }
 
 impl Default for WorldConfig {
@@ -195,6 +199,7 @@ impl Default for WorldConfig {
             preset: "default".to_string(),
             seed: 0xDEADBEEF,
             install_spawn_platform: true,
+            generate_content: true,
         }
     }
 }
@@ -206,6 +211,11 @@ pub fn generate_world(config: &WorldConfig) -> World {
     world.seed = config.seed;
     if config.install_spawn_platform {
         install_huge_spawn_platform(&mut world);
+    }
+    if config.generate_content {
+        let generated = content::generate_and_materialize_content(&mut world, config.seed)
+            .unwrap_or_else(|error| panic!("world content generation failed: {error}"));
+        world.content = Some(std::sync::Arc::new(generated));
     }
     world
 }
@@ -222,6 +232,7 @@ impl World {
             pipeline: std::sync::Arc::new(terrain::presets::default_preset()),
             geo_overlay: Vec::new(),
             geo_overlay_names: std::collections::HashSet::new(),
+            content: None,
         }
     }
 

@@ -36,8 +36,21 @@ use crate::ray_aabb::{RayAabb, nearest_ray_aabb_hit};
 
 const FEATURED_MODELS: &[&str] = &[
     "procedural/pretty/sokpop_gatherer.glb",
+    "procedural/pretty/villager.glb",
+    "procedural/pretty/wolf.glb",
+    "procedural/pretty/monster_treant.glb",
     "procedural/pretty/sokpop_tree.glb",
-    "procedural/pretty/fallen_stick.glb",
+    "procedural/pretty/granular_round_tree.glb",
+    "procedural/pretty/granular_pine_tree.glb",
+    "procedural/pretty/granular_wildflowers.glb",
+    "procedural/pretty/house_small.glb",
+    "procedural/pretty/windmill.glb",
+    "procedural/pretty/bridge_stone.glb",
+    "procedural/pretty/lighthouse.glb",
+    "procedural/pretty/campfire.glb",
+    "procedural/pretty/treasure_chest.glb",
+    "procedural/pretty/boat.glb",
+    "procedural/pretty/cart.glb",
 ];
 
 pub const MODEL_PREVIEW_OUTPUT_DIR: &str = "screenshots/model_preview";
@@ -376,11 +389,7 @@ fn spawn_models(
     for (idx, (asset_path, category)) in glbs.iter().enumerate() {
         let col = idx % CELLS_PER_ROW;
         let row = idx / CELLS_PER_ROW;
-        let pos = Vec3::new(
-            (col as f32 - 1.0) * CELL_SIZE,
-            0.0,
-            (row as f32 - 0.5) * CELL_SIZE,
-        );
+        let pos = preview_grid_position(idx, glbs.len());
         let scene: Handle<WorldAsset> =
             asset_server.load(GltfAssetLabel::Scene(0).from_asset(asset_path.clone()));
         commands.spawn((
@@ -426,6 +435,18 @@ fn spawn_models(
     info!("[model-preview] spawned {} models", state.models.len());
 }
 
+fn preview_grid_position(index: usize, model_count: usize) -> Vec3 {
+    let rows = model_count.max(1).div_ceil(CELLS_PER_ROW);
+    let row = index / CELLS_PER_ROW;
+    let col = index % CELLS_PER_ROW;
+    let models_in_row = model_count.saturating_sub(row * CELLS_PER_ROW).min(CELLS_PER_ROW).max(1);
+    Vec3::new(
+        (col as f32 - (models_in_row - 1) as f32 * 0.5) * CELL_SIZE,
+        0.0,
+        (row as f32 - (rows - 1) as f32 * 0.5) * CELL_SIZE,
+    )
+}
+
 fn preview_model_aabb(pos: Vec3) -> RayAabb {
     RayAabb::new(
         pos + Vec3::new(-PREVIEW_AABB_RADIUS, 0.0, -PREVIEW_AABB_RADIUS),
@@ -447,19 +468,14 @@ fn preview_entry_aabb(entry: &PreviewEntry) -> RayAabb {
 fn setup_camera(mut commands: Commands, state: Res<ModelPreviewState>) {
     let rows = ((state.models.len().max(1) + CELLS_PER_ROW - 1) / CELLS_PER_ROW) as f32;
     let single = state.models.len() == 1;
-    let center = if single {
-        Vec3::new(-CELL_SIZE, 1.2, -CELL_SIZE * 0.5)
+    let center = Vec3::new(0.0, 1.2, 0.0);
+    let distance = if single { 4.8 } else { (rows * 4.5).max(9.0) };
+    let height = if single {
+        3.7
     } else {
-        Vec3::new(0.0, 1.2, (rows - 1.0) * CELL_SIZE * 0.5)
+        (rows * 2.4).clamp(5.5, 30.0)
     };
-    let distance = if single {
-        4.8
-    } else if state.models.len() <= FEATURED_MODELS.len() {
-        7.0
-    } else {
-        rows * 3.8
-    };
-    let preview_camera = PreviewCamera { yaw: -0.30, distance, height: 3.7, center };
+    let preview_camera = PreviewCamera { yaw: -0.55, distance, height, center };
     let pos = camera_pos(&preview_camera);
     commands.insert_resource(preview_camera);
     commands.spawn((
@@ -776,7 +792,24 @@ fn exit_model_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<ModelPreviewSt
 
 #[cfg(test)]
 mod tests {
-    use super::{FEATURED_MODELS, collect_preview_glbs, workspace_asset_root};
+    use bevy::prelude::Vec3;
+
+    use super::{
+        FEATURED_MODELS, collect_preview_glbs, preview_grid_position, workspace_asset_root,
+    };
+
+    #[test]
+    fn preview_grid_positions_are_centered() {
+        let positions: Vec<_> = (0..16).map(|index| preview_grid_position(index, 16)).collect();
+        let min_x = positions.iter().map(|pos| pos.x).fold(f32::INFINITY, f32::min);
+        let max_x = positions.iter().map(|pos| pos.x).fold(f32::NEG_INFINITY, f32::max);
+        let min_z = positions.iter().map(|pos| pos.z).fold(f32::INFINITY, f32::min);
+        let max_z = positions.iter().map(|pos| pos.z).fold(f32::NEG_INFINITY, f32::max);
+
+        assert!((min_x + max_x).abs() < f32::EPSILON);
+        assert!((min_z + max_z).abs() < f32::EPSILON);
+        assert_eq!(preview_grid_position(0, 1), Vec3::ZERO);
+    }
 
     #[test]
     fn model_preview_all_scans_assets_recursively() {
@@ -785,6 +818,25 @@ mod tests {
         assert!(all.iter().any(|(path, _)| path == "procedural/pretty/sokpop_tree.glb"));
         assert!(all.iter().any(|(path, _)| path == "procedural/pretty/fallen_stick.glb"));
         assert!(all.len() >= FEATURED_MODELS.len());
+    }
+
+    #[test]
+    fn featured_model_preview_is_a_representative_showroom() {
+        let root = workspace_asset_root();
+        let featured = collect_preview_glbs(&root, false, None);
+
+        assert!(
+            featured.len() >= 12,
+            "featured showroom only has {} models",
+            featured.len()
+        );
+        for (path, category) in featured {
+            assert_eq!(category, "featured");
+            assert!(
+                root.join(&path).is_file(),
+                "featured model does not exist: {path}"
+            );
+        }
     }
 
     #[test]

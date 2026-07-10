@@ -7,6 +7,7 @@ pub mod eco_cycle;
 pub mod ecology;
 pub mod equipment;
 pub mod hint;
+pub mod legendary;
 pub mod match_state;
 pub mod mining_site;
 pub mod monster;

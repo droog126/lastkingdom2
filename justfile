@@ -31,7 +31,7 @@ play *ARGS:
     just xtask play {{ARGS}}
 
 model-preview:
-    just play --model-preview
+    just play --gpu-backend=vulkan --model-preview
 
 # Iterate every GLB under assets/, screenshot each individually, and write a
 # self-evaluation summary to screenshots/model_preview/decision.md. Use this
@@ -45,10 +45,10 @@ model-preview-all-only MODEL:
     just xtask model-preview-all --only={{MODEL}}
 
 model-preview-one MODEL:
-    just play --model-preview --model-preview-one={{MODEL}}
+    just play --gpu-backend=vulkan --model-preview --model-preview-one={{MODEL}}
 
 model-preview-shot MODEL:
-    just play --model-preview --model-preview-one={{MODEL}} --model-preview-shot
+    just play --gpu-backend=vulkan --model-preview --model-preview-one={{MODEL}} --model-preview-shot
 
 terrain-preview:
     just play --terrain-preview

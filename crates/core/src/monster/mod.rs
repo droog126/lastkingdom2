@@ -237,11 +237,11 @@ impl MonsterEcosystem {
     }
 
     pub fn demo_init(&mut self, world_center: [i32; 3]) {
-        self.spawn_kingdom(
-            Biome::Jungle,
-            [world_center[0], world_center[1], world_center[2] - 8],
-            3,
-        );
+        self.demo_init_at([world_center[0], world_center[1], world_center[2] - 8]);
+    }
+
+    pub fn demo_init_at(&mut self, content_anchor: [i32; 3]) {
+        self.spawn_kingdom(Biome::Jungle, content_anchor, 3);
     }
 
     pub fn spawn_kingdom(&mut self, biome: Biome, center: [i32; 3], nest_count: u32) -> u32 {
@@ -329,6 +329,21 @@ mod tests {
         eco.demo_init([16, 8, 16]);
         assert_eq!(eco.current_individuals, 60);
         assert!(eco.kingdoms.len() == 1);
+    }
+
+    #[test]
+    fn demo_init_at_places_monsters_on_generated_content_anchor() {
+        let mut eco = MonsterEcosystem::new();
+        let anchor = [34, 15, 34];
+
+        eco.demo_init_at(anchor);
+
+        let kingdom = eco.kingdoms.values().next().expect("one demo kingdom");
+        assert_eq!(kingdom.center, anchor);
+        assert!(kingdom.nests.values().all(|nest| {
+            (nest.center[0] - anchor[0]).abs() <= 4
+                && (nest.center[2] - anchor[2]).abs() <= 4
+        }));
     }
 
     #[test]

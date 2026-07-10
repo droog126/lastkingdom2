@@ -1,5 +1,6 @@
 use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::protection::Protection;
 use lk2_core::pvp::FixedTick;
 use lk2_core::pvp::{
     CombatState, DamageEvent, Hitbox, PositionHistory, PositionSnapshot, WeaponStats,
@@ -223,6 +224,36 @@ pub fn apply_damage_and_knockback(
                 server_tick: tick_val,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protected_victim_does_not_take_authoritative_damage() {
+        let mut app = App::new();
+        app.add_message::<DamageEvent>()
+            .add_message::<DamageResult>()
+            .init_resource::<FixedTick>()
+            .add_systems(Update, apply_damage_and_knockback);
+
+        let attacker = app.world_mut().spawn_empty().id();
+        let victim = app.world_mut().spawn((Health(100.0), Protection::mid_join())).id();
+        app.world_mut().write_message(DamageEvent {
+            attacker,
+            victim,
+            damage: 25.0,
+            knockback: Vec3::ZERO,
+            is_critical: false,
+            hit_location: Vec3::ZERO,
+            server_tick: 1,
+        });
+
+        app.update();
+
+        assert_eq!(app.world().get::<Health>(victim).unwrap().0, 100.0);
     }
 }
 

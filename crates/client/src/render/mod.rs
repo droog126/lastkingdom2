@@ -465,13 +465,21 @@ pub fn spawn_terrain_around_player(
     }
 
     let first_person_mode = *mode == CameraMode::FirstPerson;
-    let r = if first_person_mode {
+    let r = if stable_scene_baseline_enabled() {
+        16
+    } else if first_person_mode {
         cfg.radius.min(28)
     } else {
         cfg.radius
     } as i32;
     let py = player.block_pos[1];
-    let y_span = if first_person_mode { 24 } else { 40 };
+    let y_span = if stable_scene_baseline_enabled() {
+        18
+    } else if first_person_mode {
+        24
+    } else {
+        40
+    };
     let y_min = (py - y_span).max(0);
     let y_max = (py + y_span).min(game_world.size as i32 - 1);
     let center_x = mesh_center.x.round() as i32;
@@ -1090,8 +1098,13 @@ pub fn sync_camera_projection(
     };
     match *mode {
         CameraMode::TopDown => {
+            let viewport_height = if stable_scene_baseline_enabled() {
+                38.0
+            } else {
+                TOP_DOWN_ORTHO_HEIGHT
+            };
             *projection = Projection::Orthographic(OrthographicProjection {
-                scaling_mode: ScalingMode::FixedVertical { viewport_height: TOP_DOWN_ORTHO_HEIGHT },
+                scaling_mode: ScalingMode::FixedVertical { viewport_height },
                 ..OrthographicProjection::default_3d()
             });
         }
@@ -2343,7 +2356,11 @@ pub fn first_person_camera(
             player.pos.z.floor() as i32,
         );
         let target = Vec3::new(player.pos.x, ground_top + 0.8, player.pos.z);
-        let camera_offset = Vec3::new(-48.0, 64.0, 38.0);
+        let camera_offset = if stable_scene_baseline_enabled() {
+            Vec3::new(-18.0, 62.0, 14.0)
+        } else {
+            Vec3::new(-48.0, 64.0, 38.0)
+        };
         tf.translation = target + camera_offset;
         tf.look_at(target, Vec3::Y);
         return;

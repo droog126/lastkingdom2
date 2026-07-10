@@ -98,10 +98,10 @@ def make_granular_round_tree() -> None:
     rng = random.Random(1101)
     bark = make_mat("granular_round_bark", (0.34, 0.22, 0.13))
     bark_light = make_mat("granular_round_bark_light", (0.47, 0.31, 0.17))
-    leaf_a = make_mat("granular_round_leaf_a", (0.22, 0.46, 0.24))
-    leaf_b = make_mat("granular_round_leaf_b", (0.31, 0.60, 0.30))
-    leaf_c = make_mat("granular_round_leaf_c", (0.15, 0.34, 0.20))
-    leaf_tip = make_mat("granular_round_leaf_tip", (0.44, 0.68, 0.34))
+    leaf_a = make_mat("granular_round_leaf_a", (0.17, 0.38, 0.20))
+    leaf_b = make_mat("granular_round_leaf_b", (0.27, 0.54, 0.27))
+    leaf_c = make_mat("granular_round_leaf_c", (0.10, 0.27, 0.16))
+    leaf_tip = make_mat("granular_round_leaf_tip", (0.36, 0.64, 0.30))
 
     cylinder("trunk_low", (0.0, 0.0, 0.62), 0.16, 1.24, bark, vertices=7)
     cylinder("trunk_high", (0.03, -0.01, 1.45), 0.12, 0.82, bark_light, vertices=7)
@@ -127,9 +127,9 @@ def make_granular_pine_tree() -> None:
     clear_scene()
     rng = random.Random(1207)
     bark = make_mat("granular_pine_bark", (0.30, 0.19, 0.11))
-    leaf_dark = make_mat("granular_pine_leaf_dark", (0.10, 0.26, 0.18))
-    leaf_mid = make_mat("granular_pine_leaf_mid", (0.16, 0.39, 0.23))
-    leaf_light = make_mat("granular_pine_leaf_light", (0.25, 0.52, 0.29))
+    leaf_dark = make_mat("granular_pine_leaf_dark", (0.08, 0.22, 0.16))
+    leaf_mid = make_mat("granular_pine_leaf_mid", (0.14, 0.34, 0.22))
+    leaf_light = make_mat("granular_pine_leaf_light", (0.22, 0.46, 0.27))
 
     cylinder("trunk", (0.0, 0.0, 1.10), 0.12, 2.20, bark, vertices=7)
     levels = [
@@ -160,8 +160,8 @@ def make_granular_pine_tree() -> None:
 def make_granular_wildflowers() -> None:
     clear_scene()
     rng = random.Random(2219)
-    grass_a = make_mat("granular_flower_grass_a", (0.33, 0.55, 0.30))
-    grass_b = make_mat("granular_flower_grass_b", (0.22, 0.42, 0.25))
+    grass_a = make_mat("granular_flower_grass_a", (0.29, 0.49, 0.27))
+    grass_b = make_mat("granular_flower_grass_b", (0.17, 0.34, 0.20))
     stem = make_mat("granular_flower_stem", (0.38, 0.57, 0.27))
     yellow = make_mat("granular_flower_yellow", (0.94, 0.75, 0.26))
     white = make_mat("granular_flower_white", (0.86, 0.86, 0.70))
@@ -199,10 +199,10 @@ def make_granular_reed_bank() -> None:
     clear_scene()
     rng = random.Random(3313)
     mud = make_mat("granular_reed_mud", (0.28, 0.24, 0.15))
-    grass = make_mat("granular_reed_grass", (0.24, 0.45, 0.28))
-    reed = make_mat("granular_reed_stalk", (0.53, 0.47, 0.25))
-    reed_tip = make_mat("granular_reed_tip", (0.62, 0.44, 0.26))
-    water = make_mat("granular_reed_water", (0.16, 0.36, 0.35), roughness=0.72, alpha=0.68)
+    grass = make_mat("granular_reed_grass", (0.20, 0.39, 0.25))
+    reed = make_mat("granular_reed_stalk", (0.48, 0.43, 0.23))
+    reed_tip = make_mat("granular_reed_tip", (0.58, 0.40, 0.23))
+    water = make_mat("granular_reed_water", (0.12, 0.30, 0.32), roughness=0.72, alpha=0.70)
 
     block("mud_bank", (0.0, -0.05, 0.02), (1.45, 0.42, 0.05), mud, rot=(0.0, 0.0, -0.08))
     block("shallow_water_edge", (0.0, 0.36, 0.055), (1.52, 0.33, 0.028), water, rot=(0.0, 0.0, 0.02))
@@ -233,24 +233,24 @@ def add_preview_lights() -> None:
     bpy.ops.object.light_add(type="SUN", location=(0.0, -4.0, 5.0), rotation=(math.radians(45.0), 0.0, math.radians(35.0)))
     sun = bpy.context.object
     sun.name = "preview_sun"
-    sun.data.energy = 3.0
+    sun.data.energy = 1.8
     bpy.ops.object.light_add(type="AREA", location=(0.0, -3.2, 3.0))
     area = bpy.context.object
     area.name = "preview_softbox"
-    area.data.energy = 450.0
-    area.data.size = 5.0
+    area.data.energy = 180.0
+    area.data.size = 5.5
 
 
 def render_preview(path: Path = PREVIEW_PATH) -> Path:
     clear_scene()
-    ground = make_mat("preview_ground", (0.36, 0.48, 0.30))
-    block("preview_ground", (0.0, 0.0, -0.035), (4.3, 2.2, 0.04), ground)
+    ground = make_mat("preview_ground", (0.28, 0.40, 0.25))
+    block("preview_ground", (0.0, 0.0, -0.035), (5.2, 3.0, 0.04), ground)
 
     placements = [
-        ("granular_round_tree.glb", (-1.45, 0.15, 0.0)),
-        ("granular_pine_tree.glb", (0.70, 0.10, 0.0)),
-        ("granular_wildflowers.glb", (-0.25, -1.05, 0.0)),
-        ("granular_reed_bank.glb", (1.45, -1.00, 0.0)),
+        ("granular_round_tree.glb", (-1.75, 0.45, 0.0)),
+        ("granular_pine_tree.glb", (0.85, 0.40, 0.0)),
+        ("granular_wildflowers.glb", (-0.55, -1.15, 0.0)),
+        ("granular_reed_bank.glb", (1.55, -1.05, 0.0)),
     ]
     for filename, offset in placements:
         before = set(bpy.context.scene.objects)
@@ -262,13 +262,14 @@ def render_preview(path: Path = PREVIEW_PATH) -> Path:
             obj.location.z += offset[2]
 
     add_preview_lights()
-    bpy.ops.object.camera_add(location=(0.0, -5.2, 2.35), rotation=(math.radians(67.0), 0.0, 0.0))
+    bpy.ops.object.camera_add(location=(0.0, -7.1, 3.15), rotation=(math.radians(64.0), 0.0, 0.0))
     bpy.context.scene.camera = bpy.context.object
     bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in {item.identifier for item in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items} else "BLENDER_EEVEE"
     bpy.context.scene.render.resolution_x = 1400
     bpy.context.scene.render.resolution_y = 900
-    bpy.context.scene.view_settings.view_transform = "Standard"
+    bpy.context.scene.view_settings.view_transform = "Filmic"
     bpy.context.scene.view_settings.look = "Medium High Contrast"
+    bpy.context.scene.view_settings.exposure = -0.35
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.context.scene.render.filepath = str(path)
     bpy.ops.render.render(write_still=True)

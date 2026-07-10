@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Logic Audit"
+  short_description: "Audit runtime game logic end to end"
+  default_prompt: "Use $game-logic-audit to audit the real game logic and rank evidence-backed bugs."

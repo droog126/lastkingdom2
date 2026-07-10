@@ -13,6 +13,10 @@
       "sokpop_gatherer",
       "sokpop_tree",
       "tree",
+      "granular_round_tree",
+      "granular_pine_tree",
+      "granular_wildflowers",
+      "granular_reed_bank",
       "fallen_stick",
       "rock_dark",
       "rock_mid",
@@ -79,7 +83,11 @@
       "cauldron",
       "cooking_station",
       "spit_roast",
-      "sword"
+      "sword",
+      "hoplite_reaper_scythe",
+      "hoplite_dragon_katana",
+      "hoplite_golem_hammer",
+      "hoplite_midas_sword"
     ],
     "creatures": [
       "villager",

@@ -89,6 +89,10 @@ PRETTY_GROUPS = {
         "cooking_station",
         "spit_roast",
         "sword",
+        "hoplite_reaper_scythe",
+        "hoplite_dragon_katana",
+        "hoplite_golem_hammer",
+        "hoplite_midas_sword",
     ],
     "creatures": ["villager", "wolf", "bear"],
 }

@@ -12,7 +12,7 @@ use crate::render::{
     RenderFeatureSettings,
 };
 use crate::{
-    GameplayFeedbackToast, OnlineCommandDiagnostics, OnlineConnectionDiagnostics,
+    GameplayFeedbackToast, NetworkStatus, OnlineCommandDiagnostics, OnlineConnectionDiagnostics,
     OnlineNetworkStatus,
 };
 use lk2_core::combat::{
@@ -1304,9 +1304,18 @@ pub fn format_network_hud_line(
     } else {
         "idle"
     };
+    let disconnect_reason = connection
+        .disconnect_reason
+        .as_deref()
+        .filter(|_| status.status == NetworkStatus::Disconnected)
+        .map(|reason| {
+            let reason = reason.chars().take(80).collect::<String>();
+            format!(" reason {reason}")
+        })
+        .unwrap_or_default();
 
     Some(format!(
-        "{} {server} id {:04} ping {ping} pong {pong_age} snap {snapshot_age} pos {pos_age} tick {} drift {:.2} corr {:.2} | {command_path} sent {} dir {},{}",
+        "{} {server} id {:04} ping {ping} pong {pong_age} snap {snapshot_age} pos {pos_age} tick {} drift {:.2} corr {:.2}{disconnect_reason} | {command_path} sent {} dir {},{}",
         status.status.label(),
         connection.client_id % 10_000,
         connection.last_server_tick,
@@ -1388,8 +1397,11 @@ mod tests {
     #[test]
     fn format_network_hud_line_tracks_online_freshness() {
         let connection = OnlineConnectionDiagnostics {
+            client_entity: None,
             server_addr: Some("127.0.0.1:5000".parse().unwrap()),
             client_id: 12_345,
+            transport_state: crate::TransportConnectionState::Connected,
+            disconnect_reason: None,
             snapshot_count: 3,
             server_pos_updates: 9,
             ping_sequence: 4,
@@ -1425,6 +1437,20 @@ mod tests {
             format_network_hud_line(ClientRunMode::Offline, status, 10.0, &connection, &commands,)
                 .is_none()
         );
+
+        let disconnected = OnlineConnectionDiagnostics {
+            disconnect_reason: Some("Link failed: timeout".into()),
+            ..connection
+        };
+        let line = format_network_hud_line(
+            ClientRunMode::Online,
+            OnlineNetworkStatus { status: NetworkStatus::Disconnected },
+            10.0,
+            &disconnected,
+            &commands,
+        )
+        .unwrap();
+        assert!(line.contains("reason Link failed: timeout"));
     }
 
     #[test]

@@ -107,10 +107,22 @@ pub struct OnlineCommandDiagnostics {
     pub gameplay_udp_active: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TransportConnectionState {
+    #[default]
+    Offline,
+    Connecting,
+    Connected,
+    Disconnected,
+}
+
 #[derive(Resource, Default, Debug, Clone)]
 pub struct OnlineConnectionDiagnostics {
+    pub client_entity: Option<Entity>,
     pub server_addr: Option<std::net::SocketAddr>,
     pub client_id: u64,
+    pub transport_state: TransportConnectionState,
+    pub disconnect_reason: Option<String>,
     pub snapshot_count: u64,
     pub server_pos_updates: u64,
     pub ping_sequence: u64,
@@ -124,6 +136,10 @@ pub struct OnlineConnectionDiagnostics {
 }
 
 impl OnlineConnectionDiagnostics {
+    pub fn is_transport_connected(&self) -> bool {
+        self.transport_state == TransportConnectionState::Connected
+    }
+
     pub fn snapshot_age_secs(&self, now_secs: f32) -> Option<f32> {
         self.last_snapshot_secs.map(|secs| (now_secs - secs).max(0.0))
     }
@@ -583,6 +599,7 @@ fn main() {
                 .run_if(resource_equals(ClientRunMode::Offline)),
             lk2_core::scenario::scenario_tick_recorder
                 .run_if(resource_equals(ClientRunMode::Offline)),
+            update_transport_connection_state,
             apply_networked_position,
             apply_server_pos_update,
             send_ping_messages,
@@ -720,7 +737,7 @@ fn spawn_networked_client(
     use lightyear::prelude::MessageReceiver;
     use lightyear::prelude::UdpIo;
     use lightyear::prelude::client::Connect;
-    use lightyear::prelude::{LinkStart, LocalAddr, PeerAddr};
+    use lightyear::prelude::{LocalAddr, PeerAddr};
     use lightyear_netcode::client_plugin::{NetcodeClient, NetcodeConfig};
     use lightyear_netcode::prelude::Authentication;
     use lk2_core::protocol::messages::ServerPosUpdate;
@@ -749,12 +766,6 @@ fn spawn_networked_client(
         server_addr, client_id_seed, PROTOCOL_ID
     );
 
-    commands.insert_resource(OnlineConnectionDiagnostics {
-        server_addr: Some(server_addr),
-        client_id: client_id_seed,
-        ..default()
-    });
-
     let client_id = commands
         .spawn((
             Name::new("Client"),
@@ -769,14 +780,57 @@ fn spawn_networked_client(
         ))
         .id();
 
-    info!(
-        "[net] triggering LinkStart on client entity {:?}",
-        client_id
-    );
-    commands.trigger(LinkStart { entity: client_id });
+    commands.insert_resource(OnlineConnectionDiagnostics {
+        client_entity: Some(client_id),
+        server_addr: Some(server_addr),
+        client_id: client_id_seed,
+        transport_state: TransportConnectionState::Connecting,
+        ..default()
+    });
 
     info!("[net] triggering Connect on client entity {:?}", client_id);
     commands.trigger(Connect { entity: client_id });
+}
+
+fn update_transport_connection_state(
+    run_mode: Res<ClientRunMode>,
+    mut diagnostics: ResMut<OnlineConnectionDiagnostics>,
+    connections: Query<(
+        Option<&lightyear_connection::client::Connected>,
+        Option<&lightyear_connection::client::Connecting>,
+        Option<&lightyear_connection::client::Disconnected>,
+    )>,
+) {
+    if *run_mode == ClientRunMode::Offline {
+        diagnostics.transport_state = TransportConnectionState::Offline;
+        diagnostics.disconnect_reason = None;
+        return;
+    }
+
+    let Some(client_entity) = diagnostics.client_entity else {
+        diagnostics.transport_state = TransportConnectionState::Disconnected;
+        diagnostics.disconnect_reason = Some("network client entity was not created".to_string());
+        return;
+    };
+    let Ok((connected, connecting, disconnected)) = connections.get(client_entity) else {
+        diagnostics.transport_state = TransportConnectionState::Disconnected;
+        diagnostics.disconnect_reason = Some("network client entity is missing".to_string());
+        return;
+    };
+
+    if connected.is_some() {
+        diagnostics.transport_state = TransportConnectionState::Connected;
+        diagnostics.disconnect_reason = None;
+    } else if connecting.is_some() {
+        diagnostics.transport_state = TransportConnectionState::Connecting;
+        diagnostics.disconnect_reason = None;
+    } else if let Some(disconnected) = disconnected {
+        diagnostics.transport_state = TransportConnectionState::Disconnected;
+        diagnostics.disconnect_reason = disconnected.reason.clone();
+    } else {
+        diagnostics.transport_state = TransportConnectionState::Connecting;
+        diagnostics.disconnect_reason = None;
+    }
 }
 
 fn apply_networked_position(
@@ -982,7 +1036,10 @@ fn send_ping_messages(
     writer: Option<MessageWriter<PingMessage>>,
     mut next_ping_secs: Local<f32>,
 ) {
-    if *run_mode != ClientRunMode::Online || time.elapsed_secs() < *next_ping_secs {
+    if *run_mode != ClientRunMode::Online
+        || !connection.is_transport_connected()
+        || time.elapsed_secs() < *next_ping_secs
+    {
         return;
     }
     *next_ping_secs = time.elapsed_secs() + PING_INTERVAL.as_secs_f32();
@@ -1065,6 +1122,13 @@ fn classify_network_status(
 ) -> NetworkStatus {
     if run_mode == ClientRunMode::Offline {
         return NetworkStatus::Offline;
+    }
+    match connection.transport_state {
+        TransportConnectionState::Offline | TransportConnectionState::Connecting => {
+            return NetworkStatus::Connecting;
+        }
+        TransportConnectionState::Disconnected => return NetworkStatus::Disconnected,
+        TransportConnectionState::Connected => {}
     }
     if connection.snapshot_count == 0
         && connection.server_pos_updates == 0
@@ -1261,12 +1325,18 @@ fn send_online_gameplay_commands(
     player: Res<PlayerState>,
     clock: Res<SimClock>,
     angles: Res<CameraAngles>,
+    connection: Res<OnlineConnectionDiagnostics>,
     mut diagnostics: ResMut<OnlineCommandDiagnostics>,
     gameplay_udp: Option<Res<OnlineGameplayUdp>>,
     writer: Option<MessageWriter<GameplayCommand>>,
     mut next_move_send_secs: Local<f32>,
 ) {
     if *run_mode != ClientRunMode::Online {
+        return;
+    }
+    if !connection.is_transport_connected() {
+        diagnostics.sender_entities = 0;
+        diagnostics.gameplay_udp_active = gameplay_udp.is_some();
         return;
     }
     diagnostics.sender_entities = usize::from(writer.is_some());
@@ -1745,11 +1815,15 @@ fn setup_world(
         let _ = pool.force_add(*k, init);
     }
 
-    monsters.demo_init([
-        constant::WORLD_SIZE / 2,
-        constant::SEA_LEVEL + 1,
-        constant::WORLD_SIZE / 2,
-    ]);
+    let monster_anchor = game_world.content.as_ref().map_or(
+        [
+            constant::WORLD_SIZE / 2,
+            constant::SEA_LEVEL + 1,
+            constant::WORLD_SIZE / 2 - 8,
+        ],
+        |content| content.monster_position,
+    );
+    monsters.demo_init_at(monster_anchor);
 
     let (sx, sz) =
         walk_override_static().unwrap_or((constant::WORLD_SIZE / 2, constant::WORLD_SIZE / 2));
@@ -2092,6 +2166,7 @@ mod tests {
         );
 
         let live = OnlineConnectionDiagnostics {
+            transport_state: TransportConnectionState::Connected,
             snapshot_count: 1,
             last_snapshot_secs: Some(9.0),
             ..default()
@@ -2102,6 +2177,7 @@ mod tests {
         );
 
         let stale = OnlineConnectionDiagnostics {
+            transport_state: TransportConnectionState::Connected,
             snapshot_count: 1,
             last_snapshot_secs: Some(5.0),
             ..default()
@@ -2112,13 +2188,24 @@ mod tests {
         );
 
         let disconnected = OnlineConnectionDiagnostics {
+            transport_state: TransportConnectionState::Disconnected,
+            disconnect_reason: Some("Link failed: timeout".into()),
             snapshot_count: 1,
-            last_snapshot_secs: Some(-(NETCODE_CLIENT_TIMEOUT_SECS as f32 + 1.0)),
+            last_snapshot_secs: Some(9.9),
             ..default()
         };
         assert_eq!(
             classify_network_status(ClientRunMode::Online, 10.0, &disconnected),
             NetworkStatus::Disconnected
+        );
+
+        let connected_without_payload = OnlineConnectionDiagnostics {
+            transport_state: TransportConnectionState::Connected,
+            ..default()
+        };
+        assert_eq!(
+            classify_network_status(ClientRunMode::Online, 10.0, &connected_without_payload),
+            NetworkStatus::Connecting
         );
     }
 

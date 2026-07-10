@@ -194,7 +194,15 @@ pub fn spawn_pretty(
     let first_person_mode = *camera_mode == CameraMode::FirstPerson;
 
     if stable_scene_baseline_enabled() {
-        info!("stable-scene: skipped pretty startup decorations");
+        spawn_stable_scene_baseline_decor(
+            &mut commands,
+            &game_world,
+            player.pos,
+            &mut meshes,
+            &mut materials,
+            camera_angles.yaw,
+        );
+        info!("stable-scene: spawned minimal non-coplanar decor");
         return;
     }
 
@@ -575,6 +583,112 @@ pub fn spawn_pretty(
         player.pos,
         ground_y,
     );
+}
+
+fn spawn_stable_scene_baseline_decor(
+    commands: &mut Commands,
+    game_world: &GameWorld,
+    player_pos: Vec3,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    yaw: f32,
+) {
+    let player_ground = effective_ground_height(
+        game_world,
+        player_pos.x.floor() as i32,
+        player_pos.z.floor() as i32,
+    );
+    let avatar_translation =
+        player_avatar_translation(player_pos.x, player_ground, player_pos.z, 0.0);
+    spawn_player_readability_marker(commands, meshes, materials, avatar_translation, yaw);
+    spawn_stable_player_beacon(commands, meshes, materials, avatar_translation);
+
+    let landmark_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let palette = [
+        Color::srgb(0.95, 0.22, 0.18),
+        Color::srgb(0.10, 0.42, 0.95),
+        Color::srgb(1.0, 0.82, 0.18),
+        Color::srgb(0.70, 0.20, 0.95),
+        Color::srgb(0.10, 0.72, 0.42),
+        Color::srgb(0.95, 0.44, 0.12),
+    ];
+    let offsets = [
+        Vec2::new(-10.0, -8.0),
+        Vec2::new(-4.0, 9.0),
+        Vec2::new(7.5, -7.0),
+        Vec2::new(12.0, 6.0),
+        Vec2::new(-14.0, 4.0),
+        Vec2::new(3.0, 14.0),
+    ];
+
+    for (i, offset) in offsets.iter().enumerate() {
+        let x = player_pos.x + offset.x;
+        let z = player_pos.z + offset.y;
+        let h = 1.1 + (i % 3) as f32 * 0.45;
+        let ground_y = effective_ground_height(game_world, x.floor() as i32, z.floor() as i32);
+        let color = palette[i % palette.len()];
+        let material = materials.add(StandardMaterial {
+            base_color: color,
+            emissive: (color.to_linear() * 0.18).into(),
+            perceptual_roughness: 0.72,
+            metallic: 0.0,
+            ..default()
+        });
+        commands.spawn((
+            Mesh3d(landmark_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(Vec3::new(x, ground_y + h * 0.5 + 0.08, z))
+                .with_scale(Vec3::new(1.25, h, 1.25)),
+        ));
+    }
+}
+
+fn spawn_stable_player_beacon(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    avatar_translation: Vec3,
+) {
+    let blue = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.05, 0.22, 0.95),
+        emissive: Color::srgb(0.04, 0.12, 0.65).into(),
+        perceptual_roughness: 0.58,
+        metallic: 0.0,
+        ..default()
+    });
+    let yellow = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.86, 0.06),
+        emissive: Color::srgb(0.45, 0.32, 0.03).into(),
+        perceptual_roughness: 0.52,
+        metallic: 0.0,
+        ..default()
+    });
+    let red = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.95, 0.10, 0.08),
+        emissive: Color::srgb(0.45, 0.04, 0.03).into(),
+        perceptual_roughness: 0.55,
+        metallic: 0.0,
+        ..default()
+    });
+    let beam_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let y = avatar_translation.y + 0.28;
+    for (scale, y_offset, material) in [
+        (Vec3::new(22.0, 0.16, 2.1), 0.00, blue),
+        (Vec3::new(2.1, 0.18, 22.0), 0.10, yellow),
+        (Vec3::new(5.6, 0.14, 5.6), 0.20, red),
+    ] {
+        commands.spawn((
+            Mesh3d(beam_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(Vec3::new(
+                avatar_translation.x,
+                y + y_offset,
+                avatar_translation.z,
+            ))
+            .with_scale(scale),
+            PlayerReadabilityMarker { part: PlayerReadabilityMarkerPart::Ring },
+        ));
+    }
 }
 
 fn spawn_player_readability_marker(
