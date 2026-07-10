@@ -21,6 +21,11 @@ use std::time::Duration;
 
 mod los;
 mod pvp_systems;
+mod app;
+mod authority;
+mod observation;
+mod persistence;
+mod replication;
 
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
@@ -36,7 +41,7 @@ use lk2_core::player::{PlayerState, PlayerTag};
 use lk2_core::pvp::FixedTick;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
+use lk2_core::sim::{SimRole, advance_fixed_authority_tick_report};
 use lk2_core::transport::{
     DEFAULT_PORT, NETCODE_CLIENT_TIMEOUT_SECS, PRIVATE_KEY, PROTOCOL_ID,
     SERVER_POS_UPDATE_INTERVAL_TICKS, gameplay_port_for,
@@ -52,6 +57,8 @@ use crate::pvp_systems::{
     ServerPvPPlugin, apply_damage_and_knockback, broadcast_pvp_messages, expire_knockback_immunity,
     melee_hit_registration, read_attack_inputs, record_position_history, tick_combat_cooldowns,
 };
+use crate::app::NatureServerProjectionPlugin;
+use crate::authority::{LatestNatureReport, NatureAuthoritySet};
 
 const PLACE_WOOD_COST: i64 = 1;
 const ONLINE_MOVE_SPEED: f32 = 4.5;
@@ -995,6 +1002,7 @@ fn main() {
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(ServerPvPPlugin)
+        .add_plugins(NatureServerProjectionPlugin)
         .add_message::<lk2_core::protocol::messages::AttackInput>()
         .add_message::<GameplayCommand>()
         .add_message::<GameplayFeedback>()
@@ -1058,7 +1066,9 @@ fn main() {
         .add_systems(
             FixedUpdate,
             (
-                simulation_tick.in_set(SimSet::Interaction),
+                simulation_tick
+                    .in_set(SimSet::Interaction)
+                    .in_set(NatureAuthoritySet::StepWorld),
                 // iter_199 Phase A: nation 自动 upkeep — 每个 nation 周期消耗
                 // Wood/Food 维持 flag，缺资源时扣 flag_hp 并可能 dissolve。
                 // 放在 simulation_tick 之后才能看到 sim tick 加的 Apple/Food。
@@ -1427,8 +1437,9 @@ fn simulation_tick(
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
     mut obs: ResMut<TickObserver>,
+    mut latest_nature: ResMut<LatestNatureReport>,
 ) {
-    let _ = advance_fixed_authority_tick(
+    if let Some(report) = advance_fixed_authority_tick_report(
         fixed_time.delta_secs(),
         &mut clock,
         &mut pool,
@@ -1436,7 +1447,9 @@ fn simulation_tick(
         &mut eco,
         &mut obs,
         SimRole::ServerAuthority,
-    );
+    ) {
+        latest_nature.0 = Some(report);
+    }
 }
 
 fn end_tick_system(

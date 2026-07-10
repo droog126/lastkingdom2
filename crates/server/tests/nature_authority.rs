@@ -11,7 +11,7 @@ mod persistence;
 #[path = "../src/replication/mod.rs"]
 mod replication;
 
-use app::NatureServerPlugin;
+use app::{NatureServerPlugin, NatureServerProjectionPlugin};
 use authority::{LatestNatureReport, NatureAuthority, NatureAuthorityFault, NatureAuthorityPlugin};
 use bevy::prelude::*;
 use lk2_core::eco_cycle::EcoCycle;
@@ -104,4 +104,25 @@ fn aggregate_plugin_publishes_all_read_only_boundaries_for_the_same_tick() {
         (report_tick, replication_tick, observation_tick, save_tick),
         (1, 1, 1, 1)
     );
+}
+
+#[test]
+fn projection_plugin_does_not_start_a_second_authoritative_world() {
+    let mut app = App::new();
+    app.add_plugins(NatureServerProjectionPlugin);
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app.world().resource::<LatestNatureReport>().0.is_none());
+    assert!(app
+        .world()
+        .resource::<replication::LatestNatureReplication>()
+        .0
+        .is_none());
+    assert!(app
+        .world()
+        .resource::<observation::LatestNatureObservation>()
+        .0
+        .is_none());
+    assert!(app.world().resource::<persistence::LatestNatureSave>().0.is_none());
 }

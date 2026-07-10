@@ -25,6 +25,7 @@ impl Plugin for NaturePresentationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NatureSnapshotBuffer>()
             .init_resource::<NaturePresentationCursor>()
+            .init_resource::<NaturePresentationTelemetry>()
             .init_resource::<SkyPresentation>()
             .init_resource::<WeatherPresentation>()
             .init_resource::<NatureEventPresentation>()
@@ -34,11 +35,20 @@ impl Plugin for NaturePresentationPlugin {
                 (
                     apply_nature_events,
                     reconcile_nature_visuals,
+                    collect_nature_presentation_telemetry,
                     animate_nature_visuals,
                 )
                     .chain(),
             );
     }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NaturePresentationTelemetry {
+    pub snapshot_tick: Option<u64>,
+    pub clouds: u64,
+    pub plants: u64,
+    pub animals: u64,
 }
 
 fn apply_nature_events(
@@ -207,6 +217,28 @@ fn animate_nature_visuals(
     for (key, state, mut transform) in &mut visuals {
         *transform = visual_transform(*key, *state, elapsed);
     }
+}
+
+fn collect_nature_presentation_telemetry(
+    buffer: Res<NatureSnapshotBuffer>,
+    visuals: Query<&NatureVisualKey>,
+    mut telemetry: ResMut<NaturePresentationTelemetry>,
+) {
+    let mut clouds = 0_u64;
+    let mut plants = 0_u64;
+    let mut animals = 0_u64;
+    for key in &visuals {
+        match key {
+            NatureVisualKey::Cloud(_) => clouds += 1,
+            NatureVisualKey::Plant(_) | NatureVisualKey::BerryBush(_) => plants += 1,
+            NatureVisualKey::Rabbit(_) | NatureVisualKey::Wildlife(_) => animals += 1,
+            NatureVisualKey::RainDrop { .. } | NatureVisualKey::BerryFruit { .. } => {}
+        }
+    }
+    telemetry.snapshot_tick = buffer.latest().map(|snapshot| snapshot.tick);
+    telemetry.clouds = clouds;
+    telemetry.plants = plants;
+    telemetry.animals = animals;
 }
 
 #[must_use]

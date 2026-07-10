@@ -7,7 +7,12 @@ use std::{
 
 use serde_json::{Value, json};
 
-use crate::Result;
+use crate::{
+    Result,
+    artifacts::nature::{AssertionSeverity, NatureArtifact, write_nature_artifact},
+    assertions::nature::{NatureExpectations, evaluate_nature},
+    observer::nature::{mark_stale_against, observe_value, scan_error_logs},
+};
 
 const LUMA_VAR_HEALTHY: f64 = 100.0;
 const LUMA_MEAN_WHITE: f64 = 200.0;
@@ -88,7 +93,7 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
     let (sim, state) = analyze_sim(&iter_dir.join("final_state.json"), prev_state.as_ref());
     let stderr = scan_stderr_logs(root);
     let error_logs = archive_error_logs(root, iter_dir)?;
-    let assertions = built_in_assertions(
+    let mut assertions = built_in_assertions(
         &png,
         prev_png.as_ref(),
         &sim,
@@ -97,6 +102,24 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         &stderr,
         iter_dir,
     );
+    let nature =
+        state.as_ref().map(|state| build_nature_artifact(iter_dir, state, prev_state.as_ref()));
+    if let Some(artifact) = &nature {
+        assertions.extend(artifact.assertions.iter().map(|item| Assertion {
+            id: item.id.clone(),
+            ok: item.ok,
+            severity: match item.severity {
+                AssertionSeverity::Fail => "fail".to_owned(),
+                AssertionSeverity::Partial => "partial".to_owned(),
+            },
+            actual: item.actual.clone(),
+            op: item.op.clone(),
+            expected: item.expected.clone(),
+            message: item.message.clone(),
+            path: item.path.clone(),
+        }));
+        write_nature_artifact(iter_dir, artifact)?;
+    }
     let combo = combine(&png, &sim, &assertions);
     let name = iter_dir.file_name().and_then(OsStr::to_str).unwrap_or("iter");
     let summary = summarize(name, &png, &sim, &combo);
@@ -130,6 +153,7 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         "score": combo["score"],
         "verdict": combo["verdict"],
         "reasons": combo["reasons"],
+        "nature": nature.as_ref().map(NatureArtifact::health_extension),
     });
     fs::write(
         iter_dir.join("assertions.json"),
@@ -151,6 +175,39 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
     write_regression_json(iter_dir, prev_dir, &assertions)?;
 
     Ok(Evaluation { verdict: combo["verdict"].as_str().unwrap_or("FAIL").to_string(), summary })
+}
+
+fn build_nature_artifact(
+    iter_dir: &Path,
+    state: &Value,
+    prev_state: Option<&Value>,
+) -> NatureArtifact {
+    let errors_path = iter_dir.join("error_logs.txt");
+    let errors = scan_error_logs(&[errors_path.as_path()]);
+    let mut after = observe_value(state, "final_state.json", errors);
+    let initial = fs::read_to_string(iter_dir.join("nature_initial.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let before_value = initial.as_ref().or(prev_state);
+    let before = before_value.map(|value| observe_value(value, "nature_initial", Vec::new()));
+    if let Some(previous) = before.as_ref() {
+        mark_stale_against(previous, &mut after);
+    }
+    let expectations = NatureExpectations {
+        require_determinism: false,
+        require_causal_progress: before.is_some(),
+        require_presentation_consistency: true,
+        maximum_error_lines: 0,
+    };
+    let assertions = evaluate_nature(before.as_ref(), &after, None, &expectations);
+    NatureArtifact::new(
+        "runtime_nature_loop".to_owned(),
+        0,
+        before,
+        after,
+        None,
+        assertions,
+    )
 }
 
 #[derive(Default, Clone, Debug)]

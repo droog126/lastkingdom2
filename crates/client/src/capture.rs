@@ -14,10 +14,12 @@ use lk2_core::resource::GlobalResourcePool;
 use lk2_core::world::World as GameWorld;
 
 use crate::legendary_content::{DragonBossVisual, HeldLegendaryVisual, LegendaryRuntime};
+use crate::presentation::NaturePresentationTelemetry;
 use crate::pretty::{PlayerReadabilityMarker, WorldGroundFallback};
 use crate::render::{
     CameraAngles, CameraMode, NestMarker, RenderLightingTelemetry, RenderTelemetry, TerrainChunk,
 };
+use crate::synchronization::NatureSnapshotBuffer;
 use crate::ui::ClientRunMode;
 use crate::{OnlineCommandDiagnostics, OnlineConnectionDiagnostics};
 
@@ -120,6 +122,8 @@ pub struct CaptureStateParams<'w> {
     dragon: Res<'w, DragonBossState>,
     legendary_loadout: Res<'w, LegendaryLoadout>,
     legendary_runtime: Res<'w, LegendaryRuntime>,
+    nature_buffer: Res<'w, NatureSnapshotBuffer>,
+    nature_presentation: Res<'w, NaturePresentationTelemetry>,
 }
 
 pub fn update_static_world_visual_snapshot(
@@ -179,9 +183,13 @@ pub fn periodic_screenshot(
     mut commands: Commands,
     params: CaptureStateParams,
     mut flicker_probe_samples: Local<u32>,
+    mut initial_nature: Local<Option<serde_json::Value>>,
 ) {
     if !capture_enabled() {
         return;
+    }
+    if initial_nature.is_none() {
+        *initial_nature = nature_state_json(&params.nature_buffer, &params.nature_presentation);
     }
 
     let now = {
@@ -263,6 +271,7 @@ pub fn periodic_screenshot(
     let state_path = format!("{}/final_state.json", iter_dir);
     let diff_path = format!("{}/diff.json", iter_dir);
     let perception_manifest_path = format!("{}/perception_manifest.json", iter_dir);
+    let nature_initial_path = format!("{}/nature_initial.json", iter_dir);
 
     info!("📸 截图 #{} → {}", iter_id, png_path.display());
     commands
@@ -290,7 +299,14 @@ pub fn periodic_screenshot(
         &params.dragon,
         &params.legendary_loadout,
         &params.legendary_runtime,
+        &params.nature_buffer,
+        &params.nature_presentation,
     );
+    if let Some(initial) = initial_nature.as_ref()
+        && let Ok(text) = serde_json::to_string_pretty(initial)
+    {
+        let _ = std::fs::write(&nature_initial_path, text);
+    }
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
             warn!("写 final_state.json 失败: {}", e);
@@ -363,6 +379,8 @@ fn write_flicker_probe_capture(
         &params.dragon,
         &params.legendary_loadout,
         &params.legendary_runtime,
+        &params.nature_buffer,
+        &params.nature_presentation,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state)
         && let Err(e) = std::fs::write(&state_path, s)
@@ -413,6 +431,8 @@ pub fn tick_recorder(
         &params.dragon,
         &params.legendary_loadout,
         &params.legendary_runtime,
+        &params.nature_buffer,
+        &params.nature_presentation,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
@@ -456,6 +476,8 @@ fn build_state_json(
     dragon: &DragonBossState,
     legendary_loadout: &LegendaryLoadout,
     legendary_runtime: &LegendaryRuntime,
+    nature_buffer: &NatureSnapshotBuffer,
+    nature_presentation: &NaturePresentationTelemetry,
 ) -> serde_json::Value {
     let mut state = lk2_core::diagnostics::build_state_json(
         time,
@@ -571,8 +593,40 @@ fn build_state_json(
                 })
             }),
         );
+        if let Some(nature) = nature_state_json(nature_buffer, nature_presentation) {
+            obj.insert("nature".to_string(), nature);
+            obj.insert(
+                "presentation".to_string(),
+                serde_json::json!({
+                    "nature": {
+                        "snapshot_tick": nature_presentation.snapshot_tick,
+                        "clouds": nature_presentation.clouds,
+                        "plants": nature_presentation.plants,
+                        "animals": nature_presentation.animals,
+                    }
+                }),
+            );
+        }
     }
     state
+}
+
+fn nature_state_json(
+    buffer: &NatureSnapshotBuffer,
+    presentation: &NaturePresentationTelemetry,
+) -> Option<serde_json::Value> {
+    let snapshot = buffer.latest()?;
+    Some(serde_json::json!({
+        "tick": snapshot.tick,
+        "cloud_count": snapshot.atmosphere.cloud_count,
+        "cloud_water": snapshot.atmosphere.cloud_water,
+        "rainfall": snapshot.atmosphere.cumulative_rainfall,
+        "soil_moisture": snapshot.hydrology.available_water,
+        "plant_count": snapshot.ecology.plant_count,
+        "animal_count": snapshot.ecology.animal_count,
+        "animal_food_available": snapshot.ecology.plant_units,
+        "presentation_tick": presentation.snapshot_tick,
+    }))
 }
 
 fn player_readability_json(snapshot: &StaticWorldVisualSnapshot) -> serde_json::Value {

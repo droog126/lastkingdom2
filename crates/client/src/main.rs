@@ -16,13 +16,16 @@ use serde_json::json;
 use std::io::Write;
 use std::path::PathBuf;
 
+mod app;
 mod capture;
 mod legendary_content;
 mod model_preview;
+mod presentation;
 mod pretty;
 mod pvp_systems;
 mod ray_aabb;
 mod render;
+mod synchronization;
 mod terrain_preview;
 mod ui;
 
@@ -40,12 +43,16 @@ use lk2_core::player::{PlayerState, PlayerTag};
 use lk2_core::pvp::{FixedTick, PositionHistory};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{SimRole, advance_fixed_authority_tick};
+use lk2_core::sim::{SimRole, advance_fixed_authority_tick_report};
+use lk2_core::simulation::NatureSnapshot;
 use lk2_core::world::{
     BlockType, World as GameWorld, WorldConfig, generate_world, player_spawn_position_at,
     player_spawn_position_near,
 };
 
+use crate::app::{
+    NatureClientPlugin, NatureRunMode, submit_authoritative_snapshot, submit_authoritative_tick,
+};
 use crate::capture::{
     StaticWorldVisualSnapshot, TickRecorder, periodic_screenshot, tick_recorder,
     update_static_world_visual_snapshot,
@@ -74,6 +81,7 @@ use crate::render::{
     toggle_cursor_grab_on_esc, toggle_freefly, top_down_camera_toggle, update_animal_indicator,
     update_nest_indicator,
 };
+use crate::synchronization::NatureSnapshotBuffer;
 use crate::ui::{
     ClientRunMode, DeveloperUiState, GameMenuState, feathers_tools_scene,
     handle_feathers_tools_buttons, handle_render_toggle_buttons, setup_developer_menu, setup_fonts,
@@ -328,10 +336,6 @@ fn main() {
     let transform_gizmo_mode = args.iter().any(|a| a == "--transform-gizmo");
 
     if model_preview_mode {
-        // --model-preview takes a separate code path: no physics, no network,
-        // no terrain / creatures / HUD. Just lay every GLB in assets/ out on
-        // a grid, render one screenshot through the real atmosphere + bloom +
-        // SSR + TAA pipeline, then exit. See crates/client/src/model_preview.rs.
         model_preview::run_model_preview();
         return;
     }
@@ -572,7 +576,14 @@ fn main() {
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(lk2_core::status::StatusPlugin)
         .add_plugins(lk2_core::objectives::ObjectivesPlugin)
-        .add_plugins(ClientPvPPlugin);
+        .add_plugins(ClientPvPPlugin)
+        .add_plugins(NatureClientPlugin {
+            mode: if network_mode {
+                NatureRunMode::Online
+            } else {
+                NatureRunMode::Offline
+            },
+        });
     // ControllerPlugin used to write PvPController.move_input. That is now done
     // directly in player_input so online first-person movement has one owner.
 
@@ -992,6 +1003,7 @@ fn apply_authoritative_snapshot(
     mut nations: ResMut<NationRegistry>,
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
+    mut nature_buffer: ResMut<NatureSnapshotBuffer>,
 ) {
     if *run_mode != ClientRunMode::Online {
         return;
@@ -1050,6 +1062,10 @@ fn apply_authoritative_snapshot(
         snapshot.eco_wildlife = eco_state.wildlife.len();
         snapshot.eco_berries = eco_state.berries.len();
         snapshot.eco_plants = eco_state.plants.len();
+        let _ = submit_authoritative_snapshot(
+            &mut nature_buffer,
+            NatureSnapshot::from_ecology(hud.tick, &eco),
+        );
     }
 }
 
@@ -2057,8 +2073,9 @@ fn simulation_tick(
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
     mut obs: ResMut<TickObserver>,
+    mut nature_buffer: ResMut<NatureSnapshotBuffer>,
 ) {
-    let _ = advance_fixed_authority_tick(
+    let report = advance_fixed_authority_tick_report(
         time.delta_secs(),
         &mut clock,
         &mut pool,
@@ -2067,6 +2084,9 @@ fn simulation_tick(
         &mut obs,
         SimRole::ClientOffline,
     );
+    if let Some(report) = report {
+        let _ = submit_authoritative_tick(&mut nature_buffer, report.snapshot, report.events);
+    }
 }
 
 fn end_tick_system(

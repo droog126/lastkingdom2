@@ -1,10 +1,14 @@
 mod args;
+mod artifacts;
+mod assertions;
 mod audit;
 mod doc_audit;
 mod health;
 mod loop_cmd;
 mod model_iter;
 mod motion;
+mod observer;
+mod runner;
 mod tdd;
 
 use std::{

@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 use super::authority::NatureAuthorityPlugin;
+use super::authority::{LatestNatureReport, NatureAuthoritySet};
 use super::observation::NatureObservationPlugin;
 use super::persistence::NaturePersistencePlugin;
 use super::replication::NatureReplicationPlugin;
@@ -32,5 +33,24 @@ impl Plugin for NatureServerPlugin {
             NatureObservationPlugin,
             NaturePersistencePlugin,
         ));
+    }
+}
+
+/// Projects the legacy server's single authoritative `EcoCycle` report without
+/// starting the standalone authority adapter used by focused tests.
+pub struct NatureServerProjectionPlugin;
+
+impl Plugin for NatureServerProjectionPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<LatestNatureReport>()
+            .configure_sets(
+                FixedUpdate,
+                (NatureAuthoritySet::StepWorld, NatureAuthoritySet::PublishReport).chain(),
+            )
+            .add_plugins((
+                NatureReplicationPlugin,
+                NatureObservationPlugin,
+                NaturePersistencePlugin,
+            ));
     }
 }
