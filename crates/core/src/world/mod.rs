@@ -181,6 +181,7 @@ pub struct World {
 }
 
 pub mod content;
+pub mod generation;
 pub mod terrain;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

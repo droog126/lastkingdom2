@@ -26,6 +26,7 @@ pub enum NatureEvent {
     FruitChanged { eaten: u32, grown: u32 },
 }
 
+
 /// Stable observation envelope over the existing detailed `EcoSnapshot`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NatureSnapshot {
@@ -110,4 +111,3 @@ fn events_from_report(report: EcoTickReport) -> Vec<NatureEvent> {
     }
     events
 }
-

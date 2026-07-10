@@ -23,4 +23,3 @@ impl HydrologySnapshot {
         self.available_water.is_finite() && self.available_water >= 0.0
     }
 }
-

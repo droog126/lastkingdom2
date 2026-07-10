@@ -6,6 +6,7 @@ use crate::constant;
 use crate::eco_cycle::EcoCycle;
 use crate::monster::MonsterEcosystem;
 use crate::resource::{GlobalResourcePool, ResourceKind};
+use crate::simulation::{WorldInput, step_world};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimRole {
@@ -47,7 +48,7 @@ pub fn advance_demo_tick(
     clock.tick += 1;
     obs.begin_tick();
     monsters.tick(pool);
-    eco.tick(pool);
+    let _ = step_world(WorldInput { tick: clock.tick }, eco, pool);
 
     if clock.tick % 10 == 0 {
         info!(
@@ -84,7 +85,7 @@ pub fn advance_fixed_authority_tick(
     clock.last_sim_step_ran = true;
     obs.begin_tick();
     monsters.tick(pool);
-    eco.tick(pool);
+    let _ = step_world(WorldInput { tick: clock.tick }, eco, pool);
 
     if clock.tick % 10 == 0 {
         info!(

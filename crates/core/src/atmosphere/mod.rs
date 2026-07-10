@@ -31,4 +31,3 @@ impl AtmosphereSnapshot {
             && self.cumulative_rainfall >= 0.0
     }
 }
-

@@ -67,7 +67,7 @@ pub struct EcoCloud {
     pub phase: f32,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, PartialEq)]
 pub struct EcoCycle {
     pub clouds: Vec<EcoCloud>,
     pub rabbits: Vec<EcoRabbit>,
