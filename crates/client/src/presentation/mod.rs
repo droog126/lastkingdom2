@@ -8,12 +8,12 @@ pub mod weather;
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
-use lk2_core::protocol::components::EcoSnapshot;
+use lk2_core::simulation::NatureSnapshot;
 
 use self::animals::{rabbit_scale, wildlife_scale};
 use self::plants::{berry_bush_scale, plant_scale};
 use self::sky::SkyPresentation;
-use self::weather::WeatherPresentation;
+use self::weather::{NatureEventPresentation, WeatherPresentation};
 use crate::synchronization::NatureSnapshotBuffer;
 
 const RAIN_DROPS_PER_CLOUD: u8 = 5;
@@ -27,11 +27,27 @@ impl Plugin for NaturePresentationPlugin {
             .init_resource::<NaturePresentationCursor>()
             .init_resource::<SkyPresentation>()
             .init_resource::<WeatherPresentation>()
+            .init_resource::<NatureEventPresentation>()
             .add_systems(Startup, setup_nature_visual_assets)
             .add_systems(
                 Update,
-                (reconcile_nature_visuals, animate_nature_visuals).chain(),
+                (
+                    apply_nature_events,
+                    reconcile_nature_visuals,
+                    animate_nature_visuals,
+                )
+                    .chain(),
             );
+    }
+}
+
+fn apply_nature_events(
+    mut buffer: ResMut<NatureSnapshotBuffer>,
+    mut presentation: ResMut<NatureEventPresentation>,
+) {
+    presentation.clear();
+    for event in buffer.drain_events() {
+        presentation.apply(event);
     }
 }
 
@@ -194,10 +210,11 @@ fn animate_nature_visuals(
 }
 
 #[must_use]
-pub fn desired_visuals(snapshot: &EcoSnapshot) -> Vec<(NatureVisualKey, NatureVisualState)> {
+pub fn desired_visuals(snapshot: &NatureSnapshot) -> Vec<(NatureVisualKey, NatureVisualState)> {
     let mut visuals = Vec::new();
+    let ecology = &snapshot.detailed_ecology;
 
-    for cloud in &snapshot.clouds {
+    for cloud in &ecology.clouds {
         let cloud_state = NatureVisualState {
             position: Vec2::new(cloud.x, cloud.z),
             scale: Vec3::new(1.75, 0.58, 1.18) * (1.0 + cloud.rain.clamp(0.0, 1.0) * 0.22),
@@ -216,7 +233,7 @@ pub fn desired_visuals(snapshot: &EcoSnapshot) -> Vec<(NatureVisualKey, NatureVi
         }
     }
 
-    for plant in &snapshot.plants {
+    for plant in &ecology.plants {
         visuals.push((
             NatureVisualKey::Plant(plant.id),
             NatureVisualState {
@@ -229,7 +246,7 @@ pub fn desired_visuals(snapshot: &EcoSnapshot) -> Vec<(NatureVisualKey, NatureVi
         ));
     }
 
-    for berry in &snapshot.berries {
+    for berry in &ecology.berries {
         let bush_state = NatureVisualState {
             position: Vec2::new(berry.x, berry.z),
             scale: berry_bush_scale(berry.fruit),
@@ -246,7 +263,7 @@ pub fn desired_visuals(snapshot: &EcoSnapshot) -> Vec<(NatureVisualKey, NatureVi
         }
     }
 
-    for rabbit in &snapshot.rabbits {
+    for rabbit in &ecology.rabbits {
         visuals.push((
             NatureVisualKey::Rabbit(rabbit.id),
             NatureVisualState {
@@ -259,7 +276,7 @@ pub fn desired_visuals(snapshot: &EcoSnapshot) -> Vec<(NatureVisualKey, NatureVi
         ));
     }
 
-    for animal in &snapshot.wildlife {
+    for animal in &ecology.wildlife {
         visuals.push((
             NatureVisualKey::Wildlife(animal.id),
             NatureVisualState {

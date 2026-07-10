@@ -2,8 +2,9 @@
 
 use bevy::prelude::Resource;
 use lk2_core::protocol::components::{
-    EcoBerryNet, EcoCloudNet, EcoPlantNet, EcoRabbitNet, EcoSnapshot, EcoWildlifeNet,
+    EcoBerryNet, EcoCloudNet, EcoPlantNet, EcoRabbitNet, EcoWildlifeNet,
 };
+use lk2_core::simulation::{NatureEvent, NatureSnapshot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotAcceptance {
@@ -15,17 +16,26 @@ pub enum SnapshotAcceptance {
 /// Monotonic cache at the transport-to-presentation boundary.
 ///
 /// Online replication and offline authority both submit snapshots here. The presentation layer
-/// therefore has no way to distinguish or accidentally fork the two simulation paths.
+/// therefore cannot accidentally fork the two simulation paths.
 #[derive(Resource, Default, Debug)]
 pub struct NatureSnapshotBuffer {
-    latest: Option<EcoSnapshot>,
+    latest: Option<NatureSnapshot>,
+    pending_events: Vec<NatureEvent>,
     accepted_count: u64,
     rejected_count: u64,
 }
 
 impl NatureSnapshotBuffer {
-    pub fn push(&mut self, snapshot: EcoSnapshot) -> SnapshotAcceptance {
-        if !snapshot_is_finite(&snapshot) {
+    pub fn push(&mut self, snapshot: NatureSnapshot) -> SnapshotAcceptance {
+        self.push_with_events(snapshot, std::iter::empty())
+    }
+
+    pub fn push_with_events(
+        &mut self,
+        snapshot: NatureSnapshot,
+        events: impl IntoIterator<Item = NatureEvent>,
+    ) -> SnapshotAcceptance {
+        if !snapshot.is_finite() {
             self.rejected_count = self.rejected_count.saturating_add(1);
             return SnapshotAcceptance::RejectedNonFinite;
         }
@@ -33,13 +43,14 @@ impl NatureSnapshotBuffer {
             self.rejected_count = self.rejected_count.saturating_add(1);
             return SnapshotAcceptance::DuplicateOrStale;
         }
+        self.pending_events.extend(events);
         self.latest = Some(snapshot);
         self.accepted_count = self.accepted_count.saturating_add(1);
         SnapshotAcceptance::Accepted
     }
 
     #[must_use]
-    pub fn latest(&self) -> Option<&EcoSnapshot> {
+    pub fn latest(&self) -> Option<&NatureSnapshot> {
         self.latest.as_ref()
     }
 
@@ -52,13 +63,18 @@ impl NatureSnapshotBuffer {
     pub fn rejected_count(&self) -> u64 {
         self.rejected_count
     }
+
+    pub fn drain_events(&mut self) -> impl Iterator<Item = NatureEvent> + '_ {
+        self.pending_events.drain(..)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct NaturePresentationInput<'a> {
     pub tick: u64,
-    pub rain: f32,
-    pub rainfall: f32,
+    pub cloud_water: f32,
+    pub available_water: f32,
+    pub cumulative_rainfall: f32,
     pub clouds: &'a [EcoCloudNet],
     pub rabbits: &'a [EcoRabbitNet],
     pub wildlife: &'a [EcoWildlifeNet],
@@ -66,64 +82,57 @@ pub struct NaturePresentationInput<'a> {
     pub plants: &'a [EcoPlantNet],
 }
 
-impl<'a> From<&'a EcoSnapshot> for NaturePresentationInput<'a> {
-    fn from(snapshot: &'a EcoSnapshot) -> Self {
+impl<'a> From<&'a NatureSnapshot> for NaturePresentationInput<'a> {
+    fn from(snapshot: &'a NatureSnapshot) -> Self {
+        let ecology = &snapshot.detailed_ecology;
         Self {
             tick: snapshot.tick,
-            rain: snapshot.rain,
-            rainfall: snapshot.rainfall,
-            clouds: &snapshot.clouds,
-            rabbits: &snapshot.rabbits,
-            wildlife: &snapshot.wildlife,
-            berries: &snapshot.berries,
-            plants: &snapshot.plants,
+            cloud_water: snapshot.atmosphere.cloud_water,
+            available_water: snapshot.hydrology.available_water,
+            cumulative_rainfall: snapshot.atmosphere.cumulative_rainfall,
+            clouds: &ecology.clouds,
+            rabbits: &ecology.rabbits,
+            wildlife: &ecology.wildlife,
+            berries: &ecology.berries,
+            plants: &ecology.plants,
         }
     }
-}
-
-fn snapshot_is_finite(snapshot: &EcoSnapshot) -> bool {
-    snapshot.co2.is_finite()
-        && snapshot.rain.is_finite()
-        && snapshot.rainfall.is_finite()
-        && snapshot.clouds.iter().all(|cloud| {
-            finite_position(cloud.x, cloud.z) && cloud.rain.is_finite() && cloud.phase.is_finite()
-        })
-        && snapshot
-            .rabbits
-            .iter()
-            .all(|rabbit| finite_position(rabbit.x, rabbit.z) && rabbit.energy.is_finite())
-        && snapshot
-            .wildlife
-            .iter()
-            .all(|animal| finite_position(animal.x, animal.z) && animal.energy.is_finite())
-        && snapshot.berries.iter().all(|berry| finite_position(berry.x, berry.z))
-        && snapshot.plants.iter().all(|plant| finite_position(plant.x, plant.z))
-}
-
-fn finite_position(x: f32, z: f32) -> bool {
-    x.is_finite() && z.is_finite()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lk2_core::atmosphere::AtmosphereSnapshot;
+    use lk2_core::ecology::nature::NatureEcologySnapshot;
+    use lk2_core::hydrology::HydrologySnapshot;
+    use lk2_core::protocol::components::EcoSnapshot;
 
-    fn empty_snapshot(tick: u64) -> EcoSnapshot {
-        EcoSnapshot {
+    fn empty_snapshot(tick: u64) -> NatureSnapshot {
+        NatureSnapshot {
             tick,
-            co2: 0.0,
-            rain: 0.0,
-            rainfall: 0.0,
-            fruit_eaten: 0,
-            fruit_grown: 0,
-            plants_grown: 0,
-            rabbits_born: 0,
-            wildlife_born: 0,
-            clouds: vec![],
-            rabbits: vec![],
-            wildlife: vec![],
-            berries: vec![],
-            plants: vec![],
+            atmosphere: AtmosphereSnapshot {
+                cloud_count: 0,
+                cloud_water: 0.0,
+                cumulative_rainfall: 0.0,
+            },
+            hydrology: HydrologySnapshot { available_water: 0.0 },
+            ecology: NatureEcologySnapshot { plant_count: 0, plant_units: 0, animal_count: 0 },
+            detailed_ecology: EcoSnapshot {
+                tick,
+                co2: 0.0,
+                rain: 0.0,
+                rainfall: 0.0,
+                fruit_eaten: 0,
+                fruit_grown: 0,
+                plants_grown: 0,
+                rabbits_born: 0,
+                wildlife_born: 0,
+                clouds: vec![],
+                rabbits: vec![],
+                wildlife: vec![],
+                berries: vec![],
+                plants: vec![],
+            },
         }
     }
 
@@ -140,7 +149,10 @@ mod tests {
             SnapshotAcceptance::DuplicateOrStale
         );
         assert_eq!(
-            buffer.push(EcoSnapshot { rain: f32::NAN, ..empty_snapshot(5) }),
+            buffer.push(NatureSnapshot {
+                hydrology: HydrologySnapshot { available_water: f32::NAN },
+                ..empty_snapshot(5)
+            }),
             SnapshotAcceptance::RejectedNonFinite
         );
         assert_eq!(buffer.latest().map(|snapshot| snapshot.tick), Some(4));
