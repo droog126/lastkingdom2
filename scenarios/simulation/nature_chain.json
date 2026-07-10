@@ -1,8 +1,18 @@
 {
+  "schema": 1,
   "name": "nature_cloud_rain_soil_plant_animal",
   "seed": 424242,
-  "record_window": { "ticks": 12 },
-  "purpose": "Verify the authoritative cloud -> rain -> soil -> plant -> animal evidence chain.",
-  "initial": { "clouds": 1, "rainfall": 0.0, "soil_moisture": 0.1, "plants": 1, "animals": 0 },
-  "expect": ["tick_advances", "finite_values", "rainfall_positive", "soil_moisture_non_decreasing", "plant_or_animal_progress"]
+  "ticks": 120,
+  "evidence": {
+    "before": "nature_initial.json",
+    "after": "final_state.json",
+    "deterministic_repeat": "nature_repeat.json",
+    "error_logs": ["loop_run.log.err", "loop_server.log.err"]
+  },
+  "expectations": {
+    "require_determinism": true,
+    "require_causal_progress": true,
+    "require_presentation_consistency": true,
+    "maximum_error_lines": 0
+  }
 }

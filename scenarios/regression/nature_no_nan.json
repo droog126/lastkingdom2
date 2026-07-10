@@ -1,7 +1,18 @@
 {
+  "schema": 1,
   "name": "nature_no_nan_or_negative_resources",
   "seed": 424242,
-  "record_window": { "ticks": 20 },
-  "purpose": "Protect against invalid or unexplained natural resource growth.",
-  "expect": ["all_numeric_values_finite", "soil_moisture_between_0_and_1", "resources_non_negative"]
+  "ticks": 600,
+  "evidence": {
+    "before": "nature_initial.json",
+    "after": "final_state.json",
+    "deterministic_repeat": "nature_repeat.json",
+    "error_logs": ["loop_run.log.err", "loop_server.log.err"]
+  },
+  "expectations": {
+    "require_determinism": true,
+    "require_causal_progress": false,
+    "require_presentation_consistency": false,
+    "maximum_error_lines": 0
+  }
 }

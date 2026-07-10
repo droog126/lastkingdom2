@@ -1,42 +1,242 @@
-//! Versioned, deterministic artifacts for the natural-world loop.
+//! Stable artifact types for machine-checking the authoritative natural world.
+
+use std::{fs, path::Path};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub const NATURE_ARTIFACT_SCHEMA: u32 = 1;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct NatureMetrics {
+    pub tick: Option<u64>,
+    pub clouds: Option<u64>,
+    pub rainfall: Option<f64>,
+    pub soil_moisture: Option<f64>,
+    pub plants: Option<u64>,
+    pub animals: Option<u64>,
+    pub animal_food_available: Option<f64>,
+    pub presented_clouds: Option<u64>,
+    pub presented_plants: Option<u64>,
+    pub presented_animals: Option<u64>,
+}
+
+impl NatureMetrics {
+    #[must_use]
+    pub fn required_fields_present(&self) -> bool {
+        self.tick.is_some()
+            && self.clouds.is_some()
+            && self.rainfall.is_some()
+            && self.soil_moisture.is_some()
+            && self.plants.is_some()
+            && self.animals.is_some()
+            && self.animal_food_available.is_some()
+    }
+
+    #[must_use]
+    pub fn numeric_values_are_valid(&self) -> bool {
+        [
+            self.rainfall,
+            self.soil_moisture,
+            self.animal_food_available,
+        ]
+        .into_iter()
+        .flatten()
+        .all(|value| value.is_finite() && value >= 0.0)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservedLogError {
+    pub source: String,
+    pub line: usize,
+    pub message: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NatureObservation {
     pub schema: u32,
-    pub tick: u64,
-    pub clouds: u64,
-    pub rainfall: f64,
-    pub soil_moisture: f64,
-    pub plants: u64,
-    pub animals: u64,
+    pub source: String,
+    pub metrics: NatureMetrics,
     pub events: Vec<String>,
+    pub missing_fields: Vec<String>,
+    pub stale: bool,
+    pub fingerprint: String,
+    pub errors: Vec<ObservedLogError>,
 }
 
 impl NatureObservation {
-    pub fn finite_and_bounded(&self) -> bool {
-        self.rainfall.is_finite() && self.soil_moisture.is_finite()
-            && (0.0..=1.0).contains(&self.soil_moisture)
+    pub fn normalize(&mut self) {
+        self.events.sort();
+        self.events.dedup();
+        self.missing_fields.sort();
+        self.missing_fields.dedup();
+        self.errors.sort_by(|a, b| {
+            a.source.cmp(&b.source).then(a.line.cmp(&b.line)).then(a.message.cmp(&b.message))
+        });
+        self.errors.dedup();
     }
+}
 
-    pub fn to_artifact(&self) -> Value {
-        serde_json::to_value(self).expect("NatureObservation is serializable")
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssertionSeverity {
+    Fail,
+    Partial,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct NatureArtifacts {
-    pub schema: u32,
-    pub observation: NatureObservation,
-    pub assertions: Vec<String>,
+pub struct NatureAssertion {
+    pub id: String,
+    pub ok: bool,
+    pub severity: AssertionSeverity,
+    pub actual: Value,
+    pub op: String,
+    pub expected: Value,
+    pub message: String,
+    pub path: Option<String>,
 }
 
-impl NatureArtifacts {
-    pub fn new(observation: NatureObservation, assertions: Vec<String>) -> Self {
-        Self { schema: NATURE_ARTIFACT_SCHEMA, observation, assertions }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NatureArtifact {
+    pub schema: u32,
+    pub scenario: String,
+    pub seed: u64,
+    pub before: Option<NatureObservation>,
+    pub after: NatureObservation,
+    pub deterministic_repeat: Option<NatureObservation>,
+    pub assertions: Vec<NatureAssertion>,
+    pub verdict: String,
+}
+
+impl NatureArtifact {
+    #[must_use]
+    pub fn new(
+        scenario: String,
+        seed: u64,
+        before: Option<NatureObservation>,
+        after: NatureObservation,
+        deterministic_repeat: Option<NatureObservation>,
+        mut assertions: Vec<NatureAssertion>,
+    ) -> Self {
+        assertions.sort_by(|a, b| a.id.cmp(&b.id));
+        let verdict =
+            if assertions.iter().any(|item| !item.ok && item.severity == AssertionSeverity::Fail) {
+                "FAIL"
+            } else if assertions.iter().any(|item| !item.ok) {
+                "PARTIAL"
+            } else {
+                "OK"
+            };
+        Self {
+            schema: NATURE_ARTIFACT_SCHEMA,
+            scenario,
+            seed,
+            before,
+            after,
+            deterministic_repeat,
+            assertions,
+            verdict: verdict.to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn health_extension(&self) -> Value {
+        let failed = self.assertions.iter().filter(|item| !item.ok).count();
+        let hard_failed = self
+            .assertions
+            .iter()
+            .filter(|item| !item.ok && item.severity == AssertionSeverity::Fail)
+            .count();
+        json!({
+            "schema": self.schema,
+            "scenario": self.scenario,
+            "seed": self.seed,
+            "verdict": self.verdict,
+            "fingerprint": self.after.fingerprint,
+            "assertions": {
+                "total": self.assertions.len(),
+                "failed": failed,
+                "hard_failed": hard_failed
+            }
+        })
+    }
+
+    #[must_use]
+    pub fn assertions_extension(&self) -> Value {
+        serde_json::to_value(&self.assertions).expect("nature assertions are serializable")
+    }
+}
+
+pub fn write_nature_artifact(iter_dir: &Path, artifact: &NatureArtifact) -> Result<(), String> {
+    fs::create_dir_all(iter_dir)
+        .map_err(|error| format!("create {}: {error}", iter_dir.display()))?;
+    let text = serde_json::to_string_pretty(artifact).map_err(|error| error.to_string())? + "\n";
+    fs::write(iter_dir.join("nature.json"), text)
+        .map_err(|error| format!("write nature.json: {error}"))
+}
+
+pub fn extend_existing_artifacts(
+    health: &mut Value,
+    assertions: &mut Value,
+    artifact: &NatureArtifact,
+) -> Result<(), String> {
+    let health_object =
+        health.as_object_mut().ok_or_else(|| "health.json root must be an object".to_owned())?;
+    health_object.insert("nature".to_owned(), artifact.health_extension());
+
+    let assertion_object = assertions
+        .as_object_mut()
+        .ok_or_else(|| "assertions.json root must be an object".to_owned())?;
+    assertion_object.insert(
+        "nature_assertions".to_owned(),
+        artifact.assertions_extension(),
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn observation() -> NatureObservation {
+        NatureObservation {
+            schema: 1,
+            source: "final_state.json".to_owned(),
+            metrics: NatureMetrics { tick: Some(10), ..NatureMetrics::default() },
+            events: Vec::new(),
+            missing_fields: Vec::new(),
+            stale: false,
+            fingerprint: "fnv1a64:1".to_owned(),
+            errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn hard_failure_controls_verdict_and_extensions_do_not_replace_roots() {
+        let artifact = NatureArtifact::new(
+            "test".to_owned(),
+            7,
+            None,
+            observation(),
+            None,
+            vec![NatureAssertion {
+                id: "nature.test".to_owned(),
+                ok: false,
+                severity: AssertionSeverity::Fail,
+                actual: json!(0),
+                op: ">".to_owned(),
+                expected: json!(0),
+                message: "failed".to_owned(),
+                path: None,
+            }],
+        );
+        assert_eq!(artifact.verdict, "FAIL");
+        let mut health = json!({"verdict": "OK"});
+        let mut assertions = json!({"assertions": []});
+        extend_existing_artifacts(&mut health, &mut assertions, &artifact).unwrap();
+        assert_eq!(health["verdict"], "OK");
+        assert_eq!(health["nature"]["verdict"], "FAIL");
+        assert!(assertions["nature_assertions"].is_array());
     }
 }

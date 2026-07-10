@@ -1,8 +1,14 @@
 {
   "name": "nature_state_readability",
-  "seed": 424242,
-  "record_window": { "ticks": 12 },
-  "purpose": "Fixed composition for visual verification; semantic state remains authoritative.",
-  "camera": { "position": [48, 18, 48], "look_at": [48, 0, 48] },
-  "expect": ["clouds_visible", "rain_state_matches_snapshot", "plants_and_animals_readable"]
+  "record_window": [0, 120],
+  "steps": [
+    {
+      "type": "log",
+      "msg": "Capture snapshot-driven weather, plants, and animals from a fixed world position."
+    },
+    { "type": "move_to", "pos": [48, 14, 48] },
+    { "type": "wait_ticks", "ticks": 120 },
+    { "type": "screenshot", "name": "nature_state_readability" },
+    { "type": "quit" }
+  ]
 }
