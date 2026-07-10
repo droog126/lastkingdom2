@@ -1,17 +1,21 @@
+<!-- doc-status: current -->
 # Wanguo Origins: Last Kingdom Diamond
 
-Bevy 0.19 voxel simulation and rendering demo with a closed-loop AI iteration workflow.
+Bevy 0.19 voxel simulation and rendering demo with a three-crate client/server workspace and a
+Rust-driven closed-loop iteration workflow.
 
-The core workflow is: run the game, capture screenshots and state JSON, inspect the result, decide the next change, then build and run again. Read [AGENTS.md](./AGENTS.md) before making code changes.
+Read [AGENTS.md](AGENTS.md) before changing the repository. Human-facing documentation starts at
+[docs/README.md](docs/README.md), and the run guide is [docs/STARTING.md](docs/STARTING.md).
 
-## Quick Start
+## Quick start
 
 ```sh
-cargo build --workspace
-export BEVY_DISABLE_ACCESSIBILITY=1
-export RUST_LOG=info
-cargo run -p lk2-client -- --offline
+just build
+just offline
 ```
+
+The normal play aliases route through `xtask play`, which builds when needed and archives runtime
+errors under `run-logs/`.
 
 Closed-loop run:
 
@@ -25,72 +29,61 @@ Useful validation entry points:
 just test-core
 just test-changed
 just test
+just audit-tdd
+just audit-docs
+just audit-skills
 just fmt
 ```
 
-## Project Layout
+## Project layout
 
-- `crates/core/src/` - shared simulation, rules, protocol, world, AI, resources, combat, terrain
-- `crates/client/src/` - Bevy client, rendering, HUD, input, screenshots, offline auto-demo
-- `crates/server/src/` - headless server, self-check, authoritative simulation, UDP entry point
-- `assets/` - art assets and generated GLB models
-- `assets/procedural/pretty/` - generated visual models
-- `assets/procedural/eco/` - generated ecology models
-- `tools/` - Python scripts for Blender model generation and asset validation
-- `scenarios/` - scenario JSON scripts
-- `screenshots/` - closed-loop output, ignored by Git except archived material
-- `docs/` - design notes, architecture plans, gameplay design, and archived imports
-- `xtask/` - Rust task runner for loop, health, TDD, scenarios, and audits
-- `justfile` - short human-friendly command aliases
-- `AGENTS.md` - AI-agent operating manual
-- `docs/architecture/engineering-baseline.md` - current engineering boundaries, audit gates, and refactor order
+- `crates/core/src/`: shared simulation, rules, protocol, world, AI, resources, and combat.
+- `crates/client/src/`: Bevy client, rendering, HUD, input, screenshots, and offline demo.
+- `crates/server/src/`: headless authority simulation, networking, and server PvP.
+- `xtask/`: Rust task runner for development, testing, audits, play, health, and loop orchestration.
+- `justfile`: short human-friendly aliases for `xtask` and Cargo.
+- `assets/`: runtime art and generated models.
+- `tools/`: reproducible Blender/model generation and focused asset analysis.
+- `scenarios/`: scenario JSON scripts.
+- `screenshots/`: closed-loop output.
+- `run-logs/`: play/build logs and extracted error archives.
+- `docs/`: current guides, reference material, proposals, and archives.
+- `.codex/skills/`: project-specific agent workflows.
 
-## Closed-Loop Output
+## Closed-loop output
 
-Each loop writes an iteration directory like:
+Each loop writes `screenshots/iter_NN/` with the primary evidence below:
 
-- `screenshots/iter_NN/iter_NN.png`
-- `screenshots/iter_NN/final_state.json`
-- `screenshots/iter_NN/diff.json`
-- `screenshots/iter_NN/health.json`
-- `screenshots/iter_NN/assertions.json`
-- `screenshots/iter_NN/decision.template.md`
-- `screenshots/iter_NN/decision.md` after AI review
+- `iter_NN.png`
+- `final_state.json`
+- `diff.json`
+- `assertions.json`
+- `health.json` and `health.txt`
+- `error_logs.json` and `error_logs.txt`
+- `perception_manifest.json`
+- `regression.json`
+- `decision.template.md`
+- `decision.md` after review
 
-Read `health.json` first. If the result is `PARTIAL` or `FAIL`, read `assertions.json`
-next for the machine-readable failure reasons before opening the PNG. The next iteration
-should not proceed without a completed `decision.md`.
+Read `health.json` first. For `PARTIAL` or `FAIL`, inspect `assertions.json` before diagnosing from
+the PNG. A later iteration is gated on the previous iteration having `decision.md`.
 
-## Modeling Workflow
+## Modeling workflow
 
-Model generation must be reproducible from Python scripts and Blender. Use:
+Model generation is reproducible through Blender scripts under `tools/`:
 
 ```sh
 blender --background --python tools/build_all_models.py
 blender --background --python tools/create_eco_models.py
-```
-
-On this Windows workstation the Blender launcher is `F:\BLENDER\blender-launcher.exe`; keep that
-as local setup knowledge, not as a committed workflow dependency.
-
-After generating models, validate assets:
-
-```sh
 python tools/validate_pretty_glbs.py
 python tools/verify_poly_budget.py
 ```
 
-Do not commit Python caches, Blender backup files, temporary exports, or local absolute-path config.
+Use the project `$ai-modeling` skill for asset generation or manifest changes. Do not commit local
+launcher paths, Python caches, Blender backups, temporary exports, or generated run logs.
 
-## Development Rules
+## Documentation contract
 
-- Use Bevy 0.19 APIs such as `Mesh3d` and `MeshMaterial3d`.
-- Do not use deprecated `PbrBundle` or `MaterialMeshBundle`.
-- Share mesh and material handles for repeated block types.
-- Throttle logs in systems that run every tick.
-- Prefer tests in `crates/core` for game rules and state transitions.
-- Keep changes small and tied to the current task.
-
-## Current Status Signals
-
-The demo has visible terrain, player, HUD, monsters, ecology objects, resources, and observer state. The latest loop state should be judged from the newest `screenshots/iter_*` directory, not from stale README claims.
+Only files marked `doc-status: current` are maintained as operational facts. Reference and proposal
+documents may preserve old designs, so revalidate them against code before implementation. Run
+`just audit-docs` after documentation, dependency, command, or artifact-contract changes.

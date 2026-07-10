@@ -1,50 +1,51 @@
 # AGENTS.md
 
-This repository uses project skills for detailed instructions. Keep this file as a routing table only. When a task matches a route, read the matching `SKILL.md` before acting.
+This file routes agent work to project skills. Keep operational detail in the matching `SKILL.md`.
 
-## Synchronization Policy
+## Source Of Truth
 
-- `AGENTS.md` is the routing table, not the detailed handbook.
-- `.codex/skills/*/SKILL.md` files are the operational instructions for agents.
-- `docs/architecture/engineering-baseline.md` is the human-readable engineering baseline.
-- `docs/STARTING.md` is the human-readable run guide.
-- If these sources drift, prefer current code and `xtask` behavior first, then the relevant `SKILL.md`, then active docs. Update all touched sources in the same change.
-- Historical material under `docs/archive/` and imported design notes may mention old paths; do not treat them as current workflow instructions unless an active doc points there.
+- Use current code and `xtask` output to establish what the repository does now.
+- Use the relevant skill and `docs/architecture/engineering-baseline.md` to establish intended engineering behavior.
+- When implementation and intended behavior disagree, report the conflict instead of automatically rewriting documentation to match a likely bug.
+- Update only active docs and skill contracts directly affected by the current change. Treat `docs/archive/` and imported design notes as historical unless an active document points to them.
 
-## Technology Direction
+## Skill Selection
 
-- Framework: Bevy 0.19.
-- Visual target: Sokpop-style small, readable, colorful, toy-like game presentation with clear silhouettes and simple shapes.
-- First choice for core automation: Rust `xtask`, especially closed-loop orchestration, health checks, screenshot/state assertions, test runners, state files, JSON contracts, cross-platform command logic, and robust error handling.
-- Second choice: Python only for Blender, asset generation, and focused one-off analysis outside the loop workflow.
-- Third choice: `justfile`, only for short command aliases. Do not put complex branching, state handling, or loop logic in `justfile`.
-- No PowerShell scripts in root. Loop automation logic lives in `xtask/` with `justfile` as the user-facing command entry. Python is not used for loop workflow code.
-
-## Network Access Policy
-
-- When an agent needs to access the public internet from this workspace, use the user's local proxy: SOCKS5 `127.0.0.1:7890`.
-- For command-line tools, prefer setting `ALL_PROXY=socks5h://127.0.0.1:7890` and `HTTPS_PROXY=socks5h://127.0.0.1:7890` for that command or shell session.
+- Choose the smallest sufficient set: one primary skill and, only when needed, one validation companion.
+- Use `$local-dev` as the fallback for ordinary repository work. Do not add it automatically when a more specific skill already covers the task.
+- Treat audit and review requests as read-only unless the user also asks for implementation.
+- Read every selected skill before acting.
 
 ## Skill Routing
 
-- Use `$local-dev` for ordinary repository work: inspect files, make local code/docs/script changes, choose validation scope, handle git hygiene, or prepare branch/commit/PR work.
-- Use `$tdd-iteration` for testable behavior changes: pure logic, rules, state machines, resources, drops, conservation, nations, monsters, animals, combat, protection periods, phase timing, CLI/protocol/network parsing, AI decisions, scenarios, tick observers, bug fixes, and regressions.
-- Use `$bevy-gameplay-dev` for Bevy 0.19 client/server/gameplay work: `crates/client`, `crates/server`, gameplay systems in `crates/core`, render/input/HUD/camera, voxel rendering, networking behavior, scenarios, performance, and log-spam fixes.
-- Use `$bevy-resource-lifecycle` for Bevy runtime asset/GPU resource lifetime bugs: `Out of Memory`, invalid texture validation errors, `Queue::write_texture`, `Texture::create_view`, repeated runtime `Mesh`/`StandardMaterial`/`Image` allocation, or entity despawn without generated asset cleanup.
-- Use `$closed-loop-ai-dev` for visual/gameplay-experience iteration: screenshots, offline auto-demo, `just loop` / `just xtask loop`, observer health, `health.json`, `assertions.json`, `diff.json`, `final_state.json`, PNG review, and `decision.md`.
-- Use `$screenshot-scoring` for evidence-backed screenshot scoring: visual category scores, hard gates, previous/current comparison, `decision.md` score sections, and next visual iteration choice.
-- Use `$ai-modeling` for 3D assets: Blender-generated GLBs, procedural models, `tools/build_*.py`, `assets/procedural/pretty`, `assets/procedural/eco`, animals, terrain buildings, `MANIFEST.json`, and poly-budget validation.
-- Use `$skill-sedimentation` when repeated agent mistakes, bug-prone workflows, validation gaps, or user requests to "沉淀"/codify lessons should be turned into reusable skill routing plus a new or updated problem-solving skill.
+- Use `$local-dev` for ordinary code/docs/tooling work, validation selection, worktree hygiene, and git preparation when no more specific route applies.
+- Use `$tdd-iteration` for deterministic behavior that can be specified with a focused test before implementation: rules, state machines, parsing, invariants, scenarios, AI decisions, and regressions.
+- Use `$bevy-gameplay-dev` for Bevy 0.19 client/server/runtime work: ECS systems, rendering, input, HUD, camera, networking, simulation wiring, scenarios, performance, and logging.
+- Use `$bevy-resource-lifecycle` for runtime asset or GPU lifetime symptoms such as out-of-memory, invalid textures, repeated generated asset allocation, render rebuild leaks, or generated assets surviving entity cleanup.
+- Use `$closed-loop-ai-dev` when the task explicitly requires running or diagnosing the observe-decide-act loop, auto-demo, runtime screenshots, health artifacts, or `decision.md`.
+- Use `$screenshot-scoring` only for quantitative loop-screenshot scoring, previous/current comparison, or the score section of `decision.md`; ordinary PNG inspection does not require it.
+- Use `$ai-modeling` for reproducible Blender/GLB generation, asset manifests, model previews, poly budgets, and wiring generated models.
+- Use `$game-logic-audit` for evidence-backed, read-only audits of end-to-end game rules, authority flow, unreachable systems, or client/core/server divergence.
+- Use `$docs-governance` for documentation classification, current/reference/proposal boundaries, stale facts, broken links, command/dependency/artifact-contract guidance, and `audit-docs` failures.
+- Use `$skill-sedimentation` when the user explicitly asks to codify lessons, update skill routing, create/update a skill, or prevent a repeated agent failure through durable instructions.
 
 ## Composition
 
-- For gameplay rule changes, use `$tdd-iteration` plus `$bevy-gameplay-dev`.
-- For visible client/gameplay changes, use `$bevy-gameplay-dev` plus `$closed-loop-ai-dev`.
-- For Bevy render/resource lifecycle bugs, use `$bevy-resource-lifecycle` plus `$bevy-gameplay-dev`; add `$closed-loop-ai-dev` when runtime screenshots or loop logs are needed.
-- For loop screenshot review, use `$closed-loop-ai-dev` plus `$screenshot-scoring`.
-- For generated models that appear in game, use `$ai-modeling` plus `$closed-loop-ai-dev`.
-- For creating or updating skills from a concrete failure pattern, use `$skill-sedimentation` plus `$skill-creator`.
-- For broad tasks, start with `$local-dev`, then add the more specific skill above.
+- Gameplay rule implementation: `$tdd-iteration`; add `$bevy-gameplay-dev` only when ECS scheduling or runtime wiring is part of the change.
+- Visible Bevy/runtime implementation: `$bevy-gameplay-dev`; add `$closed-loop-ai-dev` when runtime evidence is required for acceptance.
+- Resource lifetime bug: `$bevy-resource-lifecycle`; add `$closed-loop-ai-dev` only when reproduction or validation needs loop/runtime evidence.
+- Loop scoring: `$closed-loop-ai-dev` plus `$screenshot-scoring` only when a numeric score or scored `decision.md` is required.
+- Generated asset: `$ai-modeling`; add `$closed-loop-ai-dev` only after the asset is wired into the game and must be judged in the target camera.
+- Logic audit: `$game-logic-audit` alone for the report; use the implementation route in a later or explicitly combined fix task.
+- Documentation change: `$docs-governance`; add `$tdd-iteration` only when changing the `xtask` documentation audit behavior.
+- Skill changes: `$skill-sedimentation` plus the system `$skill-creator` skill.
+
+## Repository Constraints
+
+- Framework: Bevy 0.19. Visual target: small, readable, colorful, toy-like Sokpop-style presentation.
+- Put durable automation in Rust `xtask`; use Python for Blender/assets and focused analysis; keep `justfile` to short aliases.
+- Do not add root PowerShell workflow scripts or Python loop orchestration.
+- For public internet access, use SOCKS5 `127.0.0.1:7890` when the local proxy is reachable. If it is unavailable, report that fact rather than repeatedly retrying through a dead proxy.
 
 ## Skill Files
 
@@ -55,4 +56,6 @@ This repository uses project skills for detailed instructions. Keep this file as
 - `.codex/skills/closed-loop-ai-dev/SKILL.md`
 - `.codex/skills/screenshot-scoring/SKILL.md`
 - `.codex/skills/ai-modeling/SKILL.md`
+- `.codex/skills/game-logic-audit/SKILL.md`
+- `.codex/skills/docs-governance/SKILL.md`
 - `.codex/skills/skill-sedimentation/SKILL.md`

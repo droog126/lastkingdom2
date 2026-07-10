@@ -341,8 +341,7 @@ mod tests {
         let kingdom = eco.kingdoms.values().next().expect("one demo kingdom");
         assert_eq!(kingdom.center, anchor);
         assert!(kingdom.nests.values().all(|nest| {
-            (nest.center[0] - anchor[0]).abs() <= 4
-                && (nest.center[2] - anchor[2]).abs() <= 4
+            (nest.center[0] - anchor[0]).abs() <= 4 && (nest.center[2] - anchor[2]).abs() <= 4
         }));
     }
 

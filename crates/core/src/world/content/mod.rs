@@ -14,8 +14,8 @@ pub use game::{
     generate_game_content_volume,
 };
 pub use materialize::{
-    CONTENT_CELL_SIZE, ContentAnchor, MaterializedContent, content_route_is_walkable,
-    generate_and_materialize_content,
+    CONTENT_CELL_SIZE, ContentAnchor, ContentMaterializeError, MaterializedContent,
+    content_route_is_walkable, generate_and_materialize_content,
 };
 pub use solver::{
     CellConstraint, ContentSolveConfig, ContentSolveError, ContentVolume, solve_content_volume,

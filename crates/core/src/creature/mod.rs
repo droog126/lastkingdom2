@@ -349,7 +349,7 @@ fn try_spawn_creature(
 
 pub fn despawn_dead_creatures(
     mut commands: Commands,
-    mut pool: ResMut<crate::resource::GlobalResourcePool>,
+    mut pool: ResMut<GlobalResourcePool>,
     mut player: ResMut<PlayerState>,
     q: Query<(Entity, &Creature, &CombatHealth)>,
 ) {
@@ -371,7 +371,7 @@ pub fn despawn_dead_creatures(
 pub fn player_attack_creatures(
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<PlayerState>,
-    mut pool: ResMut<crate::resource::GlobalResourcePool>,
+    mut pool: ResMut<GlobalResourcePool>,
     mut commands: Commands,
     q: Query<(Entity, &Creature, &CreatureAI)>,
 ) {

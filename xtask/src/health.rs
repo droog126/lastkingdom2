@@ -1161,15 +1161,15 @@ fn movement_probe_drift(state: &Value) -> StaticWorldDrift {
     )
 }
 
-fn static_world_visual_positions(value: &Value) -> std::collections::HashMap<String, [f64; 3]> {
+fn static_world_visual_positions(value: &Value) -> HashMap<String, [f64; 3]> {
     static_world_positions_at(value, "visual.static_world")
 }
 
 fn static_world_positions_at(
     value: &Value,
     path: &str,
-) -> std::collections::HashMap<String, [f64; 3]> {
-    let mut out = std::collections::HashMap::new();
+) -> HashMap<String, [f64; 3]> {
+    let mut out = HashMap::new();
     let Some(obj) = path_value(value, path).and_then(Value::as_object) else {
         return out;
     };
@@ -1184,8 +1184,8 @@ fn static_world_positions_at(
 fn static_world_drift_from_maps(
     prev_player: [f64; 3],
     current_player: [f64; 3],
-    prev_visuals: &std::collections::HashMap<String, [f64; 3]>,
-    current_visuals: &std::collections::HashMap<String, [f64; 3]>,
+    prev_visuals: &HashMap<String, [f64; 3]>,
+    current_visuals: &HashMap<String, [f64; 3]>,
 ) -> StaticWorldDrift {
     const PLAYER_MOVE_MIN: f64 = 1.0;
     const STATIC_MOVE_MAX: f64 = 0.25;
@@ -1854,6 +1854,32 @@ mod tests {
         let failed: Vec<&Assertion> = assertions.iter().filter(|a| !a.ok).collect();
         assert!(failed.iter().any(|a| a.id == "network.move_world_sent_advances"));
         assert!(failed.iter().all(|a| a.severity == "fail"));
+    }
+
+    #[test]
+    fn network_connection_requires_connected_transport_and_recent_pong() {
+        let stale = json!({
+            "role": "client_online",
+            "network_connection": {
+                "transport": "Connected",
+                "ping_ms": 37.0,
+                "pong_age_secs": 11.6
+            }
+        });
+        let assertions = network_connection_assertions(&stale);
+        assert!(assertions.iter().any(|a| a.id == "network.transport_connected" && a.ok));
+        assert!(assertions.iter().any(|a| a.id == "network.ping_available" && a.ok));
+        assert!(assertions.iter().any(|a| a.id == "network.pong_recent" && !a.ok));
+
+        let healthy = json!({
+            "role": "client_online",
+            "network_connection": {
+                "transport": "Connected",
+                "ping_ms": 24.0,
+                "pong_age_secs": 0.4
+            }
+        });
+        assert!(network_connection_assertions(&healthy).iter().all(|a| a.ok));
     }
 
     #[test]

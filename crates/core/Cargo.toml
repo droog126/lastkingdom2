@@ -13,6 +13,8 @@ path = "src/lib.rs"
 [features]
 dev-dynamic-linking = ["bevy/dynamic_linking"]
 client-render = ["bevy/bevy_pbr", "bevy/bevy_render"]
+# Prototypes without a complete runtime producer/consumer path.
+experimental-gameplay = []
 
 [dependencies]
 bevy = { version = "0.19", default-features = false, features = ["default_app", "serialize"] }

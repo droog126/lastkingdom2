@@ -236,7 +236,7 @@ fn run_one(
         cmd.env(k, v);
     }
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(PER_MODEL_SECONDS);
+    let deadline = Instant::now() + std::time::Duration::from_secs(PER_MODEL_SECONDS);
     let mut last_size: u64 = 0;
     loop {
         match child.try_wait() {
@@ -254,7 +254,7 @@ fn run_one(
                 return Ok(());
             }
         }
-        if std::time::Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(

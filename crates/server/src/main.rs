@@ -7,13 +7,13 @@ use lightyear::prelude::LocalAddr;
 use lightyear::prelude::server::ServerUdpIo;
 
 use leafwing_input_manager::prelude::ActionState;
-use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{
     EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
 };
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback, PingMessage, PongMessage,
 };
+use lk2_core::protocol::{ControlChannel, PlayerAction, StateChannel};
 
 use lightyear::prelude::PeerMetadata;
 
@@ -49,8 +49,8 @@ use lk2_core::world::{
 };
 
 use crate::pvp_systems::{
-    ServerPvPPlugin, apply_damage_and_knockback, expire_knockback_immunity, melee_hit_registration,
-    read_attack_inputs, record_position_history, tick_combat_cooldowns,
+    ServerPvPPlugin, apply_damage_and_knockback, broadcast_pvp_messages, expire_knockback_immunity,
+    melee_hit_registration, read_attack_inputs, record_position_history, tick_combat_cooldowns,
 };
 
 const PLACE_WOOD_COST: i64 = 1;
@@ -430,13 +430,7 @@ fn apply_gameplay_commands(
     creatures: Query<(Entity, &Creature, &CreatureAI)>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
     mut jump: ResMut<ServerJumpState>,
-    mut player_q: Query<
-        (
-            &mut bevy::prelude::Transform,
-            &mut lk2_core::protocol::components::PlayerPos,
-        ),
-        With<lk2_core::protocol::components::PlayerPos>,
-    >,
+    mut player_q: Query<(&mut Transform, &mut PlayerPos), With<PlayerPos>>,
     mut receivers: Query<
         &mut lightyear::prelude::MessageReceiver<GameplayCommand>,
         With<lightyear_connection::client_of::ClientOf>,
@@ -566,13 +560,7 @@ fn apply_udp_gameplay_commands(
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
     jump: Res<ServerJumpState>,
     mut anti_stuck: ResMut<AntiStuckState>,
-    mut player_q: Query<
-        (
-            &mut bevy::prelude::Transform,
-            &mut lk2_core::protocol::components::PlayerPos,
-        ),
-        With<lk2_core::protocol::components::PlayerPos>,
-    >,
+    mut player_q: Query<(&mut Transform, &mut PlayerPos), With<PlayerPos>>,
 ) {
     let Some(udp) = udp else {
         return;
@@ -647,17 +635,14 @@ fn apply_udp_gameplay_commands(
 fn echo_ping_messages(
     clock: Res<SimClock>,
     mut receivers: Query<
-        &mut lightyear::prelude::MessageReceiver<PingMessage>,
+        (
+            &mut lightyear::prelude::MessageReceiver<PingMessage>,
+            &mut lightyear::prelude::MessageSender<PongMessage>,
+        ),
         With<lightyear_connection::client_of::ClientOf>,
     >,
-    server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
-    mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
 ) {
-    let Ok(server) = server_q.single() else {
-        return;
-    };
-
-    for mut receiver in receivers.iter_mut() {
+    for (mut receiver, mut sender) in receivers.iter_mut() {
         for ping in receiver.receive() {
             if !ping.is_finite() {
                 warn!(
@@ -672,11 +657,7 @@ fn echo_ping_messages(
                 client_time_secs: ping.client_time_secs,
                 server_tick: clock.tick as u32,
             };
-            let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(
-                &pong,
-                server,
-                &lightyear::prelude::NetworkTarget::All,
-            );
+            sender.send::<ControlChannel>(pong);
         }
     }
 }
@@ -694,11 +675,8 @@ fn broadcast_gameplay_feedback(
         if msg.summary == "moved" {
             continue;
         }
-        let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(
-            msg,
-            server,
-            &lightyear::prelude::NetworkTarget::All,
-        );
+        let _ =
+            sender.send::<_, ControlChannel>(msg, server, &lightyear::prelude::NetworkTarget::All);
     }
 }
 
@@ -1015,15 +993,11 @@ fn main() {
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
         .add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
-        .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
-        .add_plugins(lk2_core::mining_site::MiningSitePlugin)
-        .add_plugins(lk2_core::terrain_overlay::TerrainOverlayPlugin)
-        .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(ServerPvPPlugin)
         .add_message::<lk2_core::protocol::messages::AttackInput>()
-        .add_message::<lk2_core::protocol::messages::GameplayCommand>()
-        .add_message::<lk2_core::protocol::messages::GameplayFeedback>()
+        .add_message::<GameplayCommand>()
+        .add_message::<GameplayFeedback>()
         .add_message::<PingMessage>()
         .add_message::<PongMessage>()
         .add_message::<lk2_core::protocol::messages::HitConfirm>()
@@ -1107,6 +1081,7 @@ fn main() {
                 read_attack_inputs,
                 melee_hit_registration,
                 apply_damage_and_knockback,
+                broadcast_pvp_messages,
                 expire_knockback_immunity,
                 tick_combat_cooldowns,
             )
@@ -1124,7 +1099,7 @@ fn server_ports_available(port: u16) -> bool {
     main.is_ok() && gameplay.is_ok()
 }
 
-fn dump_world_resources(world: &bevy::prelude::World) {
+fn dump_world_resources(world: &World) {
     let has_peer_metadata = world.get_resource::<PeerMetadata>().is_some();
     info!("[debug] PeerMetadata in world? {}", has_peer_metadata);
 }
@@ -1186,7 +1161,7 @@ fn spawn_player(
                     return (pos, block);
                 }
             }
-            let fallback = bevy::math::Vec3::new(
+            let fallback = Vec3::new(
                 sx as f32 + 0.5,
                 (constant::SEA_LEVEL + 2) as f32 + 0.5,
                 sz as f32 + 0.5,
@@ -1212,8 +1187,8 @@ fn spawn_player(
     commands.spawn((
         Name::new("Player"),
         PlayerTag(0),
-        bevy::prelude::Transform::from_translation(spawn),
-        lk2_core::protocol::components::PlayerPos(spawn),
+        Transform::from_translation(spawn),
+        PlayerPos(spawn),
         ActionState::<PlayerAction>::default(),
         empty_gameplay_hud_state(),
         EcoCycle::default().to_snapshot(0),
@@ -1290,7 +1265,7 @@ pub struct ServerTickCounter(pub u32);
 
 fn broadcast_player_pos(
     mut tick: ResMut<ServerTickCounter>,
-    q: Query<&bevy::prelude::Transform, With<lk2_core::protocol::components::PlayerPos>>,
+    q: Query<&Transform, With<PlayerPos>>,
     server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
     mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
 ) {
@@ -1318,11 +1293,8 @@ fn broadcast_player_pos(
             continue;
         };
 
-        let _ = sender.send::<_, lightyear_replication::metadata::MetadataChannel>(
-            &msg,
-            server,
-            &lightyear::prelude::NetworkTarget::All,
-        );
+        let _ =
+            sender.send::<_, StateChannel>(&msg, server, &lightyear::prelude::NetworkTarget::All);
     }
 }
 
@@ -1335,6 +1307,16 @@ fn setup_world(
 ) {
     *game_world = generate_world(&WorldConfig::default());
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
+    if let Some(content) = game_world.content.as_ref() {
+        info!(
+            "[content] 3D volume {:?}, settlement {:?}, monster territory {:?}, dungeon entrance {:?}, treasure {:?}",
+            content.volume.dimensions,
+            content.settlement_position,
+            content.monster_position,
+            content.entrance_position,
+            content.treasure_position
+        );
+    }
 
     use lk2_core::resource::ResourceKind;
     for k in ResourceKind::ALL {
@@ -1464,7 +1446,7 @@ fn end_tick_system(
     monsters: Res<MonsterEcosystem>,
     clock: Res<SimClock>,
     mut obs: ResMut<TickObserver>,
-    player: Res<lk2_core::player::PlayerState>,
+    player: Res<PlayerState>,
 ) {
     if !clock.last_sim_step_ran {
         return;
@@ -1494,7 +1476,7 @@ fn tick_recorder(
     time: Res<Time>,
     mut rec: ResMut<TickRecorder>,
     clock: Res<SimClock>,
-    player: Res<lk2_core::player::PlayerState>,
+    player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
@@ -1560,6 +1542,25 @@ mod tests {
         assert_eq!(block_type_to_u8(BlockType::Stone), 2);
         assert_eq!(block_type_to_u8(BlockType::BerryThicket), 12);
         assert_eq!(block_type_to_u8(BlockType::Grass), 13);
+    }
+
+    #[test]
+    fn initial_chunk_snapshot_contains_materialized_3d_content() {
+        let world = generate_world(&WorldConfig::default());
+        let content = world.content.as_ref().expect("default content");
+        let snapshot = build_voxel_chunk_snapshot(&world, 0, content.settlement_position);
+        let treasure = content.treasure_position;
+        let x_min = snapshot.chunk_x * VOXEL_CHUNK_SIZE_XZ;
+        let z_min = snapshot.chunk_z * VOXEL_CHUNK_SIZE_XZ;
+        let index = (((treasure[1] - 1 - snapshot.y_min) * VOXEL_CHUNK_SIZE_XZ
+            + (treasure[2] - z_min))
+            * VOXEL_CHUNK_SIZE_XZ
+            + (treasure[0] - x_min)) as usize;
+
+        assert_eq!(
+            snapshot.blocks.get(index).copied(),
+            Some(block_type_to_u8(BlockType::SunstoneOre))
+        );
     }
 
     #[test]

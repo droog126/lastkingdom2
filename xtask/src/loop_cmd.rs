@@ -1069,13 +1069,13 @@ fn reject_active_workspace_builds(root: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(process_json) else {
+    let Ok(value) = serde_json::from_str::<Value>(process_json) else {
         return false;
     };
     let current = std::process::id() as u64;
     let mut rows = match value {
-        serde_json::Value::Array(rows) => rows,
-        serde_json::Value::Object(_) => vec![value],
+        Value::Array(rows) => rows,
+        Value::Object(_) => vec![value],
         _ => return false,
     };
     let mut ancestor_ids = std::collections::HashSet::new();
@@ -1083,8 +1083,8 @@ fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
     loop {
         let mut changed = false;
         for row in &rows {
-            let pid = row.get("ProcessId").and_then(serde_json::Value::as_u64).unwrap_or(0);
-            let ppid = row.get("ParentProcessId").and_then(serde_json::Value::as_u64).unwrap_or(0);
+            let pid = row.get("ProcessId").and_then(Value::as_u64).unwrap_or(0);
+            let ppid = row.get("ParentProcessId").and_then(Value::as_u64).unwrap_or(0);
             if ancestor_ids.contains(&pid) && ppid != 0 && ancestor_ids.insert(ppid) {
                 changed = true;
             }
@@ -1095,15 +1095,15 @@ fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
     }
     let root_text = root.display().to_string().to_ascii_lowercase();
     for row in rows.drain(..) {
-        let pid = row.get("ProcessId").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let pid = row.get("ProcessId").and_then(Value::as_u64).unwrap_or(0);
         if ancestor_ids.contains(&pid) {
             continue;
         }
         let name =
-            row.get("Name").and_then(serde_json::Value::as_str).unwrap_or("").to_ascii_lowercase();
+            row.get("Name").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
         let command = row
             .get("CommandLine")
-            .and_then(serde_json::Value::as_str)
+            .and_then(Value::as_str)
             .unwrap_or("")
             .to_ascii_lowercase();
         if name == "lk2-client.exe" || name == "lk2-server.exe" {

@@ -12,10 +12,19 @@ from mathutils import Vector
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from models_lib import OUT_DIR, clear_scene, export_glb, mat, shade_flat
+from model_style import TEMP_PREVIEW_DIR
+from models_lib import (
+    OUT_DIR,
+    bevel_box,
+    clear_scene,
+    cylinder_between,
+    export_glb,
+    mat,
+    prism,
+)
 
 
-PREVIEW_PATH = Path("D:/Temp/hoplite_legendaries_preview.png")
+PREVIEW_PATH = TEMP_PREVIEW_DIR / "hoplite_legendaries.png"
 
 
 def material(name: str, color, *, metallic=0.0, roughness=0.72, glow=None):
@@ -26,69 +35,6 @@ def material(name: str, color, *, metallic=0.0, roughness=0.72, glow=None):
         roughness=roughness,
         emissive=glow or (0.0, 0.0, 0.0),
     )
-
-
-def bevel_box(name: str, loc, scale, material_slot, *, bevel=0.025, rotation=(0.0, 0.0, 0.0)):
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=loc, rotation=rotation)
-    obj = bpy.context.object
-    obj.name = name
-    obj.scale = scale
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    if bevel > 0.0:
-        modifier = obj.modifiers.new("small_cut_bevel", "BEVEL")
-        modifier.width = bevel
-        modifier.segments = 1
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.modifier_apply(modifier=modifier.name)
-    obj.data.materials.append(material_slot)
-    shade_flat(obj)
-    return obj
-
-
-def prism(name: str, points, depth: float, material_slot, *, y=0.0, bevel=0.018):
-    half = depth * 0.5
-    vertices = [(x, y - half, z) for x, z in points] + [(x, y + half, z) for x, z in points]
-    count = len(points)
-    faces = [tuple(range(count)), tuple(range(count, count * 2))[::-1]]
-    for index in range(count):
-        nxt = (index + 1) % count
-        faces.append((index, nxt, count + nxt, count + index))
-    mesh = bpy.data.meshes.new(f"{name}_mesh")
-    mesh.from_pydata(vertices, [], faces)
-    mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.collection.objects.link(obj)
-    obj.data.materials.append(material_slot)
-    if bevel > 0.0:
-        modifier = obj.modifiers.new("edge_soften", "BEVEL")
-        modifier.width = bevel
-        modifier.segments = 1
-        bpy.context.view_layer.objects.active = obj
-        obj.select_set(True)
-        bpy.ops.object.modifier_apply(modifier=modifier.name)
-        obj.select_set(False)
-    shade_flat(obj)
-    return obj
-
-
-def cylinder_between(name: str, start, end, radius: float, material_slot, *, vertices=8):
-    start_vec = Vector(start)
-    end_vec = Vector(end)
-    direction = end_vec - start_vec
-    midpoint = (start_vec + end_vec) * 0.5
-    bpy.ops.mesh.primitive_cylinder_add(
-        vertices=vertices,
-        radius=radius,
-        depth=direction.length,
-        location=midpoint,
-    )
-    obj = bpy.context.object
-    obj.name = name
-    obj.rotation_mode = "QUATERNION"
-    obj.rotation_quaternion = Vector((0.0, 0.0, 1.0)).rotation_difference(direction.normalized())
-    obj.data.materials.append(material_slot)
-    shade_flat(obj)
-    return obj
 
 
 def energy_motes(rng: random.Random, prefix: str, center, radius, count: int, mats):
@@ -110,6 +56,51 @@ def energy_motes(rng: random.Random, prefix: str, center, radius, count: int, ma
             bevel=size * 0.18,
             rotation=(rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4), rng.uniform(-0.8, 0.8)),
         )
+
+
+def make_sword() -> None:
+    clear_scene()
+    steel = material("sword_steel", (0.72, 0.76, 0.78), metallic=0.72, roughness=0.32)
+    edge = material("sword_edge", (0.90, 0.90, 0.82), metallic=0.62, roughness=0.28)
+    iron = material("sword_dark_iron", (0.18, 0.20, 0.20), metallic=0.55, roughness=0.42)
+    leather = material("sword_leather", (0.34, 0.16, 0.08), roughness=0.78)
+    brass = material("sword_brass", (0.72, 0.48, 0.12), metallic=0.52, roughness=0.38)
+
+    cylinder_between("sword_grip", (0.0, 0.0, 0.08), (0.0, 0.0, 0.72), 0.075, leather)
+    for index, z in enumerate((0.16, 0.30, 0.44, 0.58, 0.70)):
+        bevel_box(
+            f"sword_grip_band_{index}",
+            (0.0, -0.065, z),
+            (0.09, 0.026, 0.025),
+            brass if index % 2 else iron,
+            bevel=0.01,
+            rotation=(0.0, 0.0, (-1) ** index * 0.26),
+        )
+    bevel_box("sword_pommel", (0.0, 0.0, 0.06), (0.13, 0.12, 0.11), brass, bevel=0.025)
+    bevel_box("sword_guard", (0.0, 0.0, 0.79), (0.46, 0.12, 0.09), iron, bevel=0.028)
+    bevel_box(
+        "sword_guard_left",
+        (-0.36, 0.0, 0.84),
+        (0.22, 0.12, 0.08),
+        brass,
+        bevel=0.022,
+        rotation=(0.0, 0.0, math.radians(12.0)),
+    )
+    bevel_box(
+        "sword_guard_right",
+        (0.36, 0.0, 0.84),
+        (0.22, 0.12, 0.08),
+        brass,
+        bevel=0.022,
+        rotation=(0.0, 0.0, math.radians(-12.0)),
+    )
+    blade = [(-0.16, 0.84), (0.16, 0.84), (0.20, 2.34), (0.0, 2.68), (-0.20, 2.34)]
+    fuller = [(-0.055, 0.94), (0.055, 0.94), (0.07, 2.28), (0.0, 2.48), (-0.07, 2.28)]
+    left_edge = [(-0.16, 0.84), (-0.055, 0.94), (-0.07, 2.28), (0.0, 2.48), (0.0, 2.68), (-0.20, 2.34)]
+    prism("sword_blade", blade, 0.12, steel, bevel=0.018)
+    prism("sword_fuller", fuller, 0.035, iron, y=-0.078, bevel=0.007)
+    prism("sword_bright_edge", left_edge, 0.14, edge, y=0.005, bevel=0.008)
+    export_glb("sword")
 
 
 def make_reaper_scythe() -> None:
@@ -300,6 +291,7 @@ def render_preview(path: Path) -> None:
 
 
 def build_assets() -> None:
+    make_sword()
     make_reaper_scythe()
     make_dragon_katana()
     make_golem_hammer()

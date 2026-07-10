@@ -7,7 +7,7 @@ description: Diagnose and fix Bevy runtime asset, entity, render texture, GPU me
 
 ## Scope
 
-Use with `$bevy-gameplay-dev` for client/render work and with `$closed-loop-ai-dev` when the fix needs screenshot or loop evidence.
+Use this as the primary skill for lifetime bugs. Add `$closed-loop-ai-dev` only when reproducing or validating the failure requires runtime movement, screenshots, or loop logs. Do not load `$bevy-gameplay-dev` merely to repeat general Bevy guidance.
 
 This skill is for lifetime bugs, not ordinary visual tuning. The common pattern is: entities are despawned, but GPU-backed assets or render attachments remain allocated, or an expensive render feature is enabled without a bounded lifetime.
 
@@ -84,7 +84,7 @@ cargo fmt -p lk2-client
 cargo check -p lk2-client
 ```
 
-Then run the shortest runtime check that exercises the suspected leak path:
+When runtime evidence is required, run the shortest check that exercises the suspected leak path:
 
 ```sh
 just xtask loop --offline --seconds 15

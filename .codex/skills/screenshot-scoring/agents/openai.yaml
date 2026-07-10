@@ -1,4 +1,4 @@
 interface:
   display_name: "LK2 Screenshot Scoring"
-  short_description: "Rubric for visual screenshot scoring and iteration decisions."
-  default_prompt: "Use $screenshot-scoring to score a lastkingdom2 loop screenshot."
+  short_description: "Score closed-loop gameplay screenshots quantitatively"
+  default_prompt: "Use $screenshot-scoring to score and compare a closed-loop gameplay screenshot."

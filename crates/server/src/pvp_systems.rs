@@ -1,6 +1,8 @@
+use lk2_core::match_state::MatchClock;
+use lk2_core::protection::{Protection, can_attack};
+use lk2_core::protocol::ControlChannel;
 use lk2_core::protocol::components::{CombatReady, Health, KnockbackImmunity};
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
-use lk2_core::protection::Protection;
 use lk2_core::pvp::FixedTick;
 use lk2_core::pvp::{
     CombatState, DamageEvent, Hitbox, PositionHistory, PositionSnapshot, WeaponStats,
@@ -43,32 +45,55 @@ pub fn record_position_history(
 
 pub fn read_attack_inputs(
     tick: Res<FixedTick>,
-    mut events: MessageReader<AttackInput>,
+    mut receivers: Query<
+        &mut lightyear::prelude::MessageReceiver<AttackInput>,
+        With<lightyear_connection::client_of::ClientOf>,
+    >,
     mut combat_states: Query<(Entity, &mut CombatState)>,
     mut attack_queue: Local<VecDeque<(Entity, AttackInput)>>,
 ) {
     let tick_val = tick.0;
 
-    for input in events.read() {
-        for (entity, mut combat) in combat_states.iter_mut() {
-            if combat.attack_cooldown_timer > 0.0 {
+    for mut receiver in &mut receivers {
+        for input in receiver.receive() {
+            if !input.is_finite() {
+                warn!("ignoring non-finite AttackInput");
                 continue;
             }
-            combat.is_attacking = true;
-            combat.last_attack_tick = tick_val;
-            combat.attack_cooldown_timer = 0.625;
-            combat.combo_count = input.combo_count;
+            for (entity, mut combat) in combat_states.iter_mut() {
+                if combat.attack_cooldown_timer > 0.0 {
+                    continue;
+                }
+                combat.is_attacking = true;
+                combat.last_attack_tick = tick_val;
+                combat.attack_cooldown_timer = 0.625;
+                combat.combo_count = input.combo_count;
 
-            attack_queue.push_back((
-                entity,
-                AttackInput {
-                    tick: input.tick,
-                    input_dir: input.input_dir,
-                    is_falling: input.is_falling,
-                    combo_count: input.combo_count,
-                },
-            ));
+                attack_queue.push_back((entity, input.clone()));
+            }
         }
+    }
+}
+
+pub fn broadcast_pvp_messages(
+    mut hit_confirms: MessageReader<HitConfirm>,
+    mut knockbacks: MessageReader<KnockbackEvent>,
+    mut damage_results: MessageReader<DamageResult>,
+    server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
+    mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
+) {
+    let Ok(server) = server_q.single() else {
+        return;
+    };
+    let target = lightyear::prelude::NetworkTarget::All;
+    for message in hit_confirms.read() {
+        let _ = sender.send::<_, ControlChannel>(message, server, &target);
+    }
+    for message in knockbacks.read() {
+        let _ = sender.send::<_, ControlChannel>(message, server, &target);
+    }
+    for message in damage_results.read() {
+        let _ = sender.send::<_, ControlChannel>(message, server, &target);
     }
 }
 
@@ -92,6 +117,8 @@ pub fn melee_hit_registration(
     >,
     voxel_world: Res<GameWorld>,
     tick: Res<FixedTick>,
+    match_clock: Res<MatchClock>,
+    protections: Query<&Protection>,
     client_id_map: Local<std::collections::HashMap<Entity, PeerId>>,
 ) {
     if attack_queue.is_empty() {
@@ -110,6 +137,13 @@ pub fn melee_hit_registration(
         let forward = attack_input.input_dir.normalize();
 
         for (victim_entity, _, hitbox, health, history, _kb_immune) in victims.iter() {
+            if !can_attack(
+                protections.get(attacker_entity).ok(),
+                protections.get(victim_entity).ok(),
+                &match_clock,
+            ) {
+                continue;
+            }
             if health.0 <= 0.0 {
                 continue;
             }
@@ -194,11 +228,20 @@ pub fn apply_damage_and_knockback(
     mut kb_immunity: Query<(Entity, &mut KnockbackImmunity)>,
     mut damage_results: MessageWriter<DamageResult>,
     tick: Res<FixedTick>,
+    match_clock: Res<MatchClock>,
+    protections: Query<&Protection>,
     client_id_map: Local<std::collections::HashMap<Entity, PeerId>>,
 ) {
     let tick_val = tick.0;
 
     for event in damage_reader.read() {
+        if !can_attack(
+            protections.get(event.attacker).ok(),
+            protections.get(event.victim).ok(),
+            &match_clock,
+        ) {
+            continue;
+        }
         if let Ok((_, mut health)) = healths.get_mut(event.victim) {
             health.0 = (health.0 - event.damage).max(0.0);
         }
@@ -231,16 +274,19 @@ pub fn apply_damage_and_knockback(
 mod tests {
     use super::*;
 
-    #[test]
-    fn protected_victim_does_not_take_authoritative_damage() {
+    fn damage_test_app() -> App {
         let mut app = App::new();
         app.add_message::<DamageEvent>()
             .add_message::<DamageResult>()
             .init_resource::<FixedTick>()
+            .init_resource::<MatchClock>()
             .add_systems(Update, apply_damage_and_knockback);
+        app.world_mut().resource_mut::<MatchClock>().wall_secs = 300.0;
+        app.world_mut().resource_mut::<MatchClock>().refresh_phase();
+        app
+    }
 
-        let attacker = app.world_mut().spawn_empty().id();
-        let victim = app.world_mut().spawn((Health(100.0), Protection::mid_join())).id();
+    fn send_damage(app: &mut App, attacker: Entity, victim: Entity) {
         app.world_mut().write_message(DamageEvent {
             attacker,
             victim,
@@ -250,10 +296,37 @@ mod tests {
             hit_location: Vec3::ZERO,
             server_tick: 1,
         });
-
         app.update();
+    }
+
+    #[test]
+    fn protected_victim_does_not_take_authoritative_damage() {
+        let mut app = damage_test_app();
+        let attacker = app.world_mut().spawn_empty().id();
+        let victim = app.world_mut().spawn((Health(100.0), Protection::mid_join())).id();
+        send_damage(&mut app, attacker, victim);
 
         assert_eq!(app.world().get::<Health>(victim).unwrap().0, 100.0);
+    }
+
+    #[test]
+    fn protected_attacker_does_not_deal_authoritative_damage() {
+        let mut app = damage_test_app();
+        let attacker = app.world_mut().spawn(Protection::mid_join()).id();
+        let victim = app.world_mut().spawn(Health(100.0)).id();
+        send_damage(&mut app, attacker, victim);
+
+        assert_eq!(app.world().get::<Health>(victim).unwrap().0, 100.0);
+    }
+
+    #[test]
+    fn unprotected_attack_deals_authoritative_damage_after_opening_phase() {
+        let mut app = damage_test_app();
+        let attacker = app.world_mut().spawn_empty().id();
+        let victim = app.world_mut().spawn(Health(100.0)).id();
+        send_damage(&mut app, attacker, victim);
+
+        assert_eq!(app.world().get::<Health>(victim).unwrap().0, 75.0);
     }
 }
 

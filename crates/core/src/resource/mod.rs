@@ -45,6 +45,9 @@ pub enum ResourceKind {
     RelicCore,
     SovereignSpark,
     SparkFragment,
+
+    DragonHeart,
+    DragonScale,
 }
 
 impl ResourceKind {
@@ -84,6 +87,8 @@ impl ResourceKind {
             RelicCore => 48,
             SovereignSpark => 6,
             SparkFragment => 18,
+            DragonHeart => 4,
+            DragonScale => 64,
         }
     }
 
@@ -131,6 +136,8 @@ impl ResourceKind {
             RelicCore => "遗迹核心",
             SovereignSpark => "王权火种",
             SparkFragment => "火种碎片",
+            DragonHeart => "龙心",
+            DragonScale => "龙鳞",
         }
     }
 
@@ -167,6 +174,8 @@ impl ResourceKind {
         ResourceKind::RelicCore,
         ResourceKind::SovereignSpark,
         ResourceKind::SparkFragment,
+        ResourceKind::DragonHeart,
+        ResourceKind::DragonScale,
     ];
 }
 
@@ -463,7 +472,7 @@ mod tests {
 
     #[test]
     fn all_25_resources_present() {
-        assert_eq!(ResourceKind::ALL.len(), 32);
+        assert_eq!(ResourceKind::ALL.len(), 34);
     }
 
     #[test]

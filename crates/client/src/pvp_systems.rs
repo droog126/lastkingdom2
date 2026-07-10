@@ -1,21 +1,23 @@
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
-use lightyear::prelude::Controlled;
-use lightyear::prelude::Predicted;
 use lk2_core::combat::{AttackType, CombatIntent, InputBuffer};
-use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::Health;
 use lk2_core::protocol::messages::{AttackInput, DamageResult, HitConfirm, KnockbackEvent};
+use lk2_core::protocol::{ControlChannel, PlayerAction};
 use lk2_core::pvp::FixedTick;
 use lk2_core::pvp::components::{CombatState, VisualEffectEvent};
+
+use crate::OnlineConnectionDiagnostics;
 
 pub fn collect_local_input(
     tick: Res<FixedTick>,
 
-    input_manager: Query<&ActionState<PlayerAction>, With<Controlled>>,
+    input_manager: Query<&ActionState<PlayerAction>, With<Player>>,
     player_transform: Query<&Transform, With<Camera>>,
     mut writer: MessageWriter<AttackInput>,
+    connection: Res<OnlineConnectionDiagnostics>,
+    mut senders: Query<&mut lightyear::prelude::MessageSender<AttackInput>>,
     combat: Query<&CombatState>,
     mut last_attack_was_sent: Local<bool>,
 ) {
@@ -43,14 +45,50 @@ pub fn collect_local_input(
     let tick_val = tick.0;
     let combo_count = combat.map(|c| c.combo_count + 1).unwrap_or(0) as u8;
 
-    writer.write(AttackInput { tick: tick_val, input_dir: forward, is_falling, combo_count });
+    let input = AttackInput { tick: tick_val, input_dir: forward, is_falling, combo_count };
+    writer.write(input.clone());
+    if connection.is_transport_connected()
+        && let Some(client_entity) = connection.client_entity
+        && let Ok(mut sender) = senders.get_mut(client_entity)
+    {
+        sender.send::<ControlChannel>(input);
+    }
 
     *last_attack_was_sent = true;
 }
 
+pub fn receive_online_pvp_messages(
+    mut receivers: Query<(
+        &mut lightyear::prelude::MessageReceiver<HitConfirm>,
+        &mut lightyear::prelude::MessageReceiver<KnockbackEvent>,
+        &mut lightyear::prelude::MessageReceiver<DamageResult>,
+    )>,
+    mut hit_confirms: MessageWriter<HitConfirm>,
+    mut knockbacks: MessageWriter<KnockbackEvent>,
+    mut damage_results: MessageWriter<DamageResult>,
+) {
+    for (mut hit_receiver, mut knockback_receiver, mut damage_receiver) in &mut receivers {
+        for message in hit_receiver.receive() {
+            if message.is_finite() {
+                hit_confirms.write(message);
+            }
+        }
+        for message in knockback_receiver.receive() {
+            if message.is_finite() {
+                knockbacks.write(message);
+            }
+        }
+        for message in damage_receiver.receive() {
+            if message.is_finite() {
+                damage_results.write(message);
+            }
+        }
+    }
+}
+
 pub fn client_attack_predict(
     mut local_attacks: MessageReader<AttackInput>,
-    mut combat_states: Query<&mut CombatState, With<Predicted>>,
+    mut combat_states: Query<&mut CombatState, With<Player>>,
     mut effect_writer: MessageWriter<VisualEffectEvent>,
 ) {
     for input in local_attacks.read() {
@@ -112,8 +150,8 @@ pub fn on_knockback_event(
 
 pub fn on_damage_result(
     mut results: MessageReader<DamageResult>,
-    mut healths: Query<&mut Health, With<Predicted>>,
-    mut hud_text: Query<&mut Text, With<super::HealthHudMarker>>,
+    mut healths: Query<&mut Health, With<Player>>,
+    mut hud_text: Query<&mut Text, With<HealthHudMarker>>,
 ) {
     for result in results.read() {
         if let Ok(mut health) = healths.single_mut() {
@@ -193,15 +231,15 @@ fn spawn_hit_particle(
     color: Color,
 ) {
     let linear = color.to_linear();
-    let emissive = bevy::color::LinearRgba::new(
+    let emissive = LinearRgba::new(
         linear.red * 0.5,
         linear.green * 0.5,
         linear.blue * 0.5,
         linear.alpha,
     );
-    let mesh_handle = meshes.add(bevy::prelude::Cuboid::new(0.15, 0.15, 0.15));
+    let mesh_handle = meshes.add(Cuboid::new(0.15, 0.15, 0.15));
     let material_handle =
-        materials.add(bevy::prelude::StandardMaterial { base_color: color, emissive, ..default() });
+        materials.add(StandardMaterial { base_color: color, emissive, ..default() });
     commands.spawn((
         Mesh3d(mesh_handle),
         MeshMaterial3d(material_handle),

@@ -1,11 +1,22 @@
 
 
-import bpy
-import math
-import os
-import bmesh
+from __future__ import annotations
 
-OUTPUT_DIR = "F:/rustProject/lastkingdom2/assets/animals"
+import math
+import sys
+from pathlib import Path
+
+import bmesh
+import bpy
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import models_lib
+
+
+_MATERIAL_CACHE = {}
+
 
 def new_object(name):
     
@@ -43,22 +54,13 @@ def add_box_bmesh(ob, loc, size):
     bm.free()
 
 def set_color(ob, r, g, b, a=1.0):
-    
-    mat = bpy.data.materials.new(name=f"Mat_{ob.name}")
-
-    nt = mat.node_tree
-
-    for n in list(nt.nodes):
-        nt.nodes.remove(n)
-    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.location = (0, 0)
-    bsdf.inputs["Base Color"].default_value = (r, g, b, a)
-    bsdf.inputs["Roughness"].default_value = 0.9
-    bsdf.inputs["Specular IOR Level"].default_value = 0.0
-    out = nt.nodes.new("ShaderNodeOutputMaterial")
-    out.location = (200, 0)
-    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-    ob.data.materials.append(mat)
+    key = (r, g, b, a)
+    material = _MATERIAL_CACHE.get(key)
+    if material is None:
+        suffix = "_".join(f"{round(component * 255):02x}" for component in key)
+        material = models_lib.mat(f"animal_{suffix}", (r, g, b), roughness=0.9, alpha=a)
+        _MATERIAL_CACHE[key] = material
+    ob.data.materials.append(material)
 
 def parent_to(parent, child, offset=(0, 0, 0)):
     
@@ -82,14 +84,7 @@ def export_glb(name):
 
     bpy.ops.object.join()
 
-    path = os.path.join(OUTPUT_DIR, f"{name}.glb")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    bpy.ops.export_scene.gltf(
-        filepath=path,
-        export_format='GLB',
-        use_selection=True,
-        export_materials='EXPORT',
-    )
+    path = models_lib.export_glb(name, collection="animals")
     print(f"  ✓ {name}.glb  ({len(root.data.vertices)} vertices)")
     return path
 
@@ -344,15 +339,7 @@ def build_rabbit():
 if __name__ == "__main__":
     print("=" * 50)
     print("开始生成动物模型...")
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    print(f"输出目录: {OUTPUT_DIR}")
-
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete()
-    for me in list(bpy.data.meshes):
-        bpy.data.meshes.remove(me)
-    for mat in list(bpy.data.materials):
-        bpy.data.materials.remove(mat)
+    print(f"output: {models_lib.output_dir('animals')}")
 
     animals = [
         ("pig",     build_pig),
@@ -365,6 +352,8 @@ if __name__ == "__main__":
     for name, builder in animals:
         print(f"\n[生成] {name} ...")
         try:
+            models_lib.clear_scene()
+            _MATERIAL_CACHE.clear()
             root = builder()
             bpy.ops.object.select_all(action='DESELECT')
             root.select_set(True)

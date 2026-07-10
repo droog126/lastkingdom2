@@ -1,47 +1,34 @@
 ---
 name: tdd-iteration
-description: Test-driven development workflow for lastkingdom2. Use when changing pure logic, rules, state machines, resources, drops, transfers, conservation, nations, monsters, animals, combat, protection periods, phase timing, CLI/protocol/network parsing, AI decisions, scenarios, tick observers, bug fixes, regressions, or any behavior that can be tested before implementation.
+description: Test-first workflow for deterministic lastkingdom2 behavior. Use when implementing or fixing rules, state machines, resource conservation, combat, phases, parsing, protocol values, AI decisions, scenarios, observer invariants, or a regression that can be reproduced with a focused automated test. Do not use for purely visual tuning or runtime-only investigation with no stable test seam.
 ---
 
 # TDD Iteration
 
 ## Workflow
 
-1. Reproduce or specify the behavior with a failing test first.
-2. Confirm the failure is for the expected reason.
-3. Implement the smallest change that makes the test pass.
-4. Add boundary tests for the risky edge.
-5. Run the narrowest relevant test scope.
-6. Summarize the failing test, fix, and validation result.
+1. Add the narrowest test that specifies the requested behavior.
+2. Run it and confirm it fails for the intended reason.
+3. Implement the smallest behavior change that passes it.
+4. Add a boundary or regression case for the risky edge.
+5. Run the focused test, then the narrowest affected package scope.
+6. Report the red test, implementation, and green validation.
 
-Prefer tests in `crates/core` because they are fastest and most stable.
+Prefer pure tests in `crates/core` when the behavior belongs to shared simulation. Do not move presentation or authority logic into core merely to make it easier to test.
 
-## Must Test
+## Required Coverage
 
-Add or update tests for:
+Test deterministic changes to:
 
-- resource add/remove/drop/transfer/conservation
-- finite resource conversions, especially "does not produce when the required source pool is empty" and "does not consume when the destination pool is full"
-- nations, monsters, animals, combat, protection periods, phase timing
-- CLI, protocol, and network parameter parsing
-- AI decisions
-- scenario progression
-- tick observer invariant checks
-- regressions for previously broken edge cases
+- resource production, consumption, transfer, caps, drops, and conservation
+- nations, monsters, animals, combat, protection periods, and phase timing
+- CLI, scenario, protocol, and network-value parsing
+- AI decisions and scenario progression
+- observer invariants and previously broken edge cases
 
-## Test-Optional Cases
-
-It is acceptable to skip test-first only for:
-
-- pure visual parameter tuning
-- temporary debug logging
-- screenshot composition, lighting, or camera angle tweaks
-
-Even for visual tasks, test any pure function, state transition, or data selection logic behind the visual.
+For Bevy scheduling or runtime wiring, keep the pure rule test here and use `$bevy-gameplay-dev` only for the runtime-specific portion.
 
 ## Commands
-
-Choose by changed surface:
 
 ```sh
 just test-core
@@ -50,17 +37,12 @@ just test-server
 just test-changed
 just test
 just audit-tdd
-just fmt
 ```
 
-Use `just test-core` for pure core changes, `just test-client` for client-only changes, `just test-server` for server-only changes, and `just test` for cross-crate or public API changes.
+Use the smallest command that covers the change. If repository-wide formatting already drifts, format only touched files and report the unrelated drift.
 
-If the whole repo already has formatting drift, format only files touched in the current task and report the remaining `cargo fmt --check` issue.
+## Test Integrity
 
-## Constraints
-
-- Do not mutate process environment variables in concurrent unit tests.
-- Avoid `unwrap()` in production code unless a local invariant makes panic intentionally correct and obvious.
-- Do not hide new warnings with broad `allow` attributes.
-- Tests must not depend on wall-clock time, random iteration order, or local machine config.
-- When behavior must be visible in a demo or screenshot, test both state variety and default placement/framing where practical. "Entity exists in state" is not enough if the proof depends on initial camera readability.
+- Do not depend on wall-clock timing, random iteration order, mutable process environment, or local machine configuration.
+- Avoid broad warning suppressions and production `unwrap()` without an intentional invariant.
+- Do not invent a brittle test solely to satisfy test-first; report when the behavior has no stable test seam and use the relevant runtime validation route.

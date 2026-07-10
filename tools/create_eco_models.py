@@ -1,88 +1,20 @@
+from __future__ import annotations
+
 import math
+import sys
 from pathlib import Path
 
 import bpy
 
-ROOT = Path(__file__).resolve().parents[1]
-OUT_DIR = ROOT / "assets" / "procedural" / "eco"
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
-def clear_scene():
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.delete()
+import models_lib
+from models_lib import clear_scene, cone, cube, mat, uv_sphere
 
-def mat(name, color, roughness=0.8, alpha=1.0):
-    material = bpy.data.materials.new(name)
-    material.use_nodes = True
-    bsdf = next(
-        (node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED"),
-        None,
-    )
-    if bsdf is None:
-        bsdf = material.node_tree.nodes.new(type="ShaderNodeBsdfPrincipled")
-    bsdf.inputs["Base Color"].default_value = (color[0], color[1], color[2], alpha)
-    bsdf.inputs["Roughness"].default_value = roughness
-    if alpha < 1.0:
-        bsdf.inputs["Alpha"].default_value = alpha
-        material.blend_method = "BLEND"
-        material.use_screen_refraction = True
-    return material
 
-def shade_flat(obj):
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.object.shade_flat()
-    obj.select_set(False)
-
-def shade_smooth(obj):
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.object.shade_smooth()
-    obj.select_set(False)
-
-def cube(name, loc, scale, material):
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=loc)
-    obj = bpy.context.object
-    obj.name = name
-    obj.scale = scale
-    obj.data.materials.append(material)
-    shade_flat(obj)
-    return obj
-
-def uv_sphere(name, loc, scale, material, segments=16, rings=8):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, radius=1.0, location=loc)
-    obj = bpy.context.object
-    obj.name = name
-    obj.scale = scale
-    obj.data.materials.append(material)
-    shade_smooth(obj)
-    return obj
-
-def cone(name, loc, radius1, radius2, depth, material, vertices=8):
-    bpy.ops.mesh.primitive_cone_add(
-        vertices=vertices,
-        radius1=radius1,
-        radius2=radius2,
-        depth=depth,
-        location=loc,
-    )
-    obj = bpy.context.object
-    obj.name = name
-    obj.data.materials.append(material)
-    shade_flat(obj)
-    return obj
-
-def export_glb(name):
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUT_DIR / f"{name}.glb"
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.export_scene.gltf(
-        filepath=str(path),
-        export_format="GLB",
-        use_selection=True,
-        export_apply=True,
-        export_materials="EXPORT",
-    )
-    print(f"exported {path}")
+def export_glb(name: str):
+    return models_lib.export_glb(name, collection="eco")
 
 def make_rabbit():
     clear_scene()

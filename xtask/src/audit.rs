@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
@@ -73,14 +74,25 @@ pub fn tdd(root: &Path) -> Result<()> {
     if !audit_root.exists() {
         return Err("Missing audit root: crates/core/src".to_string());
     }
+    let lib_text = fs::read_to_string(audit_root.join("lib.rs")).map_err(|e| e.to_string())?;
+    let experimental_modules = feature_gated_modules(&lib_text, "experimental-gameplay");
     let mut rows = Vec::new();
+    let mut experimental_rows = Vec::new();
     for file in find_files(&audit_root, |p| {
         p.extension().and_then(OsStr::to_str) == Some("rs")
     })? {
         let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-        rows.push((rel(root, &file), text.matches("#[test]").count()));
+        let row = (rel(root, &file), count_unit_tests(&text));
+        let is_experimental = top_level_module_name(&audit_root, &file)
+            .is_some_and(|module| experimental_modules.contains(&module));
+        if is_experimental {
+            experimental_rows.push(row);
+        } else {
+            rows.push(row);
+        }
     }
     let total_tests: usize = rows.iter().map(|row| row.1).sum();
+    let experimental_tests: usize = experimental_rows.iter().map(|row| row.1).sum();
     println!("# TDD audit\n");
     println!("root: crates/core/src");
     println!("files: {}", rows.len());
@@ -92,7 +104,8 @@ pub fn tdd(root: &Path) -> Result<()> {
         "files_without_tests: {}",
         rows.iter().filter(|row| row.1 == 0).count()
     );
-    println!("unit_tests_found: {total_tests}\n");
+    println!("unit_tests_found_default: {total_tests}");
+    println!("unit_tests_experimental: {experimental_tests}\n");
     println!("## Modules without direct unit tests");
     for (file, _) in rows.iter().filter(|row| row.1 == 0) {
         println!("- {file}");
@@ -102,10 +115,128 @@ pub fn tdd(root: &Path) -> Result<()> {
     for (file, tests) in &rows {
         println!("- {file}: {tests}");
     }
+    println!("\n## Experimental modules excluded from the default test surface");
+    experimental_rows.sort_by(|a, b| a.0.cmp(&b.0));
+    if experimental_rows.is_empty() {
+        println!("- none");
+    } else {
+        for (file, tests) in &experimental_rows {
+            println!("- {file}: {tests}");
+        }
+    }
+
+    println!("\n## Top-level modules without runtime references outside themselves");
+    let unreferenced =
+        top_level_modules_without_runtime_references(root, &audit_root, &experimental_modules)?;
+    if unreferenced.is_empty() {
+        println!("- none");
+    } else {
+        for module in unreferenced {
+            println!("- {module}");
+        }
+    }
     if total_tests == 0 {
         return Err("no unit tests found".to_string());
     }
     Ok(())
+}
+
+fn count_unit_tests(text: &str) -> usize {
+    text.lines().filter(|line| line.trim() == "#[test]").count()
+}
+
+fn feature_gated_modules(lib_text: &str, feature: &str) -> HashSet<String> {
+    let gate = format!("#[cfg(feature = \"{feature}\")]");
+    let mut modules = HashSet::new();
+    let mut gated = false;
+    for line in lib_text.lines() {
+        let trimmed = line.trim();
+        if trimmed == gate {
+            gated = true;
+            continue;
+        }
+        if gated && trimmed.starts_with("pub mod ") {
+            let name = trimmed.trim_start_matches("pub mod ").trim_end_matches(';').trim();
+            if !name.is_empty() {
+                modules.insert(name.to_string());
+            }
+        }
+        if !trimmed.is_empty() && !trimmed.starts_with("#[") {
+            gated = false;
+        }
+    }
+    modules
+}
+
+fn top_level_module_name(audit_root: &Path, file: &Path) -> Option<String> {
+    let relative = file.strip_prefix(audit_root).ok()?;
+    let first = relative.components().next()?.as_os_str().to_str()?;
+    if first == "lib.rs" {
+        return None;
+    }
+    Some(first.strip_suffix(".rs").unwrap_or(first).to_string())
+}
+
+fn production_prefix(text: &str) -> &str {
+    text.split_once("#[cfg(test)]").map_or(text, |(production, _)| production)
+}
+
+fn runtime_reference_count(module: &str, sources: &[String]) -> usize {
+    let patterns = [
+        format!("lk2_core::{module}"),
+        format!("crate::{module}"),
+        format!("super::{module}"),
+    ];
+    sources
+        .iter()
+        .map(|source| {
+            let production = production_prefix(source);
+            patterns.iter().map(|pattern| production.matches(pattern).count()).sum::<usize>()
+        })
+        .sum()
+}
+
+fn top_level_modules_without_runtime_references(
+    root: &Path,
+    audit_root: &Path,
+    experimental_modules: &HashSet<String>,
+) -> Result<Vec<String>> {
+    let mut modules = HashSet::new();
+    for file in find_files(audit_root, |p| {
+        p.extension().and_then(OsStr::to_str) == Some("rs")
+    })? {
+        if let Some(module) = top_level_module_name(audit_root, &file) {
+            if !experimental_modules.contains(&module) {
+                modules.insert(module);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for module in modules {
+        let mut sources = Vec::new();
+        for source_root in [
+            root.join("crates/core/src"),
+            root.join("crates/client/src"),
+            root.join("crates/server/src"),
+        ] {
+            for file in find_files(&source_root, |p| {
+                p.extension().and_then(OsStr::to_str) == Some("rs")
+            })? {
+                if file.starts_with(audit_root)
+                    && top_level_module_name(audit_root, &file).as_deref() == Some(module.as_str())
+                {
+                    continue;
+                }
+                sources.push(fs::read_to_string(file).map_err(|e| e.to_string())?);
+            }
+        }
+        if runtime_reference_count(&module, &sources) == 0 {
+            out.push(module);
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
 pub fn architecture(root: &Path) -> Result<()> {
@@ -144,6 +275,174 @@ pub fn architecture(root: &Path) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+pub fn skills(root: &Path) -> Result<()> {
+    let skills_root = root.join(".codex/skills");
+    if !skills_root.exists() {
+        return Err("Missing skills root: .codex/skills".to_string());
+    }
+
+    let agents_text = fs::read_to_string(root.join("AGENTS.md")).map_err(|e| e.to_string())?;
+    let mut issues = Vec::new();
+    let mut skill_count = 0_usize;
+    for entry in fs::read_dir(&skills_root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        let Some(dir_name) = dir.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        let skill_path = dir.join("SKILL.md");
+        let metadata_path = dir.join("agents/openai.yaml");
+        if !skill_path.exists() || !metadata_path.exists() {
+            issues.push(format!(
+                ".codex/skills/{dir_name}: SKILL.md and agents/openai.yaml are required"
+            ));
+            continue;
+        }
+        skill_count += 1;
+        let skill_text = fs::read_to_string(&skill_path).map_err(|e| e.to_string())?;
+        let metadata_text = fs::read_to_string(&metadata_path).map_err(|e| e.to_string())?;
+        issues.extend(validate_skill_contract(
+            dir_name,
+            &skill_text,
+            &metadata_text,
+            &agents_text,
+        ));
+    }
+
+    println!("# Skill contract audit\n");
+    println!("skills: {skill_count}");
+    if issues.is_empty() {
+        println!("OK: skill frontmatter, metadata, and AGENTS routes are complete");
+        Ok(())
+    } else {
+        for issue in &issues {
+            println!("FAIL: {issue}");
+        }
+        Err(format!(
+            "Skill contract audit failed with {} issue(s)",
+            issues.len()
+        ))
+    }
+}
+
+fn parse_skill_frontmatter(text: &str) -> Result<(String, String)> {
+    let mut lines = text.lines();
+    if lines.next() != Some("---") {
+        return Err("SKILL.md must start with YAML frontmatter".to_string());
+    }
+
+    let mut name = None;
+    let mut description = None;
+    let mut closed = false;
+    for line in lines.by_ref() {
+        if line == "---" {
+            closed = true;
+            break;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            return Err(format!("invalid frontmatter line: {line}"));
+        };
+        let key = key.trim();
+        if !matches!(key, "name" | "description") {
+            return Err(format!("frontmatter field {key} is not allowed"));
+        }
+        let value = value.trim();
+        if value.is_empty()
+            || value.starts_with('[')
+            || value.starts_with('{')
+            || value.starts_with('|')
+            || value.starts_with('>')
+            || value.to_ascii_uppercase().contains("TODO")
+        {
+            return Err(format!(
+                "frontmatter {key} must be a completed scalar value"
+            ));
+        }
+        let value = value.trim_matches('"').trim_matches('\'').to_string();
+        match key {
+            "name" if name.is_none() => name = Some(value),
+            "description" if description.is_none() => description = Some(value),
+            _ => return Err(format!("frontmatter field {key} is duplicated")),
+        }
+    }
+
+    if !closed {
+        return Err("SKILL.md frontmatter is missing its closing ---".to_string());
+    }
+
+    match (name, description) {
+        (Some(name), Some(description)) => Ok((name, description)),
+        _ => Err("SKILL.md frontmatter requires name and description".to_string()),
+    }
+}
+
+fn validate_skill_contract(
+    dir_name: &str,
+    skill_text: &str,
+    metadata_text: &str,
+    agents_text: &str,
+) -> Vec<String> {
+    let mut issues = Vec::new();
+    match parse_skill_frontmatter(skill_text) {
+        Ok((name, _)) if name != dir_name => issues.push(format!(
+            ".codex/skills/{dir_name}/SKILL.md name is {name}, expected {dir_name}"
+        )),
+        Ok(_) => {}
+        Err(err) => issues.push(format!(".codex/skills/{dir_name}/SKILL.md: {err}")),
+    }
+    let upper_skill = skill_text.to_ascii_uppercase();
+    if upper_skill.contains("[TODO")
+        || upper_skill.lines().any(|line| line.trim_start().starts_with("TODO:"))
+        || skill_text.contains("Structuring This Skill")
+    {
+        issues.push(format!(
+            ".codex/skills/{dir_name}/SKILL.md contains unfinished TODO scaffold text"
+        ));
+    }
+    if !metadata_text.contains("display_name:")
+        || !metadata_text.contains("short_description:")
+        || !metadata_text.contains("default_prompt:")
+        || !metadata_text.contains(&format!("${dir_name}"))
+    {
+        issues.push(format!(
+            ".codex/skills/{dir_name}/agents/openai.yaml is incomplete or lacks ${dir_name}"
+        ));
+    }
+    if let Some(short_description) = metadata_scalar(metadata_text, "short_description") {
+        let len = short_description.chars().count();
+        if !(25..=64).contains(&len) {
+            issues.push(format!(
+                ".codex/skills/{dir_name}/agents/openai.yaml short_description must be 25-64 characters, got {len}"
+            ));
+        }
+    }
+    if !agents_text.contains(&format!("${dir_name}")) {
+        issues.push(format!(
+            "AGENTS.md is missing the ${dir_name} routing entry"
+        ));
+    }
+    let expected_path = format!(".codex/skills/{dir_name}/SKILL.md");
+    if !agents_text.contains(&expected_path) {
+        issues.push(format!(
+            "AGENTS.md is missing the {expected_path} skill path"
+        ));
+    }
+    issues
+}
+
+fn metadata_scalar(text: &str, key: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let (candidate, value) = line.trim().split_once(':')?;
+        (candidate == key).then(|| value.trim().trim_matches('"').trim_matches('\'').to_string())
+    })
 }
 
 pub fn visual(root: &Path) -> Result<()> {
@@ -316,5 +615,107 @@ mod tests {
             out.contains(".harness/KNOWN_ISSUES.md"),
             "missing reference to KNOWN_ISSUES.md:\n{out}"
         );
+    }
+
+    #[test]
+    fn unit_test_counter_ignores_string_literals_and_comments() {
+        let source = r##"
+#[test]
+fn real_test() {}
+const EXAMPLE: &str = "#[test]";
+// #[test]
+"##;
+        assert_eq!(count_unit_tests(source), 1);
+    }
+
+    #[test]
+    fn experimental_module_parser_finds_only_immediately_gated_modules() {
+        let source = r#"
+#[cfg(feature = "experimental-gameplay")]
+pub mod equipment;
+pub mod match_state;
+#[cfg(feature = "different")]
+pub mod other;
+#[cfg(feature = "experimental-gameplay")]
+pub mod mining_site;
+"#;
+        let modules = feature_gated_modules(source, "experimental-gameplay");
+        assert_eq!(
+            modules,
+            HashSet::from(["equipment".into(), "mining_site".into()])
+        );
+    }
+
+    #[test]
+    fn runtime_reference_counter_ignores_cfg_test_tail() {
+        let sources = vec![
+            "use lk2_core::resource::GlobalResourcePool;".to_string(),
+            "#[cfg(test)]\nmod tests { use lk2_core::resource::ResourceKind; }".to_string(),
+        ];
+        assert_eq!(runtime_reference_count("resource", &sources), 1);
+    }
+
+    #[test]
+    fn skill_frontmatter_requires_scalar_name_and_description() {
+        let valid = r#"---
+name: game-logic-audit
+description: Audit game logic without modifying the repository.
+---
+
+# Game Logic Audit
+"#;
+        assert_eq!(
+            parse_skill_frontmatter(valid).unwrap(),
+            (
+                "game-logic-audit".to_string(),
+                "Audit game logic without modifying the repository.".to_string()
+            )
+        );
+
+        let scaffold = r#"---
+name: game-logic-audit
+description: [TODO: explain this skill]
+---
+"#;
+        assert!(parse_skill_frontmatter(scaffold).is_err());
+    }
+
+    #[test]
+    fn skill_frontmatter_rejects_extra_fields_and_unclosed_blocks() {
+        let extra = r#"---
+name: game-logic-audit
+description: Audit game logic without modifying the repository.
+metadata: not-allowed
+---
+"#;
+        assert!(parse_skill_frontmatter(extra).is_err());
+
+        let unclosed = r#"---
+name: game-logic-audit
+description: Audit game logic without modifying the repository.
+"#;
+        assert!(parse_skill_frontmatter(unclosed).is_err());
+    }
+
+    #[test]
+    fn skill_contract_rejects_scaffolds_and_missing_routes() {
+        let skill = r#"---
+name: game-logic-audit
+description: Audit game logic without modifying the repository.
+---
+
+# Game Logic Audit
+
+[TODO: replace this scaffold]
+"#;
+        let metadata = r#"interface:
+  display_name: "Game Logic Audit"
+  short_description: "Audit runtime game logic"
+  default_prompt: "Use $game-logic-audit to audit game logic."
+"#;
+        let issues = validate_skill_contract("game-logic-audit", skill, metadata, "# AGENTS.md\n");
+        assert!(issues.iter().any(|issue| issue.contains("TODO")));
+        assert!(issues.iter().any(|issue| issue.contains("routing entry")));
+        assert!(issues.iter().any(|issue| issue.contains("skill path")));
     }
 }

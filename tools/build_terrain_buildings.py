@@ -4,8 +4,7 @@ topographic, explicit y=0 ground anchor).
 Style: v6-balanced cute (candy colors + emissive + smooth spheres).
 Output: assets/procedural/pretty/
 
-Run:
-    & "F:\\BLENDER\\blender-launcher.exe" --background --python tools\\build_terrain_buildings.py
+Run through `python tools/model_pipeline.py build --generator build_terrain_buildings.py`.
 """
 from __future__ import annotations
 
@@ -212,7 +211,7 @@ def make_lake() -> None:
         uv_sphere(f"lily_pad_{sx}", (sx, 0.10, sz), (0.20, 0.04, 0.20), grass_dark, 10, 5)
         uv_sphere(f"lily_flower_{sx}", (sx, 0.13, sz), (0.07, 0.07, 0.07), lily, 8, 6)
 
-    export_glb("lake")
+    raise RuntimeError("lake is owned by build_sokpop_style_pass.py")
 
 
 def make_swamp() -> None:
@@ -253,7 +252,7 @@ def make_swamp() -> None:
     cone("mush_cap2", (-0.65, 0.40, 0.50), 0.13, 0.0, 0.13, mush_cap, vertices=10)
     uv_sphere("mush_glow2", (-0.65, 0.48, 0.50), (0.08, 0.05, 0.08), mush_cap, 10, 5)
 
-    export_glb("swamp")
+    raise RuntimeError("swamp is owned by build_sokpop_style_pass.py")
 
 
 def make_cliff() -> None:
@@ -380,7 +379,7 @@ def make_beach() -> None:
               glow_mat("beach_shell_dot", (1.0, 1.0, 0.85), glow_strength=0.95), 8, 5)
     cone("shell2", (1.20, 0.15, 0.30), 0.13, 0.0, 0.10, shell, vertices=6)
 
-    export_glb("beach")
+    raise RuntimeError("beach is owned by build_sokpop_style_pass.py")
 
 
 # =============================================================== BUILDINGS v2
@@ -766,16 +765,10 @@ def main() -> None:
     make_volcano()
     print("[3/8] desert_dune")
     make_desert_dune()
-    print("[4/8] lake")
-    make_lake()
-    print("[5/8] swamp")
-    make_swamp()
-    print("[6/8] cliff")
+    print("[4/5] cliff")
     make_cliff()
-    print("[7/8] cave_entrance")
+    print("[5/5] cave_entrance")
     make_cave_entrance()
-    print("[8/8] beach")
-    make_beach()
 
     print("\n--- buildings (9) ---")
     print("[1/9] house_small")
@@ -799,8 +792,7 @@ def main() -> None:
 
     new_assets = {
         "terrain": [
-            "mountain_snow", "volcano", "desert_dune", "lake", "swamp",
-            "cliff", "cave_entrance", "beach",
+            "mountain_snow", "volcano", "desert_dune", "cliff", "cave_entrance",
         ],
         "buildings": [
             "house_small", "watchtower", "windmill", "bridge_stone", "well",

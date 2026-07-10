@@ -1,75 +1,58 @@
 ---
 name: ai-modeling
-description: Reproducible AI 3D modeling workflow for lastkingdom2 assets. Use when creating, modifying, validating, or wiring Blender-generated GLB assets, procedural models, asset manifests, tools/build_*.py scripts, assets/procedural/pretty, assets/procedural/eco, animals, terrain buildings, poly budgets, or Bevy asset-server model references.
+description: Reproducible 3D asset workflow for lastkingdom2. Use when creating, modifying, validating, previewing, or wiring Blender-generated GLBs, procedural models, tools/build_*.py generators, assets/procedural manifests, animals, terrain buildings, materials, scale, orientation, or poly budgets. Use closed-loop validation only after an asset is placed in the game.
 ---
 
 # AI Modeling
 
-## Rule
+## Contract
 
-Create and modify 3D models through reproducible scripts under `tools/`. Do not make unrepeatable manual Blender edits and commit only the exported result.
+Generate committed 3D assets from deterministic scripts under `tools/`. Do not make an unrepeatable manual Blender edit and commit only the exported GLB.
 
-## Style Guardrails
+## Visual Priorities
 
-For stylized low-poly assets, keep models simple, grounded, and structurally readable before adding detail.
+1. Establish silhouette, proportions, stance, contact points, and target-camera readability.
+2. Ensure connected parts visibly connect and intersections look intentional.
+3. Add one or two identity cues only after the base form reads correctly.
+4. Use simple matte materials with clear role-based color separation.
+5. Reject placeholder, debug, calibration, floating, or generic display-base geometry from production manifests.
 
-- Treat the first pass as a silhouette test, not as asset completion. A model is not acceptable just because it exports; it must read as the intended object in a preview at the target viewing scale.
-- Start with the primary silhouette and proportions: major forms, contact points, centerline, and stance must read correctly from the target camera before adding accessories.
-- Prefer a few clear primitive forms over many small decorative pieces. If a model needs many small parts to communicate the idea, simplify the idea first.
-- Ensure connected parts visibly connect or deliberately overlap. Avoid floating pieces, exposed gaps, hidden sockets, or large primitives intersecting in ways that look accidental.
-- Use proportions that match the chosen style before adding identity details. For simplified characters, prefer compact readable forms over thin anatomy, dangling parts, or proportions that fight the style.
-- Add identity details only after the base form works: one clear prop, one color accent, or one readable accessory is better than layered small features.
-- Keep colors matte, moderately saturated, and separated by role. Do not rely on bright lighting, tiny texture-like marks, or subtle shading to make a form readable.
-- For environment props, avoid generic display bases unless the asset is explicitly a marker or UI object. Use footprint, volume, and local details that make the asset feel placeable in the target scene.
-- Do not leave sample, placeholder, debug, or calibration assets in production manifests. Keep formal asset lists limited to assets intended for actual use.
-- When iterating after screenshot feedback, fix the structural problem directly instead of compensating with unrelated details.
-- Generate a preview render or use the model preview system after export, and self-check for scale, alignment, visible gaps, unwanted intersections, material readability, and whether the model still reads at target size.
-- If an old generator can recreate a retired asset, update or disable that entry point in the same change. Removing only the GLB is not enough.
-- When generated assets are wired into runtime content, judge them in the actual target camera and layout. A model that reads in isolation can still fail when scale, placement, or occlusion changes.
-- Prefer asset scale and placement that make important state visually inspectable at normal screenshot scale without relying only on metadata or UI counts.
-
-## Blender
-
-Cross-platform command shape:
-
-```sh
-blender --background --python tools/build_all_models.py
-```
-
-On this Windows workstation, Blender is available as `F:\BLENDER\blender-launcher.exe`; use it as a local substitute for `blender` when needed. Use the same command shape for project-specific generators such as `tools/build_models_v4.py`, `tools/build_animals_blender.py`, or a new focused script.
-
-## Asset Placement
-
-- Prefer new generated models in `assets/procedural/pretty/` or `assets/procedural/eco/`.
-- Put generation scripts in `tools/`.
-- Update the corresponding `MANIFEST.json` when adding, replacing, or renaming generated assets.
-- Reference models in Rust using Bevy asset-server repo-relative paths, never local absolute paths.
+Prefer a few readable primitives over many small details. Fix structural feedback directly instead of compensating with decoration or lighting.
 
 ## Workflow
 
-1. Inspect existing nearby model scripts and manifests.
-2. Add or update a deterministic Python generator in `tools/`.
-3. Generate assets with Blender in background mode.
-4. Validate exported GLBs and poly budgets.
-5. Render or open a contact sheet/model preview and critique the actual pixels for placeholder feel, material readability, proportions, orientation, missing materials, and disconnected parts.
-6. Wire assets in code only after filenames and manifest entries are stable.
-7. Run a closed-loop iteration when the change affects visible game output.
+1. Read `tools/AGENTS.md` and run `python tools/audit_model_generators.py`.
+2. Find the asset's single owner in `tools/model_catalog.py`; do not add a competing generator.
+3. Add reusable Blender operations to `tools/models_lib.py`, then update the deterministic owner script.
+4. Build through `python tools/model_pipeline.py build --asset <stem>`.
+5. Run `python tools/model_pipeline.py validate`, then sync manifests after filenames stabilize.
+6. Produce a non-interactive preview and inspect the pixels for silhouette, scale, alignment, gaps, intersections, orientation, and materials.
+7. Stabilize filenames and manifests before wiring repo-relative Bevy asset paths.
+8. If the model is placed in gameplay, validate it in the target camera with `$closed-loop-ai-dev`.
 
-## Validation
+If a retired asset can still be regenerated, update or disable its generator entry in the same change.
 
-Run these after generation when they apply:
+## Preview Commands
+
+Use an auto-exiting command for agent validation:
 
 ```sh
-python tools/validate_pretty_glbs.py
-python tools/verify_poly_budget.py
+just model-preview-shot <model-stem>
+just model-preview-all-only <model-stem>
 ```
 
-For visual/model placement changes, also use `$closed-loop-ai-dev`.
+`just model-preview` is an interactive showroom and does not exit automatically. Run it only when the user wants an interactive window.
 
-## Do Not Commit
+## Generation And Validation
 
-- `__pycache__/`
-- temporary export files
-- Blender auto-backup files
-- local absolute-path configuration
-- generated screenshots or logs unless explicitly requested
+Use `blender` from `PATH` or an explicitly configured local Blender executable:
+
+```sh
+blender --background --python tools/<generator>.py
+python tools/audit_model_generators.py
+python tools/validate_pretty_glbs.py
+python tools/verify_poly_budget.py
+python tools/model_pipeline.py validate
+```
+
+Run only commands applicable to the changed asset set. Do not commit temporary exports, preview screenshots, logs, Blender backups, `__pycache__`, or local absolute-path configuration unless explicitly requested.

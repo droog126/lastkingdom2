@@ -11,11 +11,12 @@ import bpy
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+from model_style import TEMP_PREVIEW_DIR
 from models_lib import OUT_DIR, clear_scene, export_glb, mat, shade_flat
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PREVIEW_PATH = Path("D:/Temp/granular_flora_preview.png")
+PREVIEW_PATH = TEMP_PREVIEW_DIR / "granular_flora.png"
 
 
 def make_mat(name: str, color, roughness: float = 0.94, alpha: float = 1.0):

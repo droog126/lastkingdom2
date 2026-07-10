@@ -1,119 +1,50 @@
 ---
 name: skill-sedimentation
-description: Convert repeated agent failures, bug-prone workflows, sedimentation/"沉淀" requests, postmortems, recurring validation gaps, or "next time do not repeat this mistake" feedback into reusable Codex skills. Use when the user asks to codify lessons, write routing rules, create a new problem-solving skill, update AGENTS.md skill routing, or turn a concrete mistake such as Bevy resource leaks, missing runtime validation, log spam, stale builds, or dirty-worktree confusion into durable project instructions.
+description: Audit and improve reusable Codex instructions for lastkingdom2. Use when the user explicitly asks to sediment/沉淀 lessons, codify a repeated failure, create or update a skill, change AGENTS.md routing, optimize agent rules, or make future agents stop repeating a documented workflow mistake. Do not mutate skills merely because an ordinary task failed.
 ---
 
 # Skill Sedimentation
 
-## Purpose
+## Authorization Boundary
 
-Turn a concrete failure pattern into durable routing plus an operational skill. Prefer updating an existing skill when the lesson is narrow; create a new skill when the pattern is reusable, cross-cutting, and needs its own trigger surface.
+- If the user explicitly requests skill or routing changes, implement them.
+- If an ordinary task only reveals a possible reusable lesson, report a `sedimentation_candidate` without editing skills or `AGENTS.md`.
+- Do not turn a one-off workaround, local machine detail, or isolated typo into a project skill.
 
-## Trigger Logic
+## Classification
 
-Trigger this skill when the current request or recent conversation has at least one hard trigger or a score of 3 or more from the weighted signals below.
-
-Hard triggers:
-
-- The user explicitly asks to "sediment", "沉淀", "codify", "write a skill", "create a skill", "update skill routing", "turn this into a reusable rule", "do not repeat this next time", or equivalent wording.
-- The user complains about repeated agent mistakes, missing validation, poor process memory, or asks why the same class of bug keeps happening.
-- A completed or failed task reveals a reusable workflow gap that should change future agent behavior, not only the current code.
-
-Weighted signals:
-
-- +2: the same failure mode happened more than once, or the user says it is recurring.
-- +2: the issue crosses more than one existing route, such as Bevy plus closed-loop validation.
-- +2: the failure was caused by process, validation, or routing, not by a single typo.
-- +1: the evidence includes stable trigger text, log patterns, file paths, commands, or code smells.
-- +1: the fix requires a checklist or required command sequence future agents should follow.
-- +1: the current skill descriptions do not already mention the trigger clearly.
-
-Do not trigger:
-
-- The user only asks to fix one concrete bug and does not ask for process codification.
-- The lesson is a temporary workaround, local environment detail, or one-off fact.
-- The right change is simply adding a test or editing code under an already-triggered skill.
-
-When triggered, first produce a route classification:
+Before editing, record a concise working classification:
 
 ```text
 sedimentation_trigger:
-- evidence: <user phrase/log/file/failed validation>
-- failure_mode: <process gap>
-- route: update existing skill | create new skill
-- target_skill: <skill-name>
-- composition: <other skills to combine>
+- evidence: <repeated failure, explicit request, or stable artifact>
+- failure_mode: <routing, process, validation, or domain gap>
+- route: update existing skill | complete existing draft | create new skill
+- target_skill: <name>
 ```
 
-Then perform the workflow below. Keep the classification concise; it is a working note, not a postmortem document.
+Prefer updating an existing skill. Create a new skill only when the user explicitly requests it or when repeated evidence shows a distinct workflow with stable triggers that cannot fit an existing route.
 
 ## Workflow
 
-1. Reconstruct the failure from concrete evidence:
-   - user feedback
-   - prior assistant actions
-   - failing logs, commands, screenshots, diffs, or tests
-   - files touched and validation skipped or failed
-2. Classify the lesson before editing:
-   - domain: local development, TDD/rules, Bevy gameplay/rendering, closed-loop screenshots, screenshot scoring, asset/model generation, automation, git hygiene, or meta-skill creation
-   - failure mode: missing first-read, wrong API assumption, resource lifecycle leak, incomplete validation, stale binary, log spam, visual evidence gap, dirty-worktree confusion, or unsafe workflow
-   - trigger signals: exact user phrases, log patterns, file paths, commands, or code smells that should activate the new or updated skill
-3. Decide update vs create:
-   - Update an existing skill when the lesson belongs cleanly to one existing route.
-   - Create a new skill when at least two existing routes need the same guardrail, the user explicitly asks for a new skill, or the lesson needs its own intent recognition.
-   - Do not create a skill for one-off facts, temporary workarounds, or broad advice without an executable workflow.
-4. Implement the route:
-   - Add or update `.codex/skills/<skill-name>/SKILL.md`.
-   - Add `agents/openai.yaml` with a short display name, short description, and default prompt.
-   - Update `AGENTS.md` routing and composition rules when this is a project-level skill.
-   - Update active docs only if the new skill changes human-facing workflow. Do not edit archive docs.
-5. Validate:
-   - Run the skill validator from the system `skill-creator` skill when available:
-     `python C:\Users\98185\.codex\skills\.system\skill-creator\scripts\quick_validate.py <skill-dir>`
-   - Read the generated `SKILL.md` and verify the frontmatter description contains all trigger conditions.
-   - Check `AGENTS.md` mentions the new skill path when project routing is required.
+1. Reconstruct the problem from user feedback, logs, diffs, skipped validation, or repeated outcomes.
+2. Identify the smallest instruction change that prevents the same class of failure.
+3. Keep `AGENTS.md` to routing and composition; keep operational detail in `SKILL.md`.
+4. Ensure frontmatter describes both capability and all trigger conditions.
+5. Update `agents/openai.yaml` so its prompt and UI text match the skill.
+6. Update active human documentation only when the human-facing workflow changes.
+7. Run `just audit-skills` and the narrowest tests for any changed automation.
 
-## New Skill Contract
+Use the system `$skill-creator` skill for skill structure and metadata rules.
 
-Every new problem-solving skill must include:
+## Guardrails
 
-- Frontmatter with only `name` and `description`.
-- A description that names the task and the trigger conditions. The body is too late for intent recognition.
-- A compact workflow with required first reads, implementation rules, validation commands, and completion criteria.
-- Concrete log/code/user-message trigger examples when relevant.
-- Clear composition guidance if the skill should be combined with existing skills.
-
-Avoid:
-
-- generic "be careful" advice
-- README or extra docs inside the skill
-- broad refactors while creating the skill
-- scripts unless the workflow repeats deterministic operations that agents would otherwise rewrite
-
-## Project Routing Pattern
-
-For this repository, use these routing edits in `AGENTS.md`:
-
-- Add the skill under `Skill Routing` with a one-line "Use `$skill-name` for ..." rule.
-- Add composition rules only when the skill must be combined with another skill.
-- Add the path under `Skill Files`.
-- Keep `AGENTS.md` a routing table. Put operational details in the skill itself.
-
-## Skill Naming
-
-Use short lowercase hyphen-case names. Prefer names that identify the failure class:
-
-- `bevy-resource-lifecycle`
-- `runtime-validation`
-- `loop-artifact-triage`
-- `git-worktree-hygiene`
-- `log-spam-control`
+- Select one primary skill and at most one validation companion in routing examples.
+- Keep historical incidents out of always-loaded skill bodies when a test, `xtask` assertion, or optional reference can carry them.
+- Do not place unfinished templates or TODO scaffolds under `.codex/skills/`.
+- Keep review/audit skills read-only unless their description explicitly covers implementation and the user requested it.
+- Do not duplicate machine-checkable thresholds in prose; make automation the source of truth.
 
 ## Completion
 
-Finish only after:
-
-- the skill file exists or the existing skill has been updated
-- route classification is reflected in `AGENTS.md` when project-level routing is needed
-- validation has passed, or the validation blocker is stated with the exact command and error
-- the final response names the created/updated skill and the trigger it now handles
+Finish only when the route, skill body, metadata, and active docs agree; `just audit-skills` passes; and validation blockers are reported exactly.

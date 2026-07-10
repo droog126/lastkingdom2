@@ -1,6 +1,6 @@
 {
-  "version": 8,
-  "spec": "procedural generated GLB manifest, synced from assets/procedural/pretty",
+  "version": 9,
+  "spec": "lk2-sokpop-toy-v1 canonical generated GLBs",
   "format": "glb",
   "assets": {
     "pretty": [
@@ -82,12 +82,17 @@
       "haystack",
       "cauldron",
       "cooking_station",
-      "spit_roast",
+      "spit_roast"
+    ],
+    "weapons": [
       "sword",
       "hoplite_reaper_scythe",
       "hoplite_dragon_katana",
       "hoplite_golem_hammer",
       "hoplite_midas_sword"
+    ],
+    "bosses": [
+      "hoplite_ender_dragon"
     ],
     "creatures": [
       "villager",

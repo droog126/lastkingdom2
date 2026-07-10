@@ -1,24 +1,57 @@
-# docs/
+<!-- doc-status: current -->
+# Documentation map
 
-Documentation is grouped by purpose.
+Documents are classified by the first-line `doc-status` marker:
 
-- Root `AGENTS.md` routes agent work to project skills.
-- `.codex/skills/*/SKILL.md` contains detailed agent operating rules.
-- `architecture/engineering-baseline.md` is the active engineering baseline.
-- `STARTING.md` is the current run guide.
+- `current`: maintained workflow or engineering fact; checked by `just audit-docs`.
+- `reference`: useful background that may not match the current code.
+- `proposal`: an uncommitted plan; revalidate it before implementation.
+- `docs/archive/`: historical imports and completed migrations; not audited as current guidance.
 
-- `architecture/` - engineering boundaries, system architecture, refactor plans.
-- `plans/` - near-term and feature-specific implementation plans.
-- `design/` - gameplay, world, content, and product design notes.
-- `notes/` - working notes, TDD backlog, starting guide, imported practical notes.
-- `archive/` - historical imports, drift reports, and material kept for reference.
+## Current documents
 
-Start with:
+- [Run guide](STARTING.md)
+- [Engineering baseline](architecture/engineering-baseline.md)
+- [TDD workflow](notes/tdd.md)
+- [Closed-loop contract](plans/closed-loop-iteration.md)
 
-- `../AGENTS.md`
-- `architecture/engineering-baseline.md`
-- `STARTING.md`
-- `plans/closed-loop-iteration.md`
-- `notes/tdd.md`
+Agent routing lives in [AGENTS.md](../AGENTS.md), with operational instructions under
+[project skills](../.codex/skills/). Code, Cargo metadata, `justfile`, and `xtask` behavior take
+precedence when a current document drifts.
 
-When old plans mention `loop.ps1`, root PowerShell workflow scripts, `minecraft_bevy`, `launchers/`, or `scripts/` as the workflow runtime, treat that as historical unless an active skill or baseline file says otherwise. Current durable workflow automation lives in Rust `xtask`, with `justfile` as the short command layer.
+## Reference documents
+
+- [Architecture snapshot](architecture/architecture.md)
+- [Game architecture snapshot](architecture/game.md)
+- [Server target architecture](architecture/server.md)
+- [Content design](design/content.md)
+- [Gameplay design](design/gameplay-v1.md)
+- [Imported ECS implementation proposal](design/kimi-gameplay.md)
+- [Product and architecture vision](design/overview.md)
+- [Developer notes](notes/dev-notes.md)
+- [Blender export notes](notes/document-notes/blender-export-and-character-workflow.md)
+- [Kenney asset ingest](assets/kenney-ingest.md)
+
+## Proposals
+
+- [Architecture evolution plan](architecture/architecture_plan_v2.md)
+- [Configurable terrain plan](plans/configurable-terrain.md)
+- [Historical documentation and feature plan](plans/doc-todo.md)
+- [Infinite-world plan](plans/infinite-world.md)
+
+## Maintenance
+
+Run these after changing documentation, project skills, commands, dependencies, or artifact
+contracts:
+
+```sh
+just audit-docs
+just audit-skills
+```
+
+`just test-changed` invokes the relevant documentation and skill audits automatically when its
+changed-file set touches these contracts.
+
+Every non-archived Markdown file under `docs/` must be listed here and have one status marker.
+Current documents must not contain machine-local absolute paths or legacy workflow facts. Local
+Markdown links must resolve.

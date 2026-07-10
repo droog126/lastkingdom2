@@ -66,6 +66,8 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         "audit" => {
             audit::tdd(root)?;
             audit::architecture(root)?;
+            crate::doc_audit::run(root)?;
+            audit::skills(root)?;
             audit::visual(root)
         }
         "changed" => run_changed(root, &parsed),
@@ -123,6 +125,7 @@ fn cargo_test_args<'a>(package: &'a str, args: &'a TddArgs) -> Vec<&'a str> {
 }
 
 fn set_common_env() {
+    #[allow(unsafe_code)]
     unsafe {
         env::set_var("BEVY_DISABLE_ACCESSIBILITY", "1");
         if env::var_os("RUST_LOG").is_none() {
@@ -153,6 +156,8 @@ fn run_changed(root: &Path, args: &TddArgs) -> Result<()> {
     let touches_client = changed.iter().any(|p| p.starts_with("crates/client/"));
     let touches_server = changed.iter().any(|p| p.starts_with("crates/server/"));
     let touches_xtask = changed.iter().any(|p| p.starts_with("xtask/"));
+    let touches_doc_contract = changed.iter().any(|p| affects_documentation_contract(p));
+    let touches_skills = changed.iter().any(|p| affects_skill_contract(p));
 
     if touches_core || touches_cargo {
         run_step(root, "core tests", &cargo_test_args("lk2-core", args))?;
@@ -166,7 +171,20 @@ fn run_changed(root: &Path, args: &TddArgs) -> Result<()> {
     if touches_xtask || touches_cargo {
         run_step(root, "xtask tests", &["cargo", "test", "-p", "xtask"])?;
     }
-    if !(touches_core || touches_client || touches_server || touches_xtask || touches_cargo) {
+    if touches_doc_contract {
+        crate::doc_audit::run(root)?;
+    }
+    if touches_skills {
+        audit::skills(root)?;
+    }
+    if !(touches_core
+        || touches_client
+        || touches_server
+        || touches_xtask
+        || touches_cargo
+        || touches_doc_contract
+        || touches_skills)
+    {
         run_step(
             root,
             "format check for non-code changes",
@@ -174,6 +192,19 @@ fn run_changed(root: &Path, args: &TddArgs) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn affects_documentation_contract(path: &str) -> bool {
+    path == "README.md"
+        || path == "AGENTS.md"
+        || path == "Cargo.toml"
+        || path == "justfile"
+        || path.starts_with("docs/")
+        || path.starts_with("xtask/")
+}
+
+fn affects_skill_contract(path: &str) -> bool {
+    path == "AGENTS.md" || path.starts_with(".codex/skills/")
 }
 
 fn command_lines(root: &Path, program: &str, args: &[&str]) -> Result<Vec<String>> {
@@ -212,4 +243,35 @@ pub fn run_step(root: &Path, title: &str, cmd: &[&str]) -> Result<()> {
         return Err(format!(">>> FAILED: {title}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn documentation_contract_paths_trigger_the_docs_audit() {
+        for path in [
+            "README.md",
+            "AGENTS.md",
+            "Cargo.toml",
+            "justfile",
+            "docs/STARTING.md",
+            "xtask/src/main.rs",
+        ] {
+            assert!(affects_documentation_contract(path), "path={path}");
+        }
+        assert!(!affects_documentation_contract(
+            "crates/core/src/world/mod.rs"
+        ));
+    }
+
+    #[test]
+    fn skill_contract_paths_trigger_the_skill_audit() {
+        assert!(affects_skill_contract("AGENTS.md"));
+        assert!(affects_skill_contract(
+            ".codex/skills/docs-governance/SKILL.md"
+        ));
+        assert!(!affects_skill_contract("docs/README.md"));
+    }
 }

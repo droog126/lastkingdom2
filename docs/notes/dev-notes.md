@@ -1,6 +1,7 @@
+<!-- doc-status: reference -->
 # lastkingdom2 开发文档
 
-本文是日常开发入口。更完整的 AI agent 路由以根目录 `AGENTS.md` 为准，当前工程边界以 `docs/architecture/engineering-baseline.md` 为准。
+本文保留为开发速记参考，不再承担日常入口。当前入口见 `docs/README.md` 和 `docs/STARTING.md`。
 
 ## 项目结构
 

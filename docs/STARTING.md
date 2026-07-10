@@ -1,163 +1,123 @@
+<!-- doc-status: current -->
 # 启动指南 / How to Run
 
-> 当前工程入口在 `F:\rustProject\lastkingdom2`。根 `minecraft_bevy`、旧 `launchers/`、根 PowerShell 闭环脚本和 `scripts/` 工作流运行时都是历史口径。当前自动化事实源是 Rust `xtask`，`justfile` 只做短命令别名。
+所有命令都从仓库根目录运行。项目使用 Rust stable、edition 2024、Bevy 0.19 和 Rust
+`xtask`；`justfile` 只提供短别名。
 
-## 0. 一次性准备
+## 1. 一次性准备
 
-第一次 clone 后要装依赖并编译一次：
+安装 Rust、Cargo 和 `just`，然后构建客户端：
 
 ```powershell
-cd F:\rustProject\lastkingdom2
 just build
 ```
 
-> Rust edition 2024，需要 Rust 1.85+。`Cargo.toml` 已固定 `compt = ">=1.9, <1.10"`（broccoli 0.6 配套版本）— **不要 bump 它**。
+需要生成模型时再安装 Blender；普通构建和运行不需要 Blender。
 
-### 国内镜像加速（可选）
+## 2. 运行游戏
 
-如果访问 crates.io 慢，配置 rsproxy 镜像：
-
-```powershell
-# 用户环境变量
-$env:RUSTUP_DIST_SERVER = "https://rsproxy.cn"
-$env:RUSTUP_UPDATE_ROOT = "https://rsproxy.cn/rustup"
-```
-
-`~/.cargo/config.toml`：
-
-```toml
-[source.crates-io]
-replace-with = 'mirror'
-
-[source.mirror]
-registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
-```
-
-## 1. 三种运行姿势
-
-### 1a. 手动玩（离线客户端）
+### 离线游玩
 
 ```powershell
-cd F:\rustProject\lastkingdom2
 $env:BEVY_DISABLE_ACCESSIBILITY="1"
 just offline
 ```
 
-打开一个 1280×720 的窗口，出生在 `96³` 世界的中心。
+离线模式在客户端进程内调用共享的 `lk2-core` 模拟逻辑。主要操作为 WASD/方向键移动、
+Space 跳跃、Ctrl 加速；其他调试和玩法按键以当前 HUD 提示为准。
 
-| 键 | 动作 |
-| --- | --- |
-| `WASD` / 方向键 | 移动（相对相机） |
-| `Space` | 跳 |
-| `Shift` | 下潜 / 缓慢下降 |
-| `Q` / `E` | 转向 22.5°（无鼠标时备胎） |
-| 鼠标移动 | 视角（mouse-look 默认开） |
-| `G` | 挖当前脚下方块 |
-| `K` | 挥剑 |
-| `F` | 造国（消耗 10 灵魂） |
-| `J` | 攻击 2 格内最近怪物 |
-| `Esc` | 退出 |
-
-### 1b. 自动演示（无输入 / 调试用）
+### 自动演示
 
 ```powershell
-cd F:\rustProject\lastkingdom2
 $env:BEVY_DISABLE_ACCESSIBILITY="1"
 $env:RUST_LOG="info"
-cargo run -p lk2-client -- --offline --auto-demo
+just play --auto-demo
 ```
 
-自动演示会驱动基础场景、HUD 和截图输出。需要完整 AI 闭环时优先用 `just loop`，因为它会同时处理 build、health、状态差异和决策模板。
+此入口适合手动观察自动演示。需要完整截图、状态、health 和决策契约时使用闭环命令。
 
-### 1c. 项目闭环（推荐的 AI 迭代姿势）
+### 在线模式
 
 ```powershell
-cd F:\rustProject\lastkingdom2
+just play --online --first-person
+```
+
+`xtask play` 会管理本地服务端和客户端，并把日志写入 `run-logs/`。
+
+## 3. 闭环迭代
+
+```powershell
 just loop
 ```
 
-等价于：
+该别名等价于：
 
 ```powershell
 just xtask loop --offline --seconds 60
 ```
 
-`xtask loop` 会按需 build `lk2-client`，运行离线 auto-demo，生成 `screenshots\iter_NN\` 目录，执行 health 检查，并写入 `decision.template.md`。下一轮运行前，上一轮必须有 `decision.md`。
+闭环会按需构建客户端、运行 auto-demo、生成迭代目录、执行 health 检查并创建决策模板。
+开始下一轮之前，上一轮必须有 `decision.md`。
 
-闭环阅读顺序：
+阅读顺序：
 
-1. 先读 `screenshots\iter_NN\health.json`。
-2. 如果是 `PARTIAL` 或 `FAIL`，读 `assertions.json`。
-3. 需要解释状态变化时读 `final_state.json` 和 `diff.json`。
-4. 只有视觉判断需要时再打开 `iter_NN.png`。
-5. 把本轮判断写入 `decision.md`。
+1. `health.json`
+2. `assertions.json`（`PARTIAL`、`FAIL` 或需要断言细节时）
+3. `final_state.json` 与 `diff.json`（解释状态变化时）
+4. `iter_NN.png`、`perception_manifest.json` 与 `regression.json`（视觉判断时）
+5. `decision.md`（记录结论、证据和下一步）
 
-## 2. 改完代码怎么看效果？
-
-常用验证：
+## 4. 验证命令
 
 ```powershell
 just test-changed
+just test-core
 just test
 just audit-tdd
+just audit-architecture
+just audit-docs
+just audit-skills
 just fmt
 just clippy
 ```
 
-视觉、玩法体验、HUD、auto-demo、截图或状态观察改变后，再跑：
+视觉、HUD、玩法体验、auto-demo、截图或观察状态发生变化后，还要运行 `just loop`。
 
-```powershell
-just loop
-```
+## 5. 输出位置
 
-## 3. 常见问题
+闭环目录 `screenshots/iter_NN/` 包含：
 
-| 现象 | 原因 | 解决 |
-| --- | --- | --- |
-| 启动后窗口黑屏几秒 | Vulkan 加载 + 96³ Greedy Mesh 构建 | 等 1-2 秒；首次会很慢 |
-| 终端一片 `VK_LAYER_KHRONOS_validation` 红字 | 没装 Vulkan 验证层 | 忽略，不影响运行 |
-| HUD 中文显示豆腐块 / 终端 `Path not found: fonts/NotoSansCJKsc-Regular.otf` | 字体 asset 路径找不到 | 检查 `assets/fonts/NotoSansCJKsc-Regular.otf` 是否可被 Bevy asset root 找到 |
-| 鼠标锁死在窗口中央 | FPS mouse-look 默认开 | 按 `Esc` 解锁；或用 `--auto-demo` |
-| `just loop` 拒绝运行并提示缺 `decision.md` | 上一轮闭环没有记录决策 | 根据 `decision.template.md` 写 `screenshots\iter_NN\decision.md` 后再跑 |
-
-## 4. 输出文件位置
-
-| 文件 | 说明 |
+| 文件 | 用途 |
 | --- | --- |
-| `target\debug\lk2-client.exe` | 客户端二进制 |
-| `target\debug\lk2-server.exe` | 服务端二进制 |
-| `screenshots\iter_NN\iter_NN.png` | 每轮主截图（含 HUD overlay） |
-| `screenshots\iter_NN\final_state.json` | 每轮终态 sim 状态 |
-| `screenshots\iter_NN\diff.json` | 相对上一轮的关键状态差异 |
-| `screenshots\iter_NN\assertions.json` | health 断言详情 |
-| `screenshots\iter_NN\health.json` | 闭环健康结论，优先读取 |
-| `screenshots\iter_NN\decision.template.md` | xtask 生成的决策记录模板 |
-| `screenshots\iter_NN\decision.md` | 本轮人工/AI 决策记录，下一轮前必须存在 |
-| `run-logs\*.log` | xtask 编译/运行日志 |
+| `iter_NN.png` | 主截图 |
+| `final_state.json` | 最终模拟状态 |
+| `diff.json` | 相对前一轮的关键状态差异 |
+| `assertions.json` | health 断言详情 |
+| `health.json` / `health.txt` | 机器可读与文本健康结论 |
+| `error_logs.json` / `error_logs.txt` | 错误级日志摘要 |
+| `perception_manifest.json` | 截图与观察证据清单 |
+| `regression.json` | 与前一轮的视觉回归摘要 |
+| `decision.template.md` | 生成的决策模板 |
+| `decision.md` | 完成后的人工/AI 决策记录 |
 
-运行产物写到 `screenshots/` 或 `run-logs/`，不要往根目录写 `build_xxx.log`。
+普通 `just play` 写入：
 
-## 5. 文档入口
+- `run-logs/play.log` 和 `run-logs/play.log.err`
+- `run-logs/error_logs.json` 和 `run-logs/error_logs.txt`
+- 在线模式的 `run-logs/play_server.log` 和 `run-logs/play_server.log.err`
 
-- `AGENTS.md`：项目技能路由和同步策略。
-- `.codex/skills/*/SKILL.md`：AI agent 的详细操作规则。
-- `docs/architecture/engineering-baseline.md`：当前工程边界和自动化事实源。
-- `docs/plans/closed-loop-iteration.md`：当前闭环维护计划。
-- `docs/notes/tdd.md`：TDD 入口和 backlog。
+不要把构建日志或运行产物写到仓库根目录。
 
-## 6. TL;DR
+## 6. 常见问题
 
-```powershell
-cd F:\rustProject\lastkingdom2
+- 如果 Vulkan 驱动路径异常，可用 `just play --gpu-backend=dx12` 对比。
+- 如果 Windows 报可执行文件被占用，先确认该进程属于本仓库，再结束对应客户端、服务端或构建进程。
+- 如果闭环拒绝启动，先读取上一轮 `health.json` 和 `decision.template.md`，补全或修正上一轮决策。
+- 如果 health 为 `PARTIAL`，它仍然需要在 `decision.md` 中解释，不能按 `PASS` 处理。
 
-# 玩
-just build
-just offline
+## 7. 文档入口
 
-# 改完代码
-just test-changed
-
-# AI 闭环
-just loop
-# 先读 screenshots\iter_NN\health.json，再按需读 assertions/final_state/diff/PNG
-```
+- [文档地图](README.md)
+- [工程基线](architecture/engineering-baseline.md)
+- [TDD 工作流](notes/tdd.md)
+- [闭环契约](plans/closed-loop-iteration.md)

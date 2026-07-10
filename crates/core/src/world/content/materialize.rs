@@ -4,7 +4,7 @@ use super::{
     GAME_CONTENT_TREASURE_VAULT, GAME_CONTENT_VERTICAL_PASSAGE, GAME_CONTENT_WILDERNESS,
     GameContentTheme, GameContentVolumeConfig, game_content_catalog, generate_game_content_volume,
 };
-use crate::constant::{SEA_LEVEL, WORLD_CENTER};
+use crate::constant::SEA_LEVEL;
 use crate::world::{BlockType, World, player_body_clear};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -100,10 +100,11 @@ pub fn generate_and_materialize_content(
         &catalog,
         &GameContentVolumeConfig::new(dimensions, seed ^ 0xC017_E17),
     )?;
+    let world_center = world.size / 2;
     let origin = [
-        WORLD_CENTER[0] - CONTENT_HALF_SPAN,
+        world_center - CONTENT_HALF_SPAN,
         DUNGEON_FLOOR_Y,
-        WORLD_CENTER[1] - CONTENT_HALF_SPAN,
+        world_center - CONTENT_HALF_SPAN,
     ];
     let mut anchors = Vec::new();
 
@@ -180,10 +181,12 @@ pub fn content_route_is_walkable(world: &World, content: &MaterializedContent) -
     }
 
     let horizontal_span = CONTENT_HALF_SPAN + ROOM_WALL_OFFSET + 2;
-    let min_x = WORLD_CENTER[0] - horizontal_span;
-    let max_x = WORLD_CENTER[0] + horizontal_span;
-    let min_z = WORLD_CENTER[1] - horizontal_span;
-    let max_z = WORLD_CENTER[1] + horizontal_span;
+    let center_x = content.settlement_position[0];
+    let center_z = content.settlement_position[2];
+    let min_x = center_x - horizontal_span;
+    let max_x = center_x + horizontal_span;
+    let min_z = center_z - horizontal_span;
+    let max_z = center_z + horizontal_span;
     let min_y = DUNGEON_FOOT_Y;
     let max_y = SURFACE_FOOT_Y;
     let mut queue = VecDeque::from([start]);
@@ -233,11 +236,11 @@ fn materialize_underground(world: &mut World, volume: &ContentVolume, origin: [i
     for z in 0..depth {
         for x in 0..width {
             let cell = [x, 0, z];
-            let Some(content) = volume.get(cell) else {
+            if volume.get(cell).is_none() {
                 continue;
-            };
+            }
             let center = cell_center(origin, cell);
-            build_underground_room(world, center, content);
+            build_underground_room(world, center);
         }
     }
 
@@ -269,7 +272,7 @@ fn materialize_underground(world: &mut World, volume: &ContentVolume, origin: [i
     }
 }
 
-fn build_underground_room(world: &mut World, center: [i32; 3], _content: ContentId) {
+fn build_underground_room(world: &mut World, center: [i32; 3]) {
     let cx = center[0];
     let cz = center[2];
     for z in (cz - ROOM_WALL_OFFSET)..=(cz + ROOM_WALL_OFFSET) {
@@ -322,20 +325,20 @@ fn carve_horizontal_corridor(world: &mut World, start: [i32; 3], end: [i32; 3]) 
         let min_x = start[0].min(end[0]);
         let max_x = start[0].max(end[0]);
         for x in min_x..=max_x {
-            carve_corridor_column(world, x, start[2]);
+            carve_corridor_column(world, x, start[2], true);
         }
     } else {
         let min_z = start[2].min(end[2]);
         let max_z = start[2].max(end[2]);
         for z in min_z..=max_z {
-            carve_corridor_column(world, start[0], z);
+            carve_corridor_column(world, start[0], z, false);
         }
     }
 }
 
-fn carve_corridor_column(world: &mut World, x: i32, z: i32) {
+fn carve_corridor_column(world: &mut World, x: i32, z: i32, along_x: bool) {
     for offset in -1..=1 {
-        let (column_x, column_z) = if x % CONTENT_CELL_SIZE == 0 {
+        let (column_x, column_z) = if along_x {
             (x, z + offset)
         } else {
             (x + offset, z)

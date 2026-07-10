@@ -996,7 +996,11 @@ pub fn held_weapon_follow(
     mut swing: ResMut<SwordSwing>,
     mut q: Query<&mut Transform, With<HeldWeaponPart>>,
 ) {
-    if keys.just_pressed(KeyCode::KeyK) && !swing.swinging {
+    if (keys.just_pressed(KeyCode::KeyI)
+        || keys.just_pressed(KeyCode::KeyO)
+        || keys.just_pressed(KeyCode::KeyK))
+        && !swing.swinging
+    {
         swing.swinging = true;
         swing.start_t = time.elapsed_secs();
     }
@@ -1149,8 +1153,8 @@ pub fn emergency_teleport(
     if !keys.just_pressed(KeyCode::F5) {
         return;
     }
-    let x = lk2_core::constant::WORLD_SIZE / 2;
-    let z = lk2_core::constant::WORLD_SIZE / 2;
+    let x = constant::WORLD_SIZE / 2;
+    let z = constant::WORLD_SIZE / 2;
     let Some((pos, block_pos)) = player_spawn_position_near(&game_world, x, z, 14, 2) else {
         warn!("🚨 F5 紧急传送失败：出生列没有可站位置");
         return;
@@ -2020,7 +2024,7 @@ pub fn auto_demo(
     mut player: ResMut<PlayerState>,
     mut game_world: ResMut<GameWorld>,
     mut pool: ResMut<lk2_core::resource::GlobalResourcePool>,
-    mut nations: ResMut<lk2_core::nation::NationRegistry>,
+    mut nations: ResMut<NationRegistry>,
     cfg: Res<RenderConfig>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut last: ResMut<LastMoveDirection>,
@@ -2030,8 +2034,8 @@ pub fn auto_demo(
 
     mut walk_target: Local<Option<[i32; 3]>>,
     mut player_tf_q: Query<&mut Transform, With<Player>>,
-    creatures: Query<&lk2_core::creature::Creature>,
-    monsters: Res<lk2_core::monster::MonsterEcosystem>,
+    creatures: Query<&Creature>,
+    monsters: Res<MonsterEcosystem>,
 ) {
     if cfg.auto_keys {
         *auto_frame += 1;

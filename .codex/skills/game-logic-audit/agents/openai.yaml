@@ -1,4 +1,4 @@
 interface:
   display_name: "Game Logic Audit"
-  short_description: "Audit runtime game logic end to end"
-  default_prompt: "Use $game-logic-audit to audit the real game logic and rank evidence-backed bugs."
+  short_description: "Audit game logic and authority flow read-only"
+  default_prompt: "Use $game-logic-audit to perform a read-only, evidence-backed audit of game logic."

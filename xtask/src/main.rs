@@ -1,5 +1,6 @@
 mod args;
 mod audit;
+mod doc_audit;
 mod health;
 mod loop_cmd;
 mod model_iter;
@@ -27,8 +28,8 @@ fn drop_xtask_target_dir(root: &std::path::Path, command: &mut Command) {
     let Ok(target_dir) = env::var("CARGO_TARGET_DIR") else {
         return;
     };
-    let target_path = std::path::PathBuf::from(target_dir);
-    if target_path == std::path::PathBuf::from(".tmp/xtask-target")
+    let target_path = PathBuf::from(target_dir);
+    if target_path == PathBuf::from(".tmp/xtask-target")
         || target_path == root.join(".tmp/xtask-target")
     {
         command.env_remove("CARGO_TARGET_DIR");
@@ -63,6 +64,8 @@ fn main() -> ExitCode {
         "dev" => run_dev(&root, &args),
         "audit-tdd" => audit::tdd(&root),
         "audit-architecture" => audit::architecture(&root),
+        "audit-docs" => doc_audit::run(&root),
+        "audit-skills" => audit::skills(&root),
         "audit-visual" => audit::visual(&root),
         "model-preview-all" | "model-preview-iterate" => model_iter::run(&root, &args),
         "help" | "-h" | "--help" => {
@@ -106,7 +109,11 @@ fn print_help() {
     println!("  tdd --scope core|changed|client|server|workspace|fmt|clippy|audit");
     println!("  dev build|stage-runtime|test|core|clippy|fmt|loop|health|play|help");
     println!("  health [iter_NN|path]");
+    println!("  audit-tdd");
+    println!("  audit-architecture");
     println!("  audit-visual");
+    println!("  audit-docs");
+    println!("  audit-skills");
     println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
     println!("  scenario --json scenarios/*.json");
     println!("  model-preview-all [--only=<stem>] [--limit=N] [--skip-build]");

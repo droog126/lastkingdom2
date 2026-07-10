@@ -1,81 +1,85 @@
-# Engineering Baseline
+<!-- doc-status: current -->
+# Engineering baseline
 
-This file is the active engineering baseline for humans. `AGENTS.md` routes agent work to skills, and `.codex/skills/*/SKILL.md` files carry the operational instructions. If active docs and skills drift, prefer current code and `xtask` behavior, then update the docs and skill wording together.
+This is the human-readable engineering boundary. Code, Cargo metadata, `justfile`, and `xtask`
+behavior take precedence; update this file and affected skills in the same change when a boundary or
+workflow changes.
 
-This repo is a Bevy 0.19 workspace with three runtime crates:
+## Workspace
 
-- `lk2-core`: shared game state, rules, protocol types, diagnostics, and pure logic.
-- `lk2-client`: Bevy window, rendering, HUD, input, offline demo, screenshots, and client-side prediction.
+The runtime workspace has three crates:
+
+- `lk2-core`: shared state, rules, protocol types, diagnostics, and pure simulation logic.
+- `lk2-client`: Bevy window, rendering, HUD, input, offline demo, screenshots, and prediction.
 - `lk2-server`: headless authority loop, networking, replication, and server-side PvP.
 
-Current engine-family dependencies are Bevy 0.19, Avian3D 0.7, Lightyear 0.28,
-Leafwing Input Manager 0.21, bevy-inspector-egui 0.37, bevy-tnua 0.32, and
-bevy_panorbit_camera 0.35. Historical docs and archived drift reports may still
-describe Bevy 0.18 or Lightyear 0.26; treat those as background unless active code
-or this baseline points back to them.
+Engine-family dependencies are defined in the workspace `Cargo.toml`: Bevy 0.19, Avian3D 0.7,
+Lightyear 0.28, Leafwing Input Manager 0.21, bevy-inspector-egui 0.37, bevy-tnua 0.32, and
+bevy_panorbit_camera 0.35. Do not duplicate dependency constraints in another current document.
 
-## Hard Boundaries
+## Ownership boundaries
 
-- `lk2-core` may define Bevy components/resources for shared state, but must not own rendering, window, asset loading, screenshots, input devices, or process orchestration.
-- `lk2-client` owns presentation and local UX only. It may call shared simulation APIs, but it should not fork rule logic that belongs in `lk2-core`.
-- `lk2-server` owns authority and network ingress. It must not depend on client rendering, UI, camera, or pretty asset code.
-- `tools/` owns reproducible asset generation. Generated runtime output belongs in `screenshots/` or `run-logs/`, not the repo root.
-- `xtask/` owns durable workflow automation: loop orchestration, TDD scopes, health checks, screenshot/state assertions, scenarios, and audits.
-- `justfile` owns short human-friendly command aliases.
-- `scripts/` is not a workflow runtime. Blender/model scripts stay under `tools/`; loop automation stays in Rust.
-- Root PowerShell workflow wrappers are legacy. Do not add new durable workflow logic outside `xtask/`.
+- `lk2-core` may define shared Bevy components and resources, but does not own windows, rendering,
+  asset loading, screenshots, input devices, or process orchestration.
+- `lk2-client` owns presentation and local UX. Shared gameplay rules belong in `lk2-core` rather
+  than client-only copies.
+- `lk2-server` owns authority and network ingress. It must not depend on client rendering, UI,
+  camera, or pretty-asset code.
+- `tools/` owns reproducible asset generation.
+- `xtask/` owns durable workflow automation, state files, JSON contracts, retries, audits, and
+  cross-platform error handling.
+- `justfile` owns short command aliases only.
+- Generated runtime output belongs in `screenshots/` or `run-logs/`, not the repository root.
 
-## Offline Authority Boundary
+## Offline authority
 
-Current offline demo mode is `client-offline authority`: the Bevy client owns the window and runs
-shared `lk2-core` simulation APIs in-process so screenshots and HUD capture stay simple. Online
-play remains `lk2-server` authority.
+Offline demo mode is client-offline authority: the client owns the window and invokes shared
+`lk2-core` simulation APIs in-process. Online play remains `lk2-server` authority. A shared rule
+needed by both modes must move into `lk2-core` before integration.
 
-Do not add a second copy of gameplay rules to the client. If offline and online behavior need the
-same rule, move that rule into `lk2-core` first and call it from both sides. The intended future
-state is an in-process headless server for offline mode, but that should be a dedicated
-networking/refactor task, not an incidental gameplay change.
+## Known architecture debt
 
-## Current Architecture Debt
+- `crates/client/src/main.rs` still mixes app construction, networking, diagnostics, and local
+  simulation wiring. Screenshot/capture logic has already been extracted to `capture.rs`.
+- `crates/client/src/render/mod.rs` still mixes camera, player input, terrain rendering,
+  indicators, and auto-demo movement despite several focused helper modules.
+- `crates/core/src/combat.rs` still combines combat data, rules, ECS systems, and tests.
 
-The codebase compiles, tests, and the closed-loop demo is currently healthy, but several modules are too large:
+Keep changes to these files focused. Prefer behavior-preserving extraction before adding broad new
+responsibilities.
 
-- `crates/client/src/render/mod.rs`: rendering, camera, input, indicators, and auto-demo movement are mixed.
-- `crates/client/src/main.rs`: app construction, networking, diagnostics, screenshots, and local sim wiring are mixed.
-- `crates/core/src/combat.rs`: combat data, rules, systems, and tests are in one file.
+## Required checks
 
-Do not add broad new behavior to these files without either:
-
-- extracting a focused module first, or
-- documenting why the change must stay local and keeping it small.
-
-## Required Checks
-
-Use the project task runner:
+Choose the narrowest check that covers a change:
 
 ```sh
 just test-changed
 just audit-tdd
+just audit-architecture
+just audit-docs
+just audit-skills
 just loop
 just health
 ```
 
-`just loop` currently maps to:
+The audits have distinct scopes:
 
-```sh
-just xtask loop --offline --seconds 60
-```
+- `audit-tdd`: separates default and experimental core tests, reports files without direct tests,
+  and flags top-level modules with no runtime references outside their own implementation.
+- `audit-architecture`: rejects PowerShell workflow files under `scripts/` and machine-local
+  absolute paths inside those files.
+- `audit-docs`: validates document status, current-document stale terms and absolute paths,
+  documentation index coverage, and local Markdown links.
+- `audit-skills`: validates project skill frontmatter, UI metadata, and AGENTS routing.
+- `audit-visual`: checks selected world-visual ownership patterns in client code.
 
-`just xtask audit-architecture` checks:
+These are guardrails, not substitutes for package tests, builds, or runtime evidence.
+`just test-changed` automatically runs the documentation and skill audits when affected paths are
+present in its changed-file set.
 
-- no hard-coded local absolute paths in project scripts,
-- no duplicate client objective setup registration,
-- no runtime/build output in the repo root,
-- known oversized Rust modules are reported as warnings.
+## Closed-loop artifacts
 
-## Closed-Loop Artifacts
-
-The current loop output shape is directory-based:
+`just loop` maps to `just xtask loop --offline --seconds 60` and writes:
 
 ```text
 screenshots/iter_NN/
@@ -87,25 +91,25 @@ screenshots/iter_NN/
   health.txt
   error_logs.json
   error_logs.txt
+  perception_manifest.json
+  regression.json
   decision.template.md
   decision.md
 ```
 
-Read `health.json` first. A new loop run should not start until the previous iteration has a `decision.md`.
-Normal client entry points in `justfile` route through `xtask play`, including offline, online,
-model preview, and terrain preview. They write `run-logs/play.log`, `run-logs/play.log.err`, and
-`run-logs/error_logs.{json,txt}` after the client exits; online play also writes
-`run-logs/play_server.log(.err)`. The `error_logs.*` archive contains only error-class lines
-(`error`, `panic`, or `fatal`) from stdout/stderr logs, including Bevy engine errors.
-On Windows, `xtask play` defaults to Vulkan for normal play. Use
-`just play --gpu-backend=dx12` as a fallback when comparing driver-specific render failures.
-Stale global Vulkan implicit layers, such as removed Steam overlay manifests, must be fixed at the
-Windows registry level if Vulkan is tested directly.
+Read `health.json` first. A later loop must not begin until the preceding iteration has a completed
+`decision.md`. A `PARTIAL` verdict requires explanation and follow-up; it is not equivalent to
+`PASS`.
 
-## Next Refactor Order
+Normal play aliases route through `xtask play`. They archive client logs and error summaries under
+`run-logs/`; online play also archives server logs. On Windows, normal play defaults to Vulkan and
+accepts `--gpu-backend=dx12` as an explicit comparison or fallback.
 
-1. Split `crates/client/src/main.rs` into `app.rs`, `network.rs`, `offline_loop.rs`, and `capture.rs`.
-2. Split `crates/client/src/render/mod.rs` into camera, player input, terrain rendering, indicators, and auto-demo movement.
-3. Split `crates/core/src/combat.rs` into data, rules, ECS systems, and tests.
+## Refactor order
 
-Each extraction should be behavior-preserving and validated before adding new gameplay.
+1. Continue splitting client app construction, networking, and offline wiring out of `main.rs`
+   while retaining `capture.rs` as the capture owner.
+2. Split render camera, input, terrain, indicators, and auto-demo movement into focused modules.
+3. Split combat data, rules, ECS systems, and tests without changing behavior.
+
+Validate every extraction before adding dependent gameplay behavior.

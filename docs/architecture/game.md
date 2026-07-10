@@ -1,6 +1,7 @@
+<!-- doc-status: reference -->
 # 万国起源：最后一国 钻石版 — 游戏架构文档
 
-> 当前说明：这是更新后的游戏架构文档（2026-07-06），反映 Bevy 0.19 + 3-crate workspace 结构。工程边界以 `docs/architecture/engineering-baseline.md` 为准；运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。
+> 文档状态：参考快照。正文混合了已实现内容与演进设想，不可作为当前代码或运行方式的依据。
 
 > **项目名称**：万国起源：最后一国 钻石版
 > **游戏类型**：体素沙盒 + 策略模拟

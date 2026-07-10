@@ -274,6 +274,30 @@ pub mod components {
     }
 }
 
+/// Commands and acknowledgements that must arrive exactly and in order.
+pub struct ControlChannel;
+
+/// High-frequency snapshots where only the newest value is useful.
+pub struct StateChannel;
+
+fn control_channel_settings() -> lightyear::prelude::ChannelSettings {
+    lightyear::prelude::ChannelSettings {
+        mode: lightyear::prelude::ChannelMode::OrderedReliable(
+            lightyear::prelude::ReliableSettings::default(),
+        ),
+        priority: 10.0,
+        ..default()
+    }
+}
+
+fn state_channel_settings() -> lightyear::prelude::ChannelSettings {
+    lightyear::prelude::ChannelSettings {
+        mode: lightyear::prelude::ChannelMode::SequencedUnreliable,
+        priority: 1.0,
+        ..default()
+    }
+}
+
 pub struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
@@ -281,15 +305,18 @@ impl Plugin for ProtocolPlugin {
         use lightyear::prelude::*;
 
         app.init_resource::<MessageRegistry>();
+        app.add_channel::<ControlChannel>(control_channel_settings())
+            .add_direction(NetworkDirection::Bidirectional);
+        app.add_channel::<StateChannel>(state_channel_settings())
+            .add_direction(NetworkDirection::Bidirectional);
 
         // NOTE: do NOT add `lightyear_inputs_leafwing::prelude::InputPlugin`
-        // here. We send gameplay commands over a raw UDP socket
-        // (port = server_port + 1) instead of via lightyear's InputMessage
-        // channel. Registering InputPlugin<PlayerAction> on the server
+        // here. Movement uses a raw UDP fast path (port = server_port + 1),
+        // while discrete gameplay commands use MessageSender<GameplayCommand>.
+        // Registering InputPlugin<PlayerAction> on the server
         // installs ServerInputPlugin, which adds a MessageReceiver<InputMessage<...>>
         // to each client entity and tries to deserialize every incoming packet
-        // as an InputMessage. The client never sends lightyear InputMessages
-        // (its `MessageWriter<GameplayCommand>` only writes GameplayCommand),
+        // as an InputMessage. The client never sends lightyear InputMessages,
         // so every packet is misinterpreted, the embedded `InputTarget::Entity`
         // references deserialize as 0 (PLACEHOLDER) and the server logs
         // "Attempting to deserialize an invalid entity." ~5ms — flooding
@@ -887,6 +914,21 @@ mod tests {
         assert_eq!(decoded.sequence, 77);
         assert_eq!(decoded.client_time_secs, 12.5);
         assert_eq!(decoded.server_tick, 1234);
+    }
+
+    #[test]
+    fn gameplay_channels_keep_control_reliable_and_state_latest_only() {
+        use lightyear::prelude::ChannelMode;
+
+        assert!(matches!(
+            control_channel_settings().mode,
+            ChannelMode::OrderedReliable(_)
+        ));
+        assert!(matches!(
+            state_channel_settings().mode,
+            ChannelMode::SequencedUnreliable
+        ));
+        assert!(control_channel_settings().priority > state_channel_settings().priority);
     }
 
     #[test]

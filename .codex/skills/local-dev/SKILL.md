@@ -1,125 +1,47 @@
 ---
 name: local-dev
-description: Local development workflow for the lastkingdom2 Rust/Bevy workspace. Use when Codex needs to inspect the repo, make ordinary code changes, run local build/dev commands, respect existing user changes, choose validation scope, or prepare branch/PR/commit work that is not specifically closed-loop, TDD-first, Blender modeling, or Bevy gameplay focused.
+description: Fallback local-development workflow for lastkingdom2. Use for ordinary repository inspection, small code or configuration changes, validation selection, dirty-worktree handling, and git preparation when no more specific project skill covers the task. Do not load it automatically alongside a specific gameplay, TDD, loop, modeling, lifecycle, documentation, audit, or skill-authoring route.
 ---
 
 # Local Dev
 
+## Boundary
+
+Use this as the primary fallback, not as a mandatory companion. If another project skill fully covers the request, follow that skill and apply only the universal worktree rules below.
+
 ## Workflow
 
-1. Define the task boundary before editing: what problem is being solved, which files are likely relevant, and what result counts as done.
-2. Inspect the current worktree first. Treat all existing modified, deleted, or untracked files as user work unless you created them in this turn.
-3. Read the nearest relevant code, tests, scripts, and docs before choosing an implementation.
-4. Make the smallest coherent change. Do not mix unrelated refactors, cleanup, or visual polish into the task.
-5. Pick the narrowest validation command that covers the changed surface.
-6. Summarize what changed, how it was validated, and what risk remains.
+1. Define the requested outcome and likely files before editing.
+2. Run `git status --short`. Treat existing changes as user work.
+3. Read the nearest implementation, tests, and active documentation.
+4. Make the smallest coherent change without unrelated cleanup.
+5. Run the narrowest validation that covers the changed surface.
+6. Report the change, validation result, and remaining risk.
 
-## Repo Map
+## Tooling
 
-- `crates/core/src/`: shared simulation, data, protocol, AI, scenario, monsters, nations, resources.
-- `crates/client/src/main.rs`: Bevy client entry, HUD, screenshot, offline demo.
-- `crates/client/src/render/`: render, camera, smooth mesh, auto-demo presentation.
-- `crates/server/src/main.rs`: headless server, self-check, authority simulation, UDP listen.
-- `scenarios/`: scenario JSON scripts.
-- `screenshots/`: closed-loop output.
-- `docs/`: design notes and plans.
-- `assets/`: art and 3D models.
-- `xtask/`: Rust task runner for loop, health, TDD scopes, scenarios, and audits.
-- `justfile`: short cross-platform aliases for the Rust task runner.
+- Put durable workflow automation, state handling, and cross-platform command logic in Rust `xtask`.
+- Use Python for Blender, asset generation, and focused one-off analysis, not loop orchestration.
+- Keep `justfile` recipes as short aliases.
+- Do not add root PowerShell workflow wrappers.
 
-Active docs:
-
-- `AGENTS.md`: project skill routing and synchronization policy.
-- `docs/architecture/engineering-baseline.md`: current engineering boundaries and automation ownership.
-- `docs/STARTING.md`: current run guide.
-- `docs/README.md`: docs map.
-
-Legacy note: do not route work through removed `minecraft_bevy`, `launchers/`, root PowerShell workflow wrappers, or `scripts/` workflow-runtime paths.
-
-## Tooling Choices
-
-Prefer durable automation in this order:
-
-1. Rust `xtask`: use for core closed-loop orchestration, test runners, state files, JSON contracts, cross-platform command logic, and robust error handling.
-2. Python: use for Blender, asset generation, and focused one-off analysis. Do not add Python as the loop workflow runtime.
-3. `justfile`: use only for short command aliases. Do not put complex branching, state files, retries, or loop control in `justfile`.
-
-Do not add PowerShell workflow wrappers. Durable workflow logic belongs in Rust `xtask`.
-
-## Commands
-
-Install/build:
+Prefer package-specific checks over workspace builds:
 
 ```sh
-cargo build --workspace
-```
-
-Start offline client:
-
-```sh
-export BEVY_DISABLE_ACCESSIBILITY=1
-export RUST_LOG=info
-cargo run -p lk2-client -- --offline
-```
-
-Common validation entry points:
-
-```sh
+cargo check -p <crate>
+cargo test -p <crate>
 just test-changed
-just test
-just audit-tdd
 just fmt
-just clippy
+just audit-skills
 ```
 
-Closed-loop entry points:
+Do not enable Bevy dynamic linking by default on Windows; it can trigger large `bevy_dylib` linker failures.
 
-```sh
-just loop
-just health
-just xtask loop --offline --seconds 60
-just xtask health
-```
+## Worktree And Validation
 
-Use dev dynamic linking only for local client/server development when the repo scripts expect it. Do not use it for release or CI validation.
-
-## Validation Discipline
-
-- Do not keep blindly editing Rust code when the affected crate cannot compile or `cargo check` cannot run. First diagnose the compile/check blocker, reduce the validation scope, or report the blocker with the exact command and error.
-- After code changes, run at least the narrowest relevant `cargo check -p <crate>`, `cargo test -p <crate>`, or `just test-*` command before calling the task done.
-- If validation is unavailable because of environment limits, locked executables, missing tools, or unrelated pre-existing failures, stop after the smallest coherent change and state what was not validated. Do not pile on speculative fixes.
-- Treat a failed compile/check as the next task surface. Fix it or explicitly leave the task incomplete; do not claim success based only on reading the code.
-
-## Rust Build Performance
-
-Rust/Bevy builds can be slow in this workspace because Bevy, rendering, physics, networking, ECS generics, derive macros, and linking create a large dependency graph. On Windows/MSVC, linking large Bevy binaries is often a bottleneck, and `bevy/dynamic_linking` can fail with `bevy_dylib` linker limits such as `LNK1189`.
-
-Prefer the narrowest command that matches the change:
-
-- Use `cargo check -p <crate>` for type validation when a full binary is not needed.
-- Use package-specific commands such as `cargo check -p lk2-server` or `cargo check -p lk2-client` instead of workspace-wide builds.
-- Avoid switching feature sets repeatedly in the same target directory; toggling Bevy or Lightyear features can invalidate large parts of the cache.
-- Keep server builds headless and avoid enabling client render features unless the task needs them.
-- Do not enable `dev-dynamic-linking` by default on Windows; it may compile `bevy_dylib` and hit MSVC linker object limits.
-
-## Worktree Rules
-
-- Never revert files you did not change unless explicitly asked.
-- Do not delete or move generated-looking files unless the task is to clean them and the target is confirmed.
-- Do not commit `target/`, `screenshots/iter_*.png`, `*.log`, `__pycache__/`, Blender backups, or local absolute-path config.
-- Check `git status --short` before and after edits when preparing a final summary.
-
-## Quality Bar
-
-- Keep changes small and explainable in one sentence.
-- Use existing abstractions and local patterns.
-- Do not introduce duplicate rule tables.
-- Do not rely on local environment variables, current time, or random ordering to pass tests.
-- Throttle per-tick logs with a local counter or equivalent dedupe.
-- Return clear errors; do not silently ignore failure.
-
-## Recent Lessons
-
-- Treat a dirty worktree as normal in this repo. Scope status/diffs to the files involved in the task and ignore unrelated churn unless it blocks the change.
-- When validation skips a build step, build the affected binary or artifact first. Otherwise runtime evidence may come from stale output even though source changes and tests look correct.
-- On Windows, executable files can be locked by stale runtime, build, or preview processes. Check command lines before stopping anything, and only clear processes that are clearly from this workspace/task.
+- Never revert, delete, move, stage, or commit user changes unless explicitly requested.
+- Scope diffs and formatting to files involved in the task.
+- Do not commit runtime output, logs, screenshots, Blender backups, `__pycache__`, or local absolute-path configuration.
+- If compilation is blocked, diagnose or narrow the check before making further speculative edits.
+- Do not claim completion when the affected code was not validated; state the exact blocker instead.
+- Before stopping a workspace process, inspect its command line and stop only a process clearly owned by the current task.

@@ -1,10 +1,11 @@
+<!-- doc-status: proposal -->
 # 万国起源 2.0 — 计划书：从"能跑"到"百万实体级"现代架构演进
 
-> 当前说明：这是 2026-06-06 的架构演进计划快照，已更新至 Bevy 0.19。当前自动化入口为 Rust `xtask`/`just loop`；工程边界以 `docs/architecture/engineering-baseline.md` 为准。文中 `loop.ps1`、`state_t*.json`、`.harness/reins` 等描述按历史阶段阅读。
+> 文档状态：历史提案。阶段、指标、文件名和命令均不代表当前实现或排期；当前工程边界以 `engineering-baseline.md` 为准。
 
 > **作者**：Mavis (orchestrator)
 > **版本**：v0.3（2026-07-06 更新：Bevy 0.19 + 3-crate workspace 已完成）
-> **状态**：P1-P4.5 已完成，P5/P6 进行中
+> **状态**：冻结的计划快照，未按本文阶段表继续维护
 
 ---
 

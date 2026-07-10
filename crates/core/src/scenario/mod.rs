@@ -679,13 +679,13 @@ pub fn simulate_player_actions(
                         crate::constant::POP_UPGRADE_20_COST
                     };
                     let (w, f, s) = cost;
-                    if pool.get(crate::resource::ResourceKind::Wood) >= w as i64
-                        && pool.get(crate::resource::ResourceKind::Food) >= f as i64
-                        && pool.get(crate::resource::ResourceKind::Soul) >= s as i64
+                    if pool.get(ResourceKind::Wood) >= w as i64
+                        && pool.get(ResourceKind::Food) >= f as i64
+                        && pool.get(ResourceKind::Soul) >= s as i64
                     {
-                        let _ = pool.try_sub(crate::resource::ResourceKind::Wood, w as i64);
-                        let _ = pool.try_sub(crate::resource::ResourceKind::Food, f as i64);
-                        let _ = pool.try_sub(crate::resource::ResourceKind::Soul, s as i64);
+                        let _ = pool.try_sub(ResourceKind::Wood, w as i64);
+                        let _ = pool.try_sub(ResourceKind::Food, f as i64);
+                        let _ = pool.try_sub(ResourceKind::Soul, s as i64);
                         n.pop_cap = if n.pop_cap < 10 {
                             10
                         } else if n.pop_cap < 15 {
@@ -855,10 +855,10 @@ pub fn scenario_tick_recorder(
         tick: clock.tick,
         player: [player.pos.x, player.pos.y, player.pos.z],
         player_block: player.block_pos,
-        wood: pool.get(crate::resource::ResourceKind::Wood),
-        food: pool.get(crate::resource::ResourceKind::Food),
-        apple: pool.get(crate::resource::ResourceKind::Apple),
-        soul: pool.get(crate::resource::ResourceKind::Soul),
+        wood: pool.get(ResourceKind::Wood),
+        food: pool.get(ResourceKind::Food),
+        apple: pool.get(ResourceKind::Apple),
+        soul: pool.get(ResourceKind::Soul),
         flags: nations.flag_count,
         monsters: monsters.current_individuals,
         nation_id: player.nation_id.map(|n| n.0),

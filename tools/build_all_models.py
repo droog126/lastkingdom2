@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import sys
 from pathlib import Path
@@ -21,7 +20,6 @@ from models_lib import (
     merge_into,
     uv_sphere,
     OUT_DIR,
-    ROOT,
 )
 
 def make_monster(name: str, base_color, glow_color, kind: str) -> None:
@@ -264,10 +262,6 @@ def main() -> None:
     make_ground_disc("inner", 2.5, 0.20,
                      color=(0.55, 0.75, 0.30), glow=(0.30, 0.50, 0.15))
 
-    manifest = build_manifest()
-    manifest_path = OUT_DIR / "MANIFEST.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\nMANIFEST -> {manifest_path}")
     print(f"\n=== done. {len(list(OUT_DIR.glob('*.glb')))} .glb files in {OUT_DIR} ===")
 
 def build_manifest() -> dict:

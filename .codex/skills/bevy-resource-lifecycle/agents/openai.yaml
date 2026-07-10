@@ -1,4 +1,4 @@
 interface:
   display_name: "Bevy Resource Lifecycle"
-  short_description: "Prevent Bevy runtime asset and GPU resource leaks"
+  short_description: "Diagnose Bevy asset and GPU lifetime failures"
   default_prompt: "Use $bevy-resource-lifecycle to diagnose and fix Bevy runtime asset or GPU resource lifecycle bugs."

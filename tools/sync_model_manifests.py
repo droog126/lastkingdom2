@@ -1,145 +1,48 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+
+from model_catalog import ECO_ASSETS, PRETTY_GROUPS
+from model_style import ECO_DIR, PRETTY_DIR, STYLE_NAME, STYLE_VERSION
 
 
-ROOT = Path(__file__).resolve().parents[1]
-PROCEDURAL = ROOT / "assets" / "procedural"
-
-PRETTY_GROUPS = {
-    "pretty": [
-        "monster_snake",
-        "monster_frost_elf",
-        "monster_sand_wurm",
-        "monster_treant",
-        "monster_aether_wraith",
-        "cloud_puff",
-        "sokpop_gatherer",
-        "sokpop_tree",
-        "tree",
-        "granular_round_tree",
-        "granular_pine_tree",
-        "granular_wildflowers",
-        "granular_reed_bank",
-        "fallen_stick",
-        "rock_dark",
-        "rock_mid",
-        "rock_moss",
-        "flower_0",
-        "flower_1",
-        "flower_2",
-        "flower_3",
-        "flower_4",
-        "hill",
-        "poi_pillar_red",
-        "poi_pillar_cyan",
-        "poi_pillar_pink",
-        "poi_pillar_gold",
-        "ground_disc_outer",
-        "ground_disc_inner",
-    ],
-    "terrain": [
-        "mountain_snow",
-        "volcano",
-        "desert_dune",
-        "lake",
-        "swamp",
-        "cliff",
-        "cave_entrance",
-        "beach",
-        "ground_patch",
-    ],
-    "buildings": [
-        "house_small",
-        "watchtower",
-        "windmill",
-        "bridge_stone",
-        "well",
-        "barn",
-        "fence",
-        "shrine",
-        "lighthouse",
-        "forge",
-        "chapel",
-        "pier",
-        "tavern",
-    ],
-    "decor": [
-        "campfire",
-        "lantern_post",
-        "crate",
-        "barrel",
-        "signpost",
-        "market_stall",
-        "bench",
-        "fountain",
-        "statue",
-        "mushroom_red",
-        "mushroom_brown",
-        "crystal_blue",
-        "crystal_pink",
-        "treasure_chest",
-        "boat",
-        "arch_stone",
-        "cart",
-        "tombstone",
-        "haystack",
-        "cauldron",
-        "cooking_station",
-        "spit_roast",
-        "sword",
-        "hoplite_reaper_scythe",
-        "hoplite_dragon_katana",
-        "hoplite_golem_hammer",
-        "hoplite_midas_sword",
-    ],
-    "creatures": ["villager", "wolf", "bear"],
-}
-
-ECO_ASSETS = ["rabbit", "berry_bush", "berry_fruit", "co2_bubble"]
-
-
-def existing(names: list[str], stems: set[str]) -> list[str]:
-    return [name for name in names if name in stems]
+def _existing_registered(directory, registered: set[str]) -> set[str]:
+    stems = {path.stem for path in directory.glob("*.glb")}
+    unregistered = stems - registered
+    if unregistered:
+        raise RuntimeError(f"unregistered GLBs in {directory}: {sorted(unregistered)}")
+    return stems
 
 
 def sync_pretty() -> None:
-    pretty = PROCEDURAL / "pretty"
-    stems = {path.stem for path in pretty.glob("*.glb")}
-    grouped = {group: existing(names, stems) for group, names in PRETTY_GROUPS.items()}
-    grouped = {group: names for group, names in grouped.items() if names}
-    known = {name for names in grouped.values() for name in names}
-    extras = sorted(stems - known)
-    if extras:
-        grouped["uncategorized"] = extras
-    manifest = {
-        "version": 8,
-        "spec": "procedural generated GLB manifest, synced from assets/procedural/pretty",
-        "format": "glb",
-        "assets": grouped,
+    registered = {asset for assets in PRETTY_GROUPS.values() for asset in assets}
+    stems = _existing_registered(PRETTY_DIR, registered)
+    groups = {
+        group: [asset for asset in assets if asset in stems]
+        for group, assets in PRETTY_GROUPS.items()
     }
-    (pretty / "MANIFEST.json").write_text(
+    manifest = {
+        "version": 9,
+        "spec": f"{STYLE_NAME}-v{STYLE_VERSION} canonical generated GLBs",
+        "format": "glb",
+        "assets": {group: assets for group, assets in groups.items() if assets},
+    }
+    PRETTY_DIR.joinpath("MANIFEST.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
 
 
 def sync_eco() -> None:
-    eco = PROCEDURAL / "eco"
-    stems = {path.stem for path in eco.glob("*.glb")}
+    registered = set(ECO_ASSETS)
+    stems = _existing_registered(ECO_DIR, registered)
     manifest = {
-        "version": 8,
-        "spec": "procedural generated GLB manifest, synced from assets/procedural/eco",
+        "version": 9,
+        "spec": f"{STYLE_NAME}-v{STYLE_VERSION} canonical eco GLBs",
         "format": "glb",
-        "assets": {
-            "eco": existing(ECO_ASSETS, stems),
-            "uncategorized": sorted(stems - set(ECO_ASSETS)),
-        },
+        "assets": {"eco": [asset for asset in ECO_ASSETS if asset in stems]},
     }
-    if not manifest["assets"]["uncategorized"]:
-        del manifest["assets"]["uncategorized"]
-    (eco / "MANIFEST.json").write_text(
+    ECO_DIR.joinpath("MANIFEST.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -148,6 +51,8 @@ def sync_eco() -> None:
 def main() -> int:
     sync_pretty()
     sync_eco()
+    print(f"synced {PRETTY_DIR / 'MANIFEST.json'}")
+    print(f"synced {ECO_DIR / 'MANIFEST.json'}")
     return 0
 
 

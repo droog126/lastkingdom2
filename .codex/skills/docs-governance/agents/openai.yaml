@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docs Governance"
+  short_description: "Keep lastkingdom2 docs classified, current, linked, and audited"
+  default_prompt: "Use $docs-governance to update or audit lastkingdom2 documentation without reintroducing stale facts."

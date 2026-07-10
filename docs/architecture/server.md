@@ -1,7 +1,8 @@
+<!-- doc-status: reference -->
 # 万国起源 · 服务器/客户端架构
 ## N 客户端 + 1 服务端 / 每维度 1 服务端
 
-> **当前实现**：Bevy 0.19 + Lightyear 0.28 + 3-crate workspace（lk2-core / lk2-server / lk2-client）
+> **文档状态**：服务器目标架构参考。维度路由、快照回滚、重放和部署示例不代表当前代码已经实现。
 > **服务端**：lk2-server 使用 MinimalPlugins + lightyear ServerPlugins
 > **客户端**：lk2-client 使用 DefaultPlugins + lightyear ClientPlugins
 > **共享层**：lk2-core 包含协议定义、游戏状态、规则逻辑

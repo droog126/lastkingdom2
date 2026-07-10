@@ -1,85 +1,46 @@
 ---
 name: game-logic-audit
-description: [TODO: Complete and informative explanation of what the skill does and when to use it. Include WHEN to use this skill - specific scenarios, file types, or tasks that trigger it.]
+description: Evidence-backed, read-only audit workflow for lastkingdom2 game logic. Use when the user asks to inspect, review, or rank bugs in end-to-end rules, authority flow, simulation reachability, client/core/server divergence, scenario progression, conservation, combat, AI, or systems that compile but may not run. Do not use it as an implementation workflow unless the user separately asks for fixes.
 ---
 
 # Game Logic Audit
 
-## Overview
+## Contract
 
-[TODO: 1-2 sentences explaining what this skill enables]
+Audit before proposing changes. Do not edit code, assets, scenarios, or configuration unless the request explicitly includes implementation.
 
-## Structuring This Skill
+## Workflow
 
-[TODO: Choose the structure that best fits this skill's purpose. Common patterns:
+1. Define the audit boundary: targeted subsystem or repository-wide logic review.
+2. Inspect `git status --short` and exclude unrelated user changes from conclusions.
+3. Read `docs/architecture/engineering-baseline.md` and the relevant entry points.
+4. Trace behavior end to end rather than reviewing isolated functions:
+   - input or scenario trigger
+   - client/server authority boundary
+   - shared core rule or state transition
+   - ECS schedule or caller reachability
+   - replication, HUD, observer, or runtime evidence
+5. Compare implementation with tests, scenario fixtures, assertions, and current runtime artifacts when available.
+6. Run focused read-only checks only when they materially increase confidence.
+7. Report findings by severity with exact file/line evidence, impact, and the missing or contradictory path.
 
-**1. Workflow-Based** (best for sequential processes)
-- Works well when there are clear step-by-step procedures
-- Example: DOCX skill with "Workflow Decision Tree" -> "Reading" -> "Creating" -> "Editing"
-- Structure: ## Overview -> ## Workflow Decision Tree -> ## Step 1 -> ## Step 2...
+## Audit Questions
 
-**2. Task-Based** (best for tool collections)
-- Works well when the skill offers different operations/capabilities
-- Example: PDF skill with "Quick Start" -> "Merge PDFs" -> "Split PDFs" -> "Extract Text"
-- Structure: ## Overview -> ## Quick Start -> ## Task Category 1 -> ## Task Category 2...
+- Can the system be reached from a registered startup, schedule, scenario, command, or network message?
+- Is authority implemented once, or forked between offline client and server?
+- Are state transitions complete at caps, empty inputs, phase boundaries, death, disconnect, and retry paths?
+- Do resource and combat paths conserve values and share rule tables?
+- Does replication expose authoritative state without clients inventing it locally?
+- Do tests prove behavior, or only construct unused helpers?
+- Do runtime artifacts demonstrate cause and effect rather than mere entity existence?
 
-**3. Reference/Guidelines** (best for standards or specifications)
-- Works well for brand guidelines, coding standards, or requirements
-- Example: Brand styling with "Brand Guidelines" -> "Colors" -> "Typography" -> "Features"
-- Structure: ## Overview -> ## Guidelines -> ## Specifications -> ## Usage...
+## Evidence Standard
 
-**4. Capabilities-Based** (best for integrated systems)
-- Works well when the skill provides multiple interrelated features
-- Example: Product Management with "Core Capabilities" -> numbered capability list
-- Structure: ## Overview -> ## Core Capabilities -> ### 1. Feature -> ### 2. Feature...
+- Treat a concrete failing path, unreachable registration, violated invariant, test contradiction, or runtime artifact as a finding.
+- Label plausible but unproven concerns as questions, not bugs.
+- Do not lower severity because code compiles, and do not raise severity because code looks unfamiliar.
+- If no actionable findings remain, say so and name the inspected surfaces and validation limits.
 
-Patterns can be mixed and matched as needed. Most skills combine patterns (e.g., start with task-based, add workflow for complex operations).
+## Handoff
 
-Delete this entire "Structuring This Skill" section when done - it's just guidance.]
-
-## [TODO: Replace with the first main section based on chosen structure]
-
-[TODO: Add content here. See examples in existing skills:
-- Code samples for technical skills
-- Decision trees for complex workflows
-- Concrete examples with realistic user requests
-- References to scripts/templates/references as needed]
-
-## Resources (optional)
-
-Create only the resource directories this skill actually needs. Delete this section if no resources are required.
-
-### scripts/
-Executable code (Python/Bash/etc.) that can be run directly to perform specific operations.
-
-**Examples from other skills:**
-- PDF skill: `fill_fillable_fields.py`, `extract_form_field_info.py` - utilities for PDF manipulation
-- DOCX skill: `document.py`, `utilities.py` - Python modules for document processing
-
-**Appropriate for:** Python scripts, shell scripts, or any executable code that performs automation, data processing, or specific operations.
-
-**Note:** Scripts may be executed without loading into context, but can still be read by Codex for patching or environment adjustments.
-
-### references/
-Documentation and reference material intended to be loaded into context to inform Codex's process and thinking.
-
-**Examples from other skills:**
-- Product management: `communication.md`, `context_building.md` - detailed workflow guides
-- BigQuery: API reference documentation and query examples
-- Finance: Schema documentation, company policies
-
-**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Codex should reference while working.
-
-### assets/
-Files not intended to be loaded into context, but rather used within the output Codex produces.
-
-**Examples from other skills:**
-- Brand styling: PowerPoint template files (.pptx), logo files
-- Frontend builder: HTML/React boilerplate project directories
-- Typography: Font files (.ttf, .woff2)
-
-**Appropriate for:** Templates, boilerplate code, document templates, images, icons, fonts, or any files meant to be copied or used in the final output.
-
----
-
-**Not every skill requires all three types of resources.**
+For an explicitly requested fix, use `$tdd-iteration` for deterministic behavior and `$bevy-gameplay-dev` for ECS/runtime wiring. Keep the audit report separate from the implementation diff.

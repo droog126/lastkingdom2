@@ -3,8 +3,7 @@ spit_roast. v4 kitchen theme matching the existing style.
 
 Output: assets/procedural/pretty/
 
-Run:
-    & "F:\\BLENDER\\blender.exe" --background --python tools\\build_models_v4.py
+Run through `python tools/model_pipeline.py build --generator build_models_v4.py`.
 """
 from __future__ import annotations
 
@@ -302,7 +301,7 @@ def make_ground_patch() -> None:
         z = math.sin(ang) * 11.5
         uv_sphere(f"edge_tuft_{ang_deg}", (x, 0.05, z), (0.20, 0.10, 0.20), grass_dark, 5, 3)
 
-    export_glb("ground_patch")
+    raise RuntimeError("ground_patch is owned by build_sokpop_style_pass.py")
 
 
 # ============================================================== MAIN
@@ -313,7 +312,6 @@ def main() -> None:
     make_cauldron()
     make_cooking_station()
     make_spit_roast()
-    make_ground_patch()
     print("[v4] done.")
 
 

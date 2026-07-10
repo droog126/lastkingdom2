@@ -1,6 +1,7 @@
+<!-- doc-status: reference -->
 # 万国起源：最后一国 钻石版 - 架构文档
 
-> 当前说明：这是更新后的架构文档，反映 Bevy 0.19 + 3-crate workspace 结构。工程边界以 `docs/architecture/engineering-baseline.md` 为准；运行/闭环入口以 `docs/STARTING.md`、`AGENTS.md` 和 `.codex/skills/*/SKILL.md` 为准。
+> 文档状态：参考快照。它包含曾经的实现描述与路线判断，不是当前事实源；工程边界以 `engineering-baseline.md` 为准。
 
 ## 一、项目概述
 

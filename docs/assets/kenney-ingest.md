@@ -1,4 +1,7 @@
+<!-- doc-status: reference -->
 # Kenney Asset Ingest
+
+> Document status: asset-ingest reference; verify paths and runtime behavior before reuse.
 
 The five imported Kenney packs were digested into `assets/kenney/curated/` on 2026-07-04 and the
 source pack directories have been removed from the working tree. Bevy loads curated GLBs by

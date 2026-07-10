@@ -5,8 +5,7 @@ Adds: mushroom_red, mushroom_brown, crystal_blue, crystal_pink, treasure_chest,
 
 Output: assets/procedural/pretty/
 
-Run:
-    & "F:\\BLENDER\\blender.exe" --background --python tools\\build_models_v3.py
+Run through `python tools/model_pipeline.py build --generator build_models_v3.py`.
 """
 from __future__ import annotations
 

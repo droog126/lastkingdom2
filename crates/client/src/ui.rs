@@ -29,6 +29,31 @@ use lk2_core::player::PlayerState;
 use lk2_core::protocol::components::GameplayHudState;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 
+/// Semantic design tokens shared by application UI, developer tools, and the in-game HUD.
+mod ui_tokens {
+    use bevy::prelude::*;
+
+    pub const SCRIM: Color = Color::srgba(0.02, 0.03, 0.04, 0.54);
+    pub const HUD_PANEL: Color = Color::srgba(0.05, 0.07, 0.10, 0.62);
+    pub const CONTROL: Color = Color::srgba(0.13, 0.16, 0.18, 0.88);
+    pub const CONTROL_ACTIVE: Color = Color::srgba(0.12, 0.34, 0.24, 0.92);
+    pub const CONTROL_PRESSED: Color = Color::srgba(0.20, 0.44, 0.34, 0.96);
+    pub const BORDER: Color = Color::srgba(0.72, 0.83, 0.92, 0.22);
+    pub const BORDER_SUBTLE: Color = Color::srgba(1.0, 1.0, 1.0, 0.10);
+    pub const BORDER_ACTIVE: Color = Color::srgba(0.48, 0.92, 0.68, 0.46);
+    pub const TEXT: Color = Color::srgb(0.94, 0.97, 1.0);
+    pub const TEXT_MUTED: Color = Color::srgba(0.82, 0.88, 0.92, 0.72);
+    pub const TEXT_ACCENT: Color = Color::srgb(0.70, 0.82, 0.90);
+    pub const SUCCESS: Color = Color::srgb(0.62, 1.0, 0.72);
+    pub const HEALTH: Color = Color::srgb(1.0, 0.4, 0.4);
+    pub const STAMINA: Color = Color::srgb(0.4, 0.8, 1.0);
+    pub const OBJECTIVE: Color = Color::srgb(0.85, 0.95, 1.0);
+    pub const SCREEN_GUTTER: f32 = 12.0;
+    pub const PANEL_PADDING: f32 = 14.0;
+    pub const PANEL_GAP: f32 = 10.0;
+    pub const PANEL_RADIUS: f32 = 6.0;
+}
+
 #[derive(Component)]
 pub struct HudText;
 
@@ -107,6 +132,14 @@ impl Default for GameMenuState {
 
 #[derive(Component)]
 pub struct GameMenuRoot;
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DeveloperUiState {
+    pub open: bool,
+}
+
+#[derive(Component, Clone, Default)]
+pub struct DeveloperUiRoot;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderToggle {
@@ -228,16 +261,18 @@ fn feathers_tools_panel() -> impl Scene {
             right: px(12),
             bottom: px(92),
             width: px(270),
-            display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Stretch,
             row_gap: px(6),
             padding: px(8),
             border_radius: BorderRadius::all(px(4)),
+            display: Display::None,
         }
+        DeveloperUiRoot
+        GlobalZIndex(41)
         ThemeBackgroundColor(tokens::PANE_BODY_BG)
         Children [
-            (Text("Feathers Tools") ThemedText),
+            (Text("Developer Tools · F3") ThemedText),
             (Text("Camera: --") ThemedText FeathersCameraModeText),
             (
                 Node {
@@ -446,6 +481,57 @@ fn style_tool_button(
 }
 
 pub fn setup_game_menu(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(px(ui_tokens::PANEL_PADDING)),
+                ..default()
+            },
+            BackgroundColor(ui_tokens::SCRIM),
+            GlobalZIndex(50),
+            GameMenuRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    width: px(380),
+                    max_width: percent(92),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(ui_tokens::PANEL_GAP),
+                    padding: UiRect::all(px(ui_tokens::PANEL_PADDING)),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(ui_tokens::PANEL_RADIUS)),
+                    ..default()
+                },
+                ThemeBackgroundColor(tokens::PANE_BODY_BG),
+                BorderColor::all(ui_tokens::BORDER),
+                children![
+                    (
+                        Text::new("Paused"),
+                        hud_label_font(FontSize::Rem(1.15)),
+                        TextColor(ui_tokens::TEXT),
+                    ),
+                    (
+                        Text::new("M / Esc  Resume\nF3  Developer Tools"),
+                        hud_mono_font(FontSize::Rem(0.72)),
+                        TextColor(ui_tokens::TEXT_MUTED),
+                        ui_text_layout(Justify::Center),
+                    ),
+                ],
+            ));
+        });
+}
+
+pub fn setup_developer_menu(mut commands: Commands) {
     let toggles = [
         RenderToggle::Atmosphere,
         RenderToggle::Taa,
@@ -468,9 +554,9 @@ pub fn setup_game_menu(mut commands: Commands) {
                 padding: UiRect::all(px(16)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.03, 0.04, 0.54)),
-            GlobalZIndex(50),
-            GameMenuRoot,
+            BackgroundColor(ui_tokens::SCRIM),
+            GlobalZIndex(40),
+            DeveloperUiRoot,
         ))
         .with_children(|root| {
             root.spawn((
@@ -485,27 +571,27 @@ pub fn setup_game_menu(mut commands: Commands) {
                     border_radius: BorderRadius::all(px(6)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.08, 0.10, 0.12, 0.94)),
-                BorderColor::all(Color::srgba(0.72, 0.83, 0.92, 0.22)),
+                ThemeBackgroundColor(tokens::PANE_BODY_BG),
+                BorderColor::all(ui_tokens::BORDER),
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new("Game Menu"),
+                    Text::new("Developer Tools"),
                     hud_label_font(FontSize::Rem(1.04)),
-                    TextColor(Color::srgb(0.94, 0.97, 1.0)),
+                    TextColor(ui_tokens::TEXT),
                 ));
                 panel.spawn((
                     Text::new("Render"),
                     hud_label_font(FontSize::Rem(0.82)),
-                    TextColor(Color::srgb(0.70, 0.82, 0.90)),
+                    TextColor(ui_tokens::TEXT_ACCENT),
                 ));
                 for toggle in toggles {
                     panel.spawn(render_toggle_row(toggle));
                 }
                 panel.spawn((
-                    Text::new("M / Esc closes menu"),
+                    Text::new("F3 closes developer tools"),
                     hud_mono_font(FontSize::Rem(0.62)),
-                    TextColor(Color::srgba(0.82, 0.88, 0.92, 0.72)),
+                    TextColor(ui_tokens::TEXT_MUTED),
                 ));
             });
         });
@@ -527,8 +613,8 @@ fn render_toggle_row(toggle: RenderToggle) -> impl Bundle {
             border_radius: BorderRadius::all(px(4)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.13, 0.16, 0.18, 0.88)),
-        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.10)),
+        BackgroundColor(ui_tokens::CONTROL),
+        BorderColor::all(ui_tokens::BORDER_SUBTLE),
         children![
             (
                 Node {
@@ -582,6 +668,31 @@ pub fn sync_game_menu_visibility(
     }
 }
 
+pub fn toggle_developer_ui_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<DeveloperUiState>,
+) {
+    if keys.just_pressed(KeyCode::F3) {
+        state.open = !state.open;
+    }
+}
+
+pub fn sync_developer_ui_visibility(
+    state: Res<DeveloperUiState>,
+    mut roots: Query<&mut Node, With<DeveloperUiRoot>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    for mut node in roots.iter_mut() {
+        node.display = if state.open {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+}
+
 pub fn handle_render_toggle_buttons(
     mut interactions: Query<
         (&Interaction, &RenderToggleStatus),
@@ -620,19 +731,19 @@ pub fn update_render_toggle_buttons(
     for (toggle, interaction, mut background, mut border, children) in buttons.iter_mut() {
         let enabled = toggle.toggle.is_enabled(&settings);
         let base = if enabled {
-            Color::srgba(0.12, 0.34, 0.24, 0.92)
+            ui_tokens::CONTROL_ACTIVE
         } else {
-            Color::srgba(0.13, 0.16, 0.18, 0.88)
+            ui_tokens::CONTROL
         };
         background.0 = match *interaction {
-            Interaction::Pressed => Color::srgba(0.20, 0.44, 0.34, 0.96),
+            Interaction::Pressed => ui_tokens::CONTROL_PRESSED,
             Interaction::Hovered => base.with_alpha(1.0),
             Interaction::None => base,
         };
         *border = BorderColor::all(if enabled {
-            Color::srgba(0.48, 0.92, 0.68, 0.46)
+            ui_tokens::BORDER_ACTIVE
         } else {
-            Color::srgba(1.0, 1.0, 1.0, 0.10)
+            ui_tokens::BORDER_SUBTLE
         });
 
         if let Some(status_entity) = children.iter().last()
@@ -640,7 +751,7 @@ pub fn update_render_toggle_buttons(
         {
             status.0 = if enabled { "ON" } else { "OFF" }.to_string();
             color.0 = if enabled {
-                Color::srgb(0.62, 1.0, 0.72)
+                ui_tokens::SUCCESS
             } else {
                 Color::srgb(0.78, 0.82, 0.86)
             };
@@ -652,13 +763,13 @@ pub fn setup_hud(mut commands: Commands) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: px(12),
-            left: px(12),
+            top: px(ui_tokens::SCREEN_GUTTER),
+            left: px(ui_tokens::SCREEN_GUTTER),
             padding: UiRect::all(px(10)),
-            border_radius: BorderRadius::all(px(6)),
+            border_radius: BorderRadius::all(px(ui_tokens::PANEL_RADIUS)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.62)),
+        BackgroundColor(ui_tokens::HUD_PANEL),
         children![(
             Text::new("WANGUO ORIGINS loading..."),
             hud_mono_font(FontSize::Rem(0.68)),
@@ -788,7 +899,7 @@ pub fn setup_hud(mut commands: Commands) {
             ..default()
         },
         ui_text_layout(Justify::Left),
-        TextColor(Color::srgb(1.0, 0.4, 0.4)),
+        TextColor(ui_tokens::HEALTH),
         LetterSpacing::Px(0.4),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(12), right: px(12), ..default() },
@@ -799,7 +910,7 @@ pub fn setup_hud(mut commands: Commands) {
         Text::new("STA 100/100"),
         hud_mono_font(FontSize::Rem(0.78)),
         ui_text_layout(Justify::Left),
-        TextColor(Color::srgb(0.4, 0.8, 1.0)),
+        TextColor(ui_tokens::STAMINA),
         LetterSpacing::Px(0.3),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(38), right: px(12), ..default() },
@@ -875,7 +986,7 @@ pub fn setup_hud(mut commands: Commands) {
         Text::new("Objective: -"),
         hud_label_font(FontSize::Rem(0.76)),
         ui_text_layout(Justify::Left),
-        TextColor(Color::srgb(0.85, 0.95, 1.0)),
+        TextColor(ui_tokens::OBJECTIVE),
         TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.9) },
         Node { position_type: PositionType::Absolute, top: px(106), left: px(12), ..default() },
         HudObjectiveText,

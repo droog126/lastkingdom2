@@ -3,8 +3,7 @@ variants, 3 creatures. v2 cute style consistent with previous batches.
 
 Output: assets/procedural/pretty/
 
-Run:
-    & "F:\\BLENDER\\blender-launcher.exe" --background --python tools\\build_more_models.py
+Run through `python tools/model_pipeline.py build --generator build_more_models.py`.
 """
 from __future__ import annotations
 
@@ -619,7 +618,7 @@ def make_villager() -> None:
     cube("basket_rim", (0.30, 0.42, 0.10), (0.18, 0.04, 0.22),
          glow_mat("v_basket_rim", (0.45, 0.28, 0.12), glow_strength=0.2, roughness=0.9))
 
-    export_glb("villager")
+    raise RuntimeError("villager is owned by build_sokpop_style_pass.py")
 
 
 def make_wolf() -> None:
@@ -743,9 +742,7 @@ def main() -> None:
     make_tavern()
 
     print("\n--- creatures (3) ---")
-    print("[14/15] villager")
-    make_villager()
-    print("[15/15] wolf + bear")
+    print("[14/15] wolf + bear")
     make_wolf()
     make_bear()
 

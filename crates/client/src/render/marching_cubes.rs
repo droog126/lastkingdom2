@@ -430,7 +430,10 @@ pub fn build_mesh(
                     let e1 = tri_row[k + 1] as usize;
                     let e2 = tri_row[k + 2] as usize;
 
-                    let pts = [vert_list[e0], vert_list[e1], vert_list[e2]];
+                    // The lookup table assumes values below the isosurface are the solid side.
+                    // Our density field uses the opposite convention (solid=1, air=0), so flip
+                    // the winding to keep visible terrain front-facing toward air.
+                    let pts = [vert_list[e0], vert_list[e2], vert_list[e1]];
 
                     let e1v = [
                         pts[1][0] - pts[0][0],
@@ -509,5 +512,42 @@ mod tests {
         let (v, i) = build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         assert_eq!(v.len(), 3);
         assert_eq!(i.len(), 3);
+    }
+
+    #[test]
+    fn flat_solid_floor_faces_up() {
+        let mut field = ScalarField { data: vec![0.0; 8], shape: [2, 2, 2] };
+        for z in 0..2 {
+            for x in 0..2 {
+                let bottom = field.idx(x, 0, z);
+                field.data[bottom] = 1.0;
+            }
+        }
+
+        let (vertices, indices) =
+            build_mesh(&field, 0.5, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+
+        assert_eq!(indices.len(), 6);
+        for triangle in indices.chunks_exact(3) {
+            let a = vertices[triangle[0] as usize];
+            let b = vertices[triangle[1] as usize];
+            let c = vertices[triangle[2] as usize];
+            let ab = [
+                b.position[0] - a.position[0],
+                b.position[1] - a.position[1],
+                b.position[2] - a.position[2],
+            ];
+            let ac = [
+                c.position[0] - a.position[0],
+                c.position[1] - a.position[1],
+                c.position[2] - a.position[2],
+            ];
+            let face_normal = normalize(cross(ab, ac));
+            assert!(
+                face_normal[1] > 0.9,
+                "standable terrain must be front-facing from above, got {face_normal:?}"
+            );
+            assert!(a.normal[1] > 0.9);
+        }
     }
 }

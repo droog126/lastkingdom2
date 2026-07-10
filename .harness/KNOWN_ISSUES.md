@@ -12,6 +12,13 @@
 
 ## Open
 
+### ISSUE-010 - online terrain churn causes frame spikes
+- Source: iter_19 PARTIAL (2026-07-11)
+- Symptom: `render.terrain_despawns=54` (expected <=6) and `dt_over_50ms=27` (expected <=10).
+- Evidence: `screenshots/iter_19/health.json` and `assertions.json`.
+- Next action: profile terrain replacement ownership and reuse chunk entities instead of despawn/recreate churn.
+- Priority: P1
+
 ### ISSUE-007 — health.rs assertion 太薄 (13 条) 漏掉 HUD/网络/视野/日志
 - 来源: iter_201 元调研 (本轮建设规划)
 - 现象: health verdict = PASS 但用户视觉/手感上大量问题

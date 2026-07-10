@@ -6,21 +6,25 @@ use bevy::prelude::*;
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::eco_cycle::EcoCycle;
+use lk2_core::legendary::{DragonBossState, LegendaryLoadout};
 use lk2_core::monster::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::PlayerState;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::world::World as GameWorld;
 
-use crate::OnlineCommandDiagnostics;
+use crate::legendary_content::{DragonBossVisual, HeldLegendaryVisual, LegendaryRuntime};
 use crate::pretty::{PlayerReadabilityMarker, WorldGroundFallback};
 use crate::render::{
     CameraAngles, CameraMode, NestMarker, RenderLightingTelemetry, RenderTelemetry, TerrainChunk,
 };
 use crate::ui::ClientRunMode;
+use crate::{OnlineCommandDiagnostics, OnlineConnectionDiagnostics};
 
 pub const FIRST_SCREENSHOT_MIN_PROGRESS: u64 = 100;
 const FIRST_SCREENSHOT_MIN_WALL_SECS: f32 = 4.0;
+const DEFAULT_FLICKER_PROBE_MAX_SAMPLES: u32 = 32;
+const HARD_FLICKER_PROBE_MAX_SAMPLES: u32 = 64;
 const SCREENSHOT_DIR: &str = "screenshots";
 const OBSERVATION_TRACE: &str = "screenshots/observation_trace.jsonl";
 const EVENT_TRACE: &str = "screenshots/event_trace.jsonl";
@@ -55,6 +59,19 @@ fn screenshot_gate_ready(
     run_mode != ClientRunMode::Offline || capture_tick >= first_progress
 }
 
+fn flicker_probe_max_samples() -> u32 {
+    flicker_probe_max_samples_from_env(
+        std::env::var("LK2_FLICKER_PROBE_MAX_SAMPLES").ok().as_deref(),
+    )
+}
+
+fn flicker_probe_max_samples_from_env(value: Option<&str>) -> u32 {
+    value
+        .and_then(|sample_count| sample_count.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_FLICKER_PROBE_MAX_SAMPLES)
+        .clamp(1, HARD_FLICKER_PROBE_MAX_SAMPLES)
+}
+
 #[derive(Resource, Default)]
 pub struct TickRecorder {
     pub last_dump_tick: u64,
@@ -76,6 +93,10 @@ pub struct StaticWorldVisualSnapshot {
     pub player_marker_count: usize,
     pub player_marker_max_distance: Option<f32>,
     pub camera_transform: Option<Transform>,
+    pub dragon_visual_count: usize,
+    pub dragon_distance_to_player: Option<f32>,
+    pub held_legendary_count: usize,
+    pub held_legendary_distance_to_player: Option<f32>,
 }
 
 #[derive(SystemParam)]
@@ -92,9 +113,13 @@ pub struct CaptureStateParams<'w> {
     camera_angles: Res<'w, CameraAngles>,
     camera_mode: Res<'w, CameraMode>,
     online_commands: Res<'w, OnlineCommandDiagnostics>,
+    online_connection: Res<'w, OnlineConnectionDiagnostics>,
     static_world_visuals: Res<'w, StaticWorldVisualSnapshot>,
     render_telemetry: Res<'w, RenderTelemetry>,
     lighting_telemetry: Res<'w, RenderLightingTelemetry>,
+    dragon: Res<'w, DragonBossState>,
+    legendary_loadout: Res<'w, LegendaryLoadout>,
+    legendary_runtime: Res<'w, LegendaryRuntime>,
 }
 
 pub fn update_static_world_visual_snapshot(
@@ -105,6 +130,8 @@ pub fn update_static_world_visual_snapshot(
     nest_markers: Query<&Transform, With<NestMarker>>,
     terrain_chunks: Query<&Transform, With<TerrainChunk>>,
     camera: Query<&Transform, With<Camera3d>>,
+    dragon_visuals: Query<&Transform, With<DragonBossVisual>>,
+    held_legendary: Query<&Transform, With<HeldLegendaryVisual>>,
 ) {
     let mut current_positions = Vec::new();
     if let Some(tf) = ground_fallback.iter().next() {
@@ -131,6 +158,16 @@ pub fn update_static_world_visual_snapshot(
         })
         .max_by(|a, b| a.total_cmp(b));
     snapshot.camera_transform = camera.iter().next().cloned();
+    snapshot.dragon_visual_count = dragon_visuals.iter().count();
+    snapshot.dragon_distance_to_player = dragon_visuals
+        .iter()
+        .map(|transform| transform.translation.distance(player.pos))
+        .min_by(|a, b| a.total_cmp(b));
+    snapshot.held_legendary_count = held_legendary.iter().count();
+    snapshot.held_legendary_distance_to_player = held_legendary
+        .iter()
+        .map(|transform| transform.translation.distance(player.pos))
+        .min_by(|a, b| a.total_cmp(b));
     if snapshot.first_player_pos.is_none() && !current_positions.is_empty() {
         snapshot.first_player_pos = Some(player.pos);
         snapshot.first_positions = current_positions;
@@ -141,6 +178,7 @@ pub fn periodic_screenshot(
     mut clock: ResMut<SimClock>,
     mut commands: Commands,
     params: CaptureStateParams,
+    mut flicker_probe_samples: Local<u32>,
 ) {
     if !capture_enabled() {
         return;
@@ -181,8 +219,19 @@ pub fn periodic_screenshot(
         if now < 1.0 {
             return;
         }
+        let max_samples = flicker_probe_max_samples();
+        if *flicker_probe_samples >= max_samples {
+            return;
+        }
         if !write_flicker_probe_capture(&mut clock, &mut commands, &params, probe_dir, now) {
             return;
+        }
+        *flicker_probe_samples = flicker_probe_samples.saturating_add(1);
+        if *flicker_probe_samples == max_samples {
+            info!(
+                "flicker probe reached its bounded capture limit of {} samples",
+                max_samples
+            );
         }
         return;
     }
@@ -234,9 +283,13 @@ pub fn periodic_screenshot(
         &params.camera_angles,
         *params.camera_mode,
         &params.online_commands,
+        &params.online_connection,
         &params.static_world_visuals,
         &params.render_telemetry,
         &params.lighting_telemetry,
+        &params.dragon,
+        &params.legendary_loadout,
+        &params.legendary_runtime,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         if let Err(e) = std::fs::write(&state_path, s) {
@@ -303,9 +356,13 @@ fn write_flicker_probe_capture(
         &params.camera_angles,
         *params.camera_mode,
         &params.online_commands,
+        &params.online_connection,
         &params.static_world_visuals,
         &params.render_telemetry,
         &params.lighting_telemetry,
+        &params.dragon,
+        &params.legendary_loadout,
+        &params.legendary_runtime,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state)
         && let Err(e) = std::fs::write(&state_path, s)
@@ -349,9 +406,13 @@ pub fn tick_recorder(
         &params.camera_angles,
         *params.camera_mode,
         &params.online_commands,
+        &params.online_connection,
         &params.static_world_visuals,
         &params.render_telemetry,
         &params.lighting_telemetry,
+        &params.dragon,
+        &params.legendary_loadout,
+        &params.legendary_runtime,
     );
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
@@ -388,9 +449,13 @@ fn build_state_json(
     camera_angles: &CameraAngles,
     camera_mode: CameraMode,
     online_commands: &OnlineCommandDiagnostics,
+    online_connection: &OnlineConnectionDiagnostics,
     static_world_visuals: &StaticWorldVisualSnapshot,
     render_telemetry: &RenderTelemetry,
     lighting_telemetry: &RenderLightingTelemetry,
+    dragon: &DragonBossState,
+    legendary_loadout: &LegendaryLoadout,
+    legendary_runtime: &LegendaryRuntime,
 ) -> serde_json::Value {
     let mut state = lk2_core::diagnostics::build_state_json(
         time,
@@ -446,16 +511,65 @@ fn build_state_json(
             }),
         );
         obj.insert(
+            "network_connection".to_string(),
+            serde_json::json!({
+                "transport": format!("{:?}", online_connection.transport_state),
+                "server_addr": online_connection.server_addr.map(|addr| addr.to_string()),
+                "client_id": online_connection.client_id,
+                "ping_sequence": online_connection.ping_sequence,
+                "ping_ms": online_connection.ping_ms,
+                "pong_age_secs": online_connection.pong_age_secs(time.elapsed_secs()),
+                "snapshot_count": online_connection.snapshot_count,
+                "server_pos_updates": online_connection.server_pos_updates,
+                "disconnect_reason": online_connection.disconnect_reason.as_deref(),
+            }),
+        );
+        obj.insert(
             "visual".to_string(),
             serde_json::json!({
                 "static_world": static_world_visual_json(&static_world_visuals.current_positions),
                 "movement_probe": movement_probe_json(static_world_visuals),
                 "player_readability": player_readability_json(static_world_visuals),
+                "legendary_readability": legendary_readability_json(static_world_visuals),
+            }),
+        );
+        obj.insert(
+            "legendary".to_string(),
+            serde_json::json!({
+                "dragon_alive": dragon.is_alive(),
+                "dragon_health": dragon.health.current,
+                "dragon_max_health": dragon.health.max,
+                "dragon_block_pos": dragon.block_pos,
+                "dragon_loot_claimed": dragon.loot_claimed,
+                "equipped": legendary_loadout.equipped.map(|weapon| weapon.label()),
+                "owned": legendary_loadout.owned.iter().map(|weapon| weapon.label()).collect::<Vec<_>>(),
+                "dragon_hearts": player.inventory.get(&lk2_core::resource::ResourceKind::DragonHeart).copied().unwrap_or(0),
+                "dragon_scales": player.inventory.get(&lk2_core::resource::ResourceKind::DragonScale).copied().unwrap_or(0),
+                "player_statuses": legendary_runtime.player_statuses.summary_zh(),
+                "reaper_cooldown_secs": legendary_runtime.reaper_cooldown_secs,
             }),
         );
         obj.insert(
             "render".to_string(),
             render_telemetry_json(render_telemetry, lighting_telemetry),
+        );
+        obj.insert(
+            "generated_content".to_string(),
+            game_world.content.as_ref().map_or(serde_json::Value::Null, |content| {
+                serde_json::json!({
+                    "dimensions": content.volume.dimensions,
+                    "cell_size": content.cell_size,
+                    "anchor_count": content.anchors.len(),
+                    "settlement_position": content.settlement_position,
+                    "monster_position": content.monster_position,
+                    "entrance_position": content.entrance_position,
+                    "treasure_position": content.treasure_position,
+                    "dungeon_route_walkable": lk2_core::world::content::content_route_is_walkable(
+                        game_world,
+                        content,
+                    ),
+                })
+            }),
         );
     }
     state
@@ -465,6 +579,15 @@ fn player_readability_json(snapshot: &StaticWorldVisualSnapshot) -> serde_json::
     serde_json::json!({
         "marker_count": snapshot.player_marker_count,
         "marker_max_distance": snapshot.player_marker_max_distance,
+    })
+}
+
+fn legendary_readability_json(snapshot: &StaticWorldVisualSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "dragon_visual_count": snapshot.dragon_visual_count,
+        "dragon_distance_to_player": snapshot.dragon_distance_to_player,
+        "held_legendary_count": snapshot.held_legendary_count,
+        "held_legendary_distance_to_player": snapshot.held_legendary_distance_to_player,
     })
 }
 
@@ -812,6 +935,9 @@ fn build_state_diff(prev: &serde_json::Value, current: &serde_json::Value) -> se
         "eco_cycle.fruit_grown",
         "observer.anomalies",
         "observer.invariant_violations",
+        "legendary.dragon_health",
+        "legendary.dragon_hearts",
+        "legendary.dragon_scales",
     ] {
         if let Some(delta) = diff_numeric_path(prev, current, path) {
             deltas.push(delta);
@@ -1035,6 +1161,15 @@ mod tests {
             FIRST_SCREENSHOT_MIN_PROGRESS,
             FIRST_SCREENSHOT_MIN_WALL_SECS,
         ));
+    }
+
+    #[test]
+    fn flicker_probe_sample_limit_is_bounded() {
+        assert_eq!(flicker_probe_max_samples_from_env(None), 32);
+        assert_eq!(flicker_probe_max_samples_from_env(Some("12")), 12);
+        assert_eq!(flicker_probe_max_samples_from_env(Some("0")), 1);
+        assert_eq!(flicker_probe_max_samples_from_env(Some("1000")), 64);
+        assert_eq!(flicker_probe_max_samples_from_env(Some("invalid")), 32);
     }
 
     #[test]

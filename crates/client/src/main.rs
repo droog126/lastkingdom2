@@ -17,6 +17,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 mod capture;
+mod legendary_content;
 mod model_preview;
 mod pretty;
 mod pvp_systems;
@@ -49,14 +50,18 @@ use crate::capture::{
     StaticWorldVisualSnapshot, TickRecorder, periodic_screenshot, tick_recorder,
     update_static_world_visual_snapshot,
 };
+use crate::legendary_content::{
+    LegendaryRuntime, animate_dragon_boss, follow_held_legendary, legendary_input,
+    setup_legendary_content, sync_held_legendary_model, update_legendary_hud,
+};
 use crate::pretty::{
     PlayerAnimState, PrettyConfig, animate_avatar, animate_cloud_puffs, animate_monsters,
     follow_monster_cubes, spawn_pretty, update_player_anim_state,
 };
 use crate::pvp_systems::{
-    HealthHudMarker, client_attack_predict, collect_combat_input_offline, collect_local_input,
+    client_attack_predict, collect_combat_input_offline, collect_local_input,
     offline_found_nation_input, on_damage_result, on_hit_confirm, on_knockback_event,
-    trigger_visual_effects,
+    receive_online_pvp_messages, trigger_visual_effects,
 };
 use crate::render::{
     AntiStuckState, CameraAngles, CameraMode, FreeFlyState, JumpState, LastMoveDirection,
@@ -70,9 +75,10 @@ use crate::render::{
     update_nest_indicator,
 };
 use crate::ui::{
-    ClientRunMode, GameMenuState, feathers_tools_scene, handle_feathers_tools_buttons,
-    handle_render_toggle_buttons, setup_fonts, setup_game_menu, setup_hud,
-    sync_game_menu_visibility, toggle_game_menu_input, update_feathers_tools_buttons,
+    ClientRunMode, DeveloperUiState, GameMenuState, feathers_tools_scene,
+    handle_feathers_tools_buttons, handle_render_toggle_buttons, setup_developer_menu, setup_fonts,
+    setup_game_menu, setup_hud, sync_developer_ui_visibility, sync_game_menu_visibility,
+    toggle_developer_ui_input, toggle_game_menu_input, update_feathers_tools_buttons,
     update_feathers_tools_status, update_feedback_toast_text, update_hud, update_nest_radar,
     update_render_toggle_buttons, update_tutorial_overlay,
 };
@@ -84,14 +90,13 @@ fn workspace_asset_root() -> PathBuf {
 }
 
 use leafwing_input_manager::prelude::ActionState;
-use lightyear::prelude::Controlled;
-use lk2_core::protocol::PlayerAction;
 use lk2_core::protocol::components::{
     EcoSnapshot, GameplayHudState, Health, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
 };
 use lk2_core::protocol::messages::{
     BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback, PingMessage, PongMessage,
 };
+use lk2_core::protocol::{ControlChannel, PlayerAction, StateChannel};
 use lk2_core::pvp::{CombatState, Hitbox, WeaponStats};
 use lk2_core::transport::{
     CLIENT_SEND_INTERVAL, NETCODE_CLIENT_TIMEOUT_SECS, NETCODE_TOKEN_EXPIRE_SECS, PING_INTERVAL,
@@ -449,14 +454,15 @@ fn main() {
     app.add_plugins(lightyear::prelude::client::ClientPlugins::default());
     app.add_plugins(lk2_core::protocol::ProtocolPlugin);
     if transform_gizmo_mode {
-        app.add_plugins(bevy::picking::mesh_picking::MeshPickingPlugin);
-        app.add_plugins(bevy::gizmos::prelude::TransformGizmoPlugin);
+        app.add_plugins(MeshPickingPlugin);
+        app.add_plugins(TransformGizmoPlugin);
         app.insert_resource(TransformGizmoEditor::default());
     }
 
     app.init_resource::<lightyear::prelude::PeerMetadata>()
-        .init_resource::<lk2_core::pvp::FixedTick>()
-        .init_resource::<TimeOfDay>();
+        .init_resource::<FixedTick>()
+        .init_resource::<TimeOfDay>()
+        .init_resource::<DeveloperUiState>();
 
     app.add_message::<GameplayCommand>()
         .add_message::<GameplayFeedback>()
@@ -551,6 +557,9 @@ fn main() {
         .init_resource::<OnlineConnectionDiagnostics>()
         .init_resource::<OnlineNetworkStatus>()
         .init_resource::<GameplayFeedbackToast>()
+        .init_resource::<lk2_core::legendary::DragonBossState>()
+        .init_resource::<lk2_core::legendary::LegendaryLoadout>()
+        .init_resource::<LegendaryRuntime>()
         .insert_resource(if network_mode {
             ClientRunMode::Online
         } else {
@@ -560,11 +569,8 @@ fn main() {
 
     app.add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
-        .add_plugins(lk2_core::sovereign_spark::SovereignSparkPlugin)
-        .add_plugins(lk2_core::mining_site::MiningSitePlugin)
-        .add_plugins(lk2_core::terrain_overlay::TerrainOverlayPlugin)
-        .add_plugins(lk2_core::equipment::EquipmentPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
+        .add_plugins(lk2_core::status::StatusPlugin)
         .add_plugins(lk2_core::objectives::ObjectivesPlugin)
         .add_plugins(ClientPvPPlugin);
     // ControllerPlugin used to write PvPController.move_input. That is now done
@@ -583,8 +589,10 @@ fn main() {
             spawn_pretty,
             setup_hud,
             setup_game_menu,
+            setup_developer_menu,
             feathers_tools_scene.spawn(),
             setup_player_pvp,
+            setup_legendary_content,
             lk2_core::objectives::setup_default_objectives,
         )
             .chain(),
@@ -663,6 +671,8 @@ fn main() {
         (
             toggle_game_menu_input,
             sync_game_menu_visibility,
+            toggle_developer_ui_input,
+            sync_developer_ui_visibility,
             handle_render_toggle_buttons,
             update_render_toggle_buttons,
         )
@@ -670,12 +680,13 @@ fn main() {
     );
     app.add_systems(
         PostUpdate,
-        sync_transform_gizmo_player.after(bevy::gizmos::prelude::TransformGizmoSystems),
+        sync_transform_gizmo_player.after(TransformGizmoSystems),
     );
     app.add_systems(
         Update,
         (
             collect_local_input,
+            receive_online_pvp_messages,
             client_attack_predict,
             on_hit_confirm,
             on_knockback_event,
@@ -693,6 +704,19 @@ fn main() {
     );
 
     app.add_systems(Update, collect_combat_input_offline);
+
+    app.add_systems(
+        Update,
+        (
+            legendary_input,
+            sync_held_legendary_model,
+            follow_held_legendary,
+            animate_dragon_boss,
+            update_legendary_hud,
+        )
+            .chain()
+            .run_if(resource_equals(ClientRunMode::Offline)),
+    );
 
     app.add_systems(Update, offline_found_nation_input);
 
@@ -839,7 +863,7 @@ fn apply_networked_position(
     mut player: ResMut<PlayerState>,
 ) {
     let mut count = 0;
-    let mut last_pos = bevy::math::Vec3::ZERO;
+    let mut last_pos = Vec3::ZERO;
     for (mut tf, pos) in q.iter_mut() {
         tf.translation = pos.0;
         last_pos = pos.0;
@@ -913,7 +937,7 @@ fn apply_server_pos_update(
         }
         return;
     }
-    let mut last_pos = bevy::math::Vec3::ZERO;
+    let mut last_pos = Vec3::ZERO;
     let mut last_tick: u32 = 0;
     let mut count: u32 = 0;
     for mut receiver in receiver_q.iter_mut() {
@@ -1033,7 +1057,7 @@ fn send_ping_messages(
     run_mode: Res<ClientRunMode>,
     time: Res<Time>,
     mut connection: ResMut<OnlineConnectionDiagnostics>,
-    writer: Option<MessageWriter<PingMessage>>,
+    mut senders: Query<&mut lightyear::prelude::MessageSender<PingMessage>>,
     mut next_ping_secs: Local<f32>,
 ) {
     if *run_mode != ClientRunMode::Online
@@ -1043,10 +1067,15 @@ fn send_ping_messages(
         return;
     }
     *next_ping_secs = time.elapsed_secs() + PING_INTERVAL.as_secs_f32();
-    let Some(mut writer) = writer else { return };
+    let Some(client_entity) = connection.client_entity else {
+        return;
+    };
+    let Ok(mut sender) = senders.get_mut(client_entity) else {
+        return;
+    };
 
     connection.ping_sequence = connection.ping_sequence.saturating_add(1);
-    writer.write(PingMessage {
+    sender.send::<ControlChannel>(PingMessage {
         client_id: connection.client_id,
         sequence: connection.ping_sequence,
         client_time_secs: time.elapsed_secs_f64(),
@@ -1153,7 +1182,7 @@ fn classify_network_status(
     }
 }
 
-fn block_type_from_u8(value: u8) -> lk2_core::world::BlockType {
+fn block_type_from_u8(value: u8) -> BlockType {
     use lk2_core::world::BlockType;
     match value {
         1 => BlockType::Dirt,
@@ -1328,7 +1357,7 @@ fn send_online_gameplay_commands(
     connection: Res<OnlineConnectionDiagnostics>,
     mut diagnostics: ResMut<OnlineCommandDiagnostics>,
     gameplay_udp: Option<Res<OnlineGameplayUdp>>,
-    writer: Option<MessageWriter<GameplayCommand>>,
+    mut senders: Query<&mut lightyear::prelude::MessageSender<GameplayCommand>>,
     mut next_move_send_secs: Local<f32>,
 ) {
     if *run_mode != ClientRunMode::Online {
@@ -1339,17 +1368,23 @@ fn send_online_gameplay_commands(
         diagnostics.gameplay_udp_active = gameplay_udp.is_some();
         return;
     }
-    diagnostics.sender_entities = usize::from(writer.is_some());
+    diagnostics.sender_entities = senders.iter().len();
     diagnostics.gameplay_udp_active = gameplay_udp.is_some();
-    let mut writer = writer;
+    let sender_entity = connection.client_entity;
 
     let mut send = |kind: GameplayCommandKind| {
-        if let Some(writer) = writer.as_mut() {
-            writer.write(GameplayCommand {
-                tick: clock.tick,
-                player_block: player.block_pos,
-                kind,
-            });
+        let Some(sender_entity) = sender_entity else {
+            return;
+        };
+        let Ok(mut sender) = senders.get_mut(sender_entity) else {
+            return;
+        };
+        let is_state = matches!(kind, GameplayCommandKind::MoveWorld { .. });
+        let message = GameplayCommand { tick: clock.tick, player_block: player.block_pos, kind };
+        if is_state {
+            sender.send::<StateChannel>(message);
+        } else {
+            sender.send::<ControlChannel>(message);
         }
     };
 
@@ -1411,7 +1446,7 @@ fn send_online_gameplay_commands(
 fn collect_keys_to_action_state(
     cfg: Res<RenderConfig>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut q: Query<&mut ActionState<PlayerAction>, With<Controlled>>,
+    mut q: Query<&mut ActionState<PlayerAction>, With<Player>>,
 ) {
     let mut action_state = match q.single_mut() {
         Ok(s) => s,
@@ -1498,7 +1533,7 @@ fn sync_top_down_lighting(
         light.illuminance = if top_down {
             26_000.0
         } else {
-            bevy::light::light_consts::lux::RAW_SUNLIGHT
+            light_consts::lux::RAW_SUNLIGHT
         };
     }
     if let Ok(mut light) = fill.single_mut() {
@@ -1553,20 +1588,17 @@ fn setup_transform_gizmo_cursor(
         return;
     }
     if let Ok(camera) = cameras.single() {
-        commands.entity(camera).insert(bevy::gizmos::prelude::TransformGizmoCamera);
+        commands.entity(camera).insert(TransformGizmoCamera);
     }
     if let Ok(player) = players.single() {
-        commands.entity(player).insert((
-            bevy::gizmos::prelude::TransformGizmoFocus,
-            bevy::picking::Pickable::default(),
-        ));
+        commands.entity(player).insert((TransformGizmoFocus, Pickable::default()));
     }
 }
 
 fn transform_gizmo_input(
     editor: Option<Res<TransformGizmoEditor>>,
     keys: Res<ButtonInput<KeyCode>>,
-    settings: Option<ResMut<bevy::gizmos::prelude::TransformGizmoSettings>>,
+    settings: Option<ResMut<TransformGizmoSettings>>,
 ) {
     let Some(editor) = editor else {
         return;
@@ -1578,19 +1610,15 @@ fn transform_gizmo_input(
         return;
     };
     if keys.just_pressed(KeyCode::Digit1) {
-        settings.mode = bevy::gizmos::prelude::TransformGizmoMode::Translate;
+        settings.mode = TransformGizmoMode::Translate;
     } else if keys.just_pressed(KeyCode::Digit2) {
-        settings.mode = bevy::gizmos::prelude::TransformGizmoMode::Rotate;
+        settings.mode = TransformGizmoMode::Rotate;
     } else if keys.just_pressed(KeyCode::Digit3) {
-        settings.mode = bevy::gizmos::prelude::TransformGizmoMode::Scale;
+        settings.mode = TransformGizmoMode::Scale;
     } else if keys.just_pressed(KeyCode::KeyX) {
         settings.space = match settings.space {
-            bevy::gizmos::prelude::TransformGizmoSpace::World => {
-                bevy::gizmos::prelude::TransformGizmoSpace::Local
-            }
-            bevy::gizmos::prelude::TransformGizmoSpace::Local => {
-                bevy::gizmos::prelude::TransformGizmoSpace::World
-            }
+            TransformGizmoSpace::World => TransformGizmoSpace::Local,
+            TransformGizmoSpace::Local => TransformGizmoSpace::World,
         };
     }
 }
@@ -1661,7 +1689,7 @@ fn setup_light(mut commands: Commands) {
     // sky and to cast volumetric god-rays through the volumetric fog.
     commands.spawn((
         DirectionalLight {
-            illuminance: bevy::light::light_consts::lux::RAW_SUNLIGHT * 0.82,
+            illuminance: light_consts::lux::RAW_SUNLIGHT * 0.82,
             shadow_maps_enabled: true,
             color: Color::srgb(1.0, 0.91, 0.78),
             ..default()
@@ -1750,8 +1778,7 @@ pub fn day_night_cycle(
     };
     let sun_x = (std::f32::consts::TAU * (atmosphere_time_of_day - 0.25)).sin() * dist;
     let sun_pos = Vec3::new(sun_x, atmosphere_dayness * dist + 5.0, 0.0);
-    let sun_illuminance =
-        bevy::light::light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * readable_dayness);
+    let sun_illuminance = light_consts::lux::RAW_SUNLIGHT * (0.05 + 0.95 * readable_dayness);
     if let Ok((mut tf, mut l)) = sun.single_mut() {
         *tf = Transform::from_translation(sun_pos).looking_at(Vec3::ZERO, Vec3::Y);
         // RAW_SUNLIGHT at full day; ramp down to near-moonless at night so the
@@ -1809,6 +1836,16 @@ fn setup_world(
         ..WorldConfig::default()
     });
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
+    if let Some(content) = game_world.content.as_ref() {
+        info!(
+            "[content] 3D volume {:?}, settlement {:?}, monster territory {:?}, dungeon entrance {:?}, treasure {:?}",
+            content.volume.dimensions,
+            content.settlement_position,
+            content.monster_position,
+            content.entrance_position,
+            content.treasure_position
+        );
+    }
 
     for k in ResourceKind::ALL {
         let init = k.demo_initial_amount();

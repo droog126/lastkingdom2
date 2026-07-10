@@ -38,11 +38,11 @@ const FEATURED_MODELS: &[&str] = &[
     "procedural/pretty/sokpop_gatherer.glb",
     "procedural/pretty/villager.glb",
     "procedural/pretty/wolf.glb",
-    "procedural/pretty/monster_treant.glb",
+    "procedural/pretty/hoplite_ender_dragon.glb",
     "procedural/pretty/sokpop_tree.glb",
-    "procedural/pretty/granular_round_tree.glb",
     "procedural/pretty/granular_pine_tree.glb",
     "procedural/pretty/granular_wildflowers.glb",
+    "procedural/pretty/ground_patch.glb",
     "procedural/pretty/house_small.glb",
     "procedural/pretty/windmill.glb",
     "procedural/pretty/bridge_stone.glb",
@@ -51,6 +51,10 @@ const FEATURED_MODELS: &[&str] = &[
     "procedural/pretty/treasure_chest.glb",
     "procedural/pretty/boat.glb",
     "procedural/pretty/cart.glb",
+    "procedural/pretty/hoplite_reaper_scythe.glb",
+    "procedural/pretty/hoplite_dragon_katana.glb",
+    "procedural/pretty/hoplite_golem_hammer.glb",
+    "procedural/pretty/hoplite_midas_sword.glb",
 ];
 
 pub const MODEL_PREVIEW_OUTPUT_DIR: &str = "screenshots/model_preview";
@@ -835,6 +839,17 @@ mod tests {
             assert!(
                 root.join(&path).is_file(),
                 "featured model does not exist: {path}"
+            );
+        }
+        for weapon in [
+            "hoplite_reaper_scythe",
+            "hoplite_dragon_katana",
+            "hoplite_golem_hammer",
+            "hoplite_midas_sword",
+        ] {
+            assert!(
+                FEATURED_MODELS.iter().any(|path| path.ends_with(&format!("/{weapon}.glb"))),
+                "missing Hoplite weapon from featured showroom: {weapon}"
             );
         }
     }

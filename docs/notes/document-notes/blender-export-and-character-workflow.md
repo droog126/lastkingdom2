@@ -1,4 +1,6 @@
+<!-- doc-status: reference -->
 
+> 文档状态：专项参考笔记；资产生成的当前规则以 `$ai-modeling` 技能为准。
 
 ---
 

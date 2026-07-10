@@ -21,10 +21,10 @@ impl Biome {
         let fx = (x as f32 / cell as f32) - cx as f32;
         let fz = (z as f32 / cell as f32) - cz as f32;
 
-        let v00 = crate::world::terrain::hash01(cx, 0, cz, 0xB10E);
-        let v10 = crate::world::terrain::hash01(cx + 1, 0, cz, 0xB10E);
-        let v01 = crate::world::terrain::hash01(cx, 0, cz + 1, 0xB10E);
-        let v11 = crate::world::terrain::hash01(cx + 1, 0, cz + 1, 0xB10E);
+        let v00 = terrain::hash01(cx, 0, cz, 0xB10E);
+        let v10 = terrain::hash01(cx + 1, 0, cz, 0xB10E);
+        let v01 = terrain::hash01(cx, 0, cz + 1, 0xB10E);
+        let v11 = terrain::hash01(cx + 1, 0, cz + 1, 0xB10E);
 
         let sx = fx * fx * (3.0 - 2.0 * fx);
         let sz = fz * fz * (3.0 - 2.0 * fz);
@@ -35,7 +35,7 @@ impl Biome {
         let cell2 = 8_i32;
         let cx2 = (x as f32 / cell2 as f32).floor() as i32;
         let cz2 = (z as f32 / cell2 as f32).floor() as i32;
-        let detail = crate::world::terrain::hash01(cx2, 0, cz2, 0xD37A1);
+        let detail = terrain::hash01(cx2, 0, cz2, 0xD37A1);
         big * 0.7 + detail * 0.3
     }
 
@@ -175,7 +175,7 @@ pub struct World {
 
     pub geo_overlay: Vec<terrain::ShapeLayer>,
 
-    pub geo_overlay_names: std::collections::HashSet<String>,
+    pub geo_overlay_names: HashSet<String>,
 
     pub content: Option<std::sync::Arc<content::MaterializedContent>>,
 }
@@ -231,7 +231,7 @@ impl World {
             seed: 0xDEADBEEF,
             pipeline: std::sync::Arc::new(terrain::presets::default_preset()),
             geo_overlay: Vec::new(),
-            geo_overlay_names: std::collections::HashSet::new(),
+            geo_overlay_names: HashSet::new(),
             content: None,
         }
     }
@@ -1277,10 +1277,8 @@ mod tests {
         // set regardless of seed, but the *starting* lane changes — verify
         // by walking the inner 8 candidates with two seeds and confirming
         // each set has the same multiset of offsets.
-        let ring0_seed0: std::collections::HashSet<_> =
-            fallback_spawn_ring_offsets(0).into_iter().take(8).collect();
-        let ring0_seed3: std::collections::HashSet<_> =
-            fallback_spawn_ring_offsets(3).into_iter().take(8).collect();
+        let ring0_seed0: HashSet<_> = fallback_spawn_ring_offsets(0).into_iter().take(8).collect();
+        let ring0_seed3: HashSet<_> = fallback_spawn_ring_offsets(3).into_iter().take(8).collect();
         assert_eq!(ring0_seed0, ring0_seed3);
     }
 }

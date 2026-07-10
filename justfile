@@ -136,5 +136,14 @@ audit-tdd:
 audit-architecture:
     just xtask audit-architecture
 
+_xtask-audit *ARGS:
+    $env:CARGO_INCREMENTAL="0"; cargo run -q -p xtask --target-dir .tmp/xtask-audit-target -- {{ARGS}}
+
+audit-docs:
+    just _xtask-audit audit-docs
+
+audit-skills:
+    just _xtask-audit audit-skills
+
 help:
     just xtask help

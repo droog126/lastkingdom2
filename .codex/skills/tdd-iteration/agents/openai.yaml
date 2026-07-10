@@ -1,4 +1,4 @@
 interface:
   display_name: "LK2 TDD Iteration"
-  short_description: "Test-first iteration and validation workflow."
-  default_prompt: "Use $tdd-iteration to implement a test-driven change."
+  short_description: "Implement deterministic behavior test-first"
+  default_prompt: "Use $tdd-iteration to implement a deterministic behavior change test-first."

@@ -673,14 +673,14 @@ pub mod presets {
         h.amplitude_big = 16.0;
         h.amplitude_detail = 5.0;
 
-        let spawn_island = shapes::ShapeLayer {
+        let spawn_island = ShapeLayer {
             name: "spawn_island".into(),
             weight: 9.5,
-            fill: shapes::FillMode::AdaptiveSurface {
+            fill: FillMode::AdaptiveSurface {
                 surface: BlockType::Grass,
                 subsurface: BlockType::Dirt,
             },
-            shapes: vec![shapes::ShapeSpec::Hill(shapes::HillShape {
+            shapes: vec![ShapeSpec::Hill(HillShape {
                 name: "spawn_dome".into(),
                 center_x: 48,
                 center_z: 48,
