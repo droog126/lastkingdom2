@@ -1,7 +1,10 @@
 //! Read-only replication boundary. It owns no simulation state.
 
+use bevy::prelude::*;
 use lk2_core::simulation::{NatureEvent, NatureSnapshot, TickReport};
 use serde::{Deserialize, Serialize};
+
+use super::authority::{LatestNatureReport, NatureAuthoritySet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NatureSnapshotDto<T> {
@@ -39,4 +42,31 @@ impl ReplicationBatch<NatureSnapshot, NatureEvent> {
     pub fn from_tick_report(report: TickReport) -> Self {
         Self::new(report.tick, report.snapshot, report.events)
     }
+}
+
+#[derive(Resource, Default)]
+pub struct LatestNatureReplication(pub Option<ReplicationBatch<NatureSnapshot, NatureEvent>>);
+
+pub struct NatureReplicationPlugin;
+
+impl Plugin for NatureReplicationPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<LatestNatureReplication>().add_systems(
+            FixedUpdate,
+            build_replication_batch.in_set(NatureAuthoritySet::PublishReport),
+        );
+    }
+}
+
+fn build_replication_batch(
+    report: Res<LatestNatureReport>,
+    mut replication: ResMut<LatestNatureReplication>,
+) {
+    let Some(report) = report.0.as_ref() else {
+        return;
+    };
+    if replication.0.as_ref().is_some_and(|batch| batch.tick() == report.tick) {
+        return;
+    }
+    replication.0 = Some(ReplicationBatch::from_tick_report(report.clone()));
 }

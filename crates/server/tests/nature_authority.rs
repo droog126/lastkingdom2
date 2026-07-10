@@ -1,3 +1,5 @@
+#[path = "../src/app/mod.rs"]
+mod app;
 #[path = "../src/authority/mod.rs"]
 mod authority;
 #[path = "../src/networking/mod.rs"]
@@ -9,6 +11,7 @@ mod persistence;
 #[path = "../src/replication/mod.rs"]
 mod replication;
 
+use app::NatureServerPlugin;
 use authority::{LatestNatureReport, NatureAuthority, NatureAuthorityFault, NatureAuthorityPlugin};
 use bevy::prelude::*;
 use lk2_core::eco_cycle::EcoCycle;
@@ -75,4 +78,30 @@ fn report_projects_to_replication_observation_and_persistence_without_new_rules(
     assert_eq!(save.state, batch.snapshot.value);
     assert!(save.validate().is_ok());
     assert_eq!(removal, replication::NatureEventDto::Remove { id: 7 });
+}
+
+#[test]
+fn aggregate_plugin_publishes_all_read_only_boundaries_for_the_same_tick() {
+    assert!(app::NATURE_SERVER_MODULES.authority);
+    assert!(app::NATURE_SERVER_MODULES.replication);
+    assert!(app::NATURE_SERVER_MODULES.observation);
+    assert!(app::NATURE_SERVER_MODULES.persistence);
+
+    let mut app = App::new();
+    app.add_plugins(NatureServerPlugin);
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let report_tick = app.world().resource::<LatestNatureReport>().0.as_ref().unwrap().tick;
+    let replication_tick =
+        app.world().resource::<replication::LatestNatureReplication>().0.as_ref().unwrap().tick();
+    let observation_tick =
+        app.world().resource::<observation::LatestNatureObservation>().0.as_ref().unwrap().tick;
+    let save_tick =
+        app.world().resource::<persistence::LatestNatureSave>().0.as_ref().unwrap().tick;
+
+    assert_eq!(
+        (report_tick, replication_tick, observation_tick, save_tick),
+        (1, 1, 1, 1)
+    );
 }
