@@ -857,6 +857,7 @@ fn built_in_assertions(
             ));
         }
         a.extend(network_command_assertions(state));
+        a.extend(network_connection_assertions(state));
         a.extend(camera_assertions(state));
         a.extend(player_readability_assertions(state));
         a.extend(resource_deltas_assertions(iter_dir));
@@ -994,6 +995,45 @@ fn network_command_assertions(state: &Value) -> Vec<Assertion> {
     out
 }
 
+fn network_connection_assertions(state: &Value) -> Vec<Assertion> {
+    if state.get("role").and_then(Value::as_str) != Some("client_online") {
+        return Vec::new();
+    }
+    let transport =
+        path_value(state, "network_connection.transport").and_then(Value::as_str).unwrap_or("");
+    let ping = path_f64(state, "network_connection.ping_ms");
+    let pong_age = path_f64(state, "network_connection.pong_age_secs");
+    vec![
+        assertion(
+            "network.transport_connected",
+            &json!(transport),
+            "==",
+            json!("Connected"),
+            "fail",
+            "online transport is not connected",
+            Some("network_connection.transport"),
+        ),
+        assertion(
+            "network.ping_available",
+            &json!(ping),
+            ">=",
+            json!(0.0),
+            "partial",
+            "online connection has no finite ping sample",
+            Some("network_connection.ping_ms"),
+        ),
+        assertion(
+            "network.pong_recent",
+            &json!(pong_age),
+            "<=",
+            json!(5.0),
+            "fail",
+            "online connection has not received a recent pong",
+            Some("network_connection.pong_age_secs"),
+        ),
+    ]
+}
+
 fn camera_assertions(state: &Value) -> Vec<Assertion> {
     let mut out = Vec::new();
     let mode =
@@ -1112,6 +1152,9 @@ fn gameplay_motion_count(state: &Value) -> usize {
 }
 
 fn regression_assertions(state: &Value, prev: &Value) -> Vec<Assertion> {
+    if !same_regression_context(state, prev) {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     let monsters_curr = path_f64(state, "monsters.current").unwrap_or(0.0);
     let monsters_prev = path_f64(prev, "monsters.current").unwrap_or(0.0);
@@ -1145,6 +1188,14 @@ fn regression_assertions(state: &Value, prev: &Value) -> Vec<Assertion> {
         ));
     }
     out
+}
+
+fn same_regression_context(state: &Value, prev: &Value) -> bool {
+    ["role", "camera.mode"].iter().all(|path| {
+        let current = path_value(state, path);
+        let previous = path_value(prev, path);
+        current == previous || (current.is_none() && previous.is_none())
+    })
 }
 
 struct StaticWorldDrift {
@@ -2228,6 +2279,21 @@ mod tests {
             .find(|a| a.id == "regression.nations_total_non_decreasing")
             .expect("nations regression assertion missing");
         assert!(nations.ok);
+    }
+
+    #[test]
+    fn regression_skips_independent_camera_contexts() {
+        let prev = json!({
+            "role": "client_offline",
+            "camera": {"mode": "TopDown"},
+            "nations": {"total_nations": 3}
+        });
+        let curr = json!({
+            "role": "client_offline",
+            "camera": {"mode": "ThirdPerson"},
+            "nations": {"total_nations": 1}
+        });
+        assert!(regression_assertions(&curr, &prev).is_empty());
     }
 
     #[test]
