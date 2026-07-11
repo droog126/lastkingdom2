@@ -19,7 +19,9 @@
 ## 验证节奏
 
 - 优先连续完成一批相关实现，再在有意义的里程碑运行一次最窄充分验证；不要在每个小修改后重复编译、测试或闭环。
-- 仅在交付前、风险确实需要、验收明确要求运行时证据或用户明确要求时运行完整包测试或闭环。
+- 可见、图形、Bevy 表现层、视觉调参或 presentation-only 改动本身不触发 `just loop`。
+- 仅当用户明确要求、验收条件明确要求、复现/诊断必须依赖运行时工件，或最终答复要声明“实际渲染画面已验证”时，才运行闭环、截图、auto-demo 或 health 工件。
+- 交付前是否运行 `cargo check` / 聚焦测试由匹配技能的验证决策决定；低风险连续迭代可以延后验证，但最终答复必须说明选择。
 - 验证失败后先根据证据修代码；没有相关代码变化时不要反复运行同一验证命令。
 
 ## 技能路由
@@ -28,7 +30,7 @@
 - 对于可以在实现前用聚焦测试指定的确定性行为，使用 `$tdd-iteration`：规则、状态机、解析、不变量、场景、AI 决策和回归。
 - 对于 Bevy 0.19 客户端/服务器/运行时工作，使用 `$bevy-gameplay-dev`：ECS 系统、渲染、输入、HUD、相机、网络、模拟接线、场景、性能和日志记录。
 - 对于运行时资产或 GPU 生命周期症状，如内存不足、无效纹理、重复生成的资产分配、渲染重建泄漏或生成的资产在实体清理后仍然存在，使用 `$bevy-resource-lifecycle`。
-- 当任务明确要求运行或诊断观察-决策-行动循环、自动演示、运行时截图、健康工件或 `decision.md` 时，使用 `$closed-loop-ai-dev`。
+- 仅当任务明确要求运行或诊断观察-决策-行动循环、自动演示、运行时截图、健康工件或 `decision.md` 时，使用 `$closed-loop-ai-dev`。不要因为改动可见或表现层相关而自动添加它。
 - 仅用于定量循环截图评分、先前/当前比较或 `decision.md` 的评分部分，使用 `$screenshot-scoring`；普通 PNG 检查不需要它。
 - 对于可复现的 Blender/GLB 生成、资产清单、模型预览、多边形预算和连接生成的模型，使用 `$ai-modeling`。
 - 对于由证据支持的、只读的端到端游戏规则、权威流、不可达系统或客户端/核心/服务器差异的审计，使用 `$game-logic-audit`。
@@ -38,10 +40,10 @@
 ## 组合
 
 - 游戏玩法规则实现：`$tdd-iteration`；仅当 ECS 调度或运行时接线是更改的一部分时，添加 `$bevy-gameplay-dev`。
-- 可见的 Bevy/运行时实现：`$bevy-gameplay-dev`；当验收需要运行时证据时，添加 `$closed-loop-ai-dev`。
-- 资源生命周期 bug：`$bevy-resource-lifecycle`；仅当复现或验证需要循环/运行时证据时，添加 `$closed-loop-ai-dev`。
+- 可见的 Bevy/运行时实现：`$bevy-gameplay-dev`。不要自动添加 `$closed-loop-ai-dev`；只有用户明确要求、验收条件明确要求，或需要声明已观察真实渲染画面时才添加。
+- 资源生命周期 bug：`$bevy-resource-lifecycle`；仅当复现或验证必须依赖循环/运行时证据时，添加 `$closed-loop-ai-dev`。
 - 循环评分：仅当需要数字分数或带评分的 `decision.md` 时，使用 `$closed-loop-ai-dev` 加上 `$screenshot-scoring`。
-- 生成的资产：`$ai-modeling`；仅在资产连接到游戏中并且必须在目标相机中判断之后，添加 `$closed-loop-ai-dev`。
+- 生成的资产：`$ai-modeling`；仅当用户/验收要求在游戏目标相机中验证，或最终结论要声明目标相机下已验证时，添加 `$closed-loop-ai-dev`。
 - 逻辑审计：单独使用 `$game-logic-audit` 生成报告；在后续或明确组合的修复任务中使用实现路由。
 - 文档更改：`$docs-governance`；仅当更改 `xtask` 文档审计行为时，添加 `$tdd-iteration`。
 - 技能更改：`$skill-sedimentation` 加上系统 `$skill-creator` 技能。

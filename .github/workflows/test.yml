@@ -9,14 +9,31 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
     steps:
-      # Checkout code
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: sudo apt install libasound2-dev libudev-dev pkg-config
 
-      # Unit testing
+      - name: Install Rust tooling
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-machete,cargo-llvm-cov,cargo-insta
+
+      - name: Check unused dependencies
+        run: cargo machete
+
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
+
+      - name: Coverage
+        run: cargo llvm-cov nextest --workspace --lcov --output-path lcov.info
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info

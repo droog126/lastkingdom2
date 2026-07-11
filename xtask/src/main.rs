@@ -8,7 +8,6 @@ mod loop_cmd;
 mod model_iter;
 mod motion;
 mod observer;
-mod runner;
 mod tdd;
 
 use std::{
@@ -104,7 +103,7 @@ fn project_root() -> Result<PathBuf> {
 
 fn print_help() {
     println!("xtask commands:");
-    println!("  loop [--offline] [--seconds N]");
+    println!("  loop [--offline] [--seconds N] (currently unavailable)");
     println!(
         "  flicker-probe [--seconds N] [--interval S] [--period S] [--warmup S] [--gpu-backend dx12|vulkan]"
     );

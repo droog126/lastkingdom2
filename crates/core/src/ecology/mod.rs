@@ -1,11 +1,16 @@
 use bevy::prelude::Component;
 use bevy::prelude::Vec3;
 
-use crate::creature::CreatureKind;
+use self::animals::CreatureKind;
 use crate::resource::ResourceKind;
 use crate::world::{Biome, BlockType};
 
+pub mod animals;
+mod cycle;
 pub mod nature;
+pub mod threats;
+
+pub use cycle::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EcologyKind {
@@ -86,8 +91,14 @@ pub fn ecology_components(
     let entry = ecology_entry(kind);
     (
         EcologyEntity { kind, block_pos },
-        EcologyModel { path: entry.model_path, scale: entry.visual_scale },
-        entry.produced_resource.map(|resource| HarvestYield { kind: resource, amount: 1 }),
+        EcologyModel {
+            path: entry.model_path,
+            scale: entry.visual_scale,
+        },
+        entry.produced_resource.map(|resource| HarvestYield {
+            kind: resource,
+            amount: 1,
+        }),
     )
 }
 
@@ -363,14 +374,20 @@ mod smoke_tests {
 
     #[test]
     fn harvest_yield_fields() {
-        let hy = HarvestYield { kind: ResourceKind::Wood, amount: 5 };
+        let hy = HarvestYield {
+            kind: ResourceKind::Wood,
+            amount: 5,
+        };
         assert_eq!(hy.kind, ResourceKind::Wood);
         assert_eq!(hy.amount, 5);
     }
 
     #[test]
     fn ecology_model_fields() {
-        let m = EcologyModel { path: "test.glb", scale: Vec3::splat(2.0) };
+        let m = EcologyModel {
+            path: "test.glb",
+            scale: Vec3::splat(2.0),
+        };
         assert_eq!(m.path, "test.glb");
         assert_eq!(m.scale, Vec3::splat(2.0));
     }
@@ -464,7 +481,7 @@ impl ResourceNodeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::creature::creature_drop_kind;
+    use crate::ecology::animals::creature_drop_kind;
 
     #[test]
     fn catalog_has_entries_for_all_creature_kinds() {
@@ -490,7 +507,11 @@ mod tests {
             WildlifeKind::Bear,
             WildlifeKind::Wolf,
         ] {
-            assert!(ecology_entry(EcologyKind::Wildlife(kind)).model_path.ends_with(".glb"));
+            assert!(
+                ecology_entry(EcologyKind::Wildlife(kind))
+                    .model_path
+                    .ends_with(".glb")
+            );
         }
 
         for kind in [
@@ -503,7 +524,11 @@ mod tests {
             ResourceNodeKind::SunstoneCrystal,
             ResourceNodeKind::FrostCrystal,
         ] {
-            assert!(ecology_entry(EcologyKind::ResourceNode(kind)).model_path.ends_with(".glb"));
+            assert!(
+                ecology_entry(EcologyKind::ResourceNode(kind))
+                    .model_path
+                    .ends_with(".glb")
+            );
         }
     }
 
@@ -543,7 +568,9 @@ mod tests {
             BlockType::LivingRoot,
         ] {
             assert!(
-                ECOLOGY_CATALOG.iter().any(|entry| entry.source_block == Some(block)),
+                ECOLOGY_CATALOG
+                    .iter()
+                    .any(|entry| entry.source_block == Some(block)),
                 "missing catalog entry for {block:?}"
             );
         }

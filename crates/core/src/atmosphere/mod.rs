@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::eco_cycle::EcoCycle;
+use crate::ecology::EcoCycle;
 
 /// Read-only atmosphere data derived from the existing authoritative ecology cycle.
 ///

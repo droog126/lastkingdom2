@@ -1,5 +1,5 @@
 use bevy::prelude::Vec2;
-use lk2_core::eco_cycle::EcoCycle;
+use lk2_core::ecology::EcoCycle;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::simulation::{NatureEvent, WorldInput, step_world};
 use lk2_core::world::generation::{NatureProfile, WorldRecipe};
@@ -55,7 +55,11 @@ fn shared_step_is_deterministic_for_equal_state_and_inputs() {
 
 #[test]
 fn world_recipe_reuses_existing_ecology_initializers_deterministically() {
-    let recipe = WorldRecipe { seed: 42, center: [32.0, 48.0], nature: NatureProfile::LivingBasin };
+    let recipe = WorldRecipe {
+        seed: 42,
+        center: [32.0, 48.0],
+        nature: NatureProfile::LivingBasin,
+    };
 
     let left = recipe.generate_ecology();
     let right = recipe.generate_ecology();

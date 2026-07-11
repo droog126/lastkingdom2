@@ -24,12 +24,19 @@ fn main() {
     )
     .expect("server authoritative world must provide safe spawn on huge platform");
 
-    let mut player = PlayerState { pos: spawn, block_pos: spawn_block, ..Default::default() };
+    let mut player = PlayerState {
+        pos: spawn,
+        block_pos: spawn_block,
+        ..Default::default()
+    };
     let mut transform = Transform::from_translation(spawn);
     let mut player_pos = PlayerPos(spawn);
     let mut actions = ActionState::<PlayerAction>::default();
     actions.press(&PlayerAction::MoveForward);
-    let command = GameplayCommandKind::MoveWorld { dx_milli: 0, dz_milli: -1000 };
+    let command = GameplayCommandKind::MoveWorld {
+        dx_milli: 0,
+        dz_milli: -1000,
+    };
 
     let before = transform.translation;
     let before_block = player.block_pos;

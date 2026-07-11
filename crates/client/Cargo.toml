@@ -11,48 +11,18 @@ publish.workspace = true
 name = "lk2-client"
 path = "src/main.rs"
 
-[[example]]
-name = "audit_player"
-path = "examples/audit_player.rs"
-
-[[example]]
-name = "simulate_forward"
-path = "examples/simulate_forward.rs"
-
-[[example]]
-name = "simulate_online_first_person"
-path = "examples/simulate_online_first_person.rs"
-
-[[example]]
-name = "debug_camera_view"
-path = "examples/debug_camera_view.rs"
-
 [features]
 dev-dynamic-linking = ["bevy/dynamic_linking"]
-audit-pretty-models = []
 
 [dependencies]
-bevy = { workspace = true, features = ["system_font_discovery", "bevy_feathers"] }
-bevy-inspector-egui = { workspace = true }
-bevy_world_serialization = { version = "0.19" }
-avian3d = { workspace = true }
-bevy-tnua = { workspace = true }
-bevy-tnua-avian3d = { workspace = true }
-bevy_panorbit_camera = { workspace = true }
+bevy = { workspace = true, features = ["system_font_discovery"] }
+bevy_world_serialization = { workspace = true }
+lk2-core = { workspace = true }
+leafwing-input-manager = { workspace = true }
+lightyear = { workspace = true, features = ["std", "client", "udp", "replication", "netcode"] }
+lightyear_netcode = { workspace = true, features = ["std", "client"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-block-mesh = { workspace = true }
-ndshape = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-lk2-core = { workspace = true, features = ["client-render"] }
-lightyear = { workspace = true, features = ["leafwing", "client", "udp", "replication", "netcode"] }
-lightyear_avian3d = { workspace = true }
-lightyear_inputs_leafwing = { workspace = true }
-lightyear_netcode = { version = "0.28" }
-lightyear_connection = { version = "0.28", features = ["client"] }
-lightyear_replication = { version = "0.28", default-features = false, features = ["std", "client"] }
-leafwing-input-manager = { workspace = true }
 
 [lints]
 workspace = true

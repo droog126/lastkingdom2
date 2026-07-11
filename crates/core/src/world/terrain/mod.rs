@@ -407,7 +407,11 @@ pub struct WaterFillModule {
 
 impl Default for WaterFillModule {
     fn default() -> Self {
-        Self { name: "water".into(), sea_level: SEA_LEVEL, weight: 0.5 }
+        Self {
+            name: "water".into(),
+            sea_level: SEA_LEVEL,
+            weight: 0.5,
+        }
     }
 }
 
@@ -635,11 +639,20 @@ impl TerrainPipeline {
         if y < self.vertical_min || y >= self.vertical_max {
             return BlockType::Air;
         }
-        let mut ctx = TerrainContext { x, y, z, seed: self.seed, surface_y: None, biome: None };
+        let mut ctx = TerrainContext {
+            x,
+            y,
+            z,
+            seed: self.seed,
+            surface_y: None,
+            biome: None,
+        };
 
         let mut sorted: Vec<&Box<dyn TerrainModule>> = self.modules.iter().collect();
         sorted.sort_by(|a, b| {
-            b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal)
+            b.weight()
+                .partial_cmp(&a.weight())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         for m in sorted {
             if let Some(block) = m.decide(&mut ctx) {
@@ -652,7 +665,9 @@ impl TerrainPipeline {
     pub fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
         let mut sorted: Vec<&Box<dyn TerrainModule>> = self.modules.iter().collect();
         sorted.sort_by(|a, b| {
-            b.weight().partial_cmp(&a.weight()).unwrap_or(std::cmp::Ordering::Equal)
+            b.weight()
+                .partial_cmp(&a.weight())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         for m in sorted {
             if let Some(h) = m.surface_f32(x, z) {
@@ -669,7 +684,10 @@ pub mod presets {
     use rand::{RngExt, SeedableRng};
 
     pub fn default_preset() -> TerrainPipeline {
-        let mut h = HeightmapModule { seed: 0xDEADBEEF, ..Default::default() };
+        let mut h = HeightmapModule {
+            seed: 0xDEADBEEF,
+            ..Default::default()
+        };
         h.amplitude_big = 16.0;
         h.amplitude_detail = 5.0;
 
@@ -717,7 +735,10 @@ pub mod presets {
             modules: vec![
                 Box::new(h),
                 Box::new(WaterFillModule::default()),
-                Box::new(TreeModule { density: 0.01, ..Default::default() }),
+                Box::new(TreeModule {
+                    density: 0.01,
+                    ..Default::default()
+                }),
             ],
             vertical_min: 0,
             vertical_max: crate::world::VERTICAL_SIZE,
@@ -737,7 +758,10 @@ pub mod presets {
             name: "superflat".into(),
             modules: vec![
                 Box::new(h),
-                Box::new(WaterFillModule { weight: 0.0, ..WaterFillModule::default() }),
+                Box::new(WaterFillModule {
+                    weight: 0.0,
+                    ..WaterFillModule::default()
+                }),
             ],
             vertical_min: 0,
             vertical_max: crate::world::VERTICAL_SIZE,
@@ -946,7 +970,9 @@ mod tests {
     #[test]
     fn default_spawn_island_surface_is_grass() {
         let pipeline = presets::by_name("default");
-        let surface = pipeline.surface_f32(48, 48).expect("default spawn island has a surface");
+        let surface = pipeline
+            .surface_f32(48, 48)
+            .expect("default spawn island has a surface");
         let y = surface.round() as i32 - 1;
 
         assert_eq!(
@@ -959,8 +985,9 @@ mod tests {
     #[test]
     fn auto_demo_spawn_y_matches_ground_at_spawn() {
         let pipeline = presets::by_name("default");
-        let ground_at_spawn =
-            pipeline.surface_f32(48, 48).expect("default preset has surface_f32 at spawn");
+        let ground_at_spawn = pipeline
+            .surface_f32(48, 48)
+            .expect("default preset has surface_f32 at spawn");
 
         let auto_demo_y = ground_at_spawn + 0.5;
 
@@ -1018,21 +1045,34 @@ mod tests {
             );
         }
 
-        let bad_water = pipeline.modules.iter().any(|m| m.name() == "water" && m.weight() >= 0.01);
+        let bad_water = pipeline
+            .modules
+            .iter()
+            .any(|m| m.name() == "water" && m.weight() >= 0.01);
         assert!(
             !bad_water,
             "superflat 不应填水, got modules: {:?}",
-            pipeline.modules.iter().map(|m| (m.name(), m.weight())).collect::<Vec<_>>()
+            pipeline
+                .modules
+                .iter()
+                .map(|m| (m.name(), m.weight()))
+                .collect::<Vec<_>>()
         );
 
         let has_tree = pipeline.modules.iter().any(|m| m.name() == "trees");
         assert!(
             !has_tree,
             "superflat 不应生成自然树, modules: {:?}",
-            pipeline.modules.iter().map(|m| m.name()).collect::<Vec<_>>()
+            pipeline
+                .modules
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
         );
 
-        let ground_at_spawn = pipeline.surface_f32(48, 48).expect("superflat spawn surface");
+        let ground_at_spawn = pipeline
+            .surface_f32(48, 48)
+            .expect("superflat spawn surface");
         assert!(
             (ground_at_spawn - 13.0).abs() < 0.01,
             "superflat 出生点 ground 应 = 13 (SEA_LEVEL+1), got {}",

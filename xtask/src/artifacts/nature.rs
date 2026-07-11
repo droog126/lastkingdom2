@@ -72,7 +72,10 @@ impl NatureObservation {
         self.missing_fields.sort();
         self.missing_fields.dedup();
         self.errors.sort_by(|a, b| {
-            a.source.cmp(&b.source).then(a.line.cmp(&b.line)).then(a.message.cmp(&b.message))
+            a.source
+                .cmp(&b.source)
+                .then(a.line.cmp(&b.line))
+                .then(a.message.cmp(&b.message))
         });
         self.errors.dedup();
     }
@@ -120,14 +123,16 @@ impl NatureArtifact {
         mut assertions: Vec<NatureAssertion>,
     ) -> Self {
         assertions.sort_by(|a, b| a.id.cmp(&b.id));
-        let verdict =
-            if assertions.iter().any(|item| !item.ok && item.severity == AssertionSeverity::Fail) {
-                "FAIL"
-            } else if assertions.iter().any(|item| !item.ok) {
-                "PARTIAL"
-            } else {
-                "OK"
-            };
+        let verdict = if assertions
+            .iter()
+            .any(|item| !item.ok && item.severity == AssertionSeverity::Fail)
+        {
+            "FAIL"
+        } else if assertions.iter().any(|item| !item.ok) {
+            "PARTIAL"
+        } else {
+            "OK"
+        };
         Self {
             schema: NATURE_ARTIFACT_SCHEMA,
             scenario,
@@ -161,11 +166,6 @@ impl NatureArtifact {
             }
         })
     }
-
-    #[must_use]
-    pub fn assertions_extension(&self) -> Value {
-        serde_json::to_value(&self.assertions).expect("nature assertions are serializable")
-    }
 }
 
 pub fn write_nature_artifact(iter_dir: &Path, artifact: &NatureArtifact) -> Result<(), String> {
@@ -176,25 +176,6 @@ pub fn write_nature_artifact(iter_dir: &Path, artifact: &NatureArtifact) -> Resu
         .map_err(|error| format!("write nature.json: {error}"))
 }
 
-pub fn extend_existing_artifacts(
-    health: &mut Value,
-    assertions: &mut Value,
-    artifact: &NatureArtifact,
-) -> Result<(), String> {
-    let health_object =
-        health.as_object_mut().ok_or_else(|| "health.json root must be an object".to_owned())?;
-    health_object.insert("nature".to_owned(), artifact.health_extension());
-
-    let assertion_object = assertions
-        .as_object_mut()
-        .ok_or_else(|| "assertions.json root must be an object".to_owned())?;
-    assertion_object.insert(
-        "nature_assertions".to_owned(),
-        artifact.assertions_extension(),
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,7 +184,10 @@ mod tests {
         NatureObservation {
             schema: 1,
             source: "final_state.json".to_owned(),
-            metrics: NatureMetrics { tick: Some(10), ..NatureMetrics::default() },
+            metrics: NatureMetrics {
+                tick: Some(10),
+                ..NatureMetrics::default()
+            },
             events: Vec::new(),
             missing_fields: Vec::new(),
             stale: false,
@@ -213,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn hard_failure_controls_verdict_and_extensions_do_not_replace_roots() {
+    fn hard_failure_controls_verdict_and_health_extension() {
         let artifact = NatureArtifact::new(
             "test".to_owned(),
             7,
@@ -232,11 +216,9 @@ mod tests {
             }],
         );
         assert_eq!(artifact.verdict, "FAIL");
-        let mut health = json!({"verdict": "OK"});
-        let mut assertions = json!({"assertions": []});
-        extend_existing_artifacts(&mut health, &mut assertions, &artifact).unwrap();
-        assert_eq!(health["verdict"], "OK");
-        assert_eq!(health["nature"]["verdict"], "FAIL");
-        assert!(assertions["nature_assertions"].is_array());
+        let health = artifact.health_extension();
+        assert_eq!(health["verdict"], "FAIL");
+        assert_eq!(health["assertions"]["failed"], 1);
+        assert_eq!(health["assertions"]["hard_failed"], 1);
     }
 }

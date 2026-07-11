@@ -14,7 +14,7 @@ mod replication;
 use app::{NatureServerPlugin, NatureServerProjectionPlugin};
 use authority::{LatestNatureReport, NatureAuthority, NatureAuthorityFault, NatureAuthorityPlugin};
 use bevy::prelude::*;
-use lk2_core::eco_cycle::EcoCycle;
+use lk2_core::ecology::EcoCycle;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::simulation::WorldInput;
 
@@ -30,7 +30,13 @@ fn concrete_authority_calls_shared_step_and_rejects_duplicate_tick() {
         authority.ecology().to_snapshot(1),
         report.snapshot.detailed_ecology
     );
-    assert!(authority.resources().current.values().all(|amount| *amount >= 0));
+    assert!(
+        authority
+            .resources()
+            .current
+            .values()
+            .all(|amount| *amount >= 0)
+    );
     assert!(authority.advance(WorldInput { tick: 1 }).is_err());
 }
 
@@ -51,14 +57,24 @@ fn fixed_schedule_advances_and_publishes_one_shared_report_per_run() {
 
     app.world_mut().run_schedule(FixedUpdate);
     assert_eq!(
-        app.world().resource::<LatestNatureReport>().0.as_ref().unwrap().tick,
+        app.world()
+            .resource::<LatestNatureReport>()
+            .0
+            .as_ref()
+            .unwrap()
+            .tick,
         1
     );
     assert_eq!(app.world().resource::<NatureAuthorityFault>().0, None);
 
     app.world_mut().run_schedule(FixedUpdate);
     assert_eq!(
-        app.world().resource::<LatestNatureReport>().0.as_ref().unwrap().tick,
+        app.world()
+            .resource::<LatestNatureReport>()
+            .0
+            .as_ref()
+            .unwrap()
+            .tick,
         2
     );
 }
@@ -92,13 +108,34 @@ fn aggregate_plugin_publishes_all_read_only_boundaries_for_the_same_tick() {
 
     app.world_mut().run_schedule(FixedUpdate);
 
-    let report_tick = app.world().resource::<LatestNatureReport>().0.as_ref().unwrap().tick;
-    let replication_tick =
-        app.world().resource::<replication::LatestNatureReplication>().0.as_ref().unwrap().tick();
-    let observation_tick =
-        app.world().resource::<observation::LatestNatureObservation>().0.as_ref().unwrap().tick;
-    let save_tick =
-        app.world().resource::<persistence::LatestNatureSave>().0.as_ref().unwrap().tick;
+    let report_tick = app
+        .world()
+        .resource::<LatestNatureReport>()
+        .0
+        .as_ref()
+        .unwrap()
+        .tick;
+    let replication_tick = app
+        .world()
+        .resource::<replication::LatestNatureReplication>()
+        .0
+        .as_ref()
+        .unwrap()
+        .tick();
+    let observation_tick = app
+        .world()
+        .resource::<observation::LatestNatureObservation>()
+        .0
+        .as_ref()
+        .unwrap()
+        .tick;
+    let save_tick = app
+        .world()
+        .resource::<persistence::LatestNatureSave>()
+        .0
+        .as_ref()
+        .unwrap()
+        .tick;
 
     assert_eq!(
         (report_tick, replication_tick, observation_tick, save_tick),
@@ -114,15 +151,22 @@ fn projection_plugin_does_not_start_a_second_authoritative_world() {
     app.world_mut().run_schedule(FixedUpdate);
 
     assert!(app.world().resource::<LatestNatureReport>().0.is_none());
-    assert!(app
-        .world()
-        .resource::<replication::LatestNatureReplication>()
-        .0
-        .is_none());
-    assert!(app
-        .world()
-        .resource::<observation::LatestNatureObservation>()
-        .0
-        .is_none());
-    assert!(app.world().resource::<persistence::LatestNatureSave>().0.is_none());
+    assert!(
+        app.world()
+            .resource::<replication::LatestNatureReplication>()
+            .0
+            .is_none()
+    );
+    assert!(
+        app.world()
+            .resource::<observation::LatestNatureObservation>()
+            .0
+            .is_none()
+    );
+    assert!(
+        app.world()
+            .resource::<persistence::LatestNatureSave>()
+            .0
+            .is_none()
+    );
 }

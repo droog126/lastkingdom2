@@ -63,10 +63,14 @@ next:
 "#;
 
 pub fn decision_template(latest_iter_name: &str, prev_name: Option<&str>) -> String {
-    DECISION_TEMPLATE.replace("{latest_iter_name}", latest_iter_name).replace(
-        "{prev_suffix}",
-        &prev_name.map(|name| format!(" compared with {name}")).unwrap_or_default(),
-    )
+    DECISION_TEMPLATE
+        .replace("{latest_iter_name}", latest_iter_name)
+        .replace(
+            "{prev_suffix}",
+            &prev_name
+                .map(|name| format!(" compared with {name}"))
+                .unwrap_or_default(),
+        )
 }
 
 pub fn tdd(root: &Path) -> Result<()> {
@@ -156,7 +160,10 @@ fn feature_gated_modules(lib_text: &str, feature: &str) -> HashSet<String> {
             continue;
         }
         if gated && trimmed.starts_with("pub mod ") {
-            let name = trimmed.trim_start_matches("pub mod ").trim_end_matches(';').trim();
+            let name = trimmed
+                .trim_start_matches("pub mod ")
+                .trim_end_matches(';')
+                .trim();
             if !name.is_empty() {
                 modules.insert(name.to_string());
             }
@@ -178,7 +185,8 @@ fn top_level_module_name(audit_root: &Path, file: &Path) -> Option<String> {
 }
 
 fn production_prefix(text: &str) -> &str {
-    text.split_once("#[cfg(test)]").map_or(text, |(production, _)| production)
+    text.split_once("#[cfg(test)]")
+        .map_or(text, |(production, _)| production)
 }
 
 fn runtime_reference_count(module: &str, sources: &[String]) -> usize {
@@ -191,7 +199,10 @@ fn runtime_reference_count(module: &str, sources: &[String]) -> usize {
         .iter()
         .map(|source| {
             let production = production_prefix(source);
-            patterns.iter().map(|pattern| production.matches(pattern).count()).sum::<usize>()
+            patterns
+                .iter()
+                .map(|pattern| production.matches(pattern).count())
+                .sum::<usize>()
         })
         .sum()
 }
@@ -400,7 +411,9 @@ fn validate_skill_contract(
     }
     let upper_skill = skill_text.to_ascii_uppercase();
     if upper_skill.contains("[TODO")
-        || upper_skill.lines().any(|line| line.trim_start().starts_with("TODO:"))
+        || upper_skill
+            .lines()
+            .any(|line| line.trim_start().starts_with("TODO:"))
         || skill_text.contains("Structuring This Skill")
     {
         issues.push(format!(
@@ -441,7 +454,13 @@ fn validate_skill_contract(
 fn metadata_scalar(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let (candidate, value) = line.trim().split_once(':')?;
-        (candidate == key).then(|| value.trim().trim_matches('"').trim_matches('\'').to_string())
+        (candidate == key).then(|| {
+            value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        })
     })
 }
 
@@ -535,7 +554,10 @@ where
 }
 
 pub fn rel(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root).unwrap_or(path).display().to_string()
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 fn has_windows_absolute_path(line: &str) -> bool {

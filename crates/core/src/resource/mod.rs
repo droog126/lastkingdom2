@@ -198,7 +198,11 @@ impl GlobalResourcePool {
             audit_added.insert(*k, 0);
             audit_subtracted.insert(*k, 0);
         }
-        Self { current, audit_added, audit_subtracted }
+        Self {
+            current,
+            audit_added,
+            audit_subtracted,
+        }
     }
 
     pub fn get(&self, k: ResourceKind) -> i64 {
@@ -212,7 +216,12 @@ impl GlobalResourcePool {
         let cur = self.get(k);
         let max = k.max();
         if cur + amount > max {
-            return Err(PoolError::WouldExceedMax { kind: k, cur, amount, max });
+            return Err(PoolError::WouldExceedMax {
+                kind: k,
+                cur,
+                amount,
+                max,
+            });
         }
         let new = cur + amount;
         self.current.insert(k, new);
@@ -234,7 +243,11 @@ impl GlobalResourcePool {
         }
         let cur = self.get(k);
         if amount > cur {
-            return Err(PoolError::Insufficient { kind: k, cur, amount });
+            return Err(PoolError::Insufficient {
+                kind: k,
+                cur,
+                amount,
+            });
         }
         let new = cur - amount;
         self.current.insert(k, new);
@@ -334,7 +347,12 @@ impl fmt::Display for PoolError {
                 cur,
                 amount
             ),
-            PoolError::WouldExceedMax { kind, cur, amount, max } => write!(
+            PoolError::WouldExceedMax {
+                kind,
+                cur,
+                amount,
+                max,
+            } => write!(
                 f,
                 "[{}] 越过 max: cur={} + amount={} > max={}",
                 kind.label_zh(),
@@ -433,7 +451,12 @@ mod tests {
         p.try_add(ResourceKind::Wood, 9_999).unwrap();
         let err = p.try_add(ResourceKind::Wood, 2).unwrap_err();
         match err {
-            PoolError::WouldExceedMax { kind, cur, amount, max } => {
+            PoolError::WouldExceedMax {
+                kind,
+                cur,
+                amount,
+                max,
+            } => {
                 assert_eq!(kind, ResourceKind::Wood);
                 assert_eq!(cur, 9_999);
                 assert_eq!(amount, 2);
@@ -513,7 +536,8 @@ mod tests {
         p.try_add(ResourceKind::Food, 100).unwrap();
         p.try_sub(ResourceKind::Food, 50).unwrap();
         p.try_sub(ResourceKind::Food, 60).unwrap_err();
-        p.verify_conservation().expect("failed sub shouldn't break conservation");
+        p.verify_conservation()
+            .expect("failed sub shouldn't break conservation");
     }
 
     #[test]
@@ -552,7 +576,8 @@ mod tests {
     #[test]
     fn gathered_transfer_cannot_exceed_resource_cap() {
         let mut p = GlobalResourcePool::new();
-        p.try_add(ResourceKind::Apple, ResourceKind::Apple.max()).unwrap();
+        p.try_add(ResourceKind::Apple, ResourceKind::Apple.max())
+            .unwrap();
 
         let err = apply_transfer(
             &mut p,
@@ -567,7 +592,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            PoolError::WouldExceedMax { kind: ResourceKind::Apple, .. }
+            PoolError::WouldExceedMax {
+                kind: ResourceKind::Apple,
+                ..
+            }
         ));
         assert_eq!(p.get(ResourceKind::Apple), ResourceKind::Apple.max());
     }

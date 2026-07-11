@@ -48,7 +48,10 @@ pub fn run_terrain_preview() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
-            .set(AssetPlugin { file_path: asset_root.to_string_lossy().into_owned(), ..default() })
+            .set(AssetPlugin {
+                file_path: asset_root.to_string_lossy().into_owned(),
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "lk2 terrain preview".into(),
@@ -60,7 +63,10 @@ pub fn run_terrain_preview() {
                 }),
                 ..default()
             })
-            .set(bevy::log::LogPlugin { level: bevy::log::Level::INFO, ..default() }),
+            .set(bevy::log::LogPlugin {
+                level: bevy::log::Level::INFO,
+                ..default()
+            }),
     );
     app.insert_resource(TerrainPreviewState {
         frame: 0,
@@ -86,7 +92,10 @@ pub fn run_terrain_preview() {
 }
 
 fn workspace_asset_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("assets")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("assets")
 }
 
 fn setup_rendering(mut commands: Commands) {
@@ -357,7 +366,10 @@ fn setup_camera(mut commands: Commands) {
         Tonemapping::AcesFitted,
         Bloom::NATURAL,
         Msaa::Off,
-        ScreenSpaceReflections { min_perceptual_roughness: 0.0..0.0, ..default() },
+        ScreenSpaceReflections {
+            min_perceptual_roughness: 0.0..0.0,
+            ..default()
+        },
         TerrainPreviewCamera,
     ));
 }
@@ -806,8 +818,9 @@ fn spawn_asset(
 }
 
 fn hash01(i: usize, salt: usize) -> f32 {
-    let mut x =
-        (i as u32).wrapping_mul(1_664_525).wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
+    let mut x = (i as u32)
+        .wrapping_mul(1_664_525)
+        .wrapping_add((salt as u32).wrapping_mul(1_013_904_223));
     x ^= x >> 16;
     x = x.wrapping_mul(2_246_822_519);
     ((x >> 8) as f32) / ((u32::MAX >> 8) as f32)
@@ -838,7 +851,9 @@ fn maybe_take_screenshot(
     if pending > 0 {
         warn!("[terrain-preview] screenshot with {pending} assets still pending");
     }
-    commands.spawn(Screenshot::primary_window()).observe(save_to_disk(state.png_path.clone()));
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(state.png_path.clone()));
     state.shot_requested = true;
     state.exit_deadline = Some(Instant::now() + Duration::from_secs(60));
     info!(
@@ -857,7 +872,10 @@ fn exit_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<TerrainPreviewState>
                 std::process::exit(0);
             }
         }
-        if state.exit_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if state
+            .exit_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
             warn!("[terrain-preview] screenshot did not flush before timeout");
             std::process::exit(1);
         }

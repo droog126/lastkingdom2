@@ -17,7 +17,11 @@ pub struct NatureSave<S> {
 
 impl<S> NatureSave<S> {
     pub fn new(tick: u64, state: S) -> Self {
-        Self { schema_version: CURRENT_SCHEMA_VERSION, tick, state }
+        Self {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            tick,
+            state,
+        }
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -46,7 +50,11 @@ fn stage_save_snapshot(report: Res<LatestNatureReport>, mut save: ResMut<LatestN
     let Some(report) = report.0.as_ref() else {
         return;
     };
-    if save.0.as_ref().is_some_and(|value| value.tick == report.tick) {
+    if save
+        .0
+        .as_ref()
+        .is_some_and(|value| value.tick == report.tick)
+    {
         return;
     }
     save.0 = Some(NatureSave::new(report.tick, report.snapshot.clone()));

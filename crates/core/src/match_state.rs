@@ -145,7 +145,11 @@ pub fn advance_match_clock(
     let dt = time.delta_secs();
     clock.advance(dt);
     if let Some((from, to)) = clock.refresh_phase() {
-        phase_events.write(MatchPhaseChanged { from, to, at_wall_secs: clock.wall_secs });
+        phase_events.write(MatchPhaseChanged {
+            from,
+            to,
+            at_wall_secs: clock.wall_secs,
+        });
         info!(
             "[match] phase {} → {} at {:.1}s ({} left)",
             from.label_zh(),

@@ -1,7 +1,7 @@
 use bevy::prelude::Vec2;
 use serde::{Deserialize, Serialize};
 
-use crate::eco_cycle::EcoCycle;
+use crate::ecology::EcoCycle;
 
 /// Discrete natural-world starting profiles backed by existing ecology constructors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

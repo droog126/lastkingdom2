@@ -1,7 +1,7 @@
 <!-- doc-status: current -->
 # 启动指南 / How to Run
 
-所有命令都从仓库根目录运行。项目使用 Rust stable、edition 2024、Bevy 0.19 和 Rust
+所有命令都从仓库根目录运行。项目使用 `rust-toolchain.toml` 固定的 Rust 1.96.0、edition 2024、Bevy 0.19 和 Rust
 `xtask`；`justfile` 只提供短别名。
 
 ## 1. 一次性准备
@@ -14,6 +14,23 @@ just build
 
 需要生成模型时再安装 Blender；普通构建和运行不需要 Blender。
 
+额外工程命令需要安装 `cargo-nextest`、`cargo-machete`、`cargo-llvm-cov` 和 `cargo-insta`：
+
+```powershell
+cargo install --locked cargo-nextest cargo-machete cargo-llvm-cov cargo-insta
+```
+
+CI 明确使用 crates.io sparse 索引。国内开发环境需要镜像时，将下面配置写入用户级
+`$CARGO_HOME/config.toml`，不要修改仓库的 `.cargo/config.toml`：
+
+```toml
+[source.crates-io]
+replace-with = "ustc"
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+```
+
 ## 2. 运行游戏
 
 ### 离线游玩
@@ -23,41 +40,19 @@ $env:BEVY_DISABLE_ACCESSIBILITY="1"
 just offline
 ```
 
-离线模式在客户端进程内调用共享的 `lk2-core` 模拟逻辑。主要操作为 WASD/方向键移动、
-Space 跳跃、Ctrl 加速；其他调试和玩法按键以当前 HUD 提示为准。
-
-### 自动演示
-
-```powershell
-$env:BEVY_DISABLE_ACCESSIBILITY="1"
-$env:RUST_LOG="info"
-just play --auto-demo
-```
-
-此入口适合手动观察自动演示。需要完整截图、状态、health 和决策契约时使用闭环命令。
+离线模式在客户端进程内调用共享的 `lk2-core` 自然模拟和近战规则。主要操作为
+WASD/方向键移动，鼠标左键或 Space 攻击，Esc 退出。
 
 ### 在线模式
 
-```powershell
-just play --online --first-person
-```
-
-`xtask play` 会管理本地服务端和客户端，并把日志写入 `run-logs/`。
+`just play --online` 会构建并启动 `lk2-server`，然后连接 focused client 的 Lightyear 在线场景。
+当前在线场景已接入 Leafwing 输入、移动/跳跃、基础 gameplay 消息、基础 HUD 和生态计数表现；更完整的 HUD、生态表现和多玩家状态仍在迁移中。
 
 ## 3. 闭环迭代
 
-```powershell
-just loop
-```
-
-该别名等价于：
-
-```powershell
-just xtask loop --offline --seconds 60
-```
-
-闭环会按需构建客户端、运行 auto-demo、生成迭代目录、执行 health 检查并创建决策模板。
-开始下一轮之前，上一轮必须有 `decision.md`。
+原有 artifact schema 和历史迭代仍保留。focused client 现在能生成基础 auto-demo、
+`final_state.json`、`diff.json` 和 `iter_NN.png`；`health.json`、assertions、regression 和
+decision 模板仍由 `xtask` 生成。不要把旧迭代结果当作当前客户端的运行证据。
 
 阅读顺序：
 
@@ -73,6 +68,10 @@ just xtask loop --offline --seconds 60
 just test-changed
 just test-core
 just test
+just test-nextest
+just coverage
+just deps-unused
+just snapshots
 just audit-tdd
 just audit-architecture
 just audit-docs
@@ -81,7 +80,7 @@ just fmt
 just clippy
 ```
 
-视觉、HUD、玩法体验、auto-demo、截图或观察状态发生变化后，还要运行 `just loop`。
+视觉、HUD、玩法体验、auto-demo、截图或观察状态发生变化后，不要默认运行 `just loop`。仅当用户明确要求、验收条件明确要求、复现/诊断必须依赖运行时工件，或最终结论要声明真实渲染画面已验证时，才运行闭环。
 
 ## 5. 输出位置
 
@@ -104,7 +103,6 @@ just clippy
 
 - `run-logs/play.log` 和 `run-logs/play.log.err`
 - `run-logs/error_logs.json` 和 `run-logs/error_logs.txt`
-- 在线模式的 `run-logs/play_server.log` 和 `run-logs/play_server.log.err`
 
 不要把构建日志或运行产物写到仓库根目录。
 
@@ -120,4 +118,3 @@ just clippy
 - [文档地图](README.md)
 - [工程基线](architecture/engineering-baseline.md)
 - [TDD 工作流](notes/tdd.md)
-- [闭环契约](plans/closed-loop-iteration.md)

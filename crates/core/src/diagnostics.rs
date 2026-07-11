@@ -2,12 +2,12 @@ use bevy::prelude::*;
 
 use crate::ai::TickObserver;
 use crate::clock::SimClock;
-use crate::eco_cycle::EcoCycle;
-use crate::monster::MonsterEcosystem;
+use crate::ecology::EcoCycle;
+use crate::ecology::threats::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, ResourceKind};
-use crate::sim::SimRole;
+use crate::simulation::SimRole;
 use crate::world::World;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,11 +83,17 @@ pub fn run_self_check(
         }
     }
 
-    SelfCheckReport { violations, ticks_run: ticks }
+    SelfCheckReport {
+        violations,
+        ticks_run: ticks,
+    }
 }
 
 pub fn total_invariant_violations(obs: &TickObserver) -> u64 {
-    obs.invariants.values().map(|inv| inv.total_violations).sum()
+    obs.invariants
+        .values()
+        .map(|inv| inv.total_violations)
+        .sum()
 }
 
 pub fn build_state_json(
@@ -175,8 +181,9 @@ mod tests {
     fn assert_has_path<'a>(value: &'a Value, path: &[&str]) -> &'a Value {
         let mut current = value;
         for key in path {
-            current =
-                current.get(*key).unwrap_or_else(|| panic!("missing json path {}", path.join(".")));
+            current = current
+                .get(*key)
+                .unwrap_or_else(|| panic!("missing json path {}", path.join(".")));
         }
         current
     }
@@ -235,7 +242,9 @@ mod tests {
             Some("client_offline")
         );
         assert_eq!(
-            assert_has_path(&json, &["player", "block_pos"]).as_array().map(|v| v.len()),
+            assert_has_path(&json, &["player", "block_pos"])
+                .as_array()
+                .map(|v| v.len()),
             Some(3)
         );
         assert_eq!(assert_has_path(&json, &["pool", "wood"]).as_i64(), Some(11));

@@ -4,7 +4,7 @@ default:
     @just --list
 
 xtask *ARGS:
-    $env:CARGO_INCREMENTAL="0"; cargo run -q -p xtask --target-dir .tmp/xtask-target -- {{ARGS}}
+    $env:CARGO_INCREMENTAL="0"; cargo run -p xtask --target-dir .tmp/xtask-target -- {{ARGS}}
 
 build:
     just xtask dev build
@@ -21,11 +21,11 @@ kill-build:
 server:
     cargo run -p lk2-server
 
-client:
-    just play
+client *ARGS:
+    $env:CARGO_BUILD_JOBS="4"; just play {{ARGS}}
 
-clint:
-    just client
+clint *ARGS:
+    just client {{ARGS}}
 
 play *ARGS:
     just xtask play {{ARGS}}
@@ -50,14 +50,14 @@ model-preview-one MODEL:
 model-preview-shot MODEL:
     just play --gpu-backend=vulkan --model-preview --model-preview-one={{MODEL}} --model-preview-shot
 
+game-scene-shot:
+    just play --gpu-backend=vulkan --game-scene-shot
+
 terrain-preview:
     just play --terrain-preview
 
 terrain-preview-shot:
     just play --terrain-preview --terrain-preview-shot
-
-client-online:
-    just play --online --first-person
 
 offline:
     just play
@@ -96,6 +96,21 @@ test-server:
 
 test-changed:
     just xtask tdd --scope changed
+
+test-nextest:
+    cargo nextest run --workspace
+
+coverage:
+    cargo llvm-cov nextest --workspace --summary-only
+
+deps-unused:
+    cargo machete
+
+snapshots:
+    cargo insta test -p lk2-core
+
+snapshots-review:
+    cargo insta review
 
 fmt:
     just xtask tdd --scope fmt

@@ -54,7 +54,11 @@ fn export_observation(
     let Some(report) = report.0.as_ref() else {
         return;
     };
-    if observation.0.as_ref().is_some_and(|value| value.tick == report.tick) {
+    if observation
+        .0
+        .as_ref()
+        .is_some_and(|value| value.tick == report.tick)
+    {
         return;
     }
     observation.0 = Some(NatureObservation::from_snapshot(&report.snapshot));

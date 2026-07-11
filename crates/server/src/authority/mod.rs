@@ -1,7 +1,9 @@
 //! Server-owned adapter around the shared deterministic world step.
 
+pub mod pvp;
+
 use bevy::prelude::*;
-use lk2_core::eco_cycle::EcoCycle;
+use lk2_core::ecology::EcoCycle;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::simulation::{TickReport, WorldInput, step_world};
 
@@ -14,7 +16,11 @@ pub struct NatureAuthority {
 
 impl NatureAuthority {
     pub fn new(ecology: EcoCycle, resources: GlobalResourcePool) -> Self {
-        Self { ecology, resources, last_tick: None }
+        Self {
+            ecology,
+            resources,
+            last_tick: None,
+        }
     }
 
     pub fn advance(&mut self, input: WorldInput) -> Result<TickReport, &'static str> {
@@ -85,7 +91,10 @@ fn advance_nature_authority(
     mut latest: ResMut<LatestNatureReport>,
     mut fault: ResMut<NatureAuthorityFault>,
 ) {
-    let tick = latest.0.as_ref().map_or(1, |report| report.tick.saturating_add(1));
+    let tick = latest
+        .0
+        .as_ref()
+        .map_or(1, |report| report.tick.saturating_add(1));
     match authority.advance(WorldInput { tick }) {
         Ok(report) => {
             latest.0 = Some(report);

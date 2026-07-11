@@ -1,5 +1,5 @@
 use lk2_core::constant::{SEA_LEVEL, WORLD_CENTER};
-use lk2_core::monster::MonsterEcosystem;
+use lk2_core::ecology::threats::MonsterEcosystem;
 use lk2_core::world::content::content_route_is_walkable;
 use lk2_core::world::{BlockType, WorldConfig, generate_world, player_body_clear};
 
@@ -38,7 +38,11 @@ fn generated_monsters_use_the_content_territory() {
 
     monsters.demo_init_at(content.monster_position);
 
-    let kingdom = monsters.kingdoms.values().next().expect("demo monster kingdom");
+    let kingdom = monsters
+        .kingdoms
+        .values()
+        .next()
+        .expect("demo monster kingdom");
     assert_eq!(kingdom.center, content.monster_position);
 }
 

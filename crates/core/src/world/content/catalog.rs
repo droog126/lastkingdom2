@@ -86,7 +86,11 @@ pub struct ContentCatalogBuilder {
 impl ContentCatalogBuilder {
     #[must_use]
     pub fn archetype(mut self, id: ContentId, name: impl Into<String>, weight: u32) -> Self {
-        self.archetypes.push(ContentArchetype { id, name: name.into(), weight });
+        self.archetypes.push(ContentArchetype {
+            id,
+            name: name.into(),
+            weight,
+        });
         self
     }
 
@@ -104,7 +108,8 @@ impl ContentCatalogBuilder {
         neighbor: ContentId,
     ) -> Self {
         self.allowed.insert((source, direction, neighbor));
-        self.allowed.insert((neighbor, direction.opposite(), source));
+        self.allowed
+            .insert((neighbor, direction.opposite(), source));
         self
     }
 
@@ -146,7 +151,11 @@ impl ContentCatalogBuilder {
             }
         }
 
-        Ok(ContentCatalog { archetypes: self.archetypes, indices, allowed: self.allowed })
+        Ok(ContentCatalog {
+            archetypes: self.archetypes,
+            indices,
+            allowed: self.allowed,
+        })
     }
 }
 

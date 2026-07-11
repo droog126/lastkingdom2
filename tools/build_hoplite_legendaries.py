@@ -128,6 +128,7 @@ def make_reaper_scythe() -> None:
     bevel_box("reaper_head_core", (0.16, 0.0, 2.20), (0.28, 0.16, 0.28), black, bevel=0.045, rotation=(0.0, 0.0, -0.12))
     bevel_box("reaper_head_gem", (0.16, -0.175, 2.20), (0.13, 0.026, 0.13), magenta, bevel=0.026)
     bevel_box("reaper_counterweight", (0.47, 0.0, 2.08), (0.25, 0.11, 0.10), violet, bevel=0.025, rotation=(0.0, 0.0, -0.22))
+    bevel_box("reaper_butt_cap", (-0.35, 0.0, 0.09), (0.12, 0.11, 0.12), steel, bevel=0.025, rotation=(0.0, 0.0, -0.22))
 
     outer_blade = [
         (0.13, 2.32), (-0.10, 2.45), (-0.48, 2.66), (-0.92, 2.83),
@@ -142,7 +143,7 @@ def make_reaper_scythe() -> None:
     prism("reaper_outer_blade", outer_blade, 0.14, black, y=0.0, bevel=0.024)
     prism("reaper_inner_blade", inner_blade, 0.045, magenta, y=-0.095, bevel=0.012)
     prism("reaper_bone_edge", [(-1.49, 2.70), (-1.34, 2.84), (-0.92, 2.83), (-0.98, 2.76), (-1.29, 2.75)], 0.17, steel, bevel=0.014)
-    energy_motes(rng, "reaper", (-0.55, -0.02, 2.42), (1.16, 0.20, 0.58), 18, [violet, magenta])
+    energy_motes(rng, "reaper", (-0.55, -0.02, 2.42), (1.08, 0.16, 0.48), 8, [violet, magenta])
     export_glb("hoplite_reaper_scythe")
 
 
@@ -159,9 +160,9 @@ def make_dragon_katana() -> None:
     for index, z in enumerate((0.14, 0.30, 0.46, 0.62, 0.78)):
         bevel_box(f"katana_wrap_{index}", (0.0, -0.075, z), (0.105, 0.035, 0.045), purple if index % 2 else silver, bevel=0.016, rotation=(0.0, 0.0, (-1) ** index * 0.28))
     bevel_box("katana_pommel", (0.0, 0.0, 0.04), (0.12, 0.12, 0.10), silver, bevel=0.025)
-    bevel_box("katana_guard", (0.0, 0.0, 0.91), (0.72, 0.16, 0.10), black, bevel=0.035)
-    bevel_box("katana_guard_left_tip", (-0.38, 0.0, 0.94), (0.22, 0.16, 0.10), silver, bevel=0.025, rotation=(0.0, 0.0, math.radians(20.0)))
-    bevel_box("katana_guard_right_tip", (0.38, 0.0, 0.94), (0.22, 0.16, 0.10), silver, bevel=0.025, rotation=(0.0, 0.0, math.radians(-20.0)))
+    bevel_box("katana_guard", (0.0, 0.0, 0.91), (0.34, 0.15, 0.10), black, bevel=0.035)
+    bevel_box("katana_guard_left_tip", (-0.29, 0.0, 0.94), (0.14, 0.15, 0.09), silver, bevel=0.025, rotation=(0.0, 0.0, math.radians(20.0)))
+    bevel_box("katana_guard_right_tip", (0.29, 0.0, 0.94), (0.14, 0.15, 0.09), silver, bevel=0.025, rotation=(0.0, 0.0, math.radians(-20.0)))
     bevel_box("katana_eye_frame", (0.0, -0.095, 0.91), (0.20, 0.035, 0.20), black, bevel=0.022, rotation=(0.0, 0.0, math.radians(45.0)))
     prism("katana_dragon_eye", [(-0.08, 0.91), (0.0, 1.00), (0.08, 0.91), (0.0, 0.82)], 0.035, green, y=-0.125, bevel=0.008)
     prism("katana_eye_slit", [(-0.018, 0.96), (0.018, 0.96), (0.018, 0.86), (-0.018, 0.86)], 0.045, black, y=-0.15, bevel=0.004,)
@@ -173,7 +174,7 @@ def make_dragon_katana() -> None:
     prism("katana_purple_core", core, 0.045, purple, y=-0.092, bevel=0.010)
     prism("katana_silver_edge", edge, 0.16, silver, y=0.01, bevel=0.010)
     prism("katana_hot_edge", [(-0.145, 1.10), (-0.105, 1.10), (-0.105, 2.78), (0.02, 3.05), (-0.02, 3.11), (-0.15, 2.84)], 0.025, pink, y=-0.13, bevel=0.006)
-    energy_motes(rng, "katana", (0.02, -0.02, 2.10), (0.52, 0.18, 1.20), 16, [purple, pink, green])
+    energy_motes(rng, "katana", (0.02, -0.02, 2.10), (0.38, 0.14, 1.02), 6, [purple, pink, green])
     export_glb("hoplite_dragon_katana")
 
 
@@ -191,17 +192,17 @@ def make_golem_hammer() -> None:
         bevel_box(f"hammer_handle_band_{index}", (0.0, 0.0, z), (0.135, 0.135, 0.055), dark if index % 2 else iron, bevel=0.018)
     bevel_box("hammer_pommel", (0.0, 0.0, 0.04), (0.18, 0.18, 0.12), bright, bevel=0.032)
 
-    bevel_box("hammer_core", (0.0, 0.0, 2.02), (0.46, 0.34, 0.45), dark, bevel=0.06)
-    bevel_box("hammer_left_head", (-0.50, 0.0, 2.02), (0.34, 0.40, 0.58), iron, bevel=0.055)
-    bevel_box("hammer_right_head", (0.50, 0.0, 2.02), (0.34, 0.40, 0.58), iron, bevel=0.055)
-    bevel_box("hammer_left_face", (-0.72, 0.0, 2.02), (0.10, 0.47, 0.66), bright, bevel=0.035)
-    bevel_box("hammer_right_face", (0.72, 0.0, 2.02), (0.10, 0.47, 0.66), bright, bevel=0.035)
+    bevel_box("hammer_core", (0.0, 0.0, 2.02), (0.34, 0.32, 0.42), dark, bevel=0.06)
+    bevel_box("hammer_left_head", (-0.35, 0.0, 2.02), (0.24, 0.36, 0.50), iron, bevel=0.055)
+    bevel_box("hammer_right_head", (0.35, 0.0, 2.02), (0.24, 0.36, 0.50), iron, bevel=0.055)
+    bevel_box("hammer_left_face", (-0.55, 0.0, 2.02), (0.08, 0.41, 0.56), bright, bevel=0.035)
+    bevel_box("hammer_right_face", (0.55, 0.0, 2.02), (0.08, 0.41, 0.56), bright, bevel=0.035)
     bevel_box("hammer_brow", (0.0, -0.19, 2.20), (0.28, 0.035, 0.10), iron, bevel=0.018)
     bevel_box("hammer_eye_left", (-0.13, -0.195, 2.08), (0.07, 0.028, 0.07), red, bevel=0.015)
     bevel_box("hammer_eye_right", (0.13, -0.195, 2.08), (0.07, 0.028, 0.07), red, bevel=0.015)
-    for index, x in enumerate((-0.55, -0.35, 0.35, 0.55)):
+    for index, x in enumerate((-0.39, -0.24, 0.24, 0.39)):
         bevel_box(f"hammer_red_rune_{index}", (x, -0.225, 1.89 + 0.10 * (index % 2)), (0.035, 0.018, 0.18), red, bevel=0.008, rotation=(0.0, 0.0, (-1) ** index * 0.25))
-    energy_motes(rng, "hammer", (0.0, -0.02, 1.92), (1.05, 0.25, 0.78), 14, [iron, red])
+    energy_motes(rng, "hammer", (0.0, -0.02, 1.92), (0.70, 0.18, 0.58), 6, [iron, red])
     export_glb("hoplite_golem_hammer")
 
 
@@ -218,11 +219,11 @@ def make_midas_sword() -> None:
     for index, z in enumerate((0.15, 0.31, 0.47, 0.63, 0.79)):
         bevel_box(f"midas_grip_band_{index}", (0.0, -0.07, z), (0.095, 0.035, 0.035), gold, bevel=0.012, rotation=(0.0, 0.0, (-1) ** index * 0.30))
     bevel_box("midas_pommel", (0.0, 0.0, 0.04), (0.13, 0.13, 0.12), gold, bevel=0.028)
-    bevel_box("midas_guard", (0.0, 0.0, 0.90), (0.88, 0.16, 0.11), gold, bevel=0.035)
-    bevel_box("midas_guard_left_tip", (-0.43, 0.0, 0.94), (0.24, 0.16, 0.11), bright, bevel=0.028, rotation=(0.0, 0.0, math.radians(18.0)))
-    bevel_box("midas_guard_right_tip", (0.43, 0.0, 0.94), (0.24, 0.16, 0.11), bright, bevel=0.028, rotation=(0.0, 0.0, math.radians(-18.0)))
-    bevel_box("midas_guard_left_gem", (-0.39, -0.095, 0.93), (0.10, 0.025, 0.10), emerald, bevel=0.018, rotation=(0.0, 0.0, math.radians(45.0)))
-    bevel_box("midas_guard_right_gem", (0.39, -0.095, 0.93), (0.10, 0.025, 0.10), emerald, bevel=0.018, rotation=(0.0, 0.0, math.radians(45.0)))
+    bevel_box("midas_guard", (0.0, 0.0, 0.90), (0.40, 0.16, 0.11), gold, bevel=0.035)
+    bevel_box("midas_guard_left_tip", (-0.34, 0.0, 0.94), (0.16, 0.16, 0.10), bright, bevel=0.028, rotation=(0.0, 0.0, math.radians(18.0)))
+    bevel_box("midas_guard_right_tip", (0.34, 0.0, 0.94), (0.16, 0.16, 0.10), bright, bevel=0.028, rotation=(0.0, 0.0, math.radians(-18.0)))
+    bevel_box("midas_guard_left_gem", (-0.31, -0.095, 0.93), (0.08, 0.025, 0.08), emerald, bevel=0.016, rotation=(0.0, 0.0, math.radians(45.0)))
+    bevel_box("midas_guard_right_gem", (0.31, -0.095, 0.93), (0.08, 0.025, 0.08), emerald, bevel=0.016, rotation=(0.0, 0.0, math.radians(45.0)))
 
     outer = [(-0.22, 0.98), (0.22, 0.98), (0.28, 2.58), (0.0, 3.02), (-0.28, 2.58)]
     core = [(-0.13, 1.06), (0.13, 1.06), (0.17, 2.54), (0.0, 2.84), (-0.17, 2.54)]
@@ -231,7 +232,7 @@ def make_midas_sword() -> None:
     prism("midas_blade_core", core, 0.045, bright, y=-0.10, bevel=0.010)
     prism("midas_pale_edge", left_edge, 0.17, pale, y=0.01, bevel=0.010)
     prism("midas_center_rune", [(-0.045, 1.14), (0.045, 1.14), (0.055, 2.47), (0.0, 2.62), (-0.055, 2.47)], 0.025, emerald, y=-0.135, bevel=0.006)
-    energy_motes(rng, "midas", (0.0, -0.02, 1.95), (0.84, 0.20, 1.08), 22, [gold, bright, emerald])
+    energy_motes(rng, "midas", (0.0, -0.02, 1.95), (0.52, 0.15, 0.92), 8, [gold, bright, emerald])
     export_glb("hoplite_midas_sword")
 
 

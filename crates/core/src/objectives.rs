@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::ecology::threats::MonsterEcosystem;
 use crate::match_state::MatchClock;
-use crate::monster::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, ResourceKind};
@@ -115,7 +115,12 @@ impl Objective {
             ObjectiveKind::KillMonsters { .. } => ObjectiveProgress::CountU(0),
             ObjectiveKind::ReachPosition { .. } => ObjectiveProgress::AtPosition { reached: false },
         };
-        Self { id: id.into(), kind, progress, done: false }
+        Self {
+            id: id.into(),
+            kind,
+            progress,
+            done: false,
+        }
     }
 
     pub fn check_complete(&self) -> bool {
@@ -187,7 +192,10 @@ impl Objectives {
         let mut o = Objectives::new();
         o.push(Objective::new(
             "q1_gather_wood",
-            ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 },
+            ObjectiveKind::GatherResource {
+                kind: ResourceKind::Wood,
+                count: 10,
+            },
         ));
         o.push(Objective::new(
             "q2_found_nation",
@@ -195,7 +203,10 @@ impl Objectives {
         ));
         o.push(Objective::new(
             "q3_gather_food",
-            ObjectiveKind::GatherResource { kind: ResourceKind::Food, count: 30 },
+            ObjectiveKind::GatherResource {
+                kind: ResourceKind::Food,
+                count: 30,
+            },
         ));
         o.push(Objective::new(
             "q4_upgrade_pop",
@@ -207,7 +218,10 @@ impl Objectives {
         ));
         o.push(Objective::new(
             "q6_reach_summit",
-            ObjectiveKind::ReachPosition { pos: [48, 30, 48], radius: 5 },
+            ObjectiveKind::ReachPosition {
+                pos: [48, 30, 48],
+                radius: 5,
+            },
         ));
         o
     }
@@ -336,10 +350,12 @@ pub struct ObjectivesPlugin;
 
 impl Plugin for ObjectivesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Objectives>().add_message::<ObjectiveCompleted>().add_systems(
-            FixedUpdate,
-            (auto_advance_objectives, objective_phase_hints).chain(),
-        );
+        app.init_resource::<Objectives>()
+            .add_message::<ObjectiveCompleted>()
+            .add_systems(
+                FixedUpdate,
+                (auto_advance_objectives, objective_phase_hints).chain(),
+            );
     }
 }
 
@@ -521,7 +537,10 @@ mod tests {
     fn completed_event_payload() {
         let ev = ObjectiveCompleted {
             id: "q1".into(),
-            kind: ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 },
+            kind: ObjectiveKind::GatherResource {
+                kind: ResourceKind::Wood,
+                count: 10,
+            },
             at_wall_secs: 12.5,
         };
         assert_eq!(ev.id, "q1");
@@ -534,7 +553,10 @@ mod tests {
 
     #[test]
     fn objective_kind_progress_str_format() {
-        let k = ObjectiveKind::GatherResource { kind: ResourceKind::Wood, count: 10 };
+        let k = ObjectiveKind::GatherResource {
+            kind: ResourceKind::Wood,
+            count: 10,
+        };
         let p = ObjectiveProgress::Count(5);
         assert_eq!(k.progress_str(&p), "5 / 10");
     }

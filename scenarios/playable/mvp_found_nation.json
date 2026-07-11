@@ -1,0 +1,19 @@
+{
+  "name": "mvp_found_nation",
+  "world": {
+    "preset": "superflat",
+    "size": 96,
+    "seed": 1,
+    "install_spawn_platform": true,
+    "generate_content": true
+  },
+  "player": {
+    "spawn": [48, 16, 48]
+  },
+  "steps": [
+    { "type": "log", "msg": "MVP: gather resources and found a nation" },
+    { "type": "gather", "count": 3 },
+    { "type": "found_nation" },
+    { "type": "log", "msg": "MVP complete" }
+  ]
+}

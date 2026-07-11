@@ -225,7 +225,13 @@ pub struct MiningSlot {
 
 impl MiningSlot {
     pub fn new(site_id: u32, slot_index: u32) -> Self {
-        Self { site_id, slot_index, occupant: None, progress_ticks: 0, mode: MiningMode::Steady }
+        Self {
+            site_id,
+            slot_index,
+            occupant: None,
+            progress_ticks: 0,
+            mode: MiningMode::Steady,
+        }
     }
 
     pub fn is_occupied(&self) -> bool {
@@ -375,9 +381,10 @@ pub fn tick_mining_slots(
     }
 
     for mut site in sites.iter_mut() {
-        let occupied =
-            slots.iter().filter(|(_, s)| s.occupant.is_some() && s.site_id == site.id).count()
-                as f32;
+        let occupied = slots
+            .iter()
+            .filter(|(_, s)| s.occupant.is_some() && s.site_id == site.id)
+            .count() as f32;
         let drain = 0.005 * occupied;
         if drain > 0.0 && site.remaining_pct > 0.0 {
             let old_tier = site.depletion_tier();
@@ -515,7 +522,11 @@ mod tests {
 
     #[test]
     fn registry_allocates_unique_ids() {
-        let mut r = MiningSiteRegistry { common_count: 10, rich_count: 4, ..Default::default() };
+        let mut r = MiningSiteRegistry {
+            common_count: 10,
+            rich_count: 4,
+            ..Default::default()
+        };
         let a = r.alloc_id();
         let b = r.alloc_id();
         assert_ne!(a, b);
@@ -572,7 +583,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            PoolError::WouldExceedMax { kind: ResourceKind::SpiritEssence, .. }
+            PoolError::WouldExceedMax {
+                kind: ResourceKind::SpiritEssence,
+                ..
+            }
         ));
         assert_eq!(
             pool.get(ResourceKind::SpiritEssence),

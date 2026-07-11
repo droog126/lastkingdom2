@@ -72,7 +72,11 @@ pub struct SparkRegistry {
 
 impl Default for SparkRegistry {
     fn default() -> Self {
-        Self { next_id: 1, max_sparks: 3, active: Vec::new() }
+        Self {
+            next_id: 1,
+            max_sparks: 3,
+            active: Vec::new(),
+        }
     }
 }
 
@@ -261,7 +265,10 @@ mod tests {
 
     #[test]
     fn consumed_spark_recirculates_to_pool() {
-        let _s = Spark { status: SparkStatus::Consumed, ..Spark::new(1, [0.0; 3], 0.0) };
+        let _s = Spark {
+            status: SparkStatus::Consumed,
+            ..Spark::new(1, [0.0; 3], 0.0)
+        };
 
         let mut pool = GlobalResourcePool::default();
         let _ = pool.try_add(ResourceKind::Soul, 50);

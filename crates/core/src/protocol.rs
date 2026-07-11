@@ -27,39 +27,17 @@ pub mod messages {
     pub struct AttackInput {
         pub tick: u32,
         pub input_dir: Vec3,
-        pub is_falling: bool,
-        pub combo_count: u8,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
-    pub struct HitConfirm {
+    pub struct AttackResult {
         pub victim_id: lightyear::prelude::PeerId,
         pub damage: f32,
-        pub is_critical: bool,
-        pub hit_pos: Vec3,
-        pub server_tick: u32,
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
-    pub struct KnockbackEvent {
-        pub victim_id: lightyear::prelude::PeerId,
-        pub velocity: Vec3,
-        pub server_tick: u32,
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
-    pub struct DamageResult {
-        pub victim_id: lightyear::prelude::PeerId,
         pub new_health: f32,
         pub is_dead: bool,
+        pub hit_pos: Vec3,
+        pub knockback: Vec3,
         pub server_tick: u32,
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
-    pub struct KillFeedEntry {
-        pub killer_name: String,
-        pub victim_name: String,
-        pub weapon_id: u8,
     }
 
     #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
@@ -118,35 +96,7 @@ pub mod components {
 
     use super::*;
 
-    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
-    #[component(storage = "SparseSet")]
-    pub struct Health(pub f32);
-
-    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
-    pub struct WeaponStatsRaw {
-        pub reach: f32,
-        pub damage: f32,
-        pub knockback: f32,
-        pub attack_speed: f32,
-        pub sweep_angle_deg: f32,
-    }
-
-    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
-    pub struct EquippedWeapon(pub u8);
-
-    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
-    pub struct CombatReady {
-        pub weapon_id: u8,
-        pub reach: f32,
-        pub damage: f32,
-        pub knockback: f32,
-        pub attack_speed: f32,
-        pub sweep_angle_deg: f32,
-        pub attack_cooldown: f32,
-    }
-
-    #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
-    pub struct KnockbackImmunity(pub f32);
+    pub use crate::pvp::Health;
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct PlayerPos(pub Vec3);
@@ -310,34 +260,20 @@ impl Plugin for ProtocolPlugin {
         app.add_channel::<StateChannel>(state_channel_settings())
             .add_direction(NetworkDirection::Bidirectional);
 
-        // NOTE: do NOT add `lightyear_inputs_leafwing::prelude::InputPlugin`
-        // here. Movement uses a raw UDP fast path (port = server_port + 1),
-        // while discrete gameplay commands use MessageSender<GameplayCommand>.
-        // Registering InputPlugin<PlayerAction> on the server
-        // installs ServerInputPlugin, which adds a MessageReceiver<InputMessage<...>>
-        // to each client entity and tries to deserialize every incoming packet
-        // as an InputMessage. The client never sends lightyear InputMessages,
-        // so every packet is misinterpreted, the embedded `InputTarget::Entity`
-        // references deserialize as 0 (PLACEHOLDER) and the server logs
-        // "Attempting to deserialize an invalid entity." ~5ms — flooding
-        // the log without affecting gameplay. Removing InputPlugin from the
-        // shared ProtocolPlugin drops that receiver and silences the storm.
-        // The client collects ActionState<PlayerAction> manually in
-        // `collect_keys_to_action_state`, so no leafwing InputManagerPlugin
-        // is required there either.
+        // Leafwing ActionState is the authoritative online input contract.
+        // ClientPlugins must be installed before this shared protocol plugin so
+        // the client half can attach its buffering/sending systems. The server
+        // half reconstructs ActionState on the controlled replicated player.
+        app.add_plugins(lightyear_inputs_leafwing::prelude::InputPlugin::<
+            PlayerAction,
+        >::default());
 
         app.register_message::<messages::AttackInput>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<messages::GameplayCommand>()
             .add_direction(NetworkDirection::ClientToServer);
 
-        app.register_message::<messages::HitConfirm>()
-            .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<messages::KnockbackEvent>()
-            .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<messages::DamageResult>()
-            .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<messages::KillFeedEntry>()
+        app.register_message::<messages::AttackResult>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<messages::GameplayFeedback>()
             .add_direction(NetworkDirection::ServerToClient);
@@ -350,10 +286,6 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
 
         app.component::<components::Health>().replicate();
-        app.component::<components::WeaponStatsRaw>().replicate();
-        app.component::<components::EquippedWeapon>().replicate();
-        app.component::<components::CombatReady>().replicate();
-        app.component::<components::KnockbackImmunity>().replicate();
         app.component::<components::PlayerPos>().replicate();
         app.component::<components::PlayerRot>().replicate();
         app.component::<components::MonsterKind>().replicate();
@@ -361,7 +293,8 @@ impl Plugin for ProtocolPlugin {
         app.component::<components::GameplayHudState>().replicate();
         app.component::<components::EcoSnapshot>().replicate();
         app.component::<components::VoxelDelta>().replicate();
-        app.component::<components::VoxelChunkSnapshot>().replicate();
+        app.component::<components::VoxelChunkSnapshot>()
+            .replicate();
     }
 }
 
@@ -379,10 +312,7 @@ pub mod wire_format {
         EcoBerryNet, EcoCloudNet, EcoPlantNet, EcoRabbitNet, EcoSnapshot, EcoWildlifeNet,
         PlayerPos, VoxelDelta,
     };
-    use super::messages::{
-        AttackInput, DamageResult, HitConfirm, KnockbackEvent, PingMessage, PongMessage,
-        ServerPosUpdate,
-    };
+    use super::messages::{AttackInput, AttackResult, PingMessage, PongMessage, ServerPosUpdate};
 
     /// True iff every component of `v` is a finite float (no NaN, no Infinity).
     #[must_use]
@@ -432,34 +362,17 @@ pub mod wire_format {
         }
     }
 
-    impl HitConfirm {
+    impl AttackResult {
         /// True iff the world-space hit position and damage amount are both
         /// finite. A NaN damage value would propagate into the HUD HP bar
         /// and the knockback velocity — drop the message at the network
         /// boundary instead of letting it corrupt authoritative state.
         #[must_use]
         pub fn is_finite(&self) -> bool {
-            is_finite_vec3(&self.hit_pos) && is_finite_f32(self.damage)
-        }
-    }
-
-    impl KnockbackEvent {
-        /// True iff the knockback velocity vector is finite. A NaN velocity
-        /// would freeze the victim in place or send them to (0,0,0) every
-        /// frame after reconciliation, so it must be filtered at the wire.
-        #[must_use]
-        pub fn is_finite(&self) -> bool {
-            is_finite_vec3(&self.velocity)
-        }
-    }
-
-    impl DamageResult {
-        /// True iff the resulting health value is finite. The HUD reads this
-        /// directly, so a NaN health makes the bar disappear or render as
-        /// gibberish.
-        #[must_use]
-        pub fn is_finite(&self) -> bool {
-            is_finite_f32(self.new_health)
+            is_finite_vec3(&self.hit_pos)
+                && is_finite_vec3(&self.knockback)
+                && is_finite_f32(self.damage)
+                && is_finite_f32(self.new_health)
         }
     }
 
@@ -601,27 +514,56 @@ pub mod wire_format {
 
         #[test]
         fn server_pos_update_is_finite_matches_inner() {
-            let ok = ServerPosUpdate { server_tick: 1, pos: Vec3::new(0.5, 1.5, 2.5) };
+            let ok = ServerPosUpdate {
+                server_tick: 1,
+                pos: Vec3::new(0.5, 1.5, 2.5),
+            };
             assert!(ok.is_finite());
-            let bad = ServerPosUpdate { server_tick: 1, pos: Vec3::new(f32::INFINITY, 0.0, 0.0) };
+            let bad = ServerPosUpdate {
+                server_tick: 1,
+                pos: Vec3::new(f32::INFINITY, 0.0, 0.0),
+            };
             assert!(!bad.is_finite());
         }
 
         #[test]
         fn voxel_delta_is_always_finite() {
-            let d = VoxelDelta { revision: 0, x: 0, y: 0, z: 0, block: 0 };
+            let d = VoxelDelta {
+                revision: 0,
+                x: 0,
+                y: 0,
+                z: 0,
+                block: 0,
+            };
             assert!(d.is_finite());
         }
 
         #[test]
         fn ping_pong_finite_checks_timestamp() {
-            assert!(PingMessage { client_id: 7, sequence: 1, client_time_secs: 1.0 }.is_finite());
             assert!(
-                !PingMessage { client_id: 7, sequence: 1, client_time_secs: f64::NAN }.is_finite()
+                PingMessage {
+                    client_id: 7,
+                    sequence: 1,
+                    client_time_secs: 1.0
+                }
+                .is_finite()
             );
             assert!(
-                PongMessage { client_id: 7, sequence: 1, client_time_secs: 1.0, server_tick: 2 }
-                    .is_finite()
+                !PingMessage {
+                    client_id: 7,
+                    sequence: 1,
+                    client_time_secs: f64::NAN
+                }
+                .is_finite()
+            );
+            assert!(
+                PongMessage {
+                    client_id: 7,
+                    sequence: 1,
+                    client_time_secs: 1.0,
+                    server_tick: 2
+                }
+                .is_finite()
             );
             assert!(
                 !PongMessage {
@@ -655,62 +597,61 @@ pub mod wire_format {
         }
 
         #[test]
-        fn hit_confirm_is_finite_checks_position_and_damage() {
-            use super::super::messages::HitConfirm;
+        fn attack_result_is_finite_checks_position_damage_health_and_knockback() {
+            use super::super::messages::AttackResult;
             use lightyear::prelude::PeerId;
-            let ok = HitConfirm {
+            let ok = AttackResult {
                 victim_id: PeerId::Netcode(1),
                 damage: 20.0,
-                is_critical: false,
-                hit_pos: Vec3::new(1.0, 2.0, 3.0),
-                server_tick: 0,
-            };
-            assert!(ok.is_finite());
-            let bad_pos = HitConfirm { hit_pos: Vec3::new(f32::NAN, 0.0, 0.0), ..ok.clone() };
-            assert!(!bad_pos.is_finite());
-            let bad_damage = HitConfirm { damage: f32::INFINITY, ..ok };
-            assert!(!bad_damage.is_finite());
-        }
-
-        #[test]
-        fn knockback_event_is_finite_checks_velocity() {
-            use super::super::messages::KnockbackEvent;
-            use lightyear::prelude::PeerId;
-            let ok = KnockbackEvent {
-                victim_id: PeerId::Netcode(1),
-                velocity: Vec3::new(1.0, 0.0, 0.0),
-                server_tick: 0,
-            };
-            assert!(ok.is_finite());
-            let bad = KnockbackEvent { velocity: Vec3::new(0.0, f32::INFINITY, 0.0), ..ok };
-            assert!(!bad.is_finite());
-        }
-
-        #[test]
-        fn damage_result_is_finite_checks_health() {
-            use super::super::messages::DamageResult;
-            use lightyear::prelude::PeerId;
-            let ok = DamageResult {
-                victim_id: PeerId::Netcode(1),
                 new_health: 80.0,
                 is_dead: false,
+                hit_pos: Vec3::new(1.0, 2.0, 3.0),
+                knockback: Vec3::new(1.0, 0.0, 0.0),
                 server_tick: 0,
             };
             assert!(ok.is_finite());
-            let bad = DamageResult { new_health: f32::NAN, ..ok };
-            assert!(!bad.is_finite());
+            let bad_pos = AttackResult {
+                hit_pos: Vec3::new(f32::NAN, 0.0, 0.0),
+                ..ok.clone()
+            };
+            assert!(!bad_pos.is_finite());
+            let bad_damage = AttackResult {
+                damage: f32::INFINITY,
+                ..ok.clone()
+            };
+            assert!(!bad_damage.is_finite());
+            let bad_health = AttackResult {
+                new_health: f32::NAN,
+                ..ok.clone()
+            };
+            assert!(!bad_health.is_finite());
+            let bad_knockback = AttackResult {
+                knockback: Vec3::new(0.0, f32::INFINITY, 0.0),
+                ..ok
+            };
+            assert!(!bad_knockback.is_finite());
         }
 
         #[test]
         fn eco_rabbit_net_is_finite_checks_position_and_energy() {
             use super::super::components::EcoRabbitNet;
-            let ok = EcoRabbitNet { id: 1, x: 0.0, z: 0.0, energy: 1.0 };
+            let ok = EcoRabbitNet {
+                id: 1,
+                x: 0.0,
+                z: 0.0,
+                energy: 1.0,
+            };
             assert!(ok.is_finite());
             let bad = EcoRabbitNet { x: f32::NAN, ..ok };
             assert!(!bad.is_finite());
             let bad_e = EcoRabbitNet {
                 energy: f32::INFINITY,
-                ..EcoRabbitNet { id: 2, x: 0.0, z: 0.0, energy: 1.0 }
+                ..EcoRabbitNet {
+                    id: 2,
+                    x: 0.0,
+                    z: 0.0,
+                    energy: 1.0,
+                }
             };
             assert!(!bad_e.is_finite());
         }
@@ -718,7 +659,13 @@ pub mod wire_format {
         #[test]
         fn eco_wildlife_net_is_finite_checks_position_and_energy() {
             use super::super::components::EcoWildlifeNet;
-            let ok = EcoWildlifeNet { id: 1, kind: 0, x: 1.0, z: 2.0, energy: 0.5 };
+            let ok = EcoWildlifeNet {
+                id: 1,
+                kind: 0,
+                x: 1.0,
+                z: 2.0,
+                energy: 0.5,
+            };
             assert!(ok.is_finite());
             let bad = EcoWildlifeNet { z: f32::NAN, ..ok };
             assert!(!bad.is_finite());
@@ -727,16 +674,30 @@ pub mod wire_format {
         #[test]
         fn eco_berry_net_is_finite_checks_position() {
             use super::super::components::EcoBerryNet;
-            let ok = EcoBerryNet { id: 1, x: 0.0, z: 0.0, fruit: 5 };
+            let ok = EcoBerryNet {
+                id: 1,
+                x: 0.0,
+                z: 0.0,
+                fruit: 5,
+            };
             assert!(ok.is_finite());
-            let bad = EcoBerryNet { x: f32::INFINITY, ..ok };
+            let bad = EcoBerryNet {
+                x: f32::INFINITY,
+                ..ok
+            };
             assert!(!bad.is_finite());
         }
 
         #[test]
         fn eco_plant_net_is_finite_checks_position() {
             use super::super::components::EcoPlantNet;
-            let ok = EcoPlantNet { id: 1, kind: 0, x: 0.0, z: 0.0, stock: 3 };
+            let ok = EcoPlantNet {
+                id: 1,
+                kind: 0,
+                x: 0.0,
+                z: 0.0,
+                stock: 3,
+            };
             assert!(ok.is_finite());
             let bad = EcoPlantNet { z: f32::NAN, ..ok };
             assert!(!bad.is_finite());
@@ -745,13 +706,28 @@ pub mod wire_format {
         #[test]
         fn eco_cloud_net_is_finite_checks_rain_and_phase() {
             use super::super::components::EcoCloudNet;
-            let ok = EcoCloudNet { id: 1, x: 0.0, z: 0.0, rain: 0.5, phase: 1.2 };
+            let ok = EcoCloudNet {
+                id: 1,
+                x: 0.0,
+                z: 0.0,
+                rain: 0.5,
+                phase: 1.2,
+            };
             assert!(ok.is_finite());
-            let bad_rain = EcoCloudNet { rain: f32::NAN, ..ok };
+            let bad_rain = EcoCloudNet {
+                rain: f32::NAN,
+                ..ok
+            };
             assert!(!bad_rain.is_finite());
             let bad_phase = EcoCloudNet {
                 phase: f32::INFINITY,
-                ..EcoCloudNet { id: 2, x: 0.0, z: 0.0, rain: 0.0, phase: 0.0 }
+                ..EcoCloudNet {
+                    id: 2,
+                    x: 0.0,
+                    z: 0.0,
+                    rain: 0.0,
+                    phase: 0.0,
+                }
             };
             assert!(!bad_phase.is_finite());
         }
@@ -776,12 +752,24 @@ pub mod wire_format {
                 plants: Vec::new(),
             };
             assert!(ok.is_finite());
-            let bad = EcoSnapshot { co2: f32::NAN, ..ok.clone() };
+            let bad = EcoSnapshot {
+                co2: f32::NAN,
+                ..ok.clone()
+            };
             assert!(!bad.is_finite());
             // A non-finite inner cloud invalidates the snapshot when iterated,
             // even though `is_finite()` only spot-checks the aggregate fields.
-            let cloud_with_nan = EcoCloudNet { id: 1, x: 0.0, z: 0.0, rain: f32::NAN, phase: 0.0 };
-            let snapshot_with_nan_cloud = EcoSnapshot { clouds: vec![cloud_with_nan], ..ok };
+            let cloud_with_nan = EcoCloudNet {
+                id: 1,
+                x: 0.0,
+                z: 0.0,
+                rain: f32::NAN,
+                phase: 0.0,
+            };
+            let snapshot_with_nan_cloud = EcoSnapshot {
+                clouds: vec![cloud_with_nan],
+                ..ok
+            };
             assert!(
                 snapshot_with_nan_cloud.is_finite(),
                 "aggregate check ignores inner lists"
@@ -827,7 +815,10 @@ mod tests {
     #[test]
     fn gameplay_command_kind_variants() {
         use messages::GameplayCommandKind;
-        let move_cmd = GameplayCommandKind::MoveWorld { dx_milli: 100, dz_milli: -50 };
+        let move_cmd = GameplayCommandKind::MoveWorld {
+            dx_milli: 100,
+            dz_milli: -50,
+        };
         match move_cmd {
             GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
                 assert_eq!(dx_milli, 100);
@@ -867,14 +858,10 @@ mod tests {
         let input = AttackInput {
             tick: 42,
             input_dir: Vec3::new(1.0, 0.0, 0.0),
-            is_falling: true,
-            combo_count: 3,
         };
         let json = serde_json::to_string(&input).unwrap();
         let decoded: AttackInput = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.tick, 42);
-        assert_eq!(decoded.is_falling, true);
-        assert_eq!(decoded.combo_count, 3);
         assert!((decoded.input_dir.x - 1.0).abs() < 0.001);
     }
 
@@ -895,7 +882,11 @@ mod tests {
 
     #[test]
     fn ping_pong_json_roundtrip() {
-        let ping = messages::PingMessage { client_id: 9, sequence: 77, client_time_secs: 12.5 };
+        let ping = messages::PingMessage {
+            client_id: 9,
+            sequence: 77,
+            client_time_secs: 12.5,
+        };
         let json = serde_json::to_string(&ping).unwrap();
         let decoded: messages::PingMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.client_id, 9);
@@ -932,23 +923,9 @@ mod tests {
     }
 
     #[test]
-    fn kill_feed_entry_json_roundtrip() {
-        use messages::KillFeedEntry;
-        let entry =
-            KillFeedEntry { killer_name: "Alice".into(), victim_name: "Bob".into(), weapon_id: 3 };
-        let json = serde_json::to_string(&entry).unwrap();
-        let decoded: KillFeedEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded.killer_name, "Alice");
-        assert_eq!(decoded.victim_name, "Bob");
-        assert_eq!(decoded.weapon_id, 3);
-    }
-
-    #[test]
     fn components_wrap_values() {
         use components::*;
-        assert_eq!(Health(100.0).0, 100.0);
-        assert_eq!(EquippedWeapon(2).0, 2);
-        assert_eq!(KnockbackImmunity(0.5).0, 0.5);
+        assert_eq!(Health::default().current, 100.0);
         assert_eq!(MonsterKind(1).0, 1);
         assert_eq!(MonsterHealth(50.0).0, 50.0);
         assert_eq!(PlayerPos(Vec3::ONE).0, Vec3::ONE);
@@ -968,7 +945,13 @@ mod tests {
     #[test]
     fn voxel_delta_fields() {
         use components::VoxelDelta;
-        let d = VoxelDelta { revision: 123, x: 5, y: 10, z: -3, block: 7 };
+        let d = VoxelDelta {
+            revision: 123,
+            x: 5,
+            y: 10,
+            z: -3,
+            block: 7,
+        };
         assert_eq!(d.revision, 123);
         assert_eq!(d.x, 5);
         assert_eq!(d.y, 10);

@@ -132,8 +132,11 @@ pub fn run(root: &Path) -> Result<()> {
         issues.extend(broken_local_links(root, path, &text));
 
         if path.starts_with(&docs_root) && path != &docs_index_path {
-            let relative =
-                path.strip_prefix(&docs_root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            let relative = path
+                .strip_prefix(&docs_root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
             if !docs_index.contains(&format!("]({relative})")) {
                 issues.push(format!("docs/README.md does not index {relative}"));
             }

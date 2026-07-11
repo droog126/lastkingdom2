@@ -1,11 +1,18 @@
 use serde::{Deserialize, Serialize};
 
 use crate::atmosphere::AtmosphereSnapshot;
-use crate::eco_cycle::{EcoCycle, EcoTickReport};
 use crate::ecology::nature::NatureEcologySnapshot;
+use crate::ecology::{EcoCycle, EcoTickReport};
 use crate::hydrology::HydrologySnapshot;
 use crate::protocol::components::EcoSnapshot;
 use crate::resource::GlobalResourcePool;
+
+pub mod app_sets;
+mod authority;
+
+pub use authority::{
+    SimRole, advance_demo_tick, advance_fixed_authority_tick, advance_fixed_authority_tick_report,
+};
 
 pub type SimulationTick = u64;
 
@@ -25,7 +32,6 @@ pub enum NatureEvent {
     AnimalsBorn { rabbits: u32, wildlife: u32 },
     FruitChanged { eaten: u32, grown: u32 },
 }
-
 
 /// Stable observation envelope over the existing detailed `EcoSnapshot`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,11 +60,31 @@ impl NatureSnapshot {
         self.atmosphere.is_finite()
             && self.hydrology.is_finite()
             && self.detailed_ecology.is_finite()
-            && self.detailed_ecology.clouds.iter().all(|cloud| cloud.is_finite())
-            && self.detailed_ecology.rabbits.iter().all(|rabbit| rabbit.is_finite())
-            && self.detailed_ecology.wildlife.iter().all(|animal| animal.is_finite())
-            && self.detailed_ecology.berries.iter().all(|berry| berry.is_finite())
-            && self.detailed_ecology.plants.iter().all(|plant| plant.is_finite())
+            && self
+                .detailed_ecology
+                .clouds
+                .iter()
+                .all(|cloud| cloud.is_finite())
+            && self
+                .detailed_ecology
+                .rabbits
+                .iter()
+                .all(|rabbit| rabbit.is_finite())
+            && self
+                .detailed_ecology
+                .wildlife
+                .iter()
+                .all(|animal| animal.is_finite())
+            && self
+                .detailed_ecology
+                .berries
+                .iter()
+                .all(|berry| berry.is_finite())
+            && self
+                .detailed_ecology
+                .plants
+                .iter()
+                .all(|plant| plant.is_finite())
     }
 }
 
@@ -92,10 +118,14 @@ pub fn step_world(
 fn events_from_report(report: EcoTickReport) -> Vec<NatureEvent> {
     let mut events = Vec::with_capacity(4);
     if report.rain_fell > 0.0 {
-        events.push(NatureEvent::RainFell { amount: report.rain_fell });
+        events.push(NatureEvent::RainFell {
+            amount: report.rain_fell,
+        });
     }
     if report.plants_grown > 0 {
-        events.push(NatureEvent::PlantsGrown { count: report.plants_grown });
+        events.push(NatureEvent::PlantsGrown {
+            count: report.plants_grown,
+        });
     }
     if report.rabbits_born > 0 || report.wildlife_born > 0 {
         events.push(NatureEvent::AnimalsBorn {

@@ -34,7 +34,10 @@ pub struct Protection {
 
 impl Protection {
     pub fn new(remaining_secs: f32, source: ProtectionSource) -> Self {
-        Self { remaining_secs, source }
+        Self {
+            remaining_secs,
+            source,
+        }
     }
 
     pub fn opening() -> Self {
@@ -203,13 +206,15 @@ mod tests {
         struct ObserverEnabled(bool);
 
         let mut app = App::new();
-        app.init_resource::<Hits>().init_resource::<ObserverEnabled>().add_observer(
-            (|trigger: On<Remove, Protection>, mut hits: ResMut<Hits>| {
-                hits.0 += 1;
-                let _ = trigger.event_target();
-            })
-            .run_if(|enabled: Res<ObserverEnabled>| enabled.0),
-        );
+        app.init_resource::<Hits>()
+            .init_resource::<ObserverEnabled>()
+            .add_observer(
+                (|trigger: On<Remove, Protection>, mut hits: ResMut<Hits>| {
+                    hits.0 += 1;
+                    let _ = trigger.event_target();
+                })
+                .run_if(|enabled: Res<ObserverEnabled>| enabled.0),
+            );
 
         let blocked = app.world_mut().spawn(Protection::opening()).id();
         app.world_mut().entity_mut(blocked).remove::<Protection>();

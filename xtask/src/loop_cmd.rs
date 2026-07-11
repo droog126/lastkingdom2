@@ -2,8 +2,10 @@ use std::{
     env,
     ffi::OsStr,
     fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -172,15 +174,20 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         &client_exe,
         &[
             "crates/client/src/main.rs",
-            "crates/client/src/capture.rs",
-            "crates/client/src/pretty/mod.rs",
-            "crates/client/src/render/mod.rs",
+            "crates/client/src/game_scene/mod.rs",
+            "crates/client/src/game_scene/capture.rs",
+            "crates/client/src/game_scene/offline.rs",
             "crates/core/src/clock.rs",
         ],
     )?;
     stage_windows_runtime_files(root, &target_dir)?;
 
     let before = latest_iter(root).and_then(|p| iter_number(&p)).unwrap_or(0);
+    let iter_dir = root
+        .join("screenshots")
+        .join(format!("iter_{:02}", before + 1));
+    fs::create_dir_all(&iter_dir).map_err(|e| e.to_string())?;
+    set_env_pair(&mut envs, "LK2_ITER_DIR", &iter_dir.display().to_string());
     let server_log = root.join("screenshots/loop_server.log");
     let client_log = root.join("screenshots/loop_run.log");
     let (mode, mut client_args) = if use_offline {
@@ -362,8 +369,9 @@ pub fn flicker_probe(root: &Path, raw: &[String]) -> Result<()> {
         &client_exe,
         &[
             "crates/client/src/main.rs",
-            "crates/client/src/capture.rs",
-            "crates/client/src/render/mod.rs",
+            "crates/client/src/game_scene/mod.rs",
+            "crates/client/src/game_scene/capture.rs",
+            "crates/client/src/game_scene/player.rs",
         ],
     )?;
     stage_windows_runtime_files(root, &target_dir)?;
@@ -400,13 +408,24 @@ pub fn flicker_probe(root: &Path, raw: &[String]) -> Result<()> {
 
     println!(
         ">>> Flicker probe {}: frames={} max_delta={} worst_pair={}",
-        summary.get("verdict").and_then(Value::as_str).unwrap_or("UNKNOWN"),
+        summary
+            .get("verdict")
+            .and_then(Value::as_str)
+            .unwrap_or("UNKNOWN"),
         summary.get("frames").and_then(Value::as_u64).unwrap_or(0),
-        summary.get("max_luma_delta").and_then(Value::as_f64).unwrap_or(0.0),
+        summary
+            .get("max_luma_delta")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
         summary
             .get("worst_pair")
             .and_then(Value::as_array)
-            .map(|pair| { pair.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" -> ") })
+            .map(|pair| {
+                pair.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            })
             .unwrap_or_else(|| "none".to_string())
     );
     println!(
@@ -414,7 +433,11 @@ pub fn flicker_probe(root: &Path, raw: &[String]) -> Result<()> {
         audit::rel(root, &probe_dir.join("summary.json"))
     );
 
-    match summary.get("verdict").and_then(Value::as_str).unwrap_or("UNKNOWN") {
+    match summary
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("UNKNOWN")
+    {
         "OK" | "WARN" => Ok(()),
         verdict => Err(format!(
             "flicker probe verdict {verdict}; see {}",
@@ -440,9 +463,8 @@ pub fn clean_runs(root: &Path) -> Result<()> {
 
 pub fn play(root: &Path, raw: &[String]) -> Result<()> {
     if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
-        println!(
-            "xtask play [--skip-build] [--gpu-backend vulkan|dx12] [--online] [--server-addr ADDR] [client flags...]"
-        );
+        println!("xtask play [--skip-build] [--gpu-backend vulkan|dx12] [client flags...]");
+        println!("  --online starts lk2-server and connects the focused client");
         println!("  default client flags: --offline --no-scenario");
         println!("  default gpu backend: {}", default_gpu_backend());
         println!("  logs: run-logs/play.log and run-logs/play.log.err");
@@ -497,8 +519,9 @@ pub fn play(root: &Path, raw: &[String]) -> Result<()> {
         audit::rel(root, &PathBuf::from(format!("{}.err", log.display())))
     );
     let mut child = spawn_logged(root, &client_exe, &parsed.client_args, &envs, &log)?;
-    let status =
-        child.wait().map_err(|e| format!("failed to wait for {}: {e}", client_exe.display()))?;
+    let status = child
+        .wait()
+        .map_err(|e| format!("failed to wait for {}: {e}", client_exe.display()))?;
     if let Some(mut child) = server_proc {
         stop_child(&mut child);
     }
@@ -778,10 +801,12 @@ fn set_env_pair(envs: &mut Vec<(String, String)>, key: &str, value: &str) {
 }
 
 fn ensure_clean_target(root: &Path, path: &Path) -> Result<()> {
-    let root_abs =
-        root.canonicalize().map_err(|e| format!("failed to resolve {}: {e}", root.display()))?;
-    let parent =
-        path.parent().ok_or_else(|| format!("invalid cleanup path: {}", path.display()))?;
+    let root_abs = root
+        .canonicalize()
+        .map_err(|e| format!("failed to resolve {}: {e}", root.display()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid cleanup path: {}", path.display()))?;
     let parent_abs = parent
         .canonicalize()
         .map_err(|e| format!("failed to resolve {}: {e}", parent.display()))?;
@@ -809,21 +834,24 @@ pub fn loop_target_dir(root: &Path) -> PathBuf {
 }
 
 fn runtime_env(root: &Path, target_dir: &Path, rust_log: &str) -> Result<Vec<(String, String)>> {
-    let sysroot =
-        match Command::new("rustc").args(["--print", "sysroot"]).current_dir(root).output() {
-            Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
-            Err(e) => {
-                println!(
-                    ">>> [warn] rustc --print sysroot failed: {}, using RUSTUP_HOME",
-                    e
-                );
-                if let Ok(rustup_home) = env::var("RUSTUP_HOME") {
-                    format!("{rustup_home}/toolchains/stable-x86_64-pc-windows-msvc")
-                } else {
-                    String::new()
-                }
+    let sysroot = match Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .current_dir(root)
+        .output()
+    {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Err(e) => {
+            println!(
+                ">>> [warn] rustc --print sysroot failed: {}, using RUSTUP_HOME",
+                e
+            );
+            if let Ok(rustup_home) = env::var("RUSTUP_HOME") {
+                format!("{rustup_home}/toolchains/stable-x86_64-pc-windows-msvc")
+            } else {
+                String::new()
             }
-        };
+        }
+    };
     let sep = if cfg!(windows) { ";" } else { ":" };
     let debug = target_dir.join("debug");
     let mut path = [debug.join("deps"), debug]
@@ -958,7 +986,9 @@ fn cargo_build_once(
     envs: &[(String, String)],
 ) -> std::result::Result<(), BuildFailure> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["build", "-p", package, "-j", "1"]).current_dir(root);
+    let build_jobs = env::var("CARGO_BUILD_JOBS").unwrap_or_else(|_| "1".to_string());
+    cmd.args(["build", "-p", package, "-j", &build_jobs])
+        .current_dir(root);
     let joined;
     if !features.is_empty() {
         joined = features.join(",");
@@ -969,21 +999,85 @@ fn cargo_build_once(
     }
     cmd.env("CARGO_INCREMENTAL", "0");
     println!(">>> {:?}", cmd);
-    let output = cmd
-        .output()
-        .map_err(|e| BuildFailure { package: package.to_string(), text: e.to_string() })?;
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let log_path = root.join("run-logs/build_loop.log");
     let _ = fs::create_dir_all(root.join("run-logs"));
-    fs::write(root.join("run-logs/build_loop.log"), &text)
-        .map_err(|e| BuildFailure { package: package.to_string(), text: e.to_string() })?;
-    for line in text.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev() {
-        println!("{line}");
-    }
-    if !output.status.success() {
-        return Err(BuildFailure { package: package.to_string(), text });
+    let log = File::create(&log_path).map_err(|e| BuildFailure {
+        package: package.to_string(),
+        text: e.to_string(),
+    })?;
+    let log = Arc::new(Mutex::new(log));
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| BuildFailure {
+            package: package.to_string(),
+            text: e.to_string(),
+        })?;
+
+    let stdout = child.stdout.take().ok_or_else(|| BuildFailure {
+        package: package.to_string(),
+        text: "cargo stdout pipe was not available".to_string(),
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| BuildFailure {
+        package: package.to_string(),
+        text: "cargo stderr pipe was not available".to_string(),
+    })?;
+    let stdout_log = Arc::clone(&log);
+    let stdout_thread =
+        thread::spawn(move || stream_build_output(BufReader::new(stdout), stdout_log));
+    let stderr_log = Arc::clone(&log);
+    let stderr_thread =
+        thread::spawn(move || stream_build_output(BufReader::new(stderr), stderr_log));
+
+    let status = child.wait().map_err(|e| BuildFailure {
+        package: package.to_string(),
+        text: e.to_string(),
+    })?;
+    let mut text = stdout_thread
+        .join()
+        .map_err(|_| BuildFailure {
+            package: package.to_string(),
+            text: "cargo stdout reader thread panicked".to_string(),
+        })?
+        .map_err(|e| BuildFailure {
+            package: package.to_string(),
+            text: format!("failed to read cargo stdout: {e}"),
+        })?;
+    text.push_str(
+        &stderr_thread
+            .join()
+            .map_err(|_| BuildFailure {
+                package: package.to_string(),
+                text: "cargo stderr reader thread panicked".to_string(),
+            })?
+            .map_err(|e| BuildFailure {
+                package: package.to_string(),
+                text: format!("failed to read cargo stderr: {e}"),
+            })?,
+    );
+    if !status.success() {
+        return Err(BuildFailure {
+            package: package.to_string(),
+            text,
+        });
     }
     Ok(())
+}
+
+fn stream_build_output<R: BufRead>(reader: R, log: Arc<Mutex<File>>) -> std::io::Result<String> {
+    let mut text = String::new();
+    for line in reader.lines() {
+        let line = line?;
+        println!("{line}");
+        text.push_str(&line);
+        text.push('\n');
+        let mut log = log
+            .lock()
+            .map_err(|_| std::io::Error::other("build log mutex poisoned"))?;
+        writeln!(log, "{line}")?;
+    }
+    Ok(text)
 }
 
 fn ensure_binary_fresh(root: &Path, binary: &Path, sources: &[&str]) -> Result<()> {
@@ -1084,7 +1178,10 @@ fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
         let mut changed = false;
         for row in &rows {
             let pid = row.get("ProcessId").and_then(Value::as_u64).unwrap_or(0);
-            let ppid = row.get("ParentProcessId").and_then(Value::as_u64).unwrap_or(0);
+            let ppid = row
+                .get("ParentProcessId")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
             if ancestor_ids.contains(&pid) && ppid != 0 && ancestor_ids.insert(ppid) {
                 changed = true;
             }
@@ -1099,8 +1196,11 @@ fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
         if ancestor_ids.contains(&pid) {
             continue;
         }
-        let name =
-            row.get("Name").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+        let name = row
+            .get("Name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
         let command = row
             .get("CommandLine")
             .and_then(Value::as_str)
@@ -1127,8 +1227,10 @@ fn has_active_workspace_process(root: &Path, process_json: &str) -> bool {
 }
 
 fn clear_loop_target(root: &Path, envs: &[(String, String)]) -> Result<()> {
-    let Some(target_dir) =
-        envs.iter().find(|(k, _)| k == "CARGO_TARGET_DIR").map(|(_, v)| PathBuf::from(v))
+    let Some(target_dir) = envs
+        .iter()
+        .find(|(k, _)| k == "CARGO_TARGET_DIR")
+        .map(|(_, v)| PathBuf::from(v))
     else {
         return Err("CARGO_TARGET_DIR missing; refusing to clear unknown target dir".to_string());
     };
@@ -1153,8 +1255,9 @@ fn cargo_clean_package(root: &Path, package: &str, envs: &[(String, String)]) ->
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let output =
-        cmd.output().map_err(|e| format!("failed to run cargo clean -p {package}: {e}"))?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to run cargo clean -p {package}: {e}"))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -1188,7 +1291,8 @@ fn spawn_logged(
         cmd.env(k, v);
     }
     println!(">>> Running: {:?}", cmd);
-    cmd.spawn().map_err(|e| format!("failed to start {}: {e}", exe.display()))
+    cmd.spawn()
+        .map_err(|e| format!("failed to start {}: {e}", exe.display()))
 }
 
 fn is_dynamic_link_failure(text: &str) -> bool {
@@ -1214,13 +1318,21 @@ fn classify_build_failure(text: &str) -> (&'static str, Vec<String>, Vec<String>
     let mut files = Vec::new();
     for line in text.lines() {
         if let Some(pos) = line.find("error[E") {
-            let code = line[pos + "error[".len()..].split(']').next().unwrap_or("").to_string();
+            let code = line[pos + "error[".len()..]
+                .split(']')
+                .next()
+                .unwrap_or("")
+                .to_string();
             if !code.is_empty() && !errors.contains(&code) {
                 errors.push(code);
             }
         }
         if line.contains("--> ") {
-            if let Some(path) = line.split("-->").nth(1).and_then(|s| s.trim().split(':').next()) {
+            if let Some(path) = line
+                .split("-->")
+                .nth(1)
+                .and_then(|s| s.trim().split(':').next())
+            {
                 let path = path.replace('\\', "/");
                 if !path.is_empty() && !files.contains(&path) {
                     files.push(path);
@@ -1356,6 +1468,9 @@ fn wait_for_iter(
         match child.try_wait() {
             Ok(Some(status)) => {
                 println!(">>> client exited before loop capture: {status}");
+                if let Some(iter) = next_ready_iter(root, before) {
+                    return Some(iter);
+                }
                 break;
             }
             Ok(None) => {}
@@ -1389,12 +1504,19 @@ fn iter_ready(iter: &Path) -> bool {
     let role = json.get("role").and_then(Value::as_str).unwrap_or("");
     let tick_ok = json.get("tick").and_then(Value::as_i64).unwrap_or(0) >= 100;
     let wall_ok = json.get("wall_secs").and_then(Value::as_f64).unwrap_or(0.0) >= 4.0;
-    if json.pointer("/visual/movement_probe/first_player_pos").is_none()
-        || json.pointer("/visual/movement_probe/current_player_pos").is_none()
+    if json
+        .pointer("/visual/movement_probe/first_player_pos")
+        .is_none()
+        || json
+            .pointer("/visual/movement_probe/current_player_pos")
+            .is_none()
     {
         return false;
     }
-    if json.pointer("/visual/player_readability/marker_count").is_none() {
+    if json
+        .pointer("/visual/player_readability/marker_count")
+        .is_none()
+    {
         return false;
     }
     if role == "client_offline" {
@@ -1404,12 +1526,17 @@ fn iter_ready(iter: &Path) -> bool {
     } else if !wall_ok {
         return false;
     }
-    fs::read_dir(iter).ok().into_iter().flatten().filter_map(|e| e.ok()).any(|e| {
-        let name = e.file_name().to_string_lossy().to_string();
-        name.starts_with("iter_")
-            && name.ends_with(".png")
-            && e.metadata().map(|m| m.len() > 30 * 1024).unwrap_or(false)
-    })
+    fs::read_dir(iter)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("iter_")
+                && name.ends_with(".png")
+                && e.metadata().map(|m| m.len() > 30 * 1024).unwrap_or(false)
+        })
 }
 
 fn next_ready_iter(root: &Path, before: u32) -> Option<PathBuf> {
@@ -1464,9 +1591,14 @@ fn write_decision_template(root: &Path) -> Result<()> {
         println!("\n[warn] no iter_* directory found -- can't write decision.template.md");
         return Ok(());
     };
-    let prev =
-        dirs.get(dirs.len().saturating_sub(2)).and_then(|p| p.file_name()).and_then(OsStr::to_str);
-    let latest_name = latest.file_name().and_then(OsStr::to_str).unwrap_or("iter_NN");
+    let prev = dirs
+        .get(dirs.len().saturating_sub(2))
+        .and_then(|p| p.file_name())
+        .and_then(OsStr::to_str);
+    let latest_name = latest
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("iter_NN");
     fs::write(
         latest.join("decision.template.md"),
         audit::decision_template(latest_name, prev),
@@ -1559,7 +1691,9 @@ fn enforce_decision_gate(root: &Path, refresh_after_fail: bool) -> Result<()> {
 fn read_health_verdict(path: &Path) -> Option<String> {
     let text = fs::read_to_string(path).ok()?;
     let json: Value = serde_json::from_str(&text).ok()?;
-    json.get("verdict").and_then(Value::as_str).map(str::to_string)
+    json.get("verdict")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn latest_iter(root: &Path) -> Option<PathBuf> {
@@ -1577,7 +1711,11 @@ fn newest_iter_after(root: &Path, before: u32) -> Option<PathBuf> {
 
 fn previous_iter(root: &Path, iter: &Path) -> Option<PathBuf> {
     let n = iter_number(iter)?;
-    iter_dirs(root).ok()?.into_iter().filter(|p| iter_number(p).unwrap_or(0) < n).next_back()
+    iter_dirs(root)
+        .ok()?
+        .into_iter()
+        .filter(|p| iter_number(p).unwrap_or(0) < n)
+        .next_back()
 }
 
 fn iter_dirs(root: &Path) -> Result<Vec<PathBuf>> {
@@ -1597,7 +1735,11 @@ fn iter_dirs(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn iter_number(path: &Path) -> Option<u32> {
-    path.file_name().and_then(OsStr::to_str)?.strip_prefix("iter_")?.parse().ok()
+    path.file_name()
+        .and_then(OsStr::to_str)?
+        .strip_prefix("iter_")?
+        .parse()
+        .ok()
 }
 
 fn exe_path(target_dir: &Path, name: &str) -> PathBuf {
@@ -1806,10 +1948,15 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
 }
 
 fn next_flicker_probe_dir(root: &Path, backend: &str) -> Result<PathBuf> {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
     let backend = sanitize_path_segment(backend);
-    let base =
-        root.join("screenshots").join("flicker_probe").join(format!("probe_{stamp}_{backend}"));
+    let base = root
+        .join("screenshots")
+        .join("flicker_probe")
+        .join(format!("probe_{stamp}_{backend}"));
     if !base.exists() {
         return Ok(base);
     }
@@ -1820,8 +1967,10 @@ fn next_flicker_probe_dir(root: &Path, backend: &str) -> Result<PathBuf> {
 }
 
 fn sanitize_path_segment(value: &str) -> String {
-    let cleaned =
-        value.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>();
+    let cleaned = value
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
     if cleaned.is_empty() {
         "default".to_string()
     } else {
@@ -1863,11 +2012,19 @@ fn analyze_flicker_probe(
     let mut samples = Vec::new();
     let mut errors = Vec::new();
     for path in pngs {
-        let name = path.file_name().and_then(OsStr::to_str).unwrap_or("frame.png").to_string();
+        let name = path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("frame.png")
+            .to_string();
         match decode_sampled_luma_mean(&path, 48) {
             Ok(luma_mean) => {
                 let state = flicker_state_for_frame(probe_dir, &name);
-                samples.push(FlickerFrameSample { name, luma_mean, state });
+                samples.push(FlickerFrameSample {
+                    name,
+                    luma_mean,
+                    state,
+                });
             }
             Err(err) => errors.push(json!({
                 "frame": name,
@@ -1935,7 +2092,11 @@ fn analyze_flicker_probe(
 }
 
 fn flicker_sample_wall_secs(sample: &FlickerFrameSample) -> Option<f64> {
-    sample.state.as_ref().and_then(|state| state.get("wall_secs")).and_then(Value::as_f64)
+    sample
+        .state
+        .as_ref()
+        .and_then(|state| state.get("wall_secs"))
+        .and_then(Value::as_f64)
 }
 
 fn analyze_flicker_sequence(
@@ -1959,15 +2120,24 @@ fn analyze_flicker_sequence(
     } else {
         "OK"
     };
-    FlickerSequenceStats { max_delta, worst_pair, verdict }
+    FlickerSequenceStats {
+        max_delta,
+        worst_pair,
+        verdict,
+    }
 }
 
 fn flicker_state_for_frame(probe_dir: &Path, frame_name: &str) -> Option<Value> {
-    let id = frame_name.strip_prefix("frame_").and_then(|name| name.strip_suffix(".png"))?;
+    let id = frame_name
+        .strip_prefix("frame_")
+        .and_then(|name| name.strip_suffix(".png"))?;
     let state_path = probe_dir.join(format!("state_{id}.json"));
     let text = fs::read_to_string(state_path).ok()?;
     let state = serde_json::from_str::<Value>(&text).ok()?;
-    let lighting = state.get("render").and_then(|render| render.get("lighting")).cloned();
+    let lighting = state
+        .get("render")
+        .and_then(|render| render.get("lighting"))
+        .cloned();
     Some(json!({
         "tick": state.get("tick").cloned(),
         "wall_secs": state.get("wall_secs").cloned(),
@@ -1982,13 +2152,24 @@ fn write_flicker_probe_summary(probe_dir: &Path, summary: &Value, stderr_tail: &
         serde_json::to_string_pretty(summary).map_err(|e| e.to_string())? + "\n",
     )
     .map_err(|e| e.to_string())?;
-    let verdict = summary.get("verdict").and_then(Value::as_str).unwrap_or("UNKNOWN");
+    let verdict = summary
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("UNKNOWN");
     let frames = summary.get("frames").and_then(Value::as_u64).unwrap_or(0);
-    let max_delta = summary.get("max_luma_delta").and_then(Value::as_f64).unwrap_or(0.0);
+    let max_delta = summary
+        .get("max_luma_delta")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let worst_pair = summary
         .get("worst_pair")
         .and_then(Value::as_array)
-        .map(|pair| pair.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" -> "))
+        .map(|pair| {
+            pair.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        })
         .unwrap_or_default();
     let md = format!(
         "# flicker probe\n\nresult: {verdict}\nframes: {frames}\nmax_luma_delta: {max_delta}\nworst_pair: {worst_pair}\n\nstderr_tail:\n```text\n{stderr_tail}\n```\n"
@@ -2155,6 +2336,14 @@ mod tests {
     }
 
     #[test]
+    fn loop_args_default_to_offline_mode() {
+        let parsed = parse_loop(&[]);
+        assert!(!parsed.online);
+        assert!(!parsed.no_server);
+        assert_eq!(parsed.seconds, 60);
+    }
+
+    #[test]
     fn flicker_probe_args_parse_thresholds_and_backend() {
         let parsed = parse_flicker_probe(&[
             "--seconds=12".into(),
@@ -2181,9 +2370,21 @@ mod tests {
     #[test]
     fn flicker_sequence_finds_worst_adjacent_delta() {
         let samples = vec![
-            FlickerFrameSample { name: "frame_0001.png".into(), luma_mean: 80.0, state: None },
-            FlickerFrameSample { name: "frame_0002.png".into(), luma_mean: 84.0, state: None },
-            FlickerFrameSample { name: "frame_0003.png".into(), luma_mean: 121.5, state: None },
+            FlickerFrameSample {
+                name: "frame_0001.png".into(),
+                luma_mean: 80.0,
+                state: None,
+            },
+            FlickerFrameSample {
+                name: "frame_0002.png".into(),
+                luma_mean: 84.0,
+                state: None,
+            },
+            FlickerFrameSample {
+                name: "frame_0003.png".into(),
+                luma_mean: 121.5,
+                state: None,
+            },
         ];
 
         let stats = analyze_flicker_sequence(&samples, 20.0, 35.0);
@@ -2196,8 +2397,16 @@ mod tests {
     #[test]
     fn flicker_sequence_warns_below_fail_threshold() {
         let samples = vec![
-            FlickerFrameSample { name: "frame_0001.png".into(), luma_mean: 80.0, state: None },
-            FlickerFrameSample { name: "frame_0002.png".into(), luma_mean: 104.0, state: None },
+            FlickerFrameSample {
+                name: "frame_0001.png".into(),
+                luma_mean: 80.0,
+                state: None,
+            },
+            FlickerFrameSample {
+                name: "frame_0002.png".into(),
+                luma_mean: 104.0,
+                state: None,
+            },
         ];
 
         let stats = analyze_flicker_sequence(&samples, 20.0, 35.0);
@@ -2230,7 +2439,9 @@ mod tests {
         );
 
         assert_eq!(
-            envs.iter().find(|(k, _)| k == "WGPU_BACKEND").map(|(_, v)| v.as_str()),
+            envs.iter()
+                .find(|(k, _)| k == "WGPU_BACKEND")
+                .map(|(_, v)| v.as_str()),
             Some("dx12")
         );
     }
@@ -2332,7 +2543,7 @@ mod tests {
 
     #[test]
     fn classifies_rust_compile_errors_and_primary_files() {
-        let text = "error[E0004]: non-exhaustive patterns\n   --> crates\\client\\src\\pretty\\mod.rs:1295:15\nerror[E0599]: no method named chain\n   --> crates\\client\\src\\main.rs:563:66\n";
+        let text = "error[E0004]: non-exhaustive patterns\n   --> crates\\client\\src\\game_scene\\mod.rs:129:15\nerror[E0599]: no method named chain\n   --> crates\\client\\src\\main.rs:56:66\n";
 
         let (kind, errors, files) = classify_build_failure(text);
 
@@ -2341,7 +2552,7 @@ mod tests {
         assert_eq!(
             files,
             vec![
-                "crates/client/src/pretty/mod.rs",
+                "crates/client/src/game_scene/mod.rs",
                 "crates/client/src/main.rs"
             ]
         );

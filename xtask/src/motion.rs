@@ -61,8 +61,14 @@ pub fn analyze(root: &Path, args: &[String]) -> Result<()> {
             .and_then(Value::as_f64)
             .unwrap_or(0.0)
             .abs();
-        let attempted = value.get("local_move_attempted").and_then(Value::as_bool).unwrap_or(false);
-        let moved = value.get("local_move_moved").and_then(Value::as_bool).unwrap_or(false);
+        let attempted = value
+            .get("local_move_attempted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let moved = value
+            .get("local_move_moved")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         stats.max_dt = stats.max_dt.max(dt);
         stats.max_player_step = stats.max_player_step.max(player_step);

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::monster::MonsterEcosystem;
+use crate::ecology::threats::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::resource::GlobalResourcePool;
 use crate::world::World;
@@ -231,14 +231,20 @@ impl TickObserver {
     }
 
     pub fn observe_ai_decision(&mut self, dec: AiDecision) {
-        let history = self.agent_decision_history.entry(dec.agent_id).or_insert_with(Vec::new);
+        let history = self
+            .agent_decision_history
+            .entry(dec.agent_id)
+            .or_insert_with(Vec::new);
         history.push((dec.tick, dec.kind));
         if history.len() > 10 {
             history.remove(0);
         }
 
         if history.len() >= 5 {
-            let last5: Vec<_> = history[history.len() - 5..].iter().map(|(_, k)| *k).collect();
+            let last5: Vec<_> = history[history.len() - 5..]
+                .iter()
+                .map(|(_, k)| *k)
+                .collect();
             if last5.iter().all(|k| *k == dec.kind) {
                 self.anomalies.push(Anomaly {
                     tick: dec.tick,
@@ -408,7 +414,9 @@ impl TickObserver {
                 "  [{}] 违例 {} 次，最后 @ tick {}\n",
                 kind.label_zh(),
                 inv.total_violations,
-                inv.last_violation_tick.map(|t| t.to_string()).unwrap_or_else(|| "n/a".into())
+                inv.last_violation_tick
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "n/a".into())
             ));
         }
         s.push_str("\n--- Anomalies ---\n");
@@ -455,7 +463,7 @@ impl TickObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::monster::MonsterEcosystem;
+    use crate::ecology::threats::MonsterEcosystem;
     use crate::nation::NationRegistry;
     use crate::resource::{GlobalResourcePool, ResourceKind};
     use crate::world::{Biome, World, WorldGenerator};
@@ -512,7 +520,9 @@ mod tests {
 
         let mut obs = TickObserver::new();
         obs.begin_tick();
-        let err = obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap_err();
+        let err = obs
+            .end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8]))
+            .unwrap_err();
         assert!(
             err.iter().any(|e| e.contains("资源守恒")),
             "expected 资源守恒 violation, got {:?}",
@@ -527,7 +537,9 @@ mod tests {
         nations.flag_count = crate::constant::MAX_NATIONAL_FLAGS + 1;
         let mut obs = TickObserver::new();
         obs.begin_tick();
-        let err = obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap_err();
+        let err = obs
+            .end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8]))
+            .unwrap_err();
         assert!(err.iter().any(|e| e.contains("国旗上限")));
     }
 
@@ -536,8 +548,9 @@ mod tests {
         let (world, pool, nations, monsters) = fresh_world();
         let mut obs = TickObserver::new();
         obs.begin_tick();
-        let err =
-            obs.end_tick(0, &world, &pool, &nations, &monsters, Some([100, 100, 100])).unwrap_err();
+        let err = obs
+            .end_tick(0, &world, &pool, &nations, &monsters, Some([100, 100, 100]))
+            .unwrap_err();
         assert!(err.iter().any(|e| e.contains("玩家出界")));
     }
 
@@ -547,7 +560,9 @@ mod tests {
         monsters.current_individuals += 10;
         let mut obs = TickObserver::new();
         obs.begin_tick();
-        let err = obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap_err();
+        let err = obs
+            .end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8]))
+            .unwrap_err();
         assert!(err.iter().any(|e| e.contains("怪物计数")));
     }
 
@@ -563,7 +578,11 @@ mod tests {
                 result: "north".into(),
             });
         }
-        let osc_count = obs.anomalies.iter().filter(|a| a.kind == AnomalyKind::Oscillation).count();
+        let osc_count = obs
+            .anomalies
+            .iter()
+            .filter(|a| a.kind == AnomalyKind::Oscillation)
+            .count();
         assert!(osc_count >= 1, "expected at least one oscillation anomaly");
     }
 
@@ -588,7 +607,11 @@ mod tests {
                 result: "".into(),
             });
         }
-        let osc_count = obs.anomalies.iter().filter(|a| a.kind == AnomalyKind::Oscillation).count();
+        let osc_count = obs
+            .anomalies
+            .iter()
+            .filter(|a| a.kind == AnomalyKind::Oscillation)
+            .count();
         assert_eq!(osc_count, 0);
     }
 
@@ -606,7 +629,11 @@ mod tests {
         assert_eq!(obs.anomalies.len(), 1);
         assert_eq!(obs.anomalies[0].tick, 12);
         assert_eq!(obs.anomalies[0].kind, AnomalyKind::TickSpike);
-        assert!(obs.invariants.get(&InvariantKind::TickDurationBounded).is_none());
+        assert!(
+            obs.invariants
+                .get(&InvariantKind::TickDurationBounded)
+                .is_none()
+        );
     }
 
     #[test]
@@ -614,9 +641,11 @@ mod tests {
         let (world, pool, mut nations, monsters) = fresh_world();
         let mut obs = TickObserver::new();
         obs.begin_tick();
-        obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap();
+        obs.end_tick(0, &world, &pool, &nations, &monsters, Some([8, 8, 8]))
+            .unwrap();
         obs.begin_tick();
-        obs.end_tick(1, &world, &pool, &nations, &monsters, Some([8, 8, 8])).unwrap();
+        obs.end_tick(1, &world, &pool, &nations, &monsters, Some([8, 8, 8]))
+            .unwrap();
 
         nations.flag_count = 99;
         obs.begin_tick();

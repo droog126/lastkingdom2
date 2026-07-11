@@ -1,5 +1,5 @@
 use super::{
-    ContentId, ContentSolveError, ContentVolume, GAME_CONTENT_CAVERN, GAME_CONTENT_DUNGEON,
+    ContentGenerationError, ContentId, ContentVolume, GAME_CONTENT_CAVERN, GAME_CONTENT_DUNGEON,
     GAME_CONTENT_EMPTY, GAME_CONTENT_MONSTER_TERRITORY, GAME_CONTENT_SETTLEMENT,
     GAME_CONTENT_TREASURE_VAULT, GAME_CONTENT_VERTICAL_PASSAGE, GAME_CONTENT_WILDERNESS,
     GameContentTheme, GameContentVolumeConfig, game_content_catalog, generate_game_content_volume,
@@ -49,7 +49,7 @@ impl MaterializedContent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContentMaterializeError {
     WorldTooSmall { size: i32, minimum: i32 },
-    Solve(ContentSolveError),
+    Generate(ContentGenerationError),
     MissingRequiredContent(ContentId),
 }
 
@@ -62,7 +62,7 @@ impl fmt::Display for ContentMaterializeError {
                     "world size {size} is too small for content; need at least {minimum}"
                 )
             }
-            Self::Solve(error) => write!(formatter, "3D content solve failed: {error}"),
+            Self::Generate(error) => write!(formatter, "3D content generation failed: {error}"),
             Self::MissingRequiredContent(content) => {
                 write!(formatter, "3D content is missing required id {}", content.0)
             }
@@ -72,9 +72,9 @@ impl fmt::Display for ContentMaterializeError {
 
 impl std::error::Error for ContentMaterializeError {}
 
-impl From<ContentSolveError> for ContentMaterializeError {
-    fn from(value: ContentSolveError) -> Self {
-        Self::Solve(value)
+impl From<ContentGenerationError> for ContentMaterializeError {
+    fn from(value: ContentGenerationError) -> Self {
+        Self::Generate(value)
     }
 }
 

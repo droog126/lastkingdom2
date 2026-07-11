@@ -19,11 +19,17 @@ just test-changed
 just test-client
 just test-server
 just test
+just test-nextest
+just coverage
+just snapshots
 just fmt
 just audit-tdd
 ```
 
 默认 `core`，因为 `crates/core` 是规则、状态机、资源和协议的主战场，反馈最快。
+
+`test-nextest` 用于快速执行整个 workspace；`coverage` 通过 `cargo-llvm-cov` 输出覆盖率摘要；
+`snapshots` 使用 `insta` 验证稳定的结构化输出。常规精确断言仍是规则测试的默认选择。
 
 `changed` 默认对比 `HEAD`，需要对比其他基线时：
 

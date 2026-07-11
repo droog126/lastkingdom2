@@ -4,18 +4,38 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use std::path::PathBuf;
 
 use crate::clock::SimClock;
-use crate::monster::MonsterEcosystem;
+use crate::ecology::threats::MonsterEcosystem;
 use crate::nation::NationRegistry;
 use crate::player::PlayerState;
 use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
+use crate::world::WorldConfig;
+
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct ScenarioWorldConfig {
+    pub size: Option<i32>,
+    pub preset: Option<String>,
+    pub seed: Option<u64>,
+    pub install_spawn_platform: Option<bool>,
+    pub generate_content: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct ScenarioPlayerConfig {
+    /// Optional initial player block position. Omit it to use terrain-aware spawning.
+    pub spawn: Option<[i32; 3]>,
+}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Scenario {
     pub name: String,
     #[serde(default)]
     pub record_window: Option<(u64, u64)>,
+    #[serde(default)]
+    pub world: ScenarioWorldConfig,
+    #[serde(default)]
+    pub player: ScenarioPlayerConfig,
     pub steps: Vec<ScenarioStep>,
 }
 
@@ -107,7 +127,38 @@ pub struct RecordedTick {
 
 impl Default for Scenario {
     fn default() -> Self {
-        Self { name: "default".into(), record_window: Some((0, 30)), steps: vec![] }
+        Self {
+            name: "default".into(),
+            record_window: Some((0, 30)),
+            world: ScenarioWorldConfig::default(),
+            player: ScenarioPlayerConfig::default(),
+            steps: vec![],
+        }
+    }
+}
+
+impl Scenario {
+    pub fn world_config(&self, fallback_preset: &str) -> WorldConfig {
+        let mut config = WorldConfig {
+            preset: fallback_preset.to_string(),
+            ..WorldConfig::default()
+        };
+        if let Some(size) = self.world.size {
+            config.size = size;
+        }
+        if let Some(preset) = &self.world.preset {
+            config.preset.clone_from(preset);
+        }
+        if let Some(seed) = self.world.seed {
+            config.seed = seed;
+        }
+        if let Some(value) = self.world.install_spawn_platform {
+            config.install_spawn_platform = value;
+        }
+        if let Some(value) = self.world.generate_content {
+            config.generate_content = value;
+        }
+        config
     }
 }
 
@@ -147,6 +198,8 @@ mod smoke_tests {
         let sc = Scenario {
             name: "test".into(),
             record_window: None,
+            world: ScenarioWorldConfig::default(),
+            player: ScenarioPlayerConfig::default(),
             steps: vec![ScenarioStep::WaitTicks { ticks: 10 }],
         };
         let state = ScenarioState::from_scenario(sc);
@@ -198,6 +251,77 @@ mod smoke_tests {
     }
 
     #[test]
+    fn scenario_file_configures_world_and_player_spawn() {
+        let scenario: Scenario = serde_json::from_str(
+            r#"{
+                "name": "mvp",
+                "world": {
+                    "preset": "superflat",
+                    "size": 96,
+                    "seed": 7,
+                    "install_spawn_platform": false,
+                    "generate_content": false
+                },
+                "player": { "spawn": [12, 20, 14] },
+                "steps": [{ "type": "gather", "count": 3 }, { "type": "found_nation" }]
+            }"#,
+        )
+        .expect("scenario should parse");
+
+        let world = scenario.world_config("default");
+        assert_eq!(world.size, 96);
+        assert_eq!(world.preset, "superflat");
+        assert_eq!(world.seed, 7);
+        assert!(!world.install_spawn_platform);
+        assert!(!world.generate_content);
+        assert_eq!(scenario.player.spawn, Some([12, 20, 14]));
+        insta::assert_json_snapshot!(scenario, @r###"
+        {
+          "name": "mvp",
+          "record_window": null,
+          "world": {
+            "size": 96,
+            "preset": "superflat",
+            "seed": 7,
+            "install_spawn_platform": false,
+            "generate_content": false
+          },
+          "player": {
+            "spawn": [
+              12,
+              20,
+              14
+            ]
+          },
+          "steps": [
+            {
+              "type": "gather",
+              "count": 3
+            },
+            {
+              "type": "found_nation"
+            }
+          ]
+        }
+        "###);
+    }
+
+    #[test]
+    fn legacy_scenario_uses_runtime_preset_and_default_world_settings() {
+        let scenario: Scenario = serde_json::from_str(
+            r#"{ "name": "legacy", "steps": [{ "type": "wait_ticks", "ticks": 1 }] }"#,
+        )
+        .expect("legacy scenario should remain valid");
+
+        let world = scenario.world_config("islands");
+        let defaults = WorldConfig::default();
+        assert_eq!(world.preset, "islands");
+        assert_eq!(world.size, defaults.size);
+        assert_eq!(world.seed, defaults.seed);
+        assert_eq!(scenario.player.spawn, None);
+    }
+
+    #[test]
     fn scenario_step_variants() {
         assert!(matches!(
             ScenarioStep::MoveTo { pos: [10, 5, 10] },
@@ -225,7 +349,9 @@ mod smoke_tests {
             ScenarioStep::WaitTicks { .. }
         ));
         assert!(matches!(
-            ScenarioStep::Screenshot { name: "test".into() },
+            ScenarioStep::Screenshot {
+                name: "test".into()
+            },
             ScenarioStep::Screenshot { .. }
         ));
         assert!(matches!(
@@ -278,7 +404,11 @@ pub fn award_gathered_resource(
 }
 
 pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
-    let path = args.iter().skip(1).find(|a| !a.starts_with("--") && a.ends_with(".json")).cloned();
+    let path = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with("--") && a.ends_with(".json"))
+        .cloned();
 
     if let Some(p) = path {
         match std::fs::read_to_string(&p) {
@@ -298,21 +428,33 @@ pub fn load_scenario_from_args_or_default(args: &[String]) -> Scenario {
     Scenario {
         name: "default".into(),
         record_window: Some((0, 60)),
+        world: ScenarioWorldConfig::default(),
+        player: ScenarioPlayerConfig::default(),
         steps: vec![
-            ScenarioStep::Log { msg: "=== 默认剧本启动 ===".into() },
+            ScenarioStep::Log {
+                msg: "=== 默认剧本启动 ===".into(),
+            },
             ScenarioStep::WaitTicks { ticks: 2 },
-            ScenarioStep::Screenshot { name: "spawn".into() },
+            ScenarioStep::Screenshot {
+                name: "spawn".into(),
+            },
             ScenarioStep::RecordBegin,
             ScenarioStep::MoveTo { pos: [20, 14, 20] },
             ScenarioStep::Gather { count: 3 },
             ScenarioStep::WaitTicks { ticks: 10 },
-            ScenarioStep::Screenshot { name: "after_gather".into() },
+            ScenarioStep::Screenshot {
+                name: "after_gather".into(),
+            },
             ScenarioStep::FoundNation,
             ScenarioStep::WaitTicks { ticks: 5 },
-            ScenarioStep::Screenshot { name: "after_founded".into() },
+            ScenarioStep::Screenshot {
+                name: "after_founded".into(),
+            },
             ScenarioStep::RecordEnd,
             ScenarioStep::WaitTicks { ticks: 5 },
-            ScenarioStep::Log { msg: "=== 结束 ===".into() },
+            ScenarioStep::Log {
+                msg: "=== 结束 ===".into(),
+            },
             ScenarioStep::Quit,
         ],
     }
@@ -415,7 +557,9 @@ pub fn scenario_runner(
             let path = format!("screenshots/{}_{}.png", scenario.name, name);
             info!("📸 截图 → {}", path);
             #[cfg(feature = "client-render")]
-            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(path));
             #[cfg(not(feature = "client-render"))]
             let _ = (&mut commands, &path);
 
@@ -806,7 +950,9 @@ fn attempt_move(player: &mut PlayerState, game_world: &mut GameWorld, d: [i32; 3
         for up in 1..=4 {
             let try_pos = [new_pos[0], new_pos[1] + up, new_pos[2]];
             if game_world.in_bounds(try_pos[0], try_pos[1], try_pos[2])
-                && !game_world.get(try_pos[0], try_pos[1], try_pos[2]).is_solid()
+                && !game_world
+                    .get(try_pos[0], try_pos[1], try_pos[2])
+                    .is_solid()
             {
                 player.block_pos = try_pos;
                 player.pos = Vec3::new(
@@ -870,8 +1016,10 @@ pub fn scenario_tick_recorder(
 
     if let Ok(line) = serde_json::to_string(&rec) {
         use std::io::Write;
-        if let Ok(mut f) =
-            std::fs::OpenOptions::new().create(true).append(true).open(&state.record_path)
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&state.record_path)
         {
             let _ = writeln!(f, "{}", line);
         }
@@ -888,14 +1036,18 @@ mod tests {
     fn award_gathered_resource_reports_full_pool_without_stats() {
         let mut pool = GlobalResourcePool::new();
         let mut player = PlayerState::default();
-        pool.try_add(ResourceKind::Wood, ResourceKind::Wood.max()).unwrap();
+        pool.try_add(ResourceKind::Wood, ResourceKind::Wood.max())
+            .unwrap();
 
         let err =
             award_gathered_resource(&mut pool, &mut player, ResourceKind::Wood, 1).unwrap_err();
 
         assert!(matches!(
             err,
-            PoolError::WouldExceedMax { kind: ResourceKind::Wood, .. }
+            PoolError::WouldExceedMax {
+                kind: ResourceKind::Wood,
+                ..
+            }
         ));
         assert_eq!(pool.get(ResourceKind::Wood), ResourceKind::Wood.max());
         assert_eq!(player.blocks_gathered, 0);

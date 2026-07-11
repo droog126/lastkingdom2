@@ -269,7 +269,11 @@ impl EquipmentState {
     }
 
     pub fn broken_ids(&self) -> Vec<u32> {
-        self.slots.values().filter(|e| e.is_broken()).map(|e| e.id).collect()
+        self.slots
+            .values()
+            .filter(|e| e.is_broken())
+            .map(|e| e.id)
+            .collect()
     }
 }
 
@@ -293,7 +297,8 @@ pub struct EquipmentPlugin;
 
 impl Plugin for EquipmentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<EquipmentChangedMsg>().add_message::<EquipmentDurabilityChangedMsg>();
+        app.add_message::<EquipmentChangedMsg>()
+            .add_message::<EquipmentDurabilityChangedMsg>();
     }
 }
 

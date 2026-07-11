@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::Exposure;
+use bevy::camera::primitives::Aabb as BevyAabb;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::VolumetricLight;
 use bevy::pbr::{
@@ -64,6 +65,7 @@ const CELLS_PER_ROW: usize = 4;
 const STABILIZATION_FRAMES: u64 = 90;
 const PREVIEW_AABB_RADIUS: f32 = 1.35;
 const PREVIEW_AABB_HEIGHT: f32 = 2.7;
+const MODEL_GAP: f32 = 1.4;
 
 #[derive(Resource)]
 pub struct ModelPreviewState {
@@ -80,6 +82,7 @@ pub struct ModelPreviewState {
     pub focused_index: usize,
     pub hovered_index: Option<usize>,
     pub auto_rotate: bool,
+    pub layout_ready: bool,
 }
 
 #[derive(Component)]
@@ -93,6 +96,12 @@ struct PreviewCamera {
     center: Vec3,
 }
 
+struct PackedPreviewLayout {
+    positions: Vec<Vec3>,
+    width: f32,
+    depth: f32,
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct PreviewEntry {
     pub path: String,
@@ -103,6 +112,7 @@ pub struct PreviewEntry {
     pub world_pos: [f32; 3],
     pub aabb_min: [f32; 3],
     pub aabb_max: [f32; 3],
+    pub aabb_ready: bool,
 }
 
 #[derive(Component)]
@@ -148,7 +158,11 @@ pub fn run_model_preview() {
     // driver loop can iterate every GLB without overwriting the previous shot.
     let png_path = match single_filter.as_deref() {
         Some(filter) => {
-            let stem = normalize_filter(filter).rsplit('/').next().unwrap_or("model").to_string();
+            let stem = normalize_filter(filter)
+                .rsplit('/')
+                .next()
+                .unwrap_or("model")
+                .to_string();
             output_dir.join(format!("{stem}.png"))
         }
         None => output_dir.join("model_preview.png"),
@@ -160,7 +174,10 @@ pub fn run_model_preview() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
-            .set(AssetPlugin { file_path: asset_root.to_string_lossy().into_owned(), ..default() })
+            .set(AssetPlugin {
+                file_path: asset_root.to_string_lossy().into_owned(),
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "lk2 model preview".into(),
@@ -172,7 +189,10 @@ pub fn run_model_preview() {
                 }),
                 ..default()
             })
-            .set(bevy::log::LogPlugin { level: bevy::log::Level::INFO, ..default() }),
+            .set(bevy::log::LogPlugin {
+                level: bevy::log::Level::INFO,
+                ..default()
+            }),
     );
 
     app.insert_resource(ModelPreviewState {
@@ -189,6 +209,7 @@ pub fn run_model_preview() {
         focused_index: 0,
         hovered_index: None,
         auto_rotate: true,
+        layout_ready: false,
     });
     app.insert_resource(ShowAllModels(show_all));
 
@@ -208,9 +229,11 @@ pub fn run_model_preview() {
         Update,
         (
             camera_controls,
-            ray_aabb_focus_controls,
             focus_controls,
             rotate_focused_model,
+            update_model_aabbs,
+            pack_model_grid,
+            ray_aabb_focus_controls,
             update_preview_base_highlights,
             update_overlay,
             maybe_take_screenshot,
@@ -227,7 +250,10 @@ pub fn run_model_preview() {
 struct ShowAllModels(bool);
 
 fn workspace_asset_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("assets")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("assets")
 }
 
 fn collect_preview_glbs(
@@ -269,13 +295,21 @@ fn collect_preview_glbs(
 
 fn normalize_filter(filter: &str) -> String {
     let filter = filter.trim().trim_matches('"').replace('\\', "/");
-    filter.strip_suffix(".glb").unwrap_or(&filter).to_ascii_lowercase()
+    filter
+        .strip_suffix(".glb")
+        .unwrap_or(&filter)
+        .to_ascii_lowercase()
 }
 
 fn preview_path_matches(asset_path: &str, normalized_filter: &str) -> bool {
-    let normalized_path =
-        asset_path.strip_suffix(".glb").unwrap_or(asset_path).to_ascii_lowercase();
-    let stem = normalized_path.rsplit('/').next().unwrap_or(&normalized_path);
+    let normalized_path = asset_path
+        .strip_suffix(".glb")
+        .unwrap_or(asset_path)
+        .to_ascii_lowercase();
+    let stem = normalized_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&normalized_path);
     normalized_path == normalized_filter
         || stem == normalized_filter
         || normalized_path.ends_with(&format!("/{}", normalized_filter))
@@ -291,13 +325,19 @@ fn collect_glbs_recursive(asset_root: &Path, dir: &Path, out: &mut Vec<(String, 
             collect_glbs_recursive(asset_root, &path, out);
             continue;
         }
-        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("glb"))
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("glb"))
             != Some(true)
         {
             continue;
         }
-        let rel =
-            path.strip_prefix(asset_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let rel = path
+            .strip_prefix(asset_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
         let category = path
             .parent()
             .and_then(|parent| parent.strip_prefix(asset_root).ok())
@@ -430,12 +470,11 @@ fn spawn_models(
             world_pos: [pos.x, pos.y, pos.z],
             aabb_min: [aabb.min.x, aabb.min.y, aabb.min.z],
             aabb_max: [aabb.max.x, aabb.max.y, aabb.max.z],
+            aabb_ready: false,
         });
     }
 
-    if let Ok(json) = serde_json::to_string_pretty(&state.models) {
-        let _ = std::fs::write(&state.manifest_path, json);
-    }
+    write_preview_manifest(&state);
     info!("[model-preview] spawned {} models", state.models.len());
 }
 
@@ -443,12 +482,65 @@ fn preview_grid_position(index: usize, model_count: usize) -> Vec3 {
     let rows = model_count.max(1).div_ceil(CELLS_PER_ROW);
     let row = index / CELLS_PER_ROW;
     let col = index % CELLS_PER_ROW;
-    let models_in_row = model_count.saturating_sub(row * CELLS_PER_ROW).min(CELLS_PER_ROW).max(1);
+    let models_in_row = model_count
+        .saturating_sub(row * CELLS_PER_ROW)
+        .min(CELLS_PER_ROW)
+        .max(1);
     Vec3::new(
         (col as f32 - (models_in_row - 1) as f32 * 0.5) * CELL_SIZE,
         0.0,
         (row as f32 - (rows - 1) as f32 * 0.5) * CELL_SIZE,
     )
+}
+
+fn packed_preview_layout(footprints: &[(f32, f32)]) -> PackedPreviewLayout {
+    if footprints.is_empty() {
+        return PackedPreviewLayout {
+            positions: Vec::new(),
+            width: 0.0,
+            depth: 0.0,
+        };
+    }
+
+    let rows = footprints.len().div_ceil(CELLS_PER_ROW);
+    let row_depths: Vec<f32> = (0..rows)
+        .map(|row| {
+            footprints[row * CELLS_PER_ROW..((row + 1) * CELLS_PER_ROW).min(footprints.len())]
+                .iter()
+                .map(|(_, depth)| depth.max(0.1))
+                .fold(0.0, f32::max)
+        })
+        .collect();
+    let depth = row_depths.iter().sum::<f32>() + MODEL_GAP * rows.saturating_sub(1) as f32;
+    let mut positions = vec![Vec3::ZERO; footprints.len()];
+    let mut z_cursor = -depth * 0.5;
+    let mut width: f32 = 0.0;
+
+    for (row, row_depth) in row_depths.into_iter().enumerate() {
+        let start = row * CELLS_PER_ROW;
+        let end = ((row + 1) * CELLS_PER_ROW).min(footprints.len());
+        let row_width = footprints[start..end]
+            .iter()
+            .map(|(model_width, _)| model_width.max(0.1))
+            .sum::<f32>()
+            + MODEL_GAP * (end - start).saturating_sub(1) as f32;
+        width = width.max(row_width);
+        let mut x_cursor = -row_width * 0.5;
+        let z = z_cursor + row_depth * 0.5;
+
+        for (offset, (model_width, _)) in footprints[start..end].iter().enumerate() {
+            let model_width = model_width.max(0.1);
+            positions[start + offset] = Vec3::new(x_cursor + model_width * 0.5, 0.0, z);
+            x_cursor += model_width + MODEL_GAP;
+        }
+        z_cursor += row_depth + MODEL_GAP;
+    }
+
+    PackedPreviewLayout {
+        positions,
+        width,
+        depth,
+    }
 }
 
 fn preview_model_aabb(pos: Vec3) -> RayAabb {
@@ -469,6 +561,125 @@ fn preview_entry_aabb(entry: &PreviewEntry) -> RayAabb {
     )
 }
 
+fn transformed_mesh_aabb(aabb: &BevyAabb, transform: &GlobalTransform) -> RayAabb {
+    let world_from_local = transform.affine();
+    let center = world_from_local.transform_point3a(aabb.center);
+    let half_extents = world_from_local.matrix3.abs() * aabb.half_extents.abs();
+    RayAabb::new(
+        (center - half_extents).into(),
+        (center + half_extents).into(),
+    )
+}
+
+fn update_model_aabbs(
+    roots: Query<(Entity, &PreviewModelRoot)>,
+    children: Query<&Children>,
+    mesh_bounds: Query<(&BevyAabb, &GlobalTransform)>,
+    mut state: ResMut<ModelPreviewState>,
+) {
+    for (root_entity, root) in &roots {
+        let mut stack = vec![root_entity];
+        let mut model_aabb: Option<RayAabb> = None;
+
+        while let Some(entity) = stack.pop() {
+            if let Ok((aabb, transform)) = mesh_bounds.get(entity) {
+                let world_aabb = transformed_mesh_aabb(aabb, transform);
+                model_aabb = Some(match model_aabb {
+                    Some(current) => RayAabb::new(
+                        current.min.min(world_aabb.min),
+                        current.max.max(world_aabb.max),
+                    ),
+                    None => world_aabb,
+                });
+            }
+            if let Ok(entity_children) = children.get(entity) {
+                stack.extend(entity_children.iter());
+            }
+        }
+
+        let Some(aabb) = model_aabb else {
+            continue;
+        };
+        let Some(entry) = state.models.get_mut(root.index) else {
+            continue;
+        };
+        entry.aabb_min = [aabb.min.x, aabb.min.y, aabb.min.z];
+        entry.aabb_max = [aabb.max.x, aabb.max.y, aabb.max.z];
+        entry.aabb_ready = true;
+    }
+}
+
+fn pack_model_grid(
+    mut roots: Query<(&PreviewModelRoot, &mut Transform), Without<PreviewBaseDisc>>,
+    mut bases: Query<(&PreviewBaseDisc, &mut Transform), Without<PreviewModelRoot>>,
+    mut state: ResMut<ModelPreviewState>,
+    mut camera: ResMut<PreviewCamera>,
+) {
+    if state.layout_ready
+        || state.models.is_empty()
+        || state.models.iter().any(|entry| !entry.aabb_ready)
+    {
+        return;
+    }
+
+    let footprints: Vec<(f32, f32)> = state
+        .models
+        .iter()
+        .map(|entry| {
+            (
+                entry.aabb_max[0] - entry.aabb_min[0],
+                entry.aabb_max[2] - entry.aabb_min[2],
+            )
+        })
+        .collect();
+    let layout = packed_preview_layout(&footprints);
+    let max_height = state
+        .models
+        .iter()
+        .map(|entry| entry.aabb_max[1] - entry.aabb_min[1])
+        .fold(0.0, f32::max);
+
+    for (root, mut transform) in &mut roots {
+        let Some(entry) = state.models.get_mut(root.index) else {
+            continue;
+        };
+        let target_center = layout.positions[root.index];
+        let current_center = Vec3::new(
+            (entry.aabb_min[0] + entry.aabb_max[0]) * 0.5,
+            (entry.aabb_min[1] + entry.aabb_max[1]) * 0.5,
+            (entry.aabb_min[2] + entry.aabb_max[2]) * 0.5,
+        );
+        let current_root = Vec3::from_array(entry.world_pos);
+        let center_offset = current_center - current_root;
+        transform.translation.x = target_center.x - center_offset.x;
+        transform.translation.z = target_center.z - center_offset.z;
+        entry.world_pos = transform.translation.to_array();
+        entry.aabb_ready = false;
+    }
+    for (base, mut transform) in &mut bases {
+        let target = layout.positions[base.index];
+        transform.translation = target + Vec3::new(0.0, 0.02, 0.0);
+    }
+
+    camera.center = Vec3::new(0.0, max_height * 0.35, 0.0);
+    if state.models.len() == 1 {
+        let span = layout.width.max(layout.depth).max(max_height);
+        camera.distance = (span * 1.7).max(4.8);
+        camera.height = (max_height * 0.8).max(3.0);
+    } else {
+        let span = layout.width.max(layout.depth);
+        camera.distance = (span * 1.30).max(12.0);
+        camera.height = (max_height + layout.depth * 0.35).max(8.0);
+    }
+    state.layout_ready = true;
+}
+
+fn write_preview_manifest(state: &ModelPreviewState) {
+    if let Ok(json) = serde_json::to_string_pretty(&state.models) {
+        let _ = std::fs::write(&state.manifest_path, json);
+    }
+}
+
 fn setup_camera(mut commands: Commands, state: Res<ModelPreviewState>) {
     let rows = ((state.models.len().max(1) + CELLS_PER_ROW - 1) / CELLS_PER_ROW) as f32;
     let single = state.models.len() == 1;
@@ -479,7 +690,12 @@ fn setup_camera(mut commands: Commands, state: Res<ModelPreviewState>) {
     } else {
         (rows * 2.4).clamp(5.5, 30.0)
     };
-    let preview_camera = PreviewCamera { yaw: -0.55, distance, height, center };
+    let preview_camera = PreviewCamera {
+        yaw: -0.55,
+        distance,
+        height,
+        center,
+    };
     let pos = camera_pos(&preview_camera);
     commands.insert_resource(preview_camera);
     commands.spawn((
@@ -491,7 +707,10 @@ fn setup_camera(mut commands: Commands, state: Res<ModelPreviewState>) {
         Bloom::NATURAL,
         Msaa::Off,
         TemporalAntiAliasing::default(),
-        ScreenSpaceReflections { min_perceptual_roughness: 0.0..0.0, ..default() },
+        ScreenSpaceReflections {
+            min_perceptual_roughness: 0.0..0.0,
+            ..default()
+        },
         ScreenSpaceAmbientOcclusion {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
             ..default()
@@ -504,7 +723,11 @@ fn setup_overlay(mut commands: Commands, state: Res<ModelPreviewState>) {
     if state.auto_shot {
         return;
     }
-    let focused = state.models.get(state.focused_index).map(|m| m.path.as_str()).unwrap_or("none");
+    let focused = state
+        .models
+        .get(state.focused_index)
+        .map(|m| m.path.as_str())
+        .unwrap_or("none");
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -608,7 +831,11 @@ fn ray_aabb_focus_controls(
     let hovered = nearest_ray_aabb_hit(
         ray.origin,
         *ray.direction,
-        state.models.iter().enumerate().map(|(index, entry)| (index, preview_entry_aabb(entry))),
+        state
+            .models
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (index, preview_entry_aabb(entry))),
     )
     .map(|(index, _)| index);
 
@@ -765,10 +992,22 @@ fn maybe_take_screenshot(
             )
         })
         .count();
-    if state.frame < STABILIZATION_FRAMES || pending > 0 {
+    let unresolved_bounds = state
+        .models
+        .iter()
+        .filter(|entry| !entry.aabb_ready)
+        .count();
+    if state.frame < STABILIZATION_FRAMES
+        || pending > 0
+        || unresolved_bounds > 0
+        || !state.layout_ready
+    {
         return;
     }
-    commands.spawn(Screenshot::primary_window()).observe(save_to_disk(state.png_path.clone()));
+    write_preview_manifest(&state);
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(state.png_path.clone()));
     state.shot_requested = true;
     state.exit_deadline = Some(Instant::now() + Duration::from_secs(20));
     info!(
@@ -787,7 +1026,10 @@ fn exit_model_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<ModelPreviewSt
                 std::process::exit(0);
             }
         }
-        if state.exit_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if state
+            .exit_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
             warn!("[model-preview] screenshot did not flush before timeout");
             std::process::exit(1);
         }
@@ -796,19 +1038,34 @@ fn exit_model_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<ModelPreviewSt
 
 #[cfg(test)]
 mod tests {
-    use bevy::prelude::Vec3;
+    use bevy::prelude::{GlobalTransform, Transform, Vec3};
 
     use super::{
-        FEATURED_MODELS, collect_preview_glbs, preview_grid_position, workspace_asset_root,
+        BevyAabb, FEATURED_MODELS, MODEL_GAP, collect_preview_glbs, packed_preview_layout,
+        preview_grid_position, transformed_mesh_aabb, workspace_asset_root,
     };
 
     #[test]
     fn preview_grid_positions_are_centered() {
-        let positions: Vec<_> = (0..16).map(|index| preview_grid_position(index, 16)).collect();
-        let min_x = positions.iter().map(|pos| pos.x).fold(f32::INFINITY, f32::min);
-        let max_x = positions.iter().map(|pos| pos.x).fold(f32::NEG_INFINITY, f32::max);
-        let min_z = positions.iter().map(|pos| pos.z).fold(f32::INFINITY, f32::min);
-        let max_z = positions.iter().map(|pos| pos.z).fold(f32::NEG_INFINITY, f32::max);
+        let positions: Vec<_> = (0..16)
+            .map(|index| preview_grid_position(index, 16))
+            .collect();
+        let min_x = positions
+            .iter()
+            .map(|pos| pos.x)
+            .fold(f32::INFINITY, f32::min);
+        let max_x = positions
+            .iter()
+            .map(|pos| pos.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_z = positions
+            .iter()
+            .map(|pos| pos.z)
+            .fold(f32::INFINITY, f32::min);
+        let max_z = positions
+            .iter()
+            .map(|pos| pos.z)
+            .fold(f32::NEG_INFINITY, f32::max);
 
         assert!((min_x + max_x).abs() < f32::EPSILON);
         assert!((min_z + max_z).abs() < f32::EPSILON);
@@ -816,11 +1073,45 @@ mod tests {
     }
 
     #[test]
+    fn transformed_mesh_bounds_preserve_world_scale() {
+        let local = BevyAabb::from_min_max(Vec3::new(-1.0, 0.0, -0.5), Vec3::new(1.0, 2.0, 0.5));
+        let transform = GlobalTransform::from(
+            Transform::from_xyz(4.0, 1.0, -2.0).with_scale(Vec3::new(2.0, 3.0, 4.0)),
+        );
+
+        let world = transformed_mesh_aabb(&local, &transform);
+
+        assert_eq!(world.min, Vec3::new(2.0, 1.0, -4.0));
+        assert_eq!(world.max, Vec3::new(6.0, 7.0, 0.0));
+    }
+
+    #[test]
+    fn packed_layout_separates_models_by_their_real_footprints() {
+        let footprints = [(1.0, 2.0), (6.0, 3.0), (2.0, 5.0), (4.0, 1.0), (8.0, 2.0)];
+        let layout = packed_preview_layout(&footprints);
+
+        for index in 1..4 {
+            let previous_right = layout.positions[index - 1].x + footprints[index - 1].0 * 0.5;
+            let current_left = layout.positions[index].x - footprints[index].0 * 0.5;
+            assert!((current_left - previous_right - MODEL_GAP).abs() < 0.0001);
+        }
+        assert!(layout.positions[4].z > layout.positions[0].z);
+        assert!(layout.width >= 17.0);
+        assert!(layout.depth >= 5.0 + MODEL_GAP + 2.0);
+    }
+
+    #[test]
     fn model_preview_all_scans_assets_recursively() {
         let root = workspace_asset_root();
         let all = collect_preview_glbs(&root, true, None);
-        assert!(all.iter().any(|(path, _)| path == "procedural/pretty/sokpop_tree.glb"));
-        assert!(all.iter().any(|(path, _)| path == "procedural/pretty/fallen_stick.glb"));
+        assert!(
+            all.iter()
+                .any(|(path, _)| path == "procedural/pretty/sokpop_tree.glb")
+        );
+        assert!(
+            all.iter()
+                .any(|(path, _)| path == "procedural/pretty/fallen_stick.glb")
+        );
         assert!(all.len() >= FEATURED_MODELS.len());
     }
 
@@ -848,7 +1139,9 @@ mod tests {
             "hoplite_midas_sword",
         ] {
             assert!(
-                FEATURED_MODELS.iter().any(|path| path.ends_with(&format!("/{weapon}.glb"))),
+                FEATURED_MODELS
+                    .iter()
+                    .any(|path| path.ends_with(&format!("/{weapon}.glb"))),
                 "missing Hoplite weapon from featured showroom: {weapon}"
             );
         }

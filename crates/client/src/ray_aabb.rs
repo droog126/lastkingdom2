@@ -15,7 +15,10 @@ pub(crate) struct RayAabbHit {
 
 impl RayAabb {
     pub(crate) fn new(a: Vec3, b: Vec3) -> Self {
-        Self { min: a.min(b), max: a.max(b) }
+        Self {
+            min: a.min(b),
+            max: a.max(b),
+        }
     }
 
     pub(crate) fn contains(self, point: Vec3) -> bool {
@@ -87,7 +90,11 @@ pub(crate) fn ray_aabb_hit(
     if distance == 0.0 && aabb.contains(origin) {
         normal = Vec3::ZERO;
     }
-    Some(RayAabbHit { distance, point, normal })
+    Some(RayAabbHit {
+        distance,
+        point,
+        normal,
+    })
 }
 
 pub(crate) fn nearest_ray_aabb_hit<I>(
@@ -111,7 +118,9 @@ mod tests {
     #[test]
     fn ray_hits_front_face() {
         let aabb = RayAabb::new(Vec3::ZERO, Vec3::ONE);
-        let hit = aabb.hit_ray(Vec3::new(0.5, 0.5, -2.0), Vec3::Z).expect("ray should hit box");
+        let hit = aabb
+            .hit_ray(Vec3::new(0.5, 0.5, -2.0), Vec3::Z)
+            .expect("ray should hit box");
 
         assert!((hit.distance - 2.0).abs() < 0.0001);
         assert!((hit.point - Vec3::new(0.5, 0.5, 0.0)).length() < 0.0001);

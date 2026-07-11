@@ -17,18 +17,14 @@ path = "examples/simulate_authoritative_forward.rs"
 
 [dependencies]
 bevy = { version = "0.19", default-features = false, features = ["default_app", "serialize"] }
-avian3d = { version = "0.7.0", default-features = false, features = ["3d", "f32", "parry-f32", "parallel", "xpbd_joints"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 lk2-core = { workspace = true }
-lightyear = { version = "0.28.0", default-features = false, features = ["std", "leafwing", "server", "udp", "client", "replication", "netcode"] }
-lightyear_inputs_leafwing = { version = "0.28.0", default-features = false, features = ["std", "server"] }
-lightyear_replication = { version = "0.28", default-features = false, features = ["std", "server"] }
+lightyear = { workspace = true, features = ["std", "leafwing", "server", "udp", "client", "replication", "netcode"] }
 leafwing-input-manager = { version = "0.21.0", default-features = false, features = ["keyboard"] }
-lightyear_connection = { version = "0.28", default-features = false, features = ["server", "client"] }
-lightyear_netcode = { version = "0.28", default-features = false, features = ["std", "server", "client"] }
+lightyear_connection = { workspace = true, features = ["server", "client"] }
+lightyear_netcode = { workspace = true, features = ["std", "server", "client"] }
 
 [lints]
 workspace = true

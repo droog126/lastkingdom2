@@ -19,10 +19,9 @@ use lightyear::prelude::PeerMetadata;
 
 use std::time::Duration;
 
-mod los;
-mod pvp_systems;
 mod app;
 mod authority;
+mod los;
 mod observation;
 mod persistence;
 mod replication;
@@ -30,34 +29,31 @@ mod replication;
 use lk2_core::ai::TickObserver;
 use lk2_core::clock::SimClock;
 use lk2_core::constant;
-use lk2_core::creature::{
+use lk2_core::ecology::EcoCycle;
+use lk2_core::ecology::animals::{
     CREATURE_TRAINING_ATTACK_RANGE_SQ, Creature, CreatureAI, CreatureKind, CreatureSpawnerDone,
     award_creature_drop, creature_attack_distance_sq,
 };
-use lk2_core::eco_cycle::EcoCycle;
-use lk2_core::monster::MonsterEcosystem;
+use lk2_core::ecology::threats::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
 use lk2_core::player::{PlayerState, PlayerTag};
-use lk2_core::pvp::FixedTick;
+use lk2_core::pvp::{Health, Hitbox, PvpCombatant, SimpleWeapon};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
-use lk2_core::sim::{SimRole, advance_fixed_authority_tick_report};
+use lk2_core::simulation::app_sets::SimSet;
+use lk2_core::simulation::{SimRole, advance_fixed_authority_tick_report};
 use lk2_core::transport::{
     DEFAULT_PORT, NETCODE_CLIENT_TIMEOUT_SECS, PRIVATE_KEY, PROTOCOL_ID,
-    SERVER_POS_UPDATE_INTERVAL_TICKS, gameplay_port_for,
+    SERVER_POS_UPDATE_INTERVAL_TICKS,
 };
-use lk2_core::v2::app_sets::SimSet;
 use lk2_core::world::{
     World as GameWorld, WorldConfig, WorldGenerator, fallback_spawn_ring_offsets, generate_world,
     player_body_clear, player_position_is_safe, player_spawn_position_at,
     player_spawn_position_near, player_stand_position_at, resolve_player_stuck_near,
 };
 
-use crate::pvp_systems::{
-    ServerPvPPlugin, apply_damage_and_knockback, broadcast_pvp_messages, expire_knockback_immunity,
-    melee_hit_registration, read_attack_inputs, record_position_history, tick_combat_cooldowns,
-};
 use crate::app::NatureServerProjectionPlugin;
+use crate::authority::pvp::SimplePvpAuthorityPlugin;
 use crate::authority::{LatestNatureReport, NatureAuthoritySet};
 
 const PLACE_WOOD_COST: i64 = 1;
@@ -78,7 +74,10 @@ struct ServerJumpState {
 
 impl Default for ServerJumpState {
     fn default() -> Self {
-        Self { velocity_y: 0.0, grounded: true }
+        Self {
+            velocity_y: 0.0,
+            grounded: true,
+        }
     }
 }
 
@@ -91,7 +90,11 @@ struct AntiStuckState {
 
 impl Default for AntiStuckState {
     fn default() -> Self {
-        Self { last_safe_pos: Vec3::ZERO, last_safe_block: [0, 0, 0], failed_move_ticks: 0 }
+        Self {
+            last_safe_pos: Vec3::ZERO,
+            last_safe_block: [0, 0, 0],
+            failed_move_ticks: 0,
+        }
     }
 }
 
@@ -108,7 +111,6 @@ pub struct ServerCommandDiagnostics {
     pub last_dx_milli: i16,
     pub last_dz_milli: i16,
     pub last_move_applied: bool,
-    pub udp_commands_received: u64,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -135,11 +137,6 @@ impl ServerConnectionDiagnostics {
     }
 }
 
-#[derive(Resource)]
-struct GameplayCommandUdp {
-    socket: std::net::UdpSocket,
-}
-
 #[derive(Resource, Clone)]
 struct LastVoxelDeltaState {
     revision: u64,
@@ -151,7 +148,13 @@ struct LastVoxelDeltaState {
 
 impl Default for LastVoxelDeltaState {
     fn default() -> Self {
-        Self { revision: 0, x: 0, y: 0, z: 0, block: lk2_core::world::BlockType::Air }
+        Self {
+            revision: 0,
+            x: 0,
+            y: 0,
+            z: 0,
+            block: lk2_core::world::BlockType::Air,
+        }
     }
 }
 
@@ -191,10 +194,26 @@ fn build_gameplay_hud_state(
         monsters_killed: player.monsters_killed,
         blocks_gathered: player.blocks_gathered,
         nations_founded: player.nations_founded,
-        inventory_wood: player.inventory.get(&ResourceKind::Wood).copied().unwrap_or(0),
-        inventory_food: player.inventory.get(&ResourceKind::Food).copied().unwrap_or(0),
-        inventory_apple: player.inventory.get(&ResourceKind::Apple).copied().unwrap_or(0),
-        inventory_soul: player.inventory.get(&ResourceKind::Soul).copied().unwrap_or(0),
+        inventory_wood: player
+            .inventory
+            .get(&ResourceKind::Wood)
+            .copied()
+            .unwrap_or(0),
+        inventory_food: player
+            .inventory
+            .get(&ResourceKind::Food)
+            .copied()
+            .unwrap_or(0),
+        inventory_apple: player
+            .inventory
+            .get(&ResourceKind::Apple)
+            .copied()
+            .unwrap_or(0),
+        inventory_soul: player
+            .inventory
+            .get(&ResourceKind::Soul)
+            .copied()
+            .unwrap_or(0),
         pool_wood: pool.get(ResourceKind::Wood),
         pool_food: pool.get(ResourceKind::Food),
         pool_apple: pool.get(ResourceKind::Apple),
@@ -280,7 +299,14 @@ fn build_voxel_chunk_snapshot(
         }
     }
 
-    VoxelChunkSnapshot { revision, chunk_x, chunk_z, y_min, y_size, blocks }
+    VoxelChunkSnapshot {
+        revision,
+        chunk_x,
+        chunk_z,
+        y_min,
+        y_size,
+        blocks,
+    }
 }
 
 fn record_voxel_delta(
@@ -292,7 +318,13 @@ fn record_voxel_delta(
     block: lk2_core::world::BlockType,
 ) {
     revision.0 = revision.0.wrapping_add(1).max(1);
-    *last_delta = LastVoxelDeltaState { revision: revision.0, x, y, z, block };
+    *last_delta = LastVoxelDeltaState {
+        revision: revision.0,
+        x,
+        y,
+        z,
+        block,
+    };
 }
 
 fn apply_gameplay_command(
@@ -503,7 +535,10 @@ fn apply_gameplay_commands(
             };
             diagnostics.last_move_applied = moved;
             if moved {
-                feedback.write(GameplayFeedback { ok: true, summary: "moved".to_string() });
+                feedback.write(GameplayFeedback {
+                    ok: true,
+                    summary: "moved".to_string(),
+                });
             }
         }
 
@@ -560,83 +595,85 @@ fn apply_gameplay_commands(
     }
 }
 
-fn apply_udp_gameplay_commands(
-    udp: Option<Res<GameplayCommandUdp>>,
+fn apply_leafwing_input(
     mut player: ResMut<PlayerState>,
     world: Res<GameWorld>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
-    jump: Res<ServerJumpState>,
+    mut jump: ResMut<ServerJumpState>,
     mut anti_stuck: ResMut<AntiStuckState>,
-    mut player_q: Query<(&mut Transform, &mut PlayerPos), With<PlayerPos>>,
+    mut player_q: Query<
+        (&mut Transform, &mut PlayerPos, &ActionState<PlayerAction>),
+        With<PlayerPos>,
+    >,
 ) {
-    let Some(udp) = udp else {
+    let Ok((mut transform, mut player_pos, actions)) = player_q.single_mut() else {
         return;
     };
-    let mut buf = [0u8; 64];
-    let mut latest_move: Option<(i16, i16)> = None;
-    loop {
-        match udp.socket.recv_from(&mut buf) {
-            Ok((len, _)) => {
-                let Ok(line) = std::str::from_utf8(&buf[..len]) else {
-                    continue;
-                };
-                let mut parts = line.split_whitespace();
-                if parts.next() != Some("MOVE") {
-                    continue;
-                }
-                let Some(dx_milli) = parts.next().and_then(|s| s.parse::<i16>().ok()) else {
-                    continue;
-                };
-                let Some(dz_milli) = parts.next().and_then(|s| s.parse::<i16>().ok()) else {
-                    continue;
-                };
-                diagnostics.udp_commands_received =
-                    diagnostics.udp_commands_received.saturating_add(1);
-                latest_move = Some((dx_milli, dz_milli));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(_) => break,
-        }
+    if actions.just_pressed(&PlayerAction::Jump) && jump.grounded {
+        jump.velocity_y = JUMP_TAKEOFF_SPEED;
+        jump.grounded = false;
     }
-    let Some((dx_milli, dz_milli)) = latest_move else {
-        return;
-    };
-    diagnostics.last_dx_milli = dx_milli;
-    diagnostics.last_dz_milli = dz_milli;
-    let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
-    diagnostics.last_move_applied =
-        if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-            let moved = if jump.grounded {
-                apply_world_move(
-                    &mut transform,
-                    &mut player_pos,
-                    &mut player,
-                    &world,
-                    dir,
-                    1.0 / 60.0,
-                )
-            } else {
-                apply_air_world_move(
-                    &mut transform,
-                    &mut player_pos,
-                    &mut player,
-                    &world,
-                    dir,
-                    1.0 / 60.0,
-                )
-            };
-            maintain_anti_stuck(
-                &world,
-                &mut player,
+
+    let mut dir = Vec2::ZERO;
+    if actions.pressed(&PlayerAction::MoveForward) {
+        dir.y -= 1.0;
+    }
+    if actions.pressed(&PlayerAction::MoveBackward) {
+        dir.y += 1.0;
+    }
+    if actions.pressed(&PlayerAction::MoveLeft) {
+        dir.x -= 1.0;
+    }
+    if actions.pressed(&PlayerAction::MoveRight) {
+        dir.x += 1.0;
+    }
+    if dir.length_squared() > 0.0001 {
+        if actions.pressed(&PlayerAction::Sprint) {
+            dir *= 1.5;
+        }
+        let dx_milli = (dir.x * 1000.0).round() as i16;
+        let dz_milli = (dir.y * 1000.0).round() as i16;
+        diagnostics.move_world_received = diagnostics.move_world_received.saturating_add(1);
+        diagnostics.last_dx_milli = dx_milli;
+        diagnostics.last_dz_milli = dz_milli;
+        let moved = if jump.grounded {
+            apply_world_move(
                 &mut transform,
                 &mut player_pos,
-                &mut anti_stuck,
-                moved,
-            );
-            moved
+                &mut player,
+                &world,
+                dir,
+                1.0 / 60.0,
+            )
         } else {
-            false
+            apply_air_world_move(
+                &mut transform,
+                &mut player_pos,
+                &mut player,
+                &world,
+                dir,
+                1.0 / 60.0,
+            )
         };
+        diagnostics.last_move_applied = moved;
+        maintain_anti_stuck(
+            &world,
+            &mut player,
+            &mut transform,
+            &mut player_pos,
+            &mut anti_stuck,
+            moved,
+        );
+    }
+
+    let _ = step_authoritative_jump(
+        &mut transform,
+        &mut player_pos,
+        &mut player,
+        &world,
+        &mut jump,
+        1.0 / 60.0,
+    );
 }
 
 fn echo_ping_messages(
@@ -951,13 +988,14 @@ fn main() {
         )
         .init();
 
-    let port: u16 =
-        std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_PORT);
+    let port: u16 = std::env::var("LK2_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
     if !server_ports_available(port) {
         error!(
-            "[server] UDP port {} or {} is already in use. Stop the existing lk2-server process or set LK2_PORT to a free port.",
-            port,
-            gameplay_port_for(port)
+            "[server] UDP port {} is already in use. Stop the existing lk2-server process or set LK2_PORT to a free port.",
+            port
         );
         return;
     }
@@ -969,6 +1007,8 @@ fn main() {
         Scenario {
             name: "idle".into(),
             record_window: None,
+            world: Default::default(),
+            player: Default::default(),
             steps: vec![
                 lk2_core::scenario::ScenarioStep::Log {
                     msg: "=== idle: server stand-by ===".into(),
@@ -982,18 +1022,7 @@ fn main() {
     let scenario_state = ScenarioState::from_scenario(scenario.clone());
 
     let _ = std::fs::create_dir_all("screenshots");
-    let gameplay_udp = {
-        let addr = std::net::SocketAddr::from(([0, 0, 0, 0], gameplay_port_for(port)));
-        std::net::UdpSocket::bind(addr).ok().and_then(|socket| {
-            socket.set_nonblocking(true).ok()?;
-            Some(GameplayCommandUdp { socket })
-        })
-    };
-
     let mut app = App::new();
-    if let Some(gameplay_udp) = gameplay_udp {
-        app.insert_resource(gameplay_udp);
-    }
     app.add_plugins(MinimalPlugins)
         .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
@@ -1001,18 +1030,12 @@ fn main() {
         .add_plugins(lk2_core::match_state::MatchStatePlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
-        .add_plugins(ServerPvPPlugin)
+        .add_plugins(SimplePvpAuthorityPlugin)
         .add_plugins(NatureServerProjectionPlugin)
-        .add_message::<lk2_core::protocol::messages::AttackInput>()
         .add_message::<GameplayCommand>()
         .add_message::<GameplayFeedback>()
         .add_message::<PingMessage>()
         .add_message::<PongMessage>()
-        .add_message::<lk2_core::protocol::messages::HitConfirm>()
-        .add_message::<lk2_core::protocol::messages::KnockbackEvent>()
-        .add_message::<lk2_core::protocol::messages::DamageResult>()
-        .add_message::<lk2_core::pvp::DamageEvent>()
-        .add_message::<lk2_core::pvp::VisualEffectEvent>()
         .init_resource::<PeerMetadata>()
         .init_resource::<SimClock>()
         .init_resource::<TimeOfDay>()
@@ -1025,7 +1048,6 @@ fn main() {
         .init_resource::<TickRecorder>()
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<PlayerState>()
-        .init_resource::<FixedTick>()
         .init_resource::<ServerTickCounter>()
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
@@ -1083,17 +1105,11 @@ fn main() {
             FixedUpdate,
             (
                 apply_gameplay_commands,
-                apply_udp_gameplay_commands,
+                apply_leafwing_input,
                 echo_ping_messages,
                 broadcast_gameplay_feedback,
                 sync_authoritative_snapshot_components,
                 broadcast_player_pos,
-                read_attack_inputs,
-                melee_hit_registration,
-                apply_damage_and_knockback,
-                broadcast_pvp_messages,
-                expire_knockback_immunity,
-                tick_combat_cooldowns,
             )
                 .chain(),
         )
@@ -1101,12 +1117,7 @@ fn main() {
 }
 
 fn server_ports_available(port: u16) -> bool {
-    let main = std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], port)));
-    let gameplay = std::net::UdpSocket::bind(std::net::SocketAddr::from((
-        [0, 0, 0, 0],
-        gameplay_port_for(port),
-    )));
-    main.is_ok() && gameplay.is_ok()
+    std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], port))).is_ok()
 }
 
 fn dump_world_resources(world: &World) {
@@ -1154,9 +1165,14 @@ fn spawn_player(
     mut player: ResMut<PlayerState>,
     mut anti_stuck: ResMut<AntiStuckState>,
     game_world: Res<GameWorld>,
+    scenario_state: Res<ScenarioState>,
 ) {
-    let sx = constant::WORLD_SIZE / 2;
-    let sz = constant::WORLD_SIZE / 2;
+    let scenario_spawn = scenario_state
+        .scenario
+        .as_ref()
+        .and_then(|scenario| scenario.player.spawn);
+    let sx = scenario_spawn.map_or(game_world.size / 2, |spawn| spawn[0]);
+    let sz = scenario_spawn.map_or(game_world.size / 2, |spawn| spawn[2]);
     let (spawn, spawn_block) = player_spawn_position_near(&game_world, sx, sz, 14, 2)
         .unwrap_or_else(|| {
             // Primary search failed (e.g. procedural terrain has no
@@ -1185,6 +1201,16 @@ fn spawn_player(
                 ],
             )
         });
+    let (spawn, spawn_block) = scenario_spawn.map_or((spawn, spawn_block), |block| {
+        (
+            Vec3::new(
+                block[0] as f32 + 0.5,
+                block[1] as f32,
+                block[2] as f32 + 0.5,
+            ),
+            block,
+        )
+    });
     player.pos = spawn;
     player.block_pos = spawn_block;
     anti_stuck.last_safe_pos = spawn;
@@ -1199,6 +1225,10 @@ fn spawn_player(
         PlayerTag(0),
         Transform::from_translation(spawn),
         PlayerPos(spawn),
+        PvpCombatant::default(),
+        SimpleWeapon::default(),
+        Hitbox::default(),
+        Health::default(),
         ActionState::<PlayerAction>::default(),
         empty_gameplay_hud_state(),
         EcoCycle::default().to_snapshot(0),
@@ -1264,7 +1294,10 @@ fn record_disconnected_client(
         "[net] client {:?} disconnected from {:?}: {}; active={}, disconnected_total={}",
         remote_id.map(|id| id.0),
         trigger.entity,
-        disconnected.reason.as_deref().unwrap_or("no reason provided"),
+        disconnected
+            .reason
+            .as_deref()
+            .unwrap_or("no reason provided"),
         diagnostics.active_connections,
         diagnostics.disconnected_total,
     );
@@ -1311,11 +1344,17 @@ fn broadcast_player_pos(
 fn setup_world(
     _commands: Commands,
     mut game_world: ResMut<GameWorld>,
+    scenario_state: Res<ScenarioState>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
     mut eco: ResMut<EcoCycle>,
 ) {
-    *game_world = generate_world(&WorldConfig::default());
+    let world_config = scenario_state
+        .scenario
+        .as_ref()
+        .map(|scenario| scenario.world_config("default"))
+        .unwrap_or_default();
+    *game_world = generate_world(&world_config);
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
     if let Some(content) = game_world.content.as_ref() {
         info!(
@@ -1427,7 +1466,10 @@ fn run_startup_self_check_once(
 }
 
 fn port_from_env() -> u16 {
-    std::env::var("LK2_PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(5000)
+    std::env::var("LK2_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5000)
 }
 
 fn simulation_tick(
@@ -1531,7 +1573,6 @@ fn tick_recorder(
                 "started_servers": started_q.iter().count(),
                 "link_of_entities": link_of_q.iter().count(),
                 "move_world_received": diagnostics.move_world_received,
-                "udp_commands_received": diagnostics.udp_commands_received,
                 "last_dx_milli": diagnostics.last_dx_milli,
                 "last_dz_milli": diagnostics.last_dz_milli,
                 "last_move_applied": diagnostics.last_move_applied,

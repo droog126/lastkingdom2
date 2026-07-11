@@ -64,7 +64,11 @@ pub fn resolve_reaper_strike(
     let damage_dealt = target_health.damage(requested_damage, current_tick, 0);
     let health_restored = wielder_health.heal(damage_dealt);
     let copied_statuses = wielder_statuses.copy_from(target_statuses);
-    ReaperStrikeOutcome { damage_dealt, health_restored, copied_statuses }
+    ReaperStrikeOutcome {
+        damage_dealt,
+        health_restored,
+        copied_statuses,
+    }
 }
 
 #[derive(Resource, Debug, Clone)]
@@ -142,7 +146,10 @@ pub fn claim_dragon_loot(
     if dragon.loot_claimed {
         return Err(DragonLootError::AlreadyClaimed);
     }
-    let loot = DragonLoot { dragon_hearts: 1, dragon_scales: 6 };
+    let loot = DragonLoot {
+        dragon_hearts: 1,
+        dragon_scales: 6,
+    };
     *inventory.entry(ResourceKind::DragonHeart).or_insert(0) += loot.dragon_hearts;
     *inventory.entry(ResourceKind::DragonScale).or_insert(0) += loot.dragon_scales;
     dragon.loot_claimed = true;
@@ -192,7 +199,11 @@ mod tests {
     use std::collections::HashMap;
 
     fn health(current: f32, max: f32) -> Health {
-        Health { current, max, invuln_until_tick: 0 }
+        Health {
+            current,
+            max,
+            invuln_until_tick: 0,
+        }
     }
 
     #[test]

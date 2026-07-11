@@ -29,13 +29,26 @@ description: Bevy 0.19 runtime development workflow for lastkingdom2. Use when c
 1. Trace the affected plugin, startup registration, schedule, resources, and authority path.
 2. Change one to three strongly related issues without unrelated refactoring.
 3. For deterministic rules, use `$tdd-iteration` for the pure behavior portion.
-4. Run the narrowest affected test or `cargo check -p <crate>`.
-5. Add `$closed-loop-ai-dev` only when acceptance requires runtime, auto-demo, screenshot, movement, or health evidence.
+4. Batch related implementation work before validation. Do not rerun `cargo check`, tests, or loop after every small edit when the next edits are already known.
+5. Run the narrowest affected test or `cargo check -p <crate>` at a meaningful milestone, before handoff, after risky schedule/API changes, or after a failed validation has been addressed.
+6. For low-risk visual tuning, presentation-only parameter changes, or exploratory refactors, it is acceptable to defer validation and report that choice explicitly.
+7. Add `$closed-loop-ai-dev` only when the user explicitly asks for loop/screenshot/runtime evidence, the acceptance criteria explicitly require it, or the final claim would say rendered behavior was actually observed.
+
+## Validation Choice
+
+- No validation yet: while doing a batch of related visual/layout/parameter edits and more edits are already planned.
+- `cargo check -p lk2-client`: before handoff when touching Bevy APIs, ECS queries/components, schedules, imports, resources, or module wiring.
+- Focused tests: when changing deterministic math, parsing, state transitions, protocol values, or pure helper behavior.
+- Runtime screenshot/loop: only when explicitly requested, required by acceptance criteria, or needed to support a final claim about observed rendered output, camera framing, movement after spawn, asset visibility, HUD readability, or auto-demo artifacts.
+- Do not run loop just because a change is visible, graphical, Bevy-facing, or presentation-only.
+- Do not repeat the same failed validation until code or configuration has changed in response to the failure.
+- In the final report, say which validation tier was chosen and why; if validation was deferred, state the risk plainly.
 
 ## Runtime Checks
 
-- Validate camera and movement changes after movement, not only at spawn.
-- Require both state evidence and visual evidence when the task claims visible gameplay state.
+- Validate camera and movement changes after movement, not only at spawn, only when runtime validation is selected.
+- Require both state evidence and visual evidence only when reporting that visible gameplay state was actually verified.
+- Prefer one useful runtime check over repeated compile checks during visual iteration; use screenshots/loop evidence only when the claim depends on actual rendered output.
 - Inspect old presentation layers before changing correct simulation logic to compensate for hidden or occluded behavior.
 - Validate auto-demo timing against the simulation progress metric used by health checks, not frame count alone.
 - Treat compile failures, panics, state desync, conservation breaks, and authority mismatch as higher priority than polish.

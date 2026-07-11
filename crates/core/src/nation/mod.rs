@@ -182,7 +182,8 @@ impl NationRegistry {
             dst: TransferDst::Wasted,
         };
 
-        pool.try_sub(ResourceKind::Soul, cost).map_err(|e| FoundError::PoolError(e))?;
+        pool.try_sub(ResourceKind::Soul, cost)
+            .map_err(|e| FoundError::PoolError(e))?;
 
         let id = NationId(self.next_id);
         self.next_id += 1;
@@ -201,16 +202,24 @@ impl NationRegistry {
         if self.find_nation_by_player(player_id).is_some() {
             return Err(JoinError::AlreadyInNation);
         }
-        let n = self.nations.get_mut(&nation_id).ok_or(JoinError::NoSuchNation)?;
+        let n = self
+            .nations
+            .get_mut(&nation_id)
+            .ok_or(JoinError::NoSuchNation)?;
         if n.size() as u32 >= n.pop_cap {
-            return Err(JoinError::PopulationFull { current: n.size() as u32, cap: n.pop_cap });
+            return Err(JoinError::PopulationFull {
+                current: n.size() as u32,
+                cap: n.pop_cap,
+            });
         }
         n.members.insert(player_id);
         Ok(())
     }
 
     pub fn leave(&mut self, player_id: u32) -> Result<NationId, LeaveError> {
-        let id = self.find_nation_by_player(player_id).ok_or(LeaveError::NotInNation)?;
+        let id = self
+            .find_nation_by_player(player_id)
+            .ok_or(LeaveError::NotInNation)?;
         let n = self.nations.get_mut(&id).unwrap();
         if player_id == n.king {
             n.flag_hp = 0;
@@ -221,7 +230,10 @@ impl NationRegistry {
     }
 
     pub fn find_nation_by_player(&self, player_id: u32) -> Option<NationId> {
-        self.nations.values().find(|n| n.is_member(player_id)).map(|n| n.id)
+        self.nations
+            .values()
+            .find(|n| n.is_member(player_id))
+            .map(|n| n.id)
     }
 
     pub fn damage_flag(&mut self, nation_id: NationId, dmg: u32) -> u32 {
@@ -253,10 +265,16 @@ impl NationRegistry {
         nation_id: NationId,
         target: u32,
     ) -> Result<(), UpgradeError> {
-        let n = self.nations.get_mut(&nation_id).ok_or(UpgradeError::NoSuchNation)?;
+        let n = self
+            .nations
+            .get_mut(&nation_id)
+            .ok_or(UpgradeError::NoSuchNation)?;
         let current_cap = n.pop_cap;
         if target <= current_cap {
-            return Err(UpgradeError::AlreadyAtOrAbove { current: current_cap, target });
+            return Err(UpgradeError::AlreadyAtOrAbove {
+                current: current_cap,
+                target,
+            });
         }
         if !matches!(target, 10 | 15 | 20) {
             return Err(UpgradeError::InvalidTarget(target));
@@ -447,7 +465,9 @@ mod tests {
     #[test]
     fn found_first_nation_costs_10_souls() {
         let (mut reg, mut pool) = reg_with_souls(10);
-        let id = reg.found(&mut pool, 1, "TestNation".into(), [16, 8, 16], 0).unwrap();
+        let id = reg
+            .found(&mut pool, 1, "TestNation".into(), [16, 8, 16], 0)
+            .unwrap();
         assert_eq!(id, NationId(0));
         assert_eq!(reg.flag_count, 1);
         assert_eq!(pool.get(ResourceKind::Soul), 0);
@@ -469,19 +489,24 @@ mod tests {
     fn cannot_exceed_8_flags() {
         let (mut reg, mut pool) = reg_with_souls(10 + 15 + 20 + 25 + 30 + 40 + 50 + 60);
         for i in 1..=8 {
-            reg.found(&mut pool, i as u32, format!("N{}", i), [i, 1, 1], 0).unwrap();
+            reg.found(&mut pool, i as u32, format!("N{}", i), [i, 1, 1], 0)
+                .unwrap();
         }
         assert_eq!(reg.flag_count, 8);
         assert!(!reg.can_found_new());
 
-        let err = reg.found(&mut pool, 9, "N9".into(), [9, 1, 1], 0).unwrap_err();
+        let err = reg
+            .found(&mut pool, 9, "N9".into(), [9, 1, 1], 0)
+            .unwrap_err();
         assert!(matches!(err, FoundError::MaxFlagsReached(8)));
     }
 
     #[test]
     fn insufficient_souls_fails() {
         let (mut reg, mut pool) = reg_with_souls(5);
-        let err = reg.found(&mut pool, 1, "N".into(), [1, 1, 1], 0).unwrap_err();
+        let err = reg
+            .found(&mut pool, 1, "N".into(), [1, 1, 1], 0)
+            .unwrap_err();
         assert!(matches!(
             err,
             FoundError::InsufficientSouls { have: 5, need: 10 }
@@ -493,7 +518,9 @@ mod tests {
         let (mut reg, mut pool) = reg_with_souls(100);
         reg.found(&mut pool, 1, "A".into(), [1, 1, 1], 0).unwrap();
 
-        let err = reg.found(&mut pool, 1, "B".into(), [2, 1, 1], 0).unwrap_err();
+        let err = reg
+            .found(&mut pool, 1, "B".into(), [2, 1, 1], 0)
+            .unwrap_err();
         assert!(matches!(err, FoundError::AlreadyInNation));
     }
 

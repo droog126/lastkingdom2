@@ -30,7 +30,10 @@ pub struct ReplicationBatch<S, E> {
 
 impl<S, E> ReplicationBatch<S, E> {
     pub fn new(tick: u64, value: S, events: Vec<E>) -> Self {
-        Self { snapshot: snapshot(tick, value), events }
+        Self {
+            snapshot: snapshot(tick, value),
+            events,
+        }
     }
 
     pub fn tick(&self) -> u64 {
@@ -65,7 +68,11 @@ fn build_replication_batch(
     let Some(report) = report.0.as_ref() else {
         return;
     };
-    if replication.0.as_ref().is_some_and(|batch| batch.tick() == report.tick) {
+    if replication
+        .0
+        .as_ref()
+        .is_some_and(|batch| batch.tick() == report.tick)
+    {
         return;
     }
     replication.0 = Some(ReplicationBatch::from_tick_report(report.clone()));

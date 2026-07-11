@@ -1,4 +1,4 @@
 interface:
   display_name: "LK2 Bevy Gameplay"
-  short_description: "Implement Bevy runtime and gameplay integration"
-  default_prompt: "Use $bevy-gameplay-dev to implement a Bevy runtime or gameplay integration change."
+  short_description: "Implement Bevy runtime changes with milestone validation"
+  default_prompt: "Use $bevy-gameplay-dev to implement a Bevy runtime or gameplay integration change, batching related edits before the narrowest meaningful validation."

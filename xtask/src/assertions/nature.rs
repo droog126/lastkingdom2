@@ -145,7 +145,9 @@ fn append_causal_assertions(
     ));
     out.push(check(
         "nature.plants_feed_animals",
-        metrics.animal_food_available.is_some_and(|value| value > 0.0)
+        metrics
+            .animal_food_available
+            .is_some_and(|value| value > 0.0)
             && (progressed_u64(previous.and_then(|item| item.animals), metrics.animals)
                 || metrics.animals.is_some_and(|value| value > 0)),
         AssertionSeverity::Partial,

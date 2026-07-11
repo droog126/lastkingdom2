@@ -10,7 +10,10 @@ pub fn split_flag(arg: &str) -> (Option<String>, Option<String>) {
 }
 
 fn normalize_flag(s: &str) -> String {
-    s.chars().filter(|ch| *ch != '_').collect::<String>().to_ascii_lowercase()
+    s.chars()
+        .filter(|ch| *ch != '_')
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 pub fn take_next(raw: &[String], i: &mut usize) -> Option<String> {

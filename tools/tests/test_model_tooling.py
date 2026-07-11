@@ -37,6 +37,22 @@ class ModelToolingTests(unittest.TestCase):
         self.assertIsNotNone(result.stats)
         self.assertLessEqual(result.stats.triangles, 3_000)
 
+    def test_handheld_weapon_scale_is_relative_to_human_height(self) -> None:
+        human_height = scale_contract_for("pretty", "sokpop_gatherer").target_meters
+        sidearms = ("sword", "hoplite_dragon_katana", "hoplite_midas_sword")
+
+        for asset in sidearms:
+            with self.subTest(asset=asset):
+                height = scale_contract_for("pretty", asset).target_meters
+                self.assertLessEqual(height, human_height * 0.75)
+
+        hammer_height = scale_contract_for("pretty", "hoplite_golem_hammer").target_meters
+        self.assertLessEqual(hammer_height, human_height * 0.85)
+
+        scythe_height = scale_contract_for("pretty", "hoplite_reaper_scythe").target_meters
+        self.assertGreater(scythe_height, human_height)
+        self.assertLessEqual(scythe_height, human_height * 1.20)
+
 
 if __name__ == "__main__":
     unittest.main()

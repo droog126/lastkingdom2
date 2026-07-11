@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::eco_cycle::EcoCycle;
+use crate::ecology::EcoCycle;
 
 /// Transitional water-cycle summary over `EcoCycle::rain`.
 ///
@@ -15,7 +15,9 @@ pub struct HydrologySnapshot {
 impl HydrologySnapshot {
     #[must_use]
     pub fn from_ecology(ecology: &EcoCycle) -> Self {
-        Self { available_water: ecology.rain }
+        Self {
+            available_water: ecology.rain,
+        }
     }
 
     #[must_use]

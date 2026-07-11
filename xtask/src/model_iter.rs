@@ -100,7 +100,9 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         println!(
             ">>> using existing {} ({} MB); pass --skip-build to skip rebuild",
             client_exe.display(),
-            fs::metadata(&client_exe).map(|m| m.len() / 1024 / 1024).unwrap_or(0)
+            fs::metadata(&client_exe)
+                .map(|m| m.len() / 1024 / 1024)
+                .unwrap_or(0)
         );
     }
     if !client_exe.exists() {
@@ -111,12 +113,20 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let mut glbs = collect_glbs(&asset_root);
     if let Some(filter) = only.as_deref() {
         let needle = filter.to_ascii_lowercase();
-        let needle_stem =
-            needle.rsplit('/').next().unwrap_or(&needle).trim_end_matches(".glb").to_string();
+        let needle_stem = needle
+            .rsplit('/')
+            .next()
+            .unwrap_or(&needle)
+            .trim_end_matches(".glb")
+            .to_string();
         let needle_no_ext = needle.trim_end_matches(".glb").to_string();
         glbs.retain(|(rel, _)| {
             let lower = rel.to_ascii_lowercase();
-            let stem = lower.rsplit('/').next().unwrap_or("").trim_end_matches(".glb");
+            let stem = lower
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .trim_end_matches(".glb");
             // Match: exact relative path, exact stem, path-ending, or the
             // unique asset path under `assets/`. We do NOT keep all models
             // that share a stem — that's too loose when several packs share
@@ -503,7 +513,10 @@ fn summarize(entries: &[ModelEntry]) -> ModelSummary {
     let total = entries.len();
     let rendered = entries.iter().filter(|e| e.rendered).count();
     let failed = entries.iter().filter(|e| e.verdict == "fail").count();
-    let white_or_blank = entries.iter().filter(|e| e.verdict == "white_or_blank").count();
+    let white_or_blank = entries
+        .iter()
+        .filter(|e| e.verdict == "white_or_blank")
+        .count();
     let flat_or_lying = entries.iter().filter(|e| e.verdict == "lying_down").count();
     let scores: Vec<f32> = entries.iter().map(score_for).collect();
     let mean_score = if scores.is_empty() {
@@ -511,7 +524,14 @@ fn summarize(entries: &[ModelEntry]) -> ModelSummary {
     } else {
         scores.iter().sum::<f32>() / scores.len() as f32
     };
-    ModelSummary { total, rendered, failed, white_or_blank, flat_or_lying, mean_score }
+    ModelSummary {
+        total,
+        rendered,
+        failed,
+        white_or_blank,
+        flat_or_lying,
+        mean_score,
+    }
 }
 
 fn score_for(e: &ModelEntry) -> f32 {
@@ -572,7 +592,13 @@ fn write_decision(
     md.push_str("by_verdict:\n");
     for (v, list) in &by_verdict {
         md.push_str(&format!("- {} ({}): ", v, list.len()));
-        md.push_str(&list.iter().map(|e| e.stem.as_str()).collect::<Vec<_>>().join(", "));
+        md.push_str(
+            &list
+                .iter()
+                .map(|e| e.stem.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
         md.push('\n');
     }
     md.push('\n');
@@ -651,13 +677,19 @@ fn collect_glbs(asset_root: &Path) -> Vec<(String, String)> {
                 walk(&path, asset_root, out);
                 continue;
             }
-            if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("glb"))
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("glb"))
                 != Some(true)
             {
                 continue;
             }
-            let rel =
-                path.strip_prefix(asset_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            let rel = path
+                .strip_prefix(asset_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
             let category = path
                 .parent()
                 .and_then(|parent| parent.strip_prefix(asset_root).ok())
@@ -673,11 +705,14 @@ fn collect_glbs(asset_root: &Path) -> Vec<(String, String)> {
 }
 
 fn runtime_env(root: &Path) -> Result<Vec<(String, String)>> {
-    let sysroot =
-        match Command::new("rustc").args(["--print", "sysroot"]).current_dir(root).output() {
-            Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
-            Err(_) => String::new(),
-        };
+    let sysroot = match Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .current_dir(root)
+        .output()
+    {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Err(_) => String::new(),
+    };
     let sep = if cfg!(windows) { ";" } else { ":" };
     // Keep the inherited PATH so things like `sccache` keep working, and
     // prepend our target/debug helpers so the spawned `lk2-client.exe` finds

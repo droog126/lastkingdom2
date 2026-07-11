@@ -37,8 +37,9 @@ pub fn parse_connect_arg(args: &[String]) -> Option<SocketAddr> {
 }
 
 pub fn generate_client_id() -> u64 {
-    let duration =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let duration = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     client_id_from_time_and_process(duration.as_nanos(), std::process::id())
 }
 
@@ -76,19 +77,28 @@ impl CliArgs {
             .map(|a| a.trim_start_matches("--preset=").to_string())
             .unwrap_or_else(|| "default".to_string());
 
-        let walk = args.iter().find(|a| a.starts_with("--walk=")).and_then(|a| {
-            let s = a.trim_start_matches("--walk=");
-            let parts: Vec<&str> = s.split(',').collect();
-            if parts.len() != 2 {
-                return None;
-            }
-            match (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
-                (Ok(x), Ok(z)) => Some((x, z)),
-                _ => None,
-            }
-        });
+        let walk = args
+            .iter()
+            .find(|a| a.starts_with("--walk="))
+            .and_then(|a| {
+                let s = a.trim_start_matches("--walk=");
+                let parts: Vec<&str> = s.split(',').collect();
+                if parts.len() != 2 {
+                    return None;
+                }
+                match (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
+                    (Ok(x), Ok(z)) => Some((x, z)),
+                    _ => None,
+                }
+            });
 
-        Self { offline, connect, auto_demo, preset, walk }
+        Self {
+            offline,
+            connect,
+            auto_demo,
+            preset,
+            walk,
+        }
     }
 }
 

@@ -17,7 +17,12 @@ pub fn line_of_sight(world: &GameWorld, from: Vec3, to: Vec3, step_size: f32) ->
     let dir = to - from;
     let total_dist = dir.length();
     if total_dist < 0.001 {
-        return LosResult { blocked: false, block_pos: None, total_dist: 0.0, travel_dist: 0.0 };
+        return LosResult {
+            blocked: false,
+            block_pos: None,
+            total_dist: 0.0,
+            travel_dist: 0.0,
+        };
     }
     let step = dir.normalize() * step_size;
     let mut pos = from;
@@ -45,7 +50,12 @@ pub fn line_of_sight(world: &GameWorld, from: Vec3, to: Vec3, step_size: f32) ->
         }
     }
 
-    LosResult { blocked: false, block_pos: None, total_dist, travel_dist: total_dist }
+    LosResult {
+        blocked: false,
+        block_pos: None,
+        total_dist,
+        travel_dist: total_dist,
+    }
 }
 
 pub fn sector_voxels(

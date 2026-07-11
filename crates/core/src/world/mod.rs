@@ -287,10 +287,20 @@ impl World {
 
     pub fn generate_voxel(&self, x: i32, y: i32, z: i32) -> BlockType {
         let mut sorted: Vec<&terrain::ShapeLayer> = self.geo_overlay.iter().collect();
-        sorted.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         for layer in &sorted {
-            let mut ctx =
-                terrain::TerrainContext { x, y, z, seed: self.seed, surface_y: None, biome: None };
+            let mut ctx = terrain::TerrainContext {
+                x,
+                y,
+                z,
+                seed: self.seed,
+                surface_y: None,
+                biome: None,
+            };
             if let Some(b) = layer.decide(&mut ctx) {
                 if let Some(biome) = layer.biome_override {
                     let _ = biome;
@@ -1115,7 +1125,10 @@ mod tests {
 
         assert_eq!(block_pos, [3, 3, 3]);
         assert_eq!(pos, Vec3::new(3.5, 3.0, 3.5));
-        assert!(w.get(block_pos[0], block_pos[1] - 1, block_pos[2]).is_solid());
+        assert!(
+            w.get(block_pos[0], block_pos[1] - 1, block_pos[2])
+                .is_solid()
+        );
         assert!(player_body_clear(
             &w,
             block_pos[0],

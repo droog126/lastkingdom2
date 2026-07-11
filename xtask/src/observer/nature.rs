@@ -23,7 +23,10 @@ pub fn observe_file(path: &Path, log_paths: &[&Path]) -> Result<NatureObservatio
         fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
     let value: Value = serde_json::from_str(&text)
         .map_err(|error| format!("parse {}: {error}", path.display()))?;
-    let source = path.file_name().and_then(|name| name.to_str()).unwrap_or("state");
+    let source = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("state");
     Ok(observe_value(&value, source, scan_error_logs(log_paths)))
 }
 
@@ -151,7 +154,10 @@ pub fn scan_error_logs(paths: &[&Path]) -> Vec<ObservedLogError> {
         let Ok(text) = fs::read_to_string(path) else {
             continue;
         };
-        let source = path.file_name().and_then(|name| name.to_str()).unwrap_or("log");
+        let source = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("log");
         for (index, line) in text.lines().enumerate() {
             let lower = line.to_ascii_lowercase();
             if lower.contains("error")
@@ -177,7 +183,9 @@ fn first_value<'a>(state: &'a Value, paths: &[&str]) -> Option<&'a Value> {
 
 fn first_u64(state: &Value, paths: &[&str]) -> Option<u64> {
     first_value(state, paths).and_then(|value| {
-        value.as_u64().or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
+        value
+            .as_u64()
+            .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
     })
 }
 
@@ -187,9 +195,14 @@ fn first_f64(state: &Value, paths: &[&str]) -> Option<f64> {
 
 fn first_count(state: &Value, paths: &[&str]) -> Option<u64> {
     first_value(state, paths).and_then(|value| {
-        value.as_array().map(|items| items.len() as u64).or_else(|| {
-            value.as_u64().or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
-        })
+        value
+            .as_array()
+            .map(|items| items.len() as u64)
+            .or_else(|| {
+                value
+                    .as_u64()
+                    .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
+            })
     })
 }
 

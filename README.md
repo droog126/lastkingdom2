@@ -1,8 +1,8 @@
 <!-- doc-status: current -->
 # Wanguo Origins: Last Kingdom Diamond
 
-Bevy 0.19 voxel simulation and rendering demo with a three-crate client/server workspace and a
-Rust-driven closed-loop iteration workflow.
+Bevy 0.19 playable forest MVP with shared simulation and combat rules, a focused offline client,
+and a separate server authority crate under migration.
 
 Read [AGENTS.md](AGENTS.md) before changing the repository. Human-facing documentation starts at
 [docs/README.md](docs/README.md), and the run guide is [docs/STARTING.md](docs/STARTING.md).
@@ -17,11 +17,8 @@ just offline
 The normal play aliases route through `xtask play`, which builds when needed and archives runtime
 errors under `run-logs/`.
 
-Closed-loop run:
-
-```sh
-just loop
-```
+The historical closed-loop artifact contract remains in the repository, but `just loop` is
+temporarily unavailable while its runtime producer is migrated to the focused client.
 
 Useful validation entry points:
 
@@ -38,7 +35,7 @@ just fmt
 ## Project layout
 
 - `crates/core/src/`: shared simulation, rules, protocol, world, AI, resources, and combat.
-- `crates/client/src/`: Bevy client, rendering, HUD, input, screenshots, and offline demo.
+- `crates/client/src/`: focused Bevy scene, input, offline authority, screenshots, and previews.
 - `crates/server/src/`: headless authority simulation, networking, and server PvP.
 - `xtask/`: Rust task runner for development, testing, audits, play, health, and loop orchestration.
 - `justfile`: short human-friendly aliases for `xtask` and Cargo.

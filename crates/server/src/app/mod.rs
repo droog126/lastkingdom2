@@ -45,7 +45,11 @@ impl Plugin for NatureServerProjectionPlugin {
         app.init_resource::<LatestNatureReport>()
             .configure_sets(
                 FixedUpdate,
-                (NatureAuthoritySet::StepWorld, NatureAuthoritySet::PublishReport).chain(),
+                (
+                    NatureAuthoritySet::StepWorld,
+                    NatureAuthoritySet::PublishReport,
+                )
+                    .chain(),
             )
             .add_plugins((
                 NatureReplicationPlugin,

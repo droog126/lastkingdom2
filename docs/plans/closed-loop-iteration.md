@@ -4,7 +4,7 @@
 ## 事实源
 
 - 入口：`just loop`
-- 直接命令：`just xtask loop --offline --seconds 60`
+- 目标直接命令：`just xtask loop --offline --seconds 60`
 - 健康检查：`just health`
 - 实现：`xtask/src/loop_cmd.rs`、`xtask/src/health.rs`、`xtask/src/audit.rs`
 - 人类运行指南：[STARTING.md](../STARTING.md)
@@ -18,6 +18,9 @@ observe -> decide -> act -> build -> run -> health -> decision
 
 `xtask loop` 负责构建、运行、截图、状态采集、health 和决策模板。开发者或 AI 负责读取
 证据、判断结果并完成 `decision.md`。上一轮没有决策记录时，不得开始下一轮。
+
+当前 focused client 已恢复基础 auto-demo、状态记录和截图生产者。下述流程和产物结构是
+兼容契约；一次迭代是否成功仍以实际运行后生成的 health/assertions/decision 证据为准。
 
 ## 产物结构
 
@@ -60,10 +63,12 @@ screenshots/iter_NN/
 - Python 仅用于 Blender、资产生成和一次性分析，不作为闭环运行时。
 - 改变产物文件、JSON 字段、health 规则或决策模板时，同步更新本文件、
   `STARTING.md` 和 `$closed-loop-ai-dev`。
-- 视觉或体验变化必须检查 loop artifacts；PNG 评分遵循 `$screenshot-scoring`。
+- 视觉或体验变化本身不要求检查 loop artifacts；仅当用户明确要求、验收条件明确要求、复现/诊断必须依赖运行时工件，或最终结论要声明真实渲染画面已验证时，才检查闭环产物。
 - 运行 `just audit-docs`，防止当前契约重新漂移。
 
 ## 验收标准
+
+维护 `just loop` 时，以下条件必须保持成立：
 
 - `xtask loop` 能生成完整迭代目录。
 - `health.json` 能区分 `PASS`、`PARTIAL` 和 `FAIL`。

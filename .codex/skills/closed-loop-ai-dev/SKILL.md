@@ -9,6 +9,8 @@ description: Runtime observe-decide-act validation workflow for lastkingdom2. Us
 
 Use the loop to obtain runtime evidence: observe -> decide -> act -> build -> re-run. A completed loop iteration must have inspected artifacts and a `screenshots/iter_NN/decision.md` before another normal iteration starts.
 
+Before running any command, confirm the task actually needs loop, screenshot, health, auto-demo, or runtime artifact evidence because the user asked for it, acceptance criteria require it, diagnosis cannot proceed without it, or the final answer will claim observed rendered behavior. If this skill was loaded only because a change is visible, graphical, Bevy-facing, or presentation-only, return to the primary implementation skill and do not run loop commands.
+
 Standalone model previews belong to `$ai-modeling`; use this skill only after an asset is wired into gameplay or when the task explicitly requires loop evidence.
 
 ## Run

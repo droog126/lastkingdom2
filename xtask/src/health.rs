@@ -122,12 +122,21 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         write_nature_artifact(iter_dir, artifact)?;
     }
     let combo = combine(&png, &sim, &assertions);
-    let name = iter_dir.file_name().and_then(OsStr::to_str).unwrap_or("iter");
+    let name = iter_dir
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("iter");
     let summary = summarize(name, &png, &sim, &combo);
 
     let failed = assertions.iter().filter(|a| !a.ok).count();
-    let hard_failed = assertions.iter().filter(|a| !a.ok && a.severity == "fail").count();
-    let partial_failed = assertions.iter().filter(|a| !a.ok && a.severity != "fail").count();
+    let hard_failed = assertions
+        .iter()
+        .filter(|a| !a.ok && a.severity == "fail")
+        .count();
+    let partial_failed = assertions
+        .iter()
+        .filter(|a| !a.ok && a.severity != "fail")
+        .count();
     let health = json!({
         "iter": name,
         "png": png,
@@ -175,7 +184,10 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
 
     write_regression_json(iter_dir, prev_dir, &assertions)?;
 
-    Ok(Evaluation { verdict: combo["verdict"].as_str().unwrap_or("FAIL").to_string(), summary })
+    Ok(Evaluation {
+        verdict: combo["verdict"].as_str().unwrap_or("FAIL").to_string(),
+        summary,
+    })
 }
 
 fn build_nature_artifact(
@@ -307,7 +319,10 @@ fn write_error_log_archive(
     }
     fs::write(out_dir.join("error_logs.txt"), text).map_err(|e| e.to_string())?;
 
-    Ok(ErrorLogSummary { error_line_count: entries.len(), files_scanned })
+    Ok(ErrorLogSummary {
+        error_line_count: entries.len(),
+        files_scanned,
+    })
 }
 
 fn collect_error_logs_dir(
@@ -376,7 +391,10 @@ fn is_error_log_line(line: &str) -> bool {
 }
 
 fn rel_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn scan_stderr_logs(root: &Path) -> StderrScan {
@@ -499,8 +517,9 @@ fn primary_png(iter_dir: &Path) -> Option<PathBuf> {
 }
 
 fn analyze_png(path: &Path) -> Value {
-    let file_kb =
-        fs::metadata(path).map(|m| (m.len() as f64 / 1024.0 * 10.0).round() / 10.0).unwrap_or(0.0);
+    let file_kb = fs::metadata(path)
+        .map(|m| (m.len() as f64 / 1024.0 * 10.0).round() / 10.0)
+        .unwrap_or(0.0);
     let mut out = json!({"file_kb": file_kb, "verdict": "NA", "sub": null});
     match decode_png_rgb(path) {
         Ok((w, h, pixels)) => {
@@ -615,7 +634,9 @@ fn analyze_sim(state_path: &Path, prev_state: Option<&Value>) -> (Value, Option<
     };
     let tick = path_i64(&state, "tick").unwrap_or(0);
     let role = state.get("role").and_then(Value::as_str).unwrap_or("");
-    let wall_secs = path_value(&state, "wall_secs").and_then(Value::as_f64).unwrap_or(0.0);
+    let wall_secs = path_value(&state, "wall_secs")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let nations = path_i64(&state, "nations.total_nations").unwrap_or(0);
     let anomalies = path_i64(&state, "observer.anomalies").unwrap_or(0);
     let invariant_violations = path_i64(&state, "observer.invariant_violations").unwrap_or(0);
@@ -652,10 +673,16 @@ fn built_in_assertions(
     stderr: &StderrScan,
     iter_dir: &Path,
 ) -> Vec<Assertion> {
-    let role = state.and_then(|s| s.get("role")).and_then(Value::as_str).unwrap_or("");
+    let role = state
+        .and_then(|s| s.get("role"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let online_client = role == "client_online";
     let progress_actual = if online_client {
-        state.and_then(|s| path_value(s, "wall_secs")).cloned().unwrap_or(json!(0.0))
+        state
+            .and_then(|s| path_value(s, "wall_secs"))
+            .cloned()
+            .unwrap_or(json!(0.0))
     } else {
         sim["tick"].clone()
     };
@@ -818,7 +845,9 @@ fn built_in_assertions(
             .zip(world_size)
             .map(|(pos, size)| {
                 pos.len() == 3
-                    && pos.iter().all(|v| v.as_i64().map(|n| n >= 0 && n < size).unwrap_or(false))
+                    && pos
+                        .iter()
+                        .all(|v| v.as_i64().map(|n| n >= 0 && n < size).unwrap_or(false))
             })
             .unwrap_or(false);
         let activity = path_i64(state, "player.blocks_gathered").unwrap_or(0)
@@ -928,7 +957,9 @@ fn visual_luma_flicker_assertions(
 
 fn player_readability_assertions(state: &Value) -> Vec<Assertion> {
     let mut out = Vec::new();
-    let mode = path_value(state, "camera.mode").and_then(Value::as_str).unwrap_or("");
+    let mode = path_value(state, "camera.mode")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     if mode != "TopDown" {
         return out;
     }
@@ -999,8 +1030,9 @@ fn network_connection_assertions(state: &Value) -> Vec<Assertion> {
     if state.get("role").and_then(Value::as_str) != Some("client_online") {
         return Vec::new();
     }
-    let transport =
-        path_value(state, "network_connection.transport").and_then(Value::as_str).unwrap_or("");
+    let transport = path_value(state, "network_connection.transport")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let ping = path_f64(state, "network_connection.ping_ms");
     let pong_age = path_f64(state, "network_connection.pong_age_secs");
     vec![
@@ -1036,8 +1068,11 @@ fn network_connection_assertions(state: &Value) -> Vec<Assertion> {
 
 fn camera_assertions(state: &Value) -> Vec<Assertion> {
     let mut out = Vec::new();
-    let mode =
-        state.get("camera").and_then(|c| c.get("mode")).and_then(Value::as_str).map(str::to_string);
+    let mode = state
+        .get("camera")
+        .and_then(|c| c.get("mode"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
     match mode.as_deref() {
         Some(m) if !m.is_empty() => {
             out.push(assertion(
@@ -1082,8 +1117,9 @@ fn camera_assertions(state: &Value) -> Vec<Assertion> {
     if mode.as_deref() == Some("TopDown")
         && path_value(state, "visual.player_readability.marker_count").is_some()
     {
-        let center_block =
-            path_value(state, "camera.center_ray_hit.block").and_then(Value::as_str).unwrap_or("");
+        let center_block = path_value(state, "camera.center_ray_hit.block")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         if center_block == "Leaves" {
             let distance = path_f64(state, "camera.center_ray_hit.distance").unwrap_or(0.0);
             out.push(assertion(
@@ -1276,10 +1312,7 @@ fn static_world_visual_positions(value: &Value) -> HashMap<String, [f64; 3]> {
     static_world_positions_at(value, "visual.static_world")
 }
 
-fn static_world_positions_at(
-    value: &Value,
-    path: &str,
-) -> HashMap<String, [f64; 3]> {
+fn static_world_positions_at(value: &Value, path: &str) -> HashMap<String, [f64; 3]> {
     let mut out = HashMap::new();
     let Some(obj) = path_value(value, path).and_then(Value::as_object) else {
         return out;
@@ -1327,8 +1360,10 @@ fn static_world_drift_from_maps(
             0.0
         };
         if visual_move > STATIC_MOVE_MAX && follow_alignment >= FOLLOW_RATIO_MIN {
-            let replace =
-                worst.as_ref().map(|(_, worst_move, _)| visual_move > *worst_move).unwrap_or(true);
+            let replace = worst
+                .as_ref()
+                .map(|(_, worst_move, _)| visual_move > *worst_move)
+                .unwrap_or(true);
             if replace {
                 worst = Some((name.clone(), visual_move, follow_alignment));
             }
@@ -1574,10 +1609,22 @@ fn compare(actual: &Value, op: &str, expected: &Value) -> bool {
     match op {
         "==" => actual == expected,
         "!=" => actual != expected,
-        ">" => num(actual).zip(num(expected)).map(|(a, e)| a > e).unwrap_or(false),
-        ">=" => num(actual).zip(num(expected)).map(|(a, e)| a >= e).unwrap_or(false),
-        "<" => num(actual).zip(num(expected)).map(|(a, e)| a < e).unwrap_or(false),
-        "<=" => num(actual).zip(num(expected)).map(|(a, e)| a <= e).unwrap_or(false),
+        ">" => num(actual)
+            .zip(num(expected))
+            .map(|(a, e)| a > e)
+            .unwrap_or(false),
+        ">=" => num(actual)
+            .zip(num(expected))
+            .map(|(a, e)| a >= e)
+            .unwrap_or(false),
+        "<" => num(actual)
+            .zip(num(expected))
+            .map(|(a, e)| a < e)
+            .unwrap_or(false),
+        "<=" => num(actual)
+            .zip(num(expected))
+            .map(|(a, e)| a <= e)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -1628,8 +1675,14 @@ fn combine(png: &Value, sim: &Value, assertions: &[Assertion]) -> Value {
         _ => {}
     }
     let failed = assertions.iter().filter(|a| !a.ok).collect::<Vec<_>>();
-    let hard = failed.iter().filter(|a| a.severity == "fail").collect::<Vec<_>>();
-    let partial = failed.iter().filter(|a| a.severity != "fail").collect::<Vec<_>>();
+    let hard = failed
+        .iter()
+        .filter(|a| a.severity == "fail")
+        .collect::<Vec<_>>();
+    let partial = failed
+        .iter()
+        .filter(|a| a.severity != "fail")
+        .collect::<Vec<_>>();
     for a in hard.iter().chain(partial.iter()).take(10) {
         reasons.push(format!(
             "{}: {} ({} {} {})",
@@ -1669,7 +1722,13 @@ fn summarize(name: &str, png: &Value, sim: &Value, combo: &Value) -> String {
     if let Some(reasons) = combo["reasons"].as_array() {
         if !reasons.is_empty() {
             out.push_str(" | ");
-            out.push_str(&reasons.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; "));
+            out.push_str(
+                &reasons
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
         }
     }
     out
@@ -1869,7 +1928,11 @@ mod tests {
         });
 
         let assertions = render_telemetry_assertions(&state);
-        let failed = assertions.iter().filter(|a| !a.ok).map(|a| a.id.as_str()).collect::<Vec<_>>();
+        let failed = assertions
+            .iter()
+            .filter(|a| !a.ok)
+            .map(|a| a.id.as_str())
+            .collect::<Vec<_>>();
 
         assert!(failed.contains(&"render.frame_spikes"));
         assert!(failed.contains(&"render.smooth_mesh_builds"));
@@ -1906,7 +1969,10 @@ mod tests {
         assert!(
             assertions.iter().all(|a| a.ok),
             "{:?}",
-            assertions.iter().map(|a| (&a.id, a.ok, &a.message)).collect::<Vec<_>>()
+            assertions
+                .iter()
+                .map(|a| (&a.id, a.ok, &a.message))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1928,9 +1994,16 @@ mod tests {
 
         let assertions = eco_cycle_assertions(&state);
 
-        assert!(assertions.iter().any(|a| a.id == "eco.clouds_exist.metric_present"));
         assert!(
-            assertions.iter().filter(|a| !a.ok).all(|a| a.severity == "partial"),
+            assertions
+                .iter()
+                .any(|a| a.id == "eco.clouds_exist.metric_present")
+        );
+        assert!(
+            assertions
+                .iter()
+                .filter(|a| !a.ok)
+                .all(|a| a.severity == "partial"),
             "missing metrics should not be hard failures"
         );
     }
@@ -1963,7 +2036,11 @@ mod tests {
         let state = json!({"role": "client_online", "network_command": {"move_world_sent": 0}});
         let assertions = network_command_assertions(&state);
         let failed: Vec<&Assertion> = assertions.iter().filter(|a| !a.ok).collect();
-        assert!(failed.iter().any(|a| a.id == "network.move_world_sent_advances"));
+        assert!(
+            failed
+                .iter()
+                .any(|a| a.id == "network.move_world_sent_advances")
+        );
         assert!(failed.iter().all(|a| a.severity == "fail"));
     }
 
@@ -1978,9 +2055,21 @@ mod tests {
             }
         });
         let assertions = network_connection_assertions(&stale);
-        assert!(assertions.iter().any(|a| a.id == "network.transport_connected" && a.ok));
-        assert!(assertions.iter().any(|a| a.id == "network.ping_available" && a.ok));
-        assert!(assertions.iter().any(|a| a.id == "network.pong_recent" && !a.ok));
+        assert!(
+            assertions
+                .iter()
+                .any(|a| a.id == "network.transport_connected" && a.ok)
+        );
+        assert!(
+            assertions
+                .iter()
+                .any(|a| a.id == "network.ping_available" && a.ok)
+        );
+        assert!(
+            assertions
+                .iter()
+                .any(|a| a.id == "network.pong_recent" && !a.ok)
+        );
 
         let healthy = json!({
             "role": "client_online",
@@ -2032,7 +2121,10 @@ mod tests {
             &sim,
             Some(&state),
             None,
-            &StderrScan { files_scanned: 1, ..Default::default() },
+            &StderrScan {
+                files_scanned: 1,
+                ..Default::default()
+            },
             &dir,
         );
         let started = assertions.iter().find(|a| a.id == "sim.started").unwrap();
@@ -2040,7 +2132,11 @@ mod tests {
 
         assert!(started.ok, "{}: {}", started.id, started.message);
         assert!(complete.ok, "{}: {}", complete.id, complete.message);
-        assert!(!assertions.iter().any(|a| a.id == "gameplay.nation_progress"));
+        assert!(
+            !assertions
+                .iter()
+                .any(|a| a.id == "gameplay.nation_progress")
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -2054,8 +2150,10 @@ mod tests {
         let assertions =
             visual_luma_flicker_assertions(&png, &prev_png, Some(&state), Some(&prev_state));
 
-        let flicker =
-            assertions.iter().find(|a| a.id == "visual.luma_flicker_between_iters").unwrap();
+        let flicker = assertions
+            .iter()
+            .find(|a| a.id == "visual.luma_flicker_between_iters")
+            .unwrap();
         assert!(!flicker.ok);
         assert_eq!(flicker.severity, "partial");
         assert_eq!(flicker.actual, json!(56.5));
@@ -2214,7 +2312,10 @@ mod tests {
             "eco.plants_support_small_animals",
             "eco.small_animals_support_wildlife",
         ] {
-            let a = assertions.iter().find(|a| a.id == id).expect("assertion missing");
+            let a = assertions
+                .iter()
+                .find(|a| a.id == id)
+                .expect("assertion missing");
             assert!(a.ok, "{id} should pass with existing animals");
         }
     }
@@ -2237,7 +2338,10 @@ mod tests {
             "eco.plants_support_small_animals",
             "eco.small_animals_support_wildlife",
         ] {
-            let a = assertions.iter().find(|a| a.id == id).expect("assertion missing");
+            let a = assertions
+                .iter()
+                .find(|a| a.id == id)
+                .expect("assertion missing");
             assert!(!a.ok, "{id} should fail without born or current animals");
             assert_eq!(a.severity, "partial");
         }
@@ -2411,8 +2515,11 @@ mod tests {
         let root = temp_root("nature_current_errors");
         let iter_dir = root.join("screenshots/iter_01");
         fs::create_dir_all(&iter_dir).unwrap();
-        fs::write(iter_dir.join("error_logs.txt"), "old-preview.log: ERROR stale failure\n")
-            .unwrap();
+        fs::write(
+            iter_dir.join("error_logs.txt"),
+            "old-preview.log: ERROR stale failure\n",
+        )
+        .unwrap();
         let state = json!({
             "nature": {
                 "tick": 2,

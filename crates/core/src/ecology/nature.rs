@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::eco_cycle::EcoCycle;
+use crate::ecology::EcoCycle;
 
 /// Compact, presentation-independent ecology totals for replication and health checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

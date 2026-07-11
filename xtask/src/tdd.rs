@@ -219,7 +219,10 @@ fn command_lines(root: &Path, program: &str, args: &[&str]) -> Result<Vec<String
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).lines().map(|s| s.replace('\\', "/")).collect())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|s| s.replace('\\', "/"))
+        .collect())
 }
 
 fn wildcard_match(pattern: &str, value: &str) -> bool {
@@ -234,7 +237,9 @@ pub fn run_step(root: &Path, title: &str, cmd: &[&str]) -> Result<()> {
     println!();
     println!(">>> {title}");
     println!("    {}", cmd.join(" "));
-    let (program, args) = cmd.split_first().ok_or_else(|| "empty command".to_string())?;
+    let (program, args) = cmd
+        .split_first()
+        .ok_or_else(|| "empty command".to_string())?;
     let status = workspace_command(root, program)
         .args(args)
         .status()
