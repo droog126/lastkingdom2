@@ -5,3 +5,8 @@
 - 观察不得改变模拟结果。
 - 导出足够的证据来解释云、水、植物、动物和守恒行为。
 - 将工件编排保留在 `xtask` 中；服务器只暴露事实。
+
+## 当前锚点
+
+- `NatureObservation` 从 `NatureSnapshot` 派生 tick、云、降雨、可用水、植物和动物摘要。
+- 观察插件只在 `PublishReport` 阶段更新 `LatestNatureObservation`，重复 tick 不重复导出。

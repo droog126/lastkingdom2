@@ -6,3 +6,7 @@
 - 支持云和粗略环境场以及有机体。
 - 明确标识和移除语义。
 
+## 当前锚点
+
+- `ReplicationBatch` 从 `TickReport` 投影快照和自然事件，不拥有第二份生态状态。
+- 当前插件维护 `LatestNatureReplication` 并跳过相同 tick；真正的网络发送仍属于现有服务器线路。

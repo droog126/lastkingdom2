@@ -114,7 +114,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     },
     EcologyCatalogEntry {
         kind: EcologyKind::Wildlife(WildlifeKind::Deer),
-        model_path: "kenney/curated/animals/kenney_deer.glb",
+        model_path: "animals/deer.glb",
         visual_scale: Vec3::splat(0.85),
         produced_resource: None,
         preferred_biome: Some(Biome::Jungle),
@@ -122,7 +122,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     },
     EcologyCatalogEntry {
         kind: EcologyKind::Wildlife(WildlifeKind::Fox),
-        model_path: "kenney/curated/animals/kenney_fox.glb",
+        model_path: "animals/fox.glb",
         visual_scale: Vec3::splat(0.80),
         produced_resource: None,
         preferred_biome: Some(Biome::Tundra),
@@ -194,7 +194,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     },
     EcologyCatalogEntry {
         kind: EcologyKind::Tree(TreeKind::Palm),
-        model_path: "kenney/curated/coastal_and_pirate/kenney_palm_straight.glb",
+        model_path: "procedural/pretty/palm.glb",
         visual_scale: Vec3::splat(1.0),
         produced_resource: Some(ResourceKind::Wood),
         preferred_biome: Some(Biome::Desert),
@@ -274,7 +274,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     },
     EcologyCatalogEntry {
         kind: EcologyKind::ResourceDrop(ResourceDropKind::Wood),
-        model_path: "kenney/curated/survival_props/kenney_resource_wood.glb",
+        model_path: "procedural/pretty/resource_wood.glb",
         visual_scale: Vec3::splat(0.8),
         produced_resource: Some(ResourceKind::Wood),
         preferred_biome: None,
@@ -282,7 +282,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
     },
     EcologyCatalogEntry {
         kind: EcologyKind::ResourceDrop(ResourceDropKind::Stone),
-        model_path: "kenney/curated/survival_props/kenney_resource_stone.glb",
+        model_path: "procedural/pretty/resource_stone.glb",
         visual_scale: Vec3::splat(0.8),
         produced_resource: Some(ResourceKind::Stone),
         preferred_biome: None,

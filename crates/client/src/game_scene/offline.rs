@@ -7,7 +7,7 @@ use lk2_core::constant;
 use lk2_core::ecology::EcoCycle;
 use lk2_core::farming::FarmingState;
 use lk2_core::resource::GlobalResourcePool;
-use lk2_core::simulation::{step_world, NatureSnapshot, WorldInput};
+use lk2_core::simulation::{NatureSnapshot, WorldInput, step_world};
 
 use crate::nature::NatureSnapshotBuffer;
 

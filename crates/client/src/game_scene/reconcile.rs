@@ -10,9 +10,10 @@ use lk2_core::ecology::{ResourceNodeKind, WildlifeKind};
 use super::offline::OfflineNature;
 use super::state::{BerryBush, PlantNode, Rabbit, RabbitAi, WildlifeAnimal, Wolf, WolfAi};
 use super::util::{
-    spawn_asset, BEAR_PATH, BERRY_PATH, CRYSTAL_BLUE_PATH, CRYSTAL_PINK_PATH, DEER_PATH,
-    FLOWER_PATH, FOX_PATH, MUSHROOM_BROWN_PATH, MUSHROOM_RED_PATH, RABBIT_PATH, ROCK_MID_PATH,
-    ROCK_PATH, WOLF_PATH,
+    BEAR_PATH, BERRY_PATH, CRYSTAL_BLUE_PATH, CRYSTAL_PINK_PATH, DEER_FAWN_PATH, DEER_PATH,
+    FLOWER_PATH, FOX_PATH, FOX_SILVER_PATH, MUSHROOM_BROWN_PATH, MUSHROOM_RED_PATH,
+    RABBIT_BROWN_PATH, RABBIT_PATH, ROCK_MID_PATH, ROCK_PATH, WOLF_PATH, spawn_asset,
+    wildlife_physics_components,
 };
 
 pub fn reconcile_nature_entities(
@@ -92,15 +93,21 @@ pub fn reconcile_nature_entities(
         if existing_rabbit_ids.contains(&rabbit.id) {
             continue;
         }
+        let rabbit_path = if rabbit.id % 3 == 0 {
+            RABBIT_BROWN_PATH
+        } else {
+            RABBIT_PATH
+        };
         spawn_asset(
             &mut commands,
             &asset_server,
-            RABBIT_PATH,
+            rabbit_path,
             Vec3::new(rabbit.x, 0.0, rabbit.z),
-            0.0,
+            0.62,
             -0.6,
             "berry_spawned_rabbit",
         )
+        .insert(wildlife_physics_components())
         .insert((
             Rabbit {
                 id: rabbit.id,
@@ -153,6 +160,7 @@ pub fn reconcile_nature_entities(
             0.4,
             "rabbit_hunting_wolf",
         )
+        .insert(wildlife_physics_components())
         .insert((
             Wolf {
                 id: wolf.id,
@@ -199,12 +207,13 @@ pub fn reconcile_nature_entities(
         spawn_asset(
             &mut commands,
             &asset_server,
-            wildlife_path(kind),
+            wildlife_path(kind, animal.id),
             Vec3::new(animal.x, 0.0, animal.z),
             0.62,
             0.0,
             "ecology_wildlife",
         )
+        .insert(wildlife_physics_components())
         .insert(WildlifeAnimal { id: animal.id });
     }
 
@@ -245,10 +254,22 @@ pub fn reconcile_nature_entities(
     }
 }
 
-fn wildlife_path(kind: WildlifeKind) -> &'static str {
+fn wildlife_path(kind: WildlifeKind, id: u32) -> &'static str {
     match kind {
-        WildlifeKind::Deer => DEER_PATH,
-        WildlifeKind::Fox => FOX_PATH,
+        WildlifeKind::Deer => {
+            if id % 4 == 0 {
+                DEER_FAWN_PATH
+            } else {
+                DEER_PATH
+            }
+        }
+        WildlifeKind::Fox => {
+            if id % 3 == 0 {
+                FOX_SILVER_PATH
+            } else {
+                FOX_PATH
+            }
+        }
         WildlifeKind::Bear => BEAR_PATH,
         WildlifeKind::Wolf | WildlifeKind::Rabbit => WOLF_PATH,
     }

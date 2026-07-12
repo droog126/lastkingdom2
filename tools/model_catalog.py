@@ -26,7 +26,6 @@ GENERATORS: tuple[GeneratorSpec, ...] = (
             "monster_treant",
             "monster_aether_wraith",
             "cloud_puff",
-            "tree",
             "rock_dark",
             "rock_mid",
             "rock_moss",
@@ -57,6 +56,10 @@ GENERATORS: tuple[GeneratorSpec, ...] = (
         (
             "granular_round_tree",
             "granular_pine_tree",
+            "forest_stone_spire",
+            "granular_birch_tree",
+            "granular_autumn_tree",
+            "granular_willow_tree",
             "granular_wildflowers",
             "granular_reed_bank",
         ),
@@ -76,6 +79,9 @@ GENERATORS: tuple[GeneratorSpec, ...] = (
             "cart",
             "tombstone",
             "haystack",
+            "palm",
+            "resource_wood",
+            "resource_stone",
         ),
     ),
     GeneratorSpec(
@@ -161,7 +167,18 @@ GENERATORS: tuple[GeneratorSpec, ...] = (
         "build_animals_blender.py",
         "animals",
         "animals",
-        ("pig", "sheep", "cow", "chicken", "rabbit"),
+        (
+            "pig",
+            "sheep",
+            "cow",
+            "chicken",
+            "rabbit",
+            "rabbit_brown",
+            "deer",
+            "deer_fawn",
+            "fox",
+            "fox_silver",
+        ),
     ),
 )
 
@@ -185,9 +202,12 @@ PRETTY_GROUPS: dict[str, tuple[str, ...]] = {
         "cloud_puff",
         "sokpop_gatherer",
         "sokpop_tree",
-        "tree",
         "granular_round_tree",
         "granular_pine_tree",
+        "forest_stone_spire",
+        "granular_birch_tree",
+        "granular_autumn_tree",
+        "granular_willow_tree",
         "granular_wildflowers",
         "granular_reed_bank",
         "fallen_stick",
@@ -256,6 +276,9 @@ PRETTY_GROUPS: dict[str, tuple[str, ...]] = {
         "cauldron",
         "cooking_station",
         "spit_roast",
+        "palm",
+        "resource_wood",
+        "resource_stone",
     ),
     "weapons": (
         "sword",
@@ -298,9 +321,12 @@ _scale("pretty", "height", 2.0, "monster_aether_wraith", grounded=False)
 _scale("pretty", "max_extent", 4.0, "cloud_puff", grounded=False, height_meters=2.0)
 _scale("pretty", "height", 1.7, "sokpop_gatherer", "villager")
 _scale("pretty", "height", 5.0, "sokpop_tree")
-_scale("pretty", "height", 4.8, "tree")
 _scale("pretty", "height", 5.5, "granular_round_tree")
 _scale("pretty", "height", 6.5, "granular_pine_tree")
+_scale("pretty", "height", 7.0, "forest_stone_spire")
+_scale("pretty", "height", 5.4, "granular_birch_tree")
+_scale("pretty", "height", 5.2, "granular_autumn_tree")
+_scale("pretty", "height", 5.0, "granular_willow_tree")
 _scale("pretty", "height", 0.65, "granular_wildflowers")
 _scale("pretty", "height", 1.4, "granular_reed_bank")
 _scale("pretty", "max_extent", 1.2, "fallen_stick", height_meters=0.25)
@@ -352,6 +378,9 @@ _scale("pretty", "max_extent", 3.0, "cart", height_meters=1.8)
 _scale("pretty", "height", 1.5, "tombstone")
 _scale("pretty", "height", 2.0, "haystack", "cooking_station")
 _scale("pretty", "height", 1.8, "spit_roast")
+_scale("pretty", "height", 4.5, "palm")
+_scale("pretty", "max_extent", 1.0, "resource_wood")
+_scale("pretty", "max_extent", 0.8, "resource_stone")
 _scale("pretty", "max_extent", 2.2, "wolf", height_meters=1.2)
 _scale("pretty", "height", 1.7, "bear")
 
@@ -372,6 +401,11 @@ _scale("animals", "height", 1.0, "sheep")
 _scale("animals", "height", 1.5, "cow")
 _scale("animals", "height", 0.7, "chicken")
 _scale("animals", "height", 0.6, "rabbit")
+_scale("animals", "height", 0.6, "rabbit_brown")
+_scale("animals", "height", 1.4, "deer")
+_scale("animals", "height", 1.15, "deer_fawn")
+_scale("animals", "height", 0.9, "fox")
+_scale("animals", "height", 0.9, "fox_silver")
 
 
 def _asset_index() -> dict[tuple[str, str], GeneratorSpec]:

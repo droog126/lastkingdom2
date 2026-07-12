@@ -1,12 +1,3 @@
-# rustfmt configuration — stable channel only.
-#
-# `wrap_comments` and `comment_width` are unstable rustfmt features and would
-# force every developer to opt into nightly; keep them out of the shared
-# config. If you really need comment wrapping, run `cargo +nightly fmt`.
-#
-# `struct_lit_width` and `chain_width` default to `max_width` and only need to
-# be set explicitly when you want them tighter. Setting them to the same value
-# triggers spurious "clamped to max_width" warnings, so we leave them implicit.
 max_width = 100
 tab_spaces = 4
 use_field_init_shorthand = true

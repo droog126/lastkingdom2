@@ -392,7 +392,11 @@ def make_house_small() -> None:
     roof = glow_mat("house_roof", (0.85, 0.25, 0.25), glow_strength=0.5, roughness=0.7)
     roof_dark = glow_mat("house_roof_dark", (0.55, 0.15, 0.15), glow_strength=0.3, roughness=0.7)
     door = glow_mat("house_door", (0.45, 0.25, 0.12), glow_strength=0.3, roughness=0.85)
+    timber = glow_mat("house_timber", (0.30, 0.16, 0.08), glow_strength=0.2, roughness=0.9)
     window_glow = glow_mat("house_window", (1.0, 0.85, 0.40), glow_strength=1.2, roughness=0.4)
+    window_cross = mat("house_window_x", (0.30, 0.18, 0.10), roughness=0.85)
+    flower_red = glow_mat("house_flower_red", (0.95, 0.25, 0.30), glow_strength=0.5, roughness=0.7)
+    flower_yellow = glow_mat("house_flower_yellow", (1.0, 0.72, 0.20), glow_strength=0.5, roughness=0.7)
     chimney = glow_mat("house_chimney", (0.45, 0.40, 0.40), glow_strength=0.2, roughness=0.95)
     smoke = mat("house_smoke", (0.85, 0.85, 0.90), roughness=0.95, alpha=0.55)
 
@@ -400,19 +404,31 @@ def make_house_small() -> None:
     cube("body_shadow", (0.0, 0.85, -0.35), (1.60, 1.70, 0.30), wall_shadow)
 
     cube("door", (0.0, 0.45, 0.66), (0.30, 0.85, 0.04), door)
+    cube("door_canopy", (0.0, 0.96, 0.72), (0.48, 0.08, 0.22), roof_dark)
     uv_sphere("door_handle", (0.10, 0.50, 0.69), (0.04, 0.04, 0.04),
               glow_mat("door_handle", (0.95, 0.80, 0.30), glow_strength=0.7), 8, 5)
 
     cube("window_l", (-0.50, 1.05, 0.66), (0.32, 0.32, 0.04), window_glow)
     cube("window_r", (0.50, 1.05, 0.66), (0.32, 0.32, 0.04), window_glow)
-    cube("window_cross_l_h", (-0.50, 1.05, 0.69), (0.32, 0.04, 0.02),
-         mat("house_window_x", (0.30, 0.18, 0.10), roughness=0.85))
-    cube("window_cross_l_v", (-0.50, 1.05, 0.69), (0.04, 0.32, 0.02),
-         mat("house_window_x", (0.30, 0.18, 0.10), roughness=0.85))
-    cube("window_cross_r_h", (0.50, 1.05, 0.69), (0.32, 0.04, 0.02),
-         mat("house_window_x", (0.30, 0.18, 0.10), roughness=0.85))
-    cube("window_cross_r_v", (0.50, 1.05, 0.69), (0.04, 0.32, 0.02),
-         mat("house_window_x", (0.30, 0.18, 0.10), roughness=0.85))
+    cube("window_cross_l_h", (-0.50, 1.05, 0.69), (0.32, 0.04, 0.02), window_cross)
+    cube("window_cross_l_v", (-0.50, 1.05, 0.69), (0.04, 0.32, 0.02), window_cross)
+    cube("window_cross_r_h", (0.50, 1.05, 0.69), (0.32, 0.04, 0.02), window_cross)
+    cube("window_cross_r_v", (0.50, 1.05, 0.69), (0.04, 0.32, 0.02), window_cross)
+
+    for x in (-0.72, 0.72):
+        cube(f"front_post_{x}", (x, 0.95, 0.70), (0.10, 1.60, 0.08), timber)
+    cube("front_beam", (0.0, 1.70, 0.70), (1.50, 0.10, 0.08), timber)
+    for x in (-0.50, 0.50):
+        cube(f"window_box_{x}", (x, 0.83, 0.73), (0.42, 0.08, 0.12), timber)
+        for flower_index, flower_x in enumerate((x - 0.12, x + 0.12)):
+            uv_sphere(
+                f"window_flower_{flower_x}",
+                (flower_x, 0.93, 0.75),
+                (0.055, 0.055, 0.055),
+                (flower_red, flower_yellow)[flower_index],
+                8,
+                5,
+            )
 
     cone("roof_main", (0.0, 2.20, 0.0), 1.10, 0.0, 1.00, roof, vertices=4)
     cube("roof_skirting", (0.0, 1.78, 0.0), (1.70, 0.10, 1.40), roof_dark)
@@ -593,6 +609,8 @@ def make_barn() -> None:
     roof = glow_mat("barn_roof", (0.30, 0.30, 0.30), glow_strength=0.2, roughness=0.85)
     trim = glow_mat("barn_trim", (0.95, 0.95, 0.90), glow_strength=0.7, roughness=0.6)
     door = glow_mat("barn_door", (0.55, 0.32, 0.18), glow_strength=0.3, roughness=0.85)
+    timber = glow_mat("barn_timber", (0.28, 0.14, 0.07), glow_strength=0.2, roughness=0.9)
+    window = glow_mat("barn_window", (0.95, 0.72, 0.30), glow_strength=0.8, roughness=0.5)
     hay = glow_mat("barn_hay", (0.95, 0.80, 0.35), glow_strength=0.5, roughness=0.9)
 
     cube("body", (0.0, 1.00, 0.0), (2.20, 2.00, 1.60), wall)
@@ -611,6 +629,15 @@ def make_barn() -> None:
     cube("door_x", (0.0, 1.50, 0.84), (1.30, 0.06, 0.02), trim)
     cube("door_y", (0.0, 0.75, 0.84), (1.30, 0.06, 0.02), trim)
     cube("door_z", (0.0, 0.30, 0.84), (0.06, 0.80, 0.02), trim)
+
+    for x in (-0.88, 0.88):
+        cube(f"front_post_{x}", (x, 1.00, 0.84), (0.10, 1.90, 0.08), timber)
+    cube("front_beam", (0.0, 1.86, 0.84), (1.90, 0.10, 0.08), timber)
+    for x in (-0.78, 0.78):
+        cube(f"window_{x}", (x, 1.38, 0.84), (0.30, 0.30, 0.04), window)
+        cube(f"window_cross_h_{x}", (x, 1.38, 0.87), (0.30, 0.04, 0.02), timber)
+        cube(f"window_cross_v_{x}", (x, 1.38, 0.87), (0.04, 0.30, 0.02), timber)
+    ico_sphere("hay_emblem", (0.0, 1.88, 0.87), (0.13, 0.13, 0.13), hay, subdivisions=1)
 
     for x, z, sx, sz, sy in [
         (0.50, -0.55, 0.32, 0.22, 0.18), (-0.40, -0.50, 0.28, 0.20, 0.18),

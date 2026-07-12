@@ -6,9 +6,9 @@ pub mod constant;
 pub mod content;
 pub mod diagnostics;
 pub mod ecology;
-pub mod farming;
 #[cfg(feature = "experimental-gameplay")]
 pub mod equipment;
+pub mod farming;
 pub mod legendary;
 pub mod match_state;
 #[cfg(feature = "experimental-gameplay")]

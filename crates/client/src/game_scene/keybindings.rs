@@ -12,6 +12,8 @@ pub enum GameAction {
     MoveRight,
     Jump,
     Attack,
+    WeaponSkill,
+    Interact,
     ToggleCamera,
     CameraTurnLeft,
     CameraTurnRight,
@@ -25,13 +27,15 @@ pub enum GameAction {
 }
 
 impl GameAction {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 18] = [
         Self::MoveForward,
         Self::MoveBackward,
         Self::MoveLeft,
         Self::MoveRight,
         Self::Jump,
         Self::Attack,
+        Self::WeaponSkill,
+        Self::Interact,
         Self::ToggleCamera,
         Self::CameraTurnLeft,
         Self::CameraTurnRight,
@@ -62,6 +66,9 @@ impl GameAction {
             Self::PlantCrop => "种植作物",
             Self::HarvestCrop => "收获作物",
             Self::OpenFarming => "打开农田",
+            Self::WeaponSkill => "\u{6b66}\u{5668}\u{6280}\u{80fd}",
+            Self::Interact => "\u{4ea4}\u{4e92}",
+            _ => "\u{6280}\u{80fd}/\u{4ea4}\u{4e92}",
         }
     }
 }
@@ -152,6 +159,8 @@ impl Default for KeyBindings {
         bindings.insert(GameAction::MoveRight, Binding::Key(KeyCode::KeyD));
         bindings.insert(GameAction::Jump, Binding::Key(KeyCode::Space));
         bindings.insert(GameAction::Attack, Binding::Mouse(MouseButton::Left));
+        bindings.insert(GameAction::WeaponSkill, Binding::Mouse(MouseButton::Right));
+        bindings.insert(GameAction::Interact, Binding::Key(KeyCode::KeyF));
         bindings.insert(GameAction::ToggleCamera, Binding::Key(KeyCode::KeyC));
         bindings.insert(GameAction::CameraTurnLeft, Binding::Key(KeyCode::KeyQ));
         bindings.insert(GameAction::CameraTurnRight, Binding::Key(KeyCode::KeyE));

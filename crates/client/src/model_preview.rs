@@ -29,6 +29,10 @@ use bevy::pbr::{
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::render::{
+    RenderPlugin,
+    settings::{Backends, WgpuSettings},
+};
 use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, PrimaryWindow, WindowResolution};
 use bevy_world_serialization::WorldAsset;
@@ -41,7 +45,11 @@ const FEATURED_MODELS: &[&str] = &[
     "procedural/pretty/wolf.glb",
     "procedural/pretty/hoplite_ender_dragon.glb",
     "procedural/pretty/sokpop_tree.glb",
+    "procedural/pretty/granular_round_tree.glb",
     "procedural/pretty/granular_pine_tree.glb",
+    "procedural/pretty/granular_birch_tree.glb",
+    "procedural/pretty/granular_autumn_tree.glb",
+    "procedural/pretty/granular_willow_tree.glb",
     "procedural/pretty/granular_wildflowers.glb",
     "procedural/pretty/ground_patch.glb",
     "procedural/pretty/house_small.glb",
@@ -174,6 +182,14 @@ pub fn run_model_preview() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .set(RenderPlugin {
+                render_creation: WgpuSettings {
+                    backends: Some(Backends::VULKAN),
+                    ..default()
+                }
+                .into(),
+                ..default()
+            })
             .set(AssetPlugin {
                 file_path: asset_root.to_string_lossy().into_owned(),
                 ..default()

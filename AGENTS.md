@@ -9,6 +9,13 @@
 - 当实现与预期行为不一致时，报告冲突，而不是自动重写文档以匹配可能的 bug。
 - 仅更新直接受当前更改影响的活动文档和技能契约。将 `docs/archive/` 和导入的设计笔记视为历史资料，除非活动文档指向它们。
 
+## 当前实现锚点
+
+- 自然世界的统一入口是 `lk2_core::simulation::step_world`；适配器不得直接创建第二套生态规则。
+- 服务器自然链路按 `authority -> replication/observation/persistence` 投影报告；`NatureServerProjectionPlugin` 是现有主服务器接线。
+- `xtask` 的状态工件和机器断言是健康结论的事实来源；PNG 只能证明表现，不能覆盖模拟失败。
+- 仅改 `AGENTS.md` 或技能契约时运行 `just audit-skills`；只有实际代码变化才选择 Cargo 验证。
+
 ## 技能选择
 
 - 选择最小的充分集合：一个主要技能，以及仅在需要时一个验证伴随技能。

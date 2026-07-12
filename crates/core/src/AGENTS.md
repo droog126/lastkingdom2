@@ -15,3 +15,8 @@
 - 在迁移旧的 `world`、`creature`、`monster`、`ecology` 或 `sim` 行为时，不要引入第二套规则实现。
 - 保持资源核算、确定性、协议兼容性和离线/在线一致性。
 
+## 当前锚点
+
+- `step_world(WorldInput, &mut EcoCycle, &mut GlobalResourcePool) -> TickReport` 是自然模拟的唯一适配入口。
+- `TickReport` 同时携带 `NatureSnapshot` 和事件；`AtmosphereSnapshot`、`HydrologySnapshot` 目前是从 `EcoCycle` 派生的只读摘要。
+- 当前迁移仍由 `EcoCycle::tick` 持有实际规则；新增调用点应复用它，而不是绕过快照和事件边界。

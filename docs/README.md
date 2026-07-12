@@ -30,7 +30,6 @@ precedence when a current document drifts.
 - [Product and architecture vision](design/overview.md)
 - [Developer notes](notes/dev-notes.md)
 - [Blender export notes](notes/document-notes/blender-export-and-character-workflow.md)
-- [Kenney asset ingest](assets/kenney-ingest.md)
 
 ## Proposals
 

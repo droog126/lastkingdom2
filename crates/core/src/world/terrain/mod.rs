@@ -6,7 +6,7 @@ pub use shapes::{
     SubtractShape,
 };
 
-use crate::world::{Biome, BlockType, SEA_LEVEL};
+use crate::world::{Biome, BlockType, SEA_LEVEL, WORLD_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct TerrainContext {
@@ -49,6 +49,36 @@ pub fn hash01(x: i32, y: i32, z: i32, seed: u32) -> f32 {
 
 fn noise3(x: i32, y: i32, z: i32, seed: u32) -> f32 {
     hash01(x, y, z, seed)
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if value >= edge1 { 1.0 } else { 0.0 };
+    }
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn value_noise2(x: f32, z: f32, frequency: f32, seed: u32) -> f32 {
+    let gx = x * frequency;
+    let gz = z * frequency;
+    let x0 = gx.floor() as i32;
+    let z0 = gz.floor() as i32;
+    let tx = gx - x0 as f32;
+    let tz = gz - z0 as f32;
+    let sx = tx * tx * (3.0 - 2.0 * tx);
+    let sz = tz * tz * (3.0 - 2.0 * tz);
+    let a = lerp(hash01(x0, 0, z0, seed), hash01(x0 + 1, 0, z0, seed), sx);
+    let b = lerp(
+        hash01(x0, 0, z0 + 1, seed),
+        hash01(x0 + 1, 0, z0 + 1, seed),
+        sx,
+    );
+    lerp(a, b, sz)
 }
 
 #[derive(Debug, Clone)]
@@ -266,11 +296,151 @@ impl Default for HeightmapModule {
             frequency_big: 1.0 / 8.0,
             amplitude_detail: 4.0,
             frequency_detail: 1.0,
-            weight: 1.0,
+            // Base terrain must run after decorators such as water and caves.
+            weight: 0.1,
             biome_bias_desert: -2.0,
             biome_bias_jungle: 0.0,
             biome_bias_tundra: 3.0,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LandformModule {
+    pub name: String,
+    pub seed: u64,
+    pub base_height: f32,
+    pub land_amplitude: f32,
+    pub detail_amplitude: f32,
+    pub mountain_height: f32,
+    pub ocean_depth: f32,
+    pub river_width: f32,
+    pub world_size: i32,
+    pub weight: f32,
+}
+
+impl Default for LandformModule {
+    fn default() -> Self {
+        Self {
+            name: "landform".into(),
+            seed: 0xDEAD_BEEF,
+            base_height: SEA_LEVEL as f32 + 1.0,
+            land_amplitude: 12.0,
+            detail_amplitude: 4.0,
+            mountain_height: 48.0,
+            ocean_depth: 7.0,
+            river_width: 3.5,
+            world_size: WORLD_SIZE,
+            weight: 0.1,
+        }
+    }
+}
+
+impl LandformModule {
+    pub fn ocean_factor(&self, x: i32, z: i32) -> f32 {
+        let continental = value_noise2(x as f32, z as f32, 0.028, (self.seed ^ 0xC011_0CEA) as u32);
+        let broad_ocean = 1.0 - smoothstep(0.23, 0.40, continental);
+
+        let edge_distance = x
+            .min(z)
+            .min(self.world_size - 1 - x)
+            .min(self.world_size - 1 - z);
+        let edge_ocean = if edge_distance >= 0 {
+            1.0 - smoothstep(4.0, 14.0, edge_distance as f32)
+        } else {
+            0.0
+        };
+        broad_ocean.max(edge_ocean)
+    }
+
+    pub fn river_factor(&self, x: i32, z: i32) -> f32 {
+        let phase =
+            value_noise2(0.0, 0.0, 1.0, (self.seed ^ 0xA11C_EA5E) as u32) * std::f32::consts::TAU;
+        let wander = (value_noise2(x as f32, z as f32, 0.018, (self.seed ^ 0xBADC_0FFE) as u32)
+            - 0.5)
+            * 14.0;
+        let main_axis =
+            self.world_size as f32 * 0.5 + (x as f32 * 0.060 + phase).sin() * 16.0 + wander;
+        let branch_axis = self.world_size as f32 * 0.5
+            + (z as f32 * 0.052 + phase * 0.7).cos() * 18.0
+            - wander * 0.5;
+        let distance = (z as f32 - main_axis)
+            .abs()
+            .min((x as f32 - branch_axis).abs());
+        (1.0 - distance / self.river_width.max(0.1)).clamp(0.0, 1.0)
+    }
+
+    pub fn mountain_factor(&self, x: i32, z: i32) -> f32 {
+        let phase =
+            value_noise2(0.0, 0.0, 1.0, (self.seed ^ 0x51DE_5EED) as u32) * std::f32::consts::TAU;
+        let ridge_axis = self.world_size as f32 * 0.52
+            + (x as f32 * 0.055 + phase).sin() * 17.0
+            + (value_noise2(x as f32, z as f32, 0.020, (self.seed ^ 0xAA55_11EE) as u32) - 0.5)
+                * 12.0;
+        let ridge = (1.0 - (z as f32 - ridge_axis).abs() / 17.0).clamp(0.0, 1.0);
+        let crags = value_noise2(x as f32, z as f32, 0.042, (self.seed ^ 0xD00D_5EED) as u32);
+        ridge * smoothstep(0.32, 0.72, crags)
+    }
+
+    pub fn surface_at(&self, x: i32, z: i32) -> f32 {
+        let continental = value_noise2(x as f32, z as f32, 0.035, (self.seed ^ 0xC011_1A0D) as u32);
+        let detail = value_noise2(x as f32, z as f32, 0.13, (self.seed ^ 0xD37A_11) as u32);
+        let mountain = self.mountain_factor(x, z);
+        let ocean = self.ocean_factor(x, z);
+        let river = self.river_factor(x, z) * (1.0 - ocean);
+        let land = self.base_height
+            + (continental - 0.5) * self.land_amplitude
+            + (detail - 0.5) * self.detail_amplitude
+            + mountain * self.mountain_height;
+        let seabed = SEA_LEVEL as f32 - 2.0 - ocean * self.ocean_depth;
+        let riverbed = SEA_LEVEL as f32 - 1.0;
+        let river_carve = smoothstep(0.22, 0.82, river);
+        let river_surface = lerp(land, riverbed, river_carve);
+        lerp(river_surface, seabed, ocean)
+    }
+
+    fn surface_block(&self, x: i32, z: i32, surface: f32) -> BlockType {
+        if self.ocean_factor(x, z) > 0.35 || self.river_factor(x, z) > 0.35 {
+            return BlockType::Sand;
+        }
+        if surface > SEA_LEVEL as f32 + 25.0 {
+            return BlockType::Snow;
+        }
+        match Biome::from_xz_infinite(x, z) {
+            Biome::Desert => BlockType::Sand,
+            Biome::Jungle => BlockType::Grass,
+            Biome::Tundra => BlockType::Snow,
+        }
+    }
+}
+
+impl TerrainModule for LandformModule {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn weight(&self) -> f32 {
+        self.weight
+    }
+
+    fn decide(&self, ctx: &mut TerrainContext) -> Option<BlockType> {
+        let surface = ctx
+            .surface_y
+            .unwrap_or_else(|| self.surface_at(ctx.x, ctx.z).round() as i32);
+        if ctx.y >= surface {
+            return Some(BlockType::Air);
+        }
+        if ctx.y == surface - 1 {
+            return Some(self.surface_block(ctx.x, ctx.z, surface as f32));
+        }
+        if ctx.y >= surface - 3 {
+            return Some(BlockType::Dirt);
+        }
+        Some(BlockType::Stone)
+    }
+
+    fn surface_f32(&self, x: i32, z: i32) -> Option<f32> {
+        Some(self.surface_at(x, z))
     }
 }
 
@@ -639,21 +809,25 @@ impl TerrainPipeline {
         if y < self.vertical_min || y >= self.vertical_max {
             return BlockType::Air;
         }
-        let mut ctx = TerrainContext {
-            x,
-            y,
-            z,
-            seed: self.seed,
-            surface_y: None,
-            biome: None,
-        };
-
         let mut sorted: Vec<&Box<dyn TerrainModule>> = self.modules.iter().collect();
         sorted.sort_by(|a, b| {
             b.weight()
                 .partial_cmp(&a.weight())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+        let surface_y = sorted
+            .iter()
+            .find_map(|module| module.surface_f32(x, z))
+            .map(|surface| surface.round() as i32);
+        let mut ctx = TerrainContext {
+            x,
+            y,
+            z,
+            seed: self.seed,
+            surface_y,
+            biome: Some(Biome::from_xz_infinite(x, z)),
+        };
+
         for m in sorted {
             if let Some(block) = m.decide(&mut ctx) {
                 return block;
@@ -684,12 +858,12 @@ pub mod presets {
     use rand::{RngExt, SeedableRng};
 
     pub fn default_preset() -> TerrainPipeline {
-        let mut h = HeightmapModule {
+        let landform = LandformModule {
             seed: 0xDEADBEEF,
+            land_amplitude: 14.0,
+            detail_amplitude: 5.0,
             ..Default::default()
         };
-        h.amplitude_big = 16.0;
-        h.amplitude_detail = 5.0;
 
         let spawn_island = ShapeLayer {
             name: "spawn_island".into(),
@@ -714,7 +888,7 @@ pub mod presets {
                 Box::new(spawn_island),
                 Box::new(SpawnHillModule::default()),
                 Box::new(VillageMarkModule::default()),
-                Box::new(h),
+                Box::new(landform),
                 Box::new(CaveModule::default()),
                 Box::new(WaterFillModule::default()),
                 Box::new(TreeModule::default()),
@@ -770,14 +944,17 @@ pub mod presets {
     }
 
     pub fn mountainous_preset() -> TerrainPipeline {
-        let mut h = HeightmapModule::default();
-        h.amplitude_big = 22.0;
-        h.amplitude_detail = 6.0;
+        let landform = LandformModule {
+            land_amplitude: 18.0,
+            detail_amplitude: 6.0,
+            mountain_height: 56.0,
+            ..Default::default()
+        };
         TerrainPipeline {
             name: "mountainous".into(),
             modules: vec![
                 Box::new(SpawnHillModule::default()),
-                Box::new(h),
+                Box::new(landform),
                 Box::new(CaveModule::default()),
                 Box::new(WaterFillModule::default()),
                 Box::new(TreeModule::default()),
@@ -795,6 +972,7 @@ pub mod presets {
         h.amplitude_big = rng.random_range(5.0..25.0);
         h.amplitude_detail = rng.random_range(1.0..6.0);
         h.seed = rng.random();
+        h.weight = 0.1;
         h.name = format!("heightmap_lold_{}", rng.random_range(0..10000));
 
         let mut cave = CaveModule::default();
@@ -1089,5 +1267,45 @@ mod tests {
         assert_eq!(a.seed, b.seed);
         assert_eq!(a.surface_f32(48, 48), b.surface_f32(48, 48));
         assert_eq!(a.generate(48, 16, 48), b.generate(48, 16, 48));
+    }
+
+    #[test]
+    fn default_landform_contains_ocean_river_and_high_mountains() {
+        let pipeline = presets::default_preset();
+        let landform = LandformModule {
+            seed: 0xDEAD_BEEF,
+            land_amplitude: 14.0,
+            detail_amplitude: 5.0,
+            ..Default::default()
+        };
+        let mut river = None;
+        let mut mountain_peak = SEA_LEVEL as f32;
+
+        for z in 0..WORLD_SIZE {
+            for x in 0..WORLD_SIZE {
+                let surface = pipeline.surface_f32(x, z).expect("landform surface");
+                mountain_peak = mountain_peak.max(surface);
+                if river.is_none()
+                    && landform.river_factor(x, z) > 0.9
+                    && landform.ocean_factor(x, z) < 0.2
+                {
+                    river = Some((x, z));
+                }
+            }
+        }
+
+        assert!(
+            pipeline.surface_f32(0, 0).unwrap() < SEA_LEVEL as f32,
+            "the generated map should have a water-filled ocean edge"
+        );
+        let (river_x, river_z) = river.expect("the generated map should contain a river");
+        assert_eq!(
+            pipeline.generate(river_x, SEA_LEVEL, river_z),
+            BlockType::Water
+        );
+        assert!(
+            mountain_peak > SEA_LEVEL as f32 + 25.0,
+            "the generated map should contain a high mountain, peak={mountain_peak}"
+        );
     }
 }

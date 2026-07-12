@@ -1,6 +1,11 @@
 # Cargo build output
 /target/
 **/target/
+/target-codex/
+/target-codex-hanabi/
+/target-codex-water/
+
+
 
 # Rust formatting backups
 **/*.rs.bk

@@ -116,21 +116,6 @@ def make_cloud_puff() -> None:
     uv_sphere("cloud_top", (0.3, 1.0, -0.2), (0.9, 0.9, 0.9), rim, 8, 5)
     export_glb("cloud_puff")
 
-def make_tree() -> None:
-    clear_scene()
-    bark = mat("tree_bark", (0.45, 0.27, 0.10), roughness=0.95)
-    leaf = mat("tree_leaf", (0.25, 0.55, 0.20), roughness=0.95)
-    leaf_dark = mat("tree_leaf_dark", (0.15, 0.40, 0.15), roughness=0.95)
-
-    cylinder("trunk_low", (0.0, 0.5, 0.0), 0.20, 1.0, bark, vertices=8)
-    cylinder("trunk_high", (0.0, 1.5, 0.0), 0.16, 1.0, bark, vertices=8)
-
-    uv_sphere("canopy_main", (0.0, 2.4, 0.0), (0.55, 0.50, 0.55), leaf, 12, 8)
-    uv_sphere("canopy_l", (-0.40, 2.6, 0.20), (0.45, 0.45, 0.45), leaf_dark, 12, 8)
-    uv_sphere("canopy_r", (0.40, 2.5, -0.20), (0.50, 0.45, 0.50), leaf, 12, 8)
-    uv_sphere("canopy_top", (0.10, 3.0, 0.10), (0.40, 0.40, 0.40), leaf_dark, 12, 8)
-    export_glb("tree")
-
 def make_rock(name: str, color, scale_hint: float = 0.7) -> None:
     clear_scene()
     body = mat(f"rock_{name}", color, roughness=0.95)
@@ -213,7 +198,7 @@ def main() -> None:
     print("=== building pretty/ models ===")
 
 
-    print("[2/9] monsters (5)")
+    print("[1/7] monsters (5)")
     make_monster("monster_snake",
                  base_color=(0.50, 0.85, 0.20), glow_color=(0.70, 1.0, 0.30), kind="snake")
     make_monster("monster_frost_elf",
@@ -225,18 +210,15 @@ def main() -> None:
     make_monster("monster_aether_wraith",
                  base_color=(0.70, 0.30, 0.85), glow_color=(0.95, 0.45, 1.0), kind="aether_wraith")
 
-    print("[3/9] cloud_puff")
+    print("[2/7] cloud_puff")
     make_cloud_puff()
 
-    print("[4/9] tree")
-    make_tree()
-
-    print("[5/9] rocks (3)")
+    print("[3/7] rocks (3)")
     make_rock("dark", (0.42, 0.42, 0.45), scale_hint=1.0)
     make_rock("mid",  (0.58, 0.55, 0.50), scale_hint=0.9)
     make_rock("moss", (0.50, 0.52, 0.48), scale_hint=0.8)
 
-    print("[6/9] flowers (5)")
+    print("[4/7] flowers (5)")
     flower_colors = [
         ("pink",   (0.98, 0.30, 0.55)),
         ("yellow", (1.00, 0.85, 0.20)),
@@ -247,16 +229,16 @@ def main() -> None:
     for idx, (_n, c) in enumerate(flower_colors):
         make_flower(c, idx)
 
-    print("[7/9] hill")
+    print("[5/7] hill")
     make_hill()
 
-    print("[8/9] poi_pillars (4)")
+    print("[6/7] poi_pillars (4)")
     make_poi_pillar("red",  (0.95, 0.20, 0.08), (1.00, 0.55, 0.18))
     make_poi_pillar("cyan", (0.05, 0.48, 0.50), (0.18, 0.90, 0.82))
     make_poi_pillar("pink", (0.72, 0.06, 0.25), (1.00, 0.18, 0.40))
     make_poi_pillar("gold", (0.82, 0.58, 0.14), (1.00, 0.80, 0.22))
 
-    print("[9/9] ground_discs")
+    print("[7/7] ground_discs")
     make_ground_disc("outer", 6.0, 0.20,
                      color=(0.32, 0.48, 0.20), glow=(0.20, 0.40, 0.10))
     make_ground_disc("inner", 2.5, 0.20,
@@ -313,12 +295,6 @@ def build_manifest() -> dict:
                 "approx_size_m": 3.2,
                 "anchor": "center",
                 "replaces": "4 cloud_puff spheres in pretty/mod.rs",
-            },
-            "tree": {
-                "path": "procedural/pretty/tree.glb",
-                "approx_size_m": "3.2 (h)",
-                "anchor": "feet (y=0)",
-                "replaces": "8 trees (2x trunk + 2x canopy cubes) in pretty/mod.rs",
             },
             "rock_dark": {
                 "path": "procedural/pretty/rock_dark.glb",

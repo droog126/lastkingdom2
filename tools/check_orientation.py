@@ -9,7 +9,7 @@ NAMES = [
     ("sokpop_gatherer", "pretty"),
     ("rabbit", "eco"),
     ("monster_snake", "pretty"),
-    ("tree", "pretty"),
+    ("sokpop_tree", "pretty"),
     ("cloud_puff", "pretty"),
 ]
 

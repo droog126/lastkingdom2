@@ -2,19 +2,23 @@
 //! berries, foraging rabbits, idle/squash boss pose, and ground darkening
 //! after rain.
 
+use avian3d::prelude::{LinearVelocity, Rotation};
 use bevy::prelude::*;
 
-use super::creature_ai::{decide_creature_intent, AiContext, AiMood, AiTarget, CreatureAiProfile};
+use super::content_visuals::ExportedContentVisual;
+use super::creature_ai::{AiContext, AiMood, AiTarget, CreatureAiProfile, decide_creature_intent};
 use super::offline::OfflineNature;
 use super::procedural_motion::{
-    heading_yaw, hop_height, idle_drift, orbit_bob, smooth_follow_alpha, wind_scale, wind_sway,
-    ProceduralTreeSway,
+    ProceduralTreeSway, heading_yaw, hop_height, idle_drift, orbit_bob, smooth_follow_alpha,
+    wind_scale, wind_sway,
 };
 use super::procedural_rig::{DragonRig, DragonTargets, QuadrupedRig, QuadrupedTargets};
 use super::state::{
-    BerryBush, BossActor, Cloud, GrassTuft, LivingSceneState, LivingSun, PlayerActor, Rabbit,
-    RabbitAi, RabbitMood, RainDrop, SceneMaterials, SlashFx, Wolf, WolfAi, WolfMood,
+    BerryBush, BossActor, Cloud, GrassTuft, HitImpactFx, HitReaction, LivingSceneState, LivingSun,
+    PlayerActor, ProceduralTerrainSurface, Rabbit, RabbitAi, RabbitMood, RainDrop, SceneMaterials,
+    SlashFx, Wolf, WolfAi, WolfMood,
 };
+use super::stylized_material::StylizedTerrainMaterial;
 use super::util::smoothstep;
 use lk2_core::pvp::Health;
 
@@ -27,6 +31,23 @@ pub fn animate_sun(state: Res<LivingSceneState>, mut suns: Query<&mut Transform,
     let transform = living_sun_transform(state.elapsed);
     for mut sun in &mut suns {
         *sun = transform;
+    }
+}
+
+pub fn animate_exported_content_visuals(
+    time: Res<Time>,
+    mut visuals: Query<(&ExportedContentVisual, &mut Transform)>,
+) {
+    for (visual, mut transform) in &mut visuals {
+        transform.rotation = Quat::from_rotation_y(
+            time.elapsed_secs()
+                * if visual.status == lk2_core::content::ContentStatus::Planned {
+                    0.12
+                } else {
+                    0.08
+                }
+                + visual.phase * 0.01,
+        );
     }
 }
 
@@ -171,10 +192,17 @@ pub fn animate_rabbits(
     time: Res<Time>,
     state: Res<LivingSceneState>,
     nature: Res<OfflineNature>,
+    terrain: Option<Res<ProceduralTerrainSurface>>,
     players: Query<&Transform, (With<PlayerActor>, Without<Rabbit>)>,
     grass: Query<&Transform, (With<GrassTuft>, Without<PlayerActor>, Without<Rabbit>)>,
     mut rabbits: Query<
-        (&Rabbit, &mut RabbitAi, &mut Transform),
+        (
+            &Rabbit,
+            &mut RabbitAi,
+            &mut Transform,
+            &mut LinearVelocity,
+            &mut Rotation,
+        ),
         (Without<PlayerActor>, Without<GrassTuft>),
     >,
 ) {
@@ -197,7 +225,7 @@ pub fn animate_rabbits(
         })
     }));
 
-    for (rabbit, mut ai, mut transform) in &mut rabbits {
+    for (rabbit, mut ai, mut transform, mut velocity, mut rotation) in &mut rabbits {
         let Some(snapshot) = nature
             .snapshot
             .detailed_ecology
@@ -206,6 +234,7 @@ pub fn animate_rabbits(
             .find(|snapshot| snapshot.id == rabbit.id)
         else {
             transform.scale = Vec3::ZERO;
+            velocity.0 = Vec3::ZERO;
             continue;
         };
         let authoritative_pos = Vec3::new(snapshot.x, 0.0, snapshot.z);
@@ -234,7 +263,8 @@ pub fn animate_rabbits(
             RabbitMood::Flee => ai.target,
         };
         let alpha = smooth_follow_alpha(dt, speed);
-        let flat = transform.translation.lerp(desired, alpha);
+        let current_position = transform.translation;
+        let flat = current_position.lerp(desired, alpha);
         let hop = match ai.mood {
             RabbitMood::Graze => hop_height(ai.hop_phase * 2.0, 0.05),
             RabbitMood::Idle => hop_height(ai.hop_phase, 0.06),
@@ -246,7 +276,11 @@ pub fn animate_rabbits(
         let hind_tuck =
             ((virtual_limbs.hind_left.joint.y + virtual_limbs.hind_right.joint.y) * 0.5 - 0.17)
                 .clamp(-0.05, 0.05);
-        transform.translation = Vec3::new(flat.x, hop, flat.z);
+        let ground_y = terrain.as_ref().map_or(0.0, |terrain| {
+            terrain.ground_height(Vec3::new(flat.x, 0.0, flat.z))
+        });
+        let target_position = Vec3::new(flat.x, ground_y + hop, flat.z);
+        velocity.0 = (target_position - current_position) / dt.max(0.0001);
         let base_scale = match ai.mood {
             RabbitMood::Flee => 1.02,
             RabbitMood::Graze => 0.86,
@@ -259,8 +293,8 @@ pub fn animate_rabbits(
                 1.0 + hind_tuck * 0.24,
             );
         let yaw = heading_yaw(
-            transform.translation,
-            desired,
+            current_position,
+            target_position,
             (state.elapsed * 0.7 + rabbit.phase).sin() * 0.45,
         );
         let graze_pitch = if ai.mood == RabbitMood::Graze {
@@ -268,7 +302,7 @@ pub fn animate_rabbits(
         } else {
             0.0
         };
-        transform.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(graze_pitch);
+        rotation.0 = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(graze_pitch);
     }
 }
 
@@ -276,8 +310,18 @@ pub fn animate_wolves(
     time: Res<Time>,
     state: Res<LivingSceneState>,
     nature: Res<OfflineNature>,
+    terrain: Option<Res<ProceduralTerrainSurface>>,
     rabbits: Query<&Transform, (With<Rabbit>, Without<Wolf>)>,
-    mut wolves: Query<(&Wolf, &mut WolfAi, &mut Transform), (With<Wolf>, Without<Rabbit>)>,
+    mut wolves: Query<
+        (
+            &Wolf,
+            &mut WolfAi,
+            &mut Transform,
+            &mut LinearVelocity,
+            &mut Rotation,
+        ),
+        (With<Wolf>, Without<Rabbit>),
+    >,
 ) {
     let prey = rabbits
         .iter()
@@ -287,7 +331,7 @@ pub fn animate_wolves(
         })
         .collect::<Vec<_>>();
 
-    for (wolf, mut ai, mut transform) in &mut wolves {
+    for (wolf, mut ai, mut transform, mut velocity, mut rotation) in &mut wolves {
         let Some(snapshot) = nature
             .snapshot
             .detailed_ecology
@@ -296,6 +340,7 @@ pub fn animate_wolves(
             .find(|snapshot| snapshot.id == wolf.id)
         else {
             transform.scale = Vec3::ZERO;
+            velocity.0 = Vec3::ZERO;
             continue;
         };
         let authoritative_pos = Vec3::new(snapshot.x, 0.0, snapshot.z);
@@ -332,9 +377,8 @@ pub fn animate_wolves(
             WolfMood::Idle => authoritative_pos + idle_drift(state.elapsed, wolf.phase, 0.28, 0.22),
             WolfMood::Chase | WolfMood::Pounce => ai.target,
         };
-        let flat = transform
-            .translation
-            .lerp(desired, smooth_follow_alpha(dt, speed));
+        let current_position = transform.translation;
+        let flat = current_position.lerp(desired, smooth_follow_alpha(dt, speed));
         let lope = match ai.mood {
             WolfMood::Idle => hop_height(ai.run_phase, 0.03),
             WolfMood::Chase => hop_height(ai.run_phase, 0.11),
@@ -343,7 +387,11 @@ pub fn animate_wolves(
         let rig = QuadrupedRig::wolf().solve(wolf_quadruped_targets(ai.run_phase, ai.mood));
         let shoulder_drive =
             ((rig.front_left.joint.y + rig.front_right.joint.y) * 0.5 - 0.28).clamp(-0.08, 0.08);
-        transform.translation = Vec3::new(flat.x, lope, flat.z);
+        let ground_y = terrain.as_ref().map_or(0.0, |terrain| {
+            terrain.ground_height(Vec3::new(flat.x, 0.0, flat.z))
+        });
+        let target_position = Vec3::new(flat.x, ground_y + lope, flat.z);
+        velocity.0 = (target_position - current_position) / dt.max(0.0001);
         transform.scale = Vec3::splat(match ai.mood {
             WolfMood::Idle => 0.62,
             WolfMood::Chase => 0.68,
@@ -354,8 +402,8 @@ pub fn animate_wolves(
             1.0,
         );
         let yaw = heading_yaw(
-            transform.translation,
-            desired,
+            current_position,
+            target_position,
             (state.elapsed * 0.5 + wolf.phase).sin() * 0.35,
         );
         let pounce_pitch = if ai.mood == WolfMood::Pounce {
@@ -363,17 +411,31 @@ pub fn animate_wolves(
         } else {
             0.0
         };
-        transform.rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pounce_pitch);
+        rotation.0 = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pounce_pitch);
     }
 }
 
 pub fn animate_boss(
+    time: Res<Time>,
     state: Res<LivingSceneState>,
-    mut bosses: Query<(&BossActor, &Health, &mut Transform), Without<SlashFx>>,
+    mut bosses: Query<
+        (
+            &BossActor,
+            &Health,
+            &mut Transform,
+            Option<&mut HitReaction>,
+        ),
+        Without<SlashFx>,
+    >,
     mut slashes: Query<(Entity, &mut Transform), With<SlashFx>>,
+    mut impacts: Query<
+        (Entity, &mut Transform, &mut HitImpactFx),
+        (With<HitImpactFx>, Without<BossActor>, Without<SlashFx>),
+    >,
     mut commands: Commands,
 ) {
-    for (boss, health, mut transform) in &mut bosses {
+    let dt = time.delta_secs();
+    for (boss, health, mut transform, reaction) in &mut bosses {
         let idle = state.elapsed * 0.8;
         let _intent = decide_creature_intent(
             CreatureAiProfile::dragon(),
@@ -395,17 +457,39 @@ pub fn animate_boss(
             * 0.25
             - 0.36)
             .clamp(-0.10, 0.10);
-        transform.translation = boss.base + orbit_bob(state.elapsed, 0.0, 0.45, 0.30, 0.12);
-        let hit_pulse = if state.attack_flash > 0.0 { 1.08 } else { 1.0 };
+        let (hit_offset, hit_pulse, hit_tilt) = reaction
+            .map(|mut reaction| {
+                let progress = (reaction.timer / 0.22).clamp(0.0, 1.0);
+                reaction.timer = (reaction.timer - dt).max(0.0);
+                let recoil = progress.powf(0.65);
+                (
+                    reaction.direction * reaction.strength * recoil,
+                    1.0 + recoil * 0.12,
+                    reaction.direction.x * recoil * 0.10,
+                )
+            })
+            .unwrap_or((Vec3::ZERO, 1.0, 0.0));
+        transform.translation =
+            boss.base + orbit_bob(state.elapsed, 0.0, 0.45, 0.30, 0.12) + hit_offset;
         let health_scale = if health.is_dead() { 0.72 } else { 1.0 };
         transform.scale = Vec3::splat(0.92 * hit_pulse * health_scale)
             * Vec3::new(1.0, 1.0 + leg_drive * 0.08, 1.0 + leg_drive * 0.05);
-        transform.rotation =
-            Quat::from_rotation_y(idle.sin() * 0.18) * Quat::from_rotation_x(wing_lift * 0.04);
+        transform.rotation = Quat::from_rotation_y(idle.sin() * 0.18)
+            * Quat::from_rotation_x(wing_lift * 0.04 + hit_tilt);
     }
     for (entity, mut transform) in &mut slashes {
         transform.scale *= 0.88;
         if transform.scale.max_element() < 0.10 {
+            commands.entity(entity).despawn();
+        }
+    }
+    for (entity, mut transform, mut impact) in &mut impacts {
+        impact.age += dt;
+        let progress = (impact.age / impact.lifetime).clamp(0.0, 1.0);
+        let growth = 0.24 + progress * 0.92;
+        transform.scale = Vec3::new(growth, 0.22 + progress * 0.18, growth);
+        transform.rotation *= Quat::from_rotation_y(dt * 8.0);
+        if progress >= 1.0 {
             commands.entity(entity).despawn();
         }
     }
@@ -491,12 +575,12 @@ pub fn animate_tree_sway(
 pub fn update_ground_after_rain(
     nature: Res<OfflineNature>,
     scene_materials: Res<SceneMaterials>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<StylizedTerrainMaterial>>,
 ) {
     let Some(mut material) = materials.get_mut(&scene_materials.ground) else {
         return;
     };
     let wet = smoothstep(nature.snapshot.atmosphere.cumulative_rainfall / 20.0);
-    material.base_color = Color::srgb(0.28 - wet * 0.05, 0.49 + wet * 0.06, 0.22 + wet * 0.02);
-    material.perceptual_roughness = 0.94 - wet * 0.16;
+    material.base.base_color = Color::srgb(0.28 - wet * 0.05, 0.49 + wet * 0.06, 0.22 + wet * 0.02);
+    material.base.perceptual_roughness = 0.94 - wet * 0.16;
 }

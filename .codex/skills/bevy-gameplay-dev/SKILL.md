@@ -12,6 +12,12 @@ description: Bevy 0.19 runtime development workflow for lastkingdom2. Use when c
 - Keep shared rules in `lk2-core`, authority in `lk2-server`, and presentation/input in `lk2-client`.
 - Make offline and online modes call the same core rule step; clients must not invent authoritative state.
 
+## Player-Facing UI
+
+- Use Simplified Chinese for all player-visible HUD, inventory, menu, button, resource, status, and shortcut text unless the user explicitly requests another language.
+- Keep newly added UI labels and interaction feedback consistently Chinese; internal Rust identifiers and developer logs may remain English.
+- Before handoff, scan changed UI code for accidental English display strings and verify that remappable shortcut hints are generated from the current bindings.
+
 ## Bevy Guardrails
 
 - Use `Mesh3d` and `MeshMaterial3d`, not removed bundle APIs.

@@ -11,9 +11,9 @@ use std::fmt;
 
 use crate::ecology::animals::CreatureKind;
 use crate::ecology::{
-    EcologyKind, ResourceDropKind, ResourceNodeKind, TreeKind, WildlifeKind, ECOLOGY_CATALOG,
+    ECOLOGY_CATALOG, EcologyKind, ResourceDropKind, ResourceNodeKind, TreeKind, WildlifeKind,
 };
-use crate::legendary::{legendary_recipe, LegendaryWeapon};
+use crate::legendary::{LegendaryWeapon, legendary_recipe};
 use crate::resource::{GlobalResourcePool, ResourceKind};
 use crate::world::{Biome, BlockType};
 
@@ -794,14 +794,18 @@ mod tests {
             export.schema_version,
             ContentRegistry::EXPORT_SCHEMA_VERSION
         );
-        assert!(export
-            .content
-            .windows(2)
-            .all(|entries| entries[0].key <= entries[1].key));
-        assert!(export
-            .recipes
-            .windows(2)
-            .all(|entries| entries[0].key <= entries[1].key));
+        assert!(
+            export
+                .content
+                .windows(2)
+                .all(|entries| entries[0].key <= entries[1].key)
+        );
+        assert!(
+            export
+                .recipes
+                .windows(2)
+                .all(|entries| entries[0].key <= entries[1].key)
+        );
 
         let stone = export
             .content
@@ -812,10 +816,12 @@ mod tests {
 
         let recipe = &export.recipes[0];
         assert_eq!(recipe.output.key, "item.dragon_katana");
-        assert!(recipe
-            .ingredients
-            .iter()
-            .any(|ingredient| ingredient.content.key == "resource.dragon_heart"));
+        assert!(
+            recipe
+                .ingredients
+                .iter()
+                .any(|ingredient| ingredient.content.key == "resource.dragon_heart")
+        );
 
         let active = game_content_registry().export_status(ContentStatus::Active);
         let planned = game_content_registry().export_status(ContentStatus::Planned);

@@ -1,24 +1,39 @@
 //! Player controls, follow camera, and per-frame scene clock.
 
+use avian3d::prelude::{LinearVelocity, Rotation, SpatialQuery, SpatialQueryFilter};
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use bevy_hanabi::ParticleEffect;
+use bevy_tnua::builtins::{TnuaBuiltinJump, TnuaBuiltinWalk};
+use bevy_tnua::prelude::{TnuaController, TnuaScheme};
 
 use super::farm_ui::FarmingUiState;
 use super::inventory::InventoryUiState;
 use super::keybindings::{GameAction, KeyBindings};
-use super::procedural_rig::{apply_local_pose, apply_local_segment, HumanoidRig, HumanoidTargets};
-use super::state::{
-    BossActor, CameraMode, LivingCameraRig, LivingSceneCamera, LivingSceneState, PlayerActor,
-    PlayerIkPart, PlayerIkPartKind, PlayerJump, PlayerMotion, SlashFx,
+use super::procedural_rig::{
+    HumanoidRig, HumanoidTargets, apply_local_pose, apply_local_segment, local_to_world,
 };
-use super::util::{PLAYER_GRAVITY, PLAYER_JUMP_SPEED, PLAYER_SPEED};
-use lk2_core::pvp::{resolve_melee_attack, Health, PvpCombatant, SimpleWeapon};
+use super::state::{
+    BossActor, CameraMode, CollisionDebugState, DragonKatanaPickup, HeldWeaponVisual, HitImpactFx,
+    HitReaction, LivingCameraRig, LivingSceneCamera, LivingSceneState, PlayerActor, PlayerIkPart,
+    PlayerIkPartKind, PlayerJump, PlayerMotion, PlayerSkillState, ProceduralTerrainSurface,
+    SlashFx, configure_collision_debug_gizmos,
+};
+use super::util::{PLAYER_JUMP_SPEED, PLAYER_PHYSICS_CENTER_HEIGHT, PLAYER_SPEED};
+use lk2_core::legendary::{LegendaryLoadout, LegendaryWeapon};
+use lk2_core::pvp::{Health, PvpCombatant, SimpleWeapon, resolve_melee_attack};
+
+#[derive(TnuaScheme)]
+#[scheme(basis = TnuaBuiltinWalk)]
+pub enum PlayerControlScheme {
+    Jump(TnuaBuiltinJump),
+}
 
 pub fn advance_scene(
     time: Res<Time>,
     mut state: ResMut<LivingSceneState>,
-    mut combatants: Query<&mut PvpCombatant>,
+    mut combatants: Query<(&mut PvpCombatant, Option<&mut PlayerSkillState>)>,
 ) {
     let dt = time.delta_secs();
     state.elapsed += dt;
@@ -28,8 +43,12 @@ pub fn advance_scene(
     }
     state.frame_dt_max_ms = state.frame_dt_max_ms.max(dt * 1000.0);
     state.attack_flash = (state.attack_flash - dt).max(0.0);
-    for mut combatant in &mut combatants {
+    state.camera_shake = (state.camera_shake - dt * 3.6).max(0.0);
+    for (mut combatant, mut skill) in &mut combatants {
         combatant.tick(dt);
+        if let Some(ref mut skill) = skill {
+            skill.tick(dt);
+        }
     }
 }
 
@@ -98,51 +117,23 @@ pub fn camera_look_input(
 }
 
 pub fn player_controls(
-    time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     camera_rig: Res<LivingCameraRig>,
     bindings: Res<KeyBindings>,
-    mut commands: Commands,
-    mut state: ResMut<LivingSceneState>,
-    scene_materials: Res<super::state::SceneMaterials>,
+    terrain: Res<ProceduralTerrainSurface>,
     inventory: Res<InventoryUiState>,
     farming: Option<Res<FarmingUiState>>,
-    mut players: Query<
-        (
-            &mut Transform,
-            &mut PvpCombatant,
-            &SimpleWeapon,
-            &mut PlayerJump,
-            &mut PlayerMotion,
-        ),
-        With<PlayerActor>,
-    >,
-    mut bosses: Query<(&Transform, &mut Health), (With<BossActor>, Without<PlayerActor>)>,
+    mut players: Query<(&Transform, &mut TnuaController<PlayerControlScheme>), With<PlayerActor>>,
 ) {
     let farming_open = farming.as_ref().is_some_and(|state| state.open);
-    if bindings.menu_open || inventory.open || farming_open {
-        return;
-    }
-    let Ok((mut player, mut combatant, weapon, mut jump, mut motion)) = players.single_mut() else {
+    let Ok((player, mut controller)) = players.single_mut() else {
         return;
     };
-    let dt = time.delta_secs().max(0.0001);
-    let previous_position = player.translation;
-    jump.vertical_velocity += PLAYER_GRAVITY * dt;
-    player.translation.y += jump.vertical_velocity * dt;
-    let mut grounded = false;
-    if player.translation.y <= 0.0 {
-        player.translation.y = 0.0;
-        jump.vertical_velocity = 0.0;
-        grounded = true;
-    }
-
-    if bindings.just_pressed(GameAction::Jump, &keys, &mouse)
-        && player.translation.y <= f32::EPSILON
-    {
-        jump.vertical_velocity = PLAYER_JUMP_SPEED;
-        grounded = false;
+    if bindings.menu_open || inventory.open || farming_open {
+        controller.initiate_action_feeding();
+        controller.basis = TnuaBuiltinWalk::default();
+        return;
     }
 
     let mut input_forward = 0.0;
@@ -161,26 +152,62 @@ pub fn player_controls(
     }
     let camera_forward = yaw_forward(camera_rig.yaw);
     let camera_right = Vec3::new(-camera_forward.z, 0.0, camera_forward.x);
-    let mut direction = camera_forward * input_forward + camera_right * input_right;
-    if direction.length_squared() > 0.0 {
-        direction = direction.normalize();
-        player.translation += direction * PLAYER_SPEED * dt;
-        player.translation.x = player.translation.x.clamp(-22.0, 22.0);
-        player.translation.z = player.translation.z.clamp(-22.0, 22.0);
-        player.rotation = match camera_rig.mode {
-            CameraMode::FirstPerson => Quat::from_rotation_y(camera_rig.yaw),
-            CameraMode::ThirdPerson => Quat::from_rotation_y(direction.x.atan2(direction.z)),
-        };
-    } else if camera_rig.mode == CameraMode::FirstPerson {
-        player.rotation = Quat::from_rotation_y(camera_rig.yaw);
+    let direction =
+        (camera_forward * input_forward + camera_right * input_right).normalize_or_zero();
+    let desired_motion = if direction.length_squared() > 0.0
+        && terrain_cell_is_water(&terrain, player.translation + direction * 0.35)
+    {
+        Vec3::ZERO
+    } else {
+        direction
+    };
+
+    controller.initiate_action_feeding();
+    controller.basis = TnuaBuiltinWalk {
+        desired_motion,
+        desired_forward: Dir3::new(if desired_motion.length_squared() > 0.0 {
+            // The avatar mesh faces local +Z, while Tnua/Bevy define forward as -Z.
+            -desired_motion
+        } else {
+            -camera_forward
+        })
+        .ok(),
+    };
+    if bindings.pressed(GameAction::Jump, &keys, &mouse) {
+        controller.action(PlayerControlScheme::Jump(TnuaBuiltinJump::default()));
     }
-    let planar_delta = Vec3::new(
-        player.translation.x - previous_position.x,
-        0.0,
-        player.translation.z - previous_position.z,
-    );
-    motion.planar_velocity = planar_delta / dt;
-    motion.planar_speed = motion.planar_velocity.length();
+}
+
+fn terrain_cell_is_water(terrain: &ProceduralTerrainSurface, position: Vec3) -> bool {
+    let x = 48 + position.x.floor() as i32;
+    let z = 48 + position.z.floor() as i32;
+    let surface = terrain.pipeline.surface_f32(x, z).unwrap_or(13.0);
+    terrain.is_water_at(x, z, surface)
+}
+
+pub fn sync_player_physics_state(
+    time: Res<Time>,
+    camera_rig: Res<LivingCameraRig>,
+    mut players: Query<
+        (
+            &LinearVelocity,
+            &TnuaController<PlayerControlScheme>,
+            &mut Rotation,
+            &mut PlayerMotion,
+            &mut PlayerJump,
+        ),
+        With<PlayerActor>,
+    >,
+) {
+    let Ok((velocity, controller, mut rotation, mut motion, mut jump)) = players.single_mut()
+    else {
+        return;
+    };
+    let dt = time.delta_secs().max(0.0001);
+    let planar_velocity = Vec3::new(velocity.0.x, 0.0, velocity.0.z);
+    let grounded = !controller.is_airborne().unwrap_or(true);
+    motion.planar_velocity = planar_velocity;
+    motion.planar_speed = planar_velocity.length();
     motion.smoothed_speed = motion
         .smoothed_speed
         .lerp(motion.planar_speed, 1.0 - (-dt * 12.0).exp());
@@ -198,81 +225,243 @@ pub fn player_controls(
     } else {
         motion.stride_phase = motion.stride_phase.lerp(0.0, 1.0 - (-dt * 5.0).exp());
     }
+    jump.vertical_velocity = velocity.0.y;
+    jump.coyote_timer = if grounded { 0.12 } else { 0.0 };
+    jump.jump_buffer_timer = 0.0;
+    let direction = planar_velocity.normalize_or_zero();
+    if direction.length_squared() > 0.0 {
+        rotation.0 = match camera_rig.mode {
+            CameraMode::FirstPerson => Quat::from_rotation_y(camera_rig.yaw),
+            CameraMode::ThirdPerson => Quat::from_rotation_y(direction.x.atan2(direction.z)),
+        };
+    }
+}
 
-    let attacking = bindings.just_pressed(GameAction::Attack, &keys, &mouse);
-    if !attacking || !combatant.begin_attack(*weapon) {
+pub fn player_combat_controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    bindings: Res<KeyBindings>,
+    mut commands: Commands,
+    mut state: ResMut<LivingSceneState>,
+    scene_materials: Res<super::state::SceneMaterials>,
+    inventory: Res<InventoryUiState>,
+    farming: Option<Res<FarmingUiState>>,
+    loadout: Option<Res<LegendaryLoadout>>,
+    mut players: Query<
+        (
+            &Transform,
+            &mut PvpCombatant,
+            &SimpleWeapon,
+            Option<&mut PlayerSkillState>,
+        ),
+        With<PlayerActor>,
+    >,
+    mut bosses: Query<
+        (&Transform, &mut Health, &mut HitReaction),
+        (With<BossActor>, Without<PlayerActor>),
+    >,
+) {
+    let farming_open = farming.as_ref().is_some_and(|state| state.open);
+    if bindings.menu_open || inventory.open || farming_open {
         return;
     }
-    state.attack_flash = 0.32;
-    if let Ok((boss, mut health)) = bosses.single_mut() {
+    let Ok((player, mut combatant, weapon, mut skill_state)) = players.single_mut() else {
+        return;
+    };
+    let dragon_equipped = loadout
+        .as_ref()
+        .and_then(|loadout| loadout.equipped)
+        .is_some_and(|weapon| weapon == LegendaryWeapon::DragonKatana);
+    let skill = bindings.just_pressed(GameAction::WeaponSkill, &keys, &mouse);
+    let attack_weapon = if skill {
+        if !dragon_equipped {
+            return;
+        }
+        let Some(ref mut skill_state) = skill_state else {
+            return;
+        };
+        if !skill_state.begin(4.0) {
+            return;
+        }
+        let mut weapon = *weapon;
+        weapon.damage *= 3.0;
+        weapon.reach *= 1.35;
+        weapon.sweep_angle_deg = 110.0;
+        weapon
+    } else {
+        if !bindings.just_pressed(GameAction::Attack, &keys, &mouse)
+            || !combatant.begin_attack(*weapon)
+        {
+            return;
+        }
+        *weapon
+    };
+    let player_position = player.translation - Vec3::Y * PLAYER_PHYSICS_CENTER_HEIGHT;
+    state.attack_flash = if skill { 0.52 } else { 0.32 };
+    if let Ok((boss, mut health, mut reaction)) = bosses.single_mut() {
         if let Some(hit) = resolve_melee_attack(
-            player.translation,
+            player_position,
             *player.back(),
             boss.translation,
-            *weapon,
+            attack_weapon,
         ) {
-            health.damage(hit.damage, state.frame as u32, 0);
+            let actual_damage = health.damage(hit.damage, state.frame as u32, 0);
+            if actual_damage > 0.0 {
+                reaction.trigger(hit.knockback, 0.18);
+                state.camera_shake = state.camera_shake.max(0.11);
+                commands.spawn((
+                    ParticleEffect::new(scene_materials.hit_effect.clone()),
+                    Transform::from_translation(hit.hit_pos + Vec3::Y * 0.86)
+                        .with_scale(Vec3::splat(0.24)),
+                    HitImpactFx {
+                        age: 0.0,
+                        lifetime: 0.22,
+                    },
+                    Name::new("hit_impact"),
+                ));
+            }
         }
     }
     commands.spawn((
-        Mesh3d(scene_materials.slash_mesh.clone()),
-        MeshMaterial3d(scene_materials.slash_material.clone()),
-        Transform::from_translation(player.translation + Vec3::Y * 0.9)
-            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
-            .with_scale(Vec3::new(1.0, 0.35, 1.0)),
+        ParticleEffect::new(scene_materials.hit_effect.clone()),
+        Transform::from_translation(player_position + Vec3::Y * 0.9).with_scale(if skill {
+            Vec3::new(1.6, 0.52, 1.6)
+        } else {
+            Vec3::new(1.0, 0.35, 1.0)
+        }),
         SlashFx,
     ));
 }
 
+pub fn pickup_dragon_katana(
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    bindings: Res<KeyBindings>,
+    mut commands: Commands,
+    mut loadout: ResMut<LegendaryLoadout>,
+    mut players: Query<(&Transform, &mut SimpleWeapon), With<PlayerActor>>,
+    pickups: Query<(Entity, &Transform), With<DragonKatanaPickup>>,
+) {
+    if bindings.menu_open || !bindings.just_pressed(GameAction::Interact, &keys, &mouse) {
+        return;
+    }
+    let Ok((player, mut weapon)) = players.single_mut() else {
+        return;
+    };
+    let Some((entity, _)) = pickups.iter().find(|(_, pickup)| {
+        pickup.translation.distance_squared(player.translation) <= 2.5_f32.powi(2)
+    }) else {
+        return;
+    };
+    loadout.grant_and_equip(LegendaryWeapon::DragonKatana);
+    *weapon = dragon_katana_weapon();
+    commands.entity(entity).despawn();
+}
+
+fn dragon_katana_weapon() -> SimpleWeapon {
+    SimpleWeapon {
+        reach: 3.6,
+        damage: 10.0,
+        knockback: 5.5,
+        cooldown_secs: 0.5,
+        sweep_angle_deg: 75.0,
+    }
+}
+
 pub fn update_camera(
     time: Res<Time>,
+    state: Res<LivingSceneState>,
     bindings: Res<KeyBindings>,
     inventory: Res<InventoryUiState>,
     farming: Option<Res<FarmingUiState>>,
     camera_rig: Res<LivingCameraRig>,
-    players: Query<&Transform, (With<PlayerActor>, Without<LivingSceneCamera>)>,
+    spatial_query: SpatialQuery,
+    players: Query<(Entity, &Transform), (With<PlayerActor>, Without<LivingSceneCamera>)>,
     mut cameras: Query<&mut Transform, (With<LivingSceneCamera>, Without<PlayerActor>)>,
 ) {
     let farming_open = farming.as_ref().is_some_and(|state| state.open);
     if bindings.menu_open || inventory.open || farming_open {
         return;
     }
-    let (Ok(player), Ok(mut camera)) = (players.single(), cameras.single_mut()) else {
+    let (Ok((player_entity, player)), Ok(mut camera)) = (players.single(), cameras.single_mut())
+    else {
         return;
     };
+    let visual_position = player.translation - Vec3::Y * PLAYER_PHYSICS_CENTER_HEIGHT;
+    let shake = camera_shake_offset(state.elapsed, state.camera_shake);
     match camera_rig.mode {
         CameraMode::FirstPerson => {
-            let eye = first_person_eye(player.translation);
+            let eye = first_person_eye(visual_position);
             let forward = camera_direction(camera_rig.yaw, camera_rig.pitch);
-            camera.translation = eye + forward * 0.08;
-            let target = camera.translation + forward;
+            camera.translation = eye + forward * 0.08 + shake;
+            let target = camera.translation + forward + shake * 0.25;
             camera.look_at(target, Vec3::Y);
         }
         CameraMode::ThirdPerson => {
-            let forward = yaw_forward(camera_rig.yaw);
-            let right = Vec3::new(-forward.z, 0.0, forward.x);
-            let desired = player.translation - forward * 6.2 + right * 0.9 + Vec3::Y * 3.2;
+            let target = visual_position + Vec3::Y * 1.05;
+            let desired = third_person_camera_position(target, camera_rig.yaw, camera_rig.pitch);
+            let desired = camera_collision_position(&spatial_query, player_entity, target, desired);
             camera.translation = camera
                 .translation
-                .lerp(desired, 1.0 - (-time.delta_secs() * 5.5).exp());
-            camera.look_at(player.translation + Vec3::Y * 1.05, Vec3::Y);
+                .lerp(desired, 1.0 - (-time.delta_secs() * 5.5).exp())
+                + shake;
+            camera.look_at(target + shake * 0.25, Vec3::Y);
         }
     }
+}
+
+fn camera_shake_offset(elapsed: f32, strength: f32) -> Vec3 {
+    let phase = elapsed * 92.0;
+    Vec3::new(
+        phase.sin() * strength,
+        (phase * 1.37).cos() * strength * 0.55,
+        (phase * 0.83).sin() * strength * 0.35,
+    )
+}
+
+fn camera_collision_position(
+    spatial_query: &SpatialQuery,
+    player_entity: Entity,
+    target: Vec3,
+    desired: Vec3,
+) -> Vec3 {
+    let offset = desired - target;
+    let distance = offset.length();
+    let Ok(direction) = Dir3::new(offset / distance.max(0.0001)) else {
+        return desired;
+    };
+    let filter = SpatialQueryFilter::from_excluded_entities([player_entity]);
+    let safe_distance = spatial_query
+        .cast_ray(target, direction, distance, true, &filter)
+        .map_or(distance, |hit| (hit.distance - 0.25).max(0.8));
+    target + direction * safe_distance
 }
 
 pub fn update_player_ik(
     state: Res<LivingSceneState>,
     camera_rig: Res<LivingCameraRig>,
+    terrain: Res<ProceduralTerrainSurface>,
+    loadout: Option<Res<LegendaryLoadout>>,
     players: Query<(&Transform, &PlayerMotion, &PlayerJump), With<PlayerActor>>,
     mut parts: Query<
         (&PlayerIkPart, &mut Transform, Option<&mut Visibility>),
         Without<PlayerActor>,
     >,
+    mut weapon_visuals: Query<(&mut Transform, &mut Visibility), With<HeldWeaponVisual>>,
 ) {
     let Ok((player, motion, jump)) = players.single() else {
         return;
     };
+    let visual_player = Transform {
+        translation: player.translation - Vec3::Y * PLAYER_PHYSICS_CENTER_HEIGHT,
+        ..*player
+    };
+    let player = &visual_player;
     let first_person = camera_rig.mode == CameraMode::FirstPerson;
+    let dragon_equipped = loadout
+        .as_ref()
+        .and_then(|loadout| loadout.equipped)
+        .is_some_and(|weapon| weapon == LegendaryWeapon::DragonKatana);
     let pose = procedural_player_pose(
         state.elapsed,
         state.attack_flash,
@@ -281,12 +470,19 @@ pub fn update_player_ik(
         first_person,
         camera_rig.pitch,
     );
+    let (left_foot, left_foot_slope) =
+        terrain_foot_pose(player, pose.left_foot, &terrain, motion.grounded);
+    let (right_foot, right_foot_slope) =
+        terrain_foot_pose(player, pose.right_foot, &terrain, motion.grounded);
+    let body_slope = left_foot_slope
+        .slerp(right_foot_slope, 0.5)
+        .slerp(Quat::IDENTITY, 0.55);
 
     let solved = HumanoidRig::player_avatar().solve(HumanoidTargets {
         left_hand: pose.left_hand,
         right_hand: pose.right_hand,
-        left_foot: pose.left_foot,
-        right_foot: pose.right_foot,
+        left_foot,
+        right_foot,
         left_elbow_pole: pose.left_elbow_pole,
         right_elbow_pole: pose.right_elbow_pole,
         left_knee_pole: pose.left_knee_pole,
@@ -295,7 +491,9 @@ pub fn update_player_ik(
 
     for (part, mut transform, visibility) in &mut parts {
         if let Some(mut visibility) = visibility {
-            *visibility = if first_person && hides_in_first_person(part.kind) {
+            *visibility = if part.kind == PlayerIkPartKind::Stick && dragon_equipped {
+                Visibility::Hidden
+            } else if first_person && hides_in_first_person(part.kind) {
                 Visibility::Hidden
             } else {
                 Visibility::Visible
@@ -307,7 +505,9 @@ pub fn update_player_ik(
                 &mut transform,
                 player,
                 Vec3::new(0.0, 0.76 + pose.body_bob, 0.0),
-                Quat::from_rotation_x(pose.torso_pitch) * Quat::from_rotation_z(pose.torso_roll),
+                body_slope
+                    * Quat::from_rotation_x(pose.torso_pitch)
+                    * Quat::from_rotation_z(pose.torso_roll),
                 Vec3::ONE,
             ),
             PlayerIkPartKind::Pants => apply_local_pose(
@@ -410,15 +610,15 @@ pub fn update_player_ik(
             PlayerIkPartKind::BootL => apply_local_pose(
                 &mut transform,
                 player,
-                pose.left_foot + Vec3::new(0.0, -0.02, 0.08),
-                Quat::from_rotation_x(pose.left_boot_pitch),
+                left_foot + Vec3::new(0.0, -0.02, 0.08),
+                left_foot_slope * Quat::from_rotation_x(pose.left_boot_pitch),
                 Vec3::ONE,
             ),
             PlayerIkPartKind::BootR => apply_local_pose(
                 &mut transform,
                 player,
-                pose.right_foot + Vec3::new(0.0, -0.02, 0.08),
-                Quat::from_rotation_x(pose.right_boot_pitch),
+                right_foot + Vec3::new(0.0, -0.02, 0.08),
+                right_foot_slope * Quat::from_rotation_x(pose.right_boot_pitch),
                 Vec3::ONE,
             ),
             PlayerIkPartKind::Basket => apply_local_pose(
@@ -434,10 +634,69 @@ pub fn update_player_ik(
             }
         }
     }
+
+    for (mut transform, mut visibility) in &mut weapon_visuals {
+        if dragon_equipped {
+            *visibility = Visibility::Visible;
+            transform.translation =
+                local_to_world(player, pose.left_hand + Vec3::new(-0.02, -0.05, 0.04));
+            transform.rotation = player.rotation;
+            transform.scale = Vec3::splat(0.32);
+        } else {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+pub fn toggle_collision_debug(
+    keys: Res<ButtonInput<KeyCode>>,
+    bindings: Res<KeyBindings>,
+    mut debug: ResMut<CollisionDebugState>,
+) {
+    if !bindings.menu_open && keys.just_pressed(KeyCode::F3) {
+        debug.enabled = !debug.enabled;
+    }
+}
+
+pub fn update_collision_debug(
+    debug: Res<CollisionDebugState>,
+    mut gizmos: ResMut<GizmoConfigStore>,
+) {
+    if !debug.is_changed() {
+        return;
+    }
+    configure_collision_debug_gizmos(&mut gizmos, debug.enabled);
+}
+
+fn terrain_foot_pose(
+    player: &Transform,
+    foot: Vec3,
+    terrain: &ProceduralTerrainSurface,
+    grounded: bool,
+) -> (Vec3, Quat) {
+    if !grounded {
+        return (foot, Quat::IDENTITY);
+    }
+
+    let foot_world = local_to_world(player, Vec3::new(foot.x, 0.0, foot.z));
+    let ground_world_y = terrain.ground_height(foot_world);
+    let ground_local = player.rotation.inverse()
+        * (Vec3::new(foot_world.x, ground_world_y, foot_world.z) - player.translation);
+    let contact_foot = Vec3::new(foot.x, foot.y.max(ground_local.y + 0.03), foot.z);
+    let local_normal = player.rotation.inverse() * terrain.surface_normal(foot_world);
+    let slope = Quat::from_rotation_arc(Vec3::Y, local_normal);
+    (contact_foot, slope)
 }
 
 fn yaw_forward(yaw: f32) -> Vec3 {
     Vec3::new(yaw.sin(), 0.0, yaw.cos())
+}
+
+pub(crate) fn third_person_camera_position(target: Vec3, yaw: f32, pitch: f32) -> Vec3 {
+    let horizontal_forward = yaw_forward(yaw);
+    let right = Vec3::new(-horizontal_forward.z, 0.0, horizontal_forward.x);
+    let orbit_pitch = (pitch - 0.36).clamp(-1.25, 0.85);
+    target - camera_direction(yaw, orbit_pitch) * 6.2 + right * 0.9
 }
 
 fn camera_direction(yaw: f32, pitch: f32) -> Vec3 {
@@ -584,13 +843,13 @@ fn procedural_arm_pose(
         (
             Vec3::new(
                 -0.40,
-                0.62 - swing * 0.12 + attack * 0.18 + airborne * 0.10,
-                0.10 - swing * 0.22 + attack * 0.38,
+                0.55 - swing * 0.08 + attack * 0.18 + airborne * 0.10,
+                0.16 - swing * 0.14 + attack * 0.38,
             ),
             Vec3::new(
                 0.40,
-                0.62 + swing * 0.12 + airborne * 0.10,
-                0.10 + swing * 0.22,
+                0.55 + swing * 0.08 + airborne * 0.10,
+                0.16 + swing * 0.14,
             ),
             Vec3::new(-0.58, 0.80 + airborne * 0.10, 0.32 + attack * 0.10),
             Vec3::new(0.58, 0.80 + airborne * 0.10, 0.32),

@@ -1,7 +1,7 @@
 //! Inventory and crafting overview for the offline playable scene.
 
 use bevy::prelude::*;
-use lk2_core::content::{resource_content_id, ContentRegistry};
+use lk2_core::content::{ContentRegistry, resource_content_id};
 use lk2_core::resource::ResourceKind;
 
 use super::keybindings::{GameAction, KeyBindings};

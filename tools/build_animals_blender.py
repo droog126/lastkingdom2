@@ -88,6 +88,20 @@ def export_glb(name):
     print(f"  ✓ {name}.glb  ({len(root.data.vertices)} vertices)")
     return path
 
+
+def child_named(root, name):
+    if root.name == name:
+        return root
+    return next((child for child in root.children_recursive if child.name == name), None)
+
+
+def recolor_named(root, prefixes, color):
+    for obj in [root, *root.children_recursive]:
+        if obj.name.startswith(prefixes) and getattr(obj, "data", None) is not None:
+            obj.data.materials.clear()
+            set_color(obj, *color)
+
+
 def build_pig():
     root = new_object("Pig")
     b = root
@@ -336,6 +350,165 @@ def build_rabbit():
     set_color(tail, 0.95, 0.95, 0.95)
     return root
 
+def build_deer():
+    root = new_object("Deer")
+
+    body = new_object("Deer_Body")
+    parent_to(root, body)
+    add_box_bmesh(body, (-0.62, -0.34, 0.10), (1.24, 0.68, 0.72))
+    set_color(body, 0.58, 0.32, 0.14)
+
+    chest = new_object("Deer_Chest")
+    parent_to(body, chest, (0.34, 0.0, 0.34))
+    add_box_bmesh(chest, (0.0, -0.25, 0.0), (0.34, 0.50, 0.56))
+    set_color(chest, 0.70, 0.42, 0.20)
+
+    head = new_object("Deer_Head")
+    parent_to(root, head, (0.62, 0.0, 0.52))
+    add_box_bmesh(head, (0.0, -0.22, 0.0), (0.40, 0.44, 0.42))
+    set_color(head, 0.62, 0.35, 0.15)
+
+    snout = new_object("Deer_Snout")
+    parent_to(head, snout, (0.34, -0.08, 0.06))
+    add_box_bmesh(snout, (0.0, 0.0, 0.0), (0.16, 0.24, 0.18))
+    set_color(snout, 0.32, 0.16, 0.08)
+
+    for side, sign in (("L", -1), ("R", 1)):
+        eye = new_object(f"Deer_Eye_{side}")
+        parent_to(head, eye, (0.28, sign * 0.18, 0.30))
+        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.06, 0.06, 0.06))
+        set_color(eye, 0.04, 0.03, 0.02)
+
+        ear = new_object(f"Deer_Ear_{side}")
+        parent_to(head, ear, (0.02, sign * 0.19, 0.38))
+        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.18, 0.10, 0.10))
+        set_color(ear, 0.48, 0.23, 0.10)
+
+        antler = new_object(f"Deer_Antler_{side}")
+        parent_to(head, antler, (-0.02, sign * 0.14, 0.46))
+        add_box_bmesh(antler, (0.0, 0.0, 0.0), (0.07, 0.07, 0.42))
+        set_color(antler, 0.78, 0.64, 0.42)
+        for branch, offset in enumerate((0.12, 0.25)):
+            tine = new_object(f"Deer_Antler_{side}_{branch}")
+            parent_to(antler, tine, (0.05, sign * 0.02, offset))
+            add_box_bmesh(tine, (0.0, 0.0, 0.0), (0.16, 0.06, 0.06))
+            set_color(tine, 0.78, 0.64, 0.42)
+
+    for index, (lx, ly) in enumerate(((-0.42, -0.24), (0.34, -0.24), (-0.42, 0.18), (0.34, 0.18))):
+        leg = new_object(f"Deer_Leg_{index}")
+        parent_to(body, leg, (lx, ly, -0.42))
+        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.16, 0.16, 0.54))
+        set_color(leg, 0.48, 0.24, 0.10)
+        hoof = new_object(f"Deer_Hoof_{index}")
+        parent_to(leg, hoof, (0.03, -0.02, -0.08))
+        add_box_bmesh(hoof, (0.0, 0.0, 0.0), (0.18, 0.18, 0.08))
+        set_color(hoof, 0.10, 0.07, 0.04)
+
+    tail = new_object("Deer_Tail")
+    parent_to(body, tail, (-0.66, 0.0, 0.48))
+    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.12, 0.14, 0.22))
+    set_color(tail, 0.92, 0.84, 0.64)
+    return root
+
+def build_fox():
+    root = new_object("Fox")
+
+    body = new_object("Fox_Body")
+    parent_to(root, body)
+    add_box_bmesh(body, (-0.48, -0.30, 0.10), (0.96, 0.60, 0.58))
+    set_color(body, 0.82, 0.28, 0.08)
+
+    belly = new_object("Fox_Belly")
+    parent_to(body, belly, (0.08, -0.31, 0.16))
+    add_box_bmesh(belly, (0.0, 0.0, 0.0), (0.58, 0.05, 0.34))
+    set_color(belly, 0.98, 0.78, 0.48)
+
+    head = new_object("Fox_Head")
+    parent_to(root, head, (0.44, 0.0, 0.40))
+    add_box_bmesh(head, (0.0, -0.20, 0.0), (0.38, 0.40, 0.38))
+    set_color(head, 0.82, 0.28, 0.08)
+
+    muzzle = new_object("Fox_Muzzle")
+    parent_to(head, muzzle, (0.32, -0.06, 0.04))
+    add_box_bmesh(muzzle, (0.0, 0.0, 0.0), (0.16, 0.22, 0.16))
+    set_color(muzzle, 0.98, 0.78, 0.50)
+
+    nose = new_object("Fox_Nose")
+    parent_to(muzzle, nose, (0.14, -0.02, 0.08))
+    add_box_bmesh(nose, (0.0, 0.0, 0.0), (0.06, 0.10, 0.08))
+    set_color(nose, 0.08, 0.04, 0.03)
+
+    for side, sign in (("L", -1), ("R", 1)):
+        eye = new_object(f"Fox_Eye_{side}")
+        parent_to(head, eye, (0.26, sign * 0.15, 0.28))
+        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.06, 0.06, 0.06))
+        set_color(eye, 0.04, 0.03, 0.02)
+
+        ear = new_object(f"Fox_Ear_{side}")
+        parent_to(head, ear, (-0.02, sign * 0.15, 0.40))
+        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.16, 0.12, 0.30))
+        set_color(ear, 0.72, 0.18, 0.06)
+
+        ear_tip = new_object(f"Fox_EarTip_{side}")
+        parent_to(ear, ear_tip, (0.02, 0.0, 0.28))
+        add_box_bmesh(ear_tip, (0.0, 0.0, 0.0), (0.12, 0.10, 0.12))
+        set_color(ear_tip, 0.12, 0.05, 0.03)
+
+    for index, (lx, ly) in enumerate(((-0.30, -0.20), (0.24, -0.20), (-0.30, 0.16), (0.24, 0.16))):
+        leg = new_object(f"Fox_Leg_{index}")
+        parent_to(body, leg, (lx, ly, -0.36))
+        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.14, 0.14, 0.40))
+        set_color(leg, 0.82, 0.28, 0.08)
+
+    tail = new_object("Fox_Tail")
+    parent_to(body, tail, (-0.56, 0.02, 0.34))
+    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.52, 0.20, 0.24))
+    set_color(tail, 0.78, 0.24, 0.07)
+    tail_tip = new_object("Fox_TailTip")
+    parent_to(tail, tail_tip, (-0.20, 0.0, 0.02))
+    add_box_bmesh(tail_tip, (0.0, 0.0, 0.0), (0.20, 0.22, 0.26))
+    set_color(tail_tip, 0.98, 0.88, 0.68)
+    return root
+
+
+def build_deer_fawn():
+    root = build_deer()
+    root.name = "Deer_Fawn"
+    for obj in list(root.children_recursive):
+        if obj.name.startswith("Deer_Antler"):
+            bpy.data.objects.remove(obj, do_unlink=True)
+    recolor_named(root, ("Deer_Body", "Deer_Chest", "Deer_Head"), (0.76, 0.48, 0.24))
+    recolor_named(root, ("Deer_Snout",), (0.42, 0.23, 0.12))
+    recolor_named(root, ("Deer_Leg",), (0.58, 0.30, 0.14))
+
+    body = child_named(root, "Deer_Body")
+    if body is not None:
+        for index, (x, y, z) in enumerate(((-0.30, -0.35, 0.62), (-0.02, -0.35, 0.68), (0.26, -0.35, 0.54), (-0.18, 0.34, 0.50))):
+            spot = new_object(f"Deer_FawnSpot_{index}")
+            parent_to(body, spot, (x, y, z))
+            add_box_bmesh(spot, (0.0, 0.0, 0.0), (0.12, 0.035, 0.10))
+            set_color(spot, 0.92, 0.76, 0.48)
+    return root
+
+
+def build_fox_silver():
+    root = build_fox()
+    root.name = "Fox_Silver"
+    recolor_named(root, ("Fox_Body", "Fox_Head", "Fox_Ear", "Fox_Tail"), (0.42, 0.47, 0.52))
+    recolor_named(root, ("Fox_Belly", "Fox_Muzzle", "Fox_TailTip"), (0.86, 0.88, 0.84))
+    recolor_named(root, ("Fox_EarTip",), (0.18, 0.20, 0.23))
+    return root
+
+
+def build_rabbit_brown():
+    root = build_rabbit()
+    root.name = "Rabbit_Brown"
+    recolor_named(root, ("Rabbit_Body", "Rabbit_Head", "Rabbit_FrontLeg", "Rabbit_HindLeg"), (0.58, 0.36, 0.20))
+    recolor_named(root, ("Rabbit_Tail",), (0.82, 0.70, 0.56))
+    recolor_named(root, ("Rabbit_EarInner",), (0.78, 0.46, 0.42))
+    return root
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("开始生成动物模型...")
@@ -347,6 +520,11 @@ if __name__ == "__main__":
         ("cow",     build_cow),
         ("chicken", build_chicken),
         ("rabbit",  build_rabbit),
+        ("rabbit_brown", build_rabbit_brown),
+        ("deer",    build_deer),
+        ("deer_fawn", build_deer_fawn),
+        ("fox",     build_fox),
+        ("fox_silver", build_fox_silver),
     ]
 
     for name, builder in animals:

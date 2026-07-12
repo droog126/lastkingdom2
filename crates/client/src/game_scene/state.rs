@@ -1,10 +1,107 @@
 //! Bevy resources and components shared by the living forest scene.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
+use avian3d::prelude::PhysicsGizmos;
 use bevy::prelude::*;
 use lk2_core::farming::CropKind;
+use lk2_core::world::terrain::{self, LandformModule, TerrainPipeline};
+
+use super::stylized_material::StylizedTerrainMaterial;
+
+pub const PROCEDURAL_TERRAIN_CENTER: i32 = 48;
+pub const PROCEDURAL_TERRAIN_RADIUS: i32 = 46;
+const PROCEDURAL_TERRAIN_REFERENCE_SURFACE: f32 = 20.0;
+const PROCEDURAL_TERRAIN_HEIGHT_SCALE: f32 = 0.14;
+const PROCEDURAL_TERRAIN_SEA_LEVEL: f32 = 12.0;
+const PROCEDURAL_TERRAIN_GRID_STEP: i32 = 2;
+
+#[derive(Resource, Clone)]
+pub struct ProceduralTerrainSurface {
+    pub pipeline: Arc<TerrainPipeline>,
+    pub landform: LandformModule,
+}
+
+#[derive(Resource, Default)]
+pub struct CollisionDebugState {
+    pub enabled: bool,
+}
+
+pub fn configure_collision_debug_gizmos(store: &mut GizmoConfigStore, enabled: bool) {
+    let (config, physics) = store.config_mut::<PhysicsGizmos>();
+    config.enabled = enabled;
+    *physics = PhysicsGizmos::colliders(Color::srgb(1.0, 0.16, 0.08));
+}
+
+impl ProceduralTerrainSurface {
+    pub fn default_world() -> Self {
+        Self {
+            pipeline: Arc::new(terrain::presets::default_preset()),
+            landform: LandformModule::default(),
+        }
+    }
+
+    pub fn render_height(&self, surface: f32) -> f32 {
+        (surface - PROCEDURAL_TERRAIN_REFERENCE_SURFACE) * PROCEDURAL_TERRAIN_HEIGHT_SCALE
+    }
+
+    pub fn ground_height(&self, position: Vec3) -> f32 {
+        let step = PROCEDURAL_TERRAIN_GRID_STEP as f32;
+        let local_x0 = (position.x / step).floor() * step;
+        let local_z0 = (position.z / step).floor() * step;
+        let tx = ((position.x - local_x0) / step).clamp(0.0, 1.0);
+        let tz = ((position.z - local_z0) / step).clamp(0.0, 1.0);
+        let x0 = PROCEDURAL_TERRAIN_CENTER + local_x0 as i32;
+        let z0 = PROCEDURAL_TERRAIN_CENTER + local_z0 as i32;
+        let x1 = x0 + PROCEDURAL_TERRAIN_GRID_STEP;
+        let z1 = z0 + PROCEDURAL_TERRAIN_GRID_STEP;
+        let h00 = self.vertex_ground_height(x0, z0);
+        let h10 = self.vertex_ground_height(x1, z0);
+        let h11 = self.vertex_ground_height(x1, z1);
+        let h01 = self.vertex_ground_height(x0, z1);
+
+        // Match SurfaceMeshData::push_quad: the rendered quad is split on the
+        // same diagonal, so collision and visible terrain stay on one plane.
+        if tz <= tx {
+            h00 + tx * (h10 - h00) + tz * (h11 - h10)
+        } else {
+            h00 + tz * (h01 - h00) + tx * (h11 - h01)
+        }
+    }
+
+    fn vertex_ground_height(&self, x: i32, z: i32) -> f32 {
+        let surface = self
+            .pipeline
+            .surface_f32(x, z)
+            .unwrap_or(PROCEDURAL_TERRAIN_SEA_LEVEL + 1.0);
+        self.render_height(if self.is_water_at(x, z, surface) {
+            PROCEDURAL_TERRAIN_SEA_LEVEL
+        } else {
+            surface
+        })
+    }
+
+    pub fn is_water_at(&self, x: i32, z: i32, surface: f32) -> bool {
+        let _ = (x, z);
+        surface < PROCEDURAL_TERRAIN_SEA_LEVEL
+    }
+
+    pub fn surface_normal(&self, position: Vec3) -> Vec3 {
+        const SAMPLE_DISTANCE: f32 = 1.0;
+        let left = self.ground_height(position - Vec3::X * SAMPLE_DISTANCE);
+        let right = self.ground_height(position + Vec3::X * SAMPLE_DISTANCE);
+        let back = self.ground_height(position - Vec3::Z * SAMPLE_DISTANCE);
+        let front = self.ground_height(position + Vec3::Z * SAMPLE_DISTANCE);
+        Vec3::new(
+            -(right - left) / (SAMPLE_DISTANCE * 2.0),
+            1.0,
+            -(front - back) / (SAMPLE_DISTANCE * 2.0),
+        )
+        .normalize()
+    }
+}
 
 #[derive(Resource)]
 pub struct LivingSceneState {
@@ -15,6 +112,7 @@ pub struct LivingSceneState {
     pub exit_deadline: Option<Instant>,
     pub png_path: PathBuf,
     pub attack_flash: f32,
+    pub camera_shake: f32,
     pub auto_demo: bool,
     pub iter_dir: Option<PathBuf>,
     pub frame_dt_over_50ms: u64,
@@ -23,9 +121,8 @@ pub struct LivingSceneState {
 
 #[derive(Resource)]
 pub struct SceneMaterials {
-    pub ground: Handle<StandardMaterial>,
-    pub slash_mesh: Handle<Mesh>,
-    pub slash_material: Handle<StandardMaterial>,
+    pub ground: Handle<StylizedTerrainMaterial>,
+    pub hit_effect: Handle<bevy_hanabi::EffectAsset>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,6 +174,31 @@ pub struct PlayerMotion {
 #[derive(Component, Default)]
 pub struct PlayerJump {
     pub vertical_velocity: f32,
+    pub coyote_timer: f32,
+    pub jump_buffer_timer: f32,
+}
+
+#[derive(Component, Default)]
+pub struct PlayerSkillState {
+    pub cooldown_remaining: f32,
+}
+
+impl PlayerSkillState {
+    pub fn ready(&self) -> bool {
+        self.cooldown_remaining <= 0.0
+    }
+
+    pub fn begin(&mut self, cooldown_secs: f32) -> bool {
+        if !self.ready() {
+            return false;
+        }
+        self.cooldown_remaining = cooldown_secs.max(0.0);
+        true
+    }
+
+    pub fn tick(&mut self, delta_secs: f32) {
+        self.cooldown_remaining = (self.cooldown_remaining - delta_secs.max(0.0)).max(0.0);
+    }
 }
 
 #[derive(Component)]
@@ -118,6 +240,12 @@ pub enum PlayerIkPartKind {
 pub struct PlayerIkPart {
     pub kind: PlayerIkPartKind,
 }
+
+#[derive(Component)]
+pub struct DragonKatanaPickup;
+
+#[derive(Component)]
+pub struct HeldWeaponVisual;
 
 #[derive(Component)]
 pub struct GrassTuft {
@@ -234,3 +362,24 @@ pub struct RainDrop {
 
 #[derive(Component)]
 pub struct SlashFx;
+
+#[derive(Component)]
+pub struct HitImpactFx {
+    pub age: f32,
+    pub lifetime: f32,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct HitReaction {
+    pub timer: f32,
+    pub direction: Vec3,
+    pub strength: f32,
+}
+
+impl HitReaction {
+    pub fn trigger(&mut self, direction: Vec3, strength: f32) {
+        self.timer = 0.22;
+        self.direction = direction.normalize_or_zero();
+        self.strength = strength.max(0.0);
+    }
+}

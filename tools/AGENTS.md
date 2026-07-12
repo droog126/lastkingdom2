@@ -39,3 +39,8 @@
 6. 仅在输出集最终确定后运行 `python tools/sync_model_manifests.py`。
 
 完成需要生成器审计、GLB 结构验证、多边形预算验证和渲染视觉检查。仅成功导出的脚本是不完整的。
+
+## 当前锚点
+
+- 生产模型的唯一归属由 `model_catalog.py` 决定，生成器不直接写 manifest；稳定输出后才同步 manifest。
+- 游戏内生态模型路径由核心生态目录消费，改名时需同时检查生成输出、manifest 和目录引用。

@@ -3,13 +3,13 @@
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use serde_json::json;
 
 use super::offline::OfflineNature;
 use super::player::first_person_eye;
 use super::state::{LivingCameraRig, LivingSceneState, PlayerActor};
-use super::util::{SCREENSHOT_MIN_FRAME, SCREENSHOT_SCENE_SECS};
+use super::util::{PLAYER_PHYSICS_CENTER_HEIGHT, SCREENSHOT_MIN_FRAME, SCREENSHOT_SCENE_SECS};
 
 pub fn maybe_take_screenshot(
     mut commands: Commands,
@@ -28,10 +28,9 @@ pub fn maybe_take_screenshot(
     if state.auto_demo {
         if let Some(iter_dir) = &state.iter_dir {
             let _ = std::fs::create_dir_all(iter_dir);
-            let player = players
-                .iter()
-                .next()
-                .map_or(Vec3::ZERO, |transform| transform.translation);
+            let player = players.iter().next().map_or(Vec3::ZERO, |transform| {
+                transform.translation - Vec3::Y * PLAYER_PHYSICS_CENTER_HEIGHT
+            });
             let eye = first_person_eye(player);
             let snapshot = nature.snapshot.clone();
             let events = nature.buffer.drain_events().collect::<Vec<_>>();

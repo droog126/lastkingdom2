@@ -7,3 +7,8 @@
 - 将生成与持续模拟和视觉放置分开。
 - 配方必须是可序列化的、可复现的和可验证的。
 - 不要仅仅为了增加变化而添加无约束的独立随机性。
+
+## 当前锚点
+
+- `WorldRecipe` 当前只负责自然模拟的离散 profile 和 seed 偏移，地形生成仍由 `WorldConfig`/terrain pipeline 负责。
+- `LivingBasin` 与 `RainRecovery` 通过 `EcoCycle` 的现有构造器生成；改变 profile 时必须保留可复现的 seed 行为。

@@ -10,8 +10,8 @@ use lk2_core::world::content::{
 };
 
 use super::content_visuals::{
-    content_profile_label, is_monster_anchor, LivingContentLayout, MONSTER_ANCHOR_PILLAR_SCALE,
-    MONSTER_DECORATIVE_MARKER_SCALE,
+    LivingContentLayout, MONSTER_ANCHOR_PILLAR_SCALE, MONSTER_DECORATIVE_MARKER_SCALE,
+    content_profile_label, is_monster_anchor,
 };
 use super::keybindings::{GameAction, KeyBindings, UiSettings};
 use super::offline::OfflineNature;

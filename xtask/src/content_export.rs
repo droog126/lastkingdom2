@@ -82,16 +82,16 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
             + "\n"),
     )?;
 
-    println!("content export complete");
-    println!("  output: {}", output_dir.display());
+    println!("内容导出完成");
+    println!("  输出目录：{}", output_dir.display());
     println!(
-        "  content: {} ({} active, {} planned)",
+        "  内容定义：{}（生效中 {}，计划中 {}）",
         export.content.len(),
         active.content.len(),
         planned.content.len()
     );
-    println!("  recipes: {}", export.recipes.len());
-    println!("  report:  content.md");
+    println!("  配方数量：{}", export.recipes.len());
+    println!("  阅读报告：content.md");
     Ok(())
 }
 
@@ -242,11 +242,11 @@ fn content_markdown(export: &ContentRegistryExport) -> String {
             .push(definition);
     }
 
-    let mut output = String::from("# Content Export\n\n");
-    output.push_str("## Overview\n\n");
-    output.push_str("| Metric | Value |\n| --- | ---: |\n");
+    let mut output = String::from("# 内容导出\n\n");
+    output.push_str("## 概览\n\n");
+    output.push_str("| 项目 | 数值 |\n| --- | ---: |\n");
     output.push_str(&format!(
-        "| Schema version | {} |\n| Content definitions | {} |\n| Active | {} |\n| Planned | {} |\n| Recipes | {} |\n\n",
+        "| 数据版本 | {} |\n| 内容定义 | {} |\n| 生效中 | {} |\n| 计划中 | {} |\n| 配方 | {} |\n\n",
         export.schema_version,
         export.content.len(),
         active_count,
@@ -254,14 +254,14 @@ fn content_markdown(export: &ContentRegistryExport) -> String {
         export.recipes.len()
     ));
 
-    output.push_str("## Content Catalog\n\n");
+    output.push_str("## 内容目录\n\n");
     for (category, definitions) in categories {
         output.push_str(&format!(
             "### {} ({})\n\n",
             category_title(category),
             definitions.len()
         ));
-        output.push_str("| Key | Name | Status | Visual | Produces | Stack |\n");
+        output.push_str("| Key | 名称 | 状态 | 外观 | 产出 | 堆叠上限 |\n");
         output.push_str("| --- | --- | --- | --- | --- | ---: |\n");
         for definition in definitions {
             let visual = definition
@@ -275,7 +275,7 @@ fn content_markdown(export: &ContentRegistryExport) -> String {
                 definition
                     .produced_resources
                     .iter()
-                    .map(|yield_| format!("{} x {}", yield_.content.key, yield_.amount))
+                    .map(|yield_| format!("{} × {}", yield_.content.key, yield_.amount))
                     .collect::<Vec<_>>()
                     .join("<br>")
             };
@@ -287,7 +287,7 @@ fn content_markdown(export: &ContentRegistryExport) -> String {
                 "| `{}` | {} | {} | {} | {} | {} |\n",
                 markdown_cell(&definition.key),
                 markdown_cell(&definition.display_name),
-                status_name(definition.status),
+                status_label(definition.status),
                 markdown_cell(&visual),
                 markdown_cell(&produced),
                 stack
@@ -296,20 +296,20 @@ fn content_markdown(export: &ContentRegistryExport) -> String {
         output.push('\n');
     }
 
-    output.push_str("## Recipes\n\n");
+    output.push_str("## 配方\n\n");
     if export.recipes.is_empty() {
-        output.push_str("No recipes registered.\n");
+        output.push_str("当前没有注册配方。\n");
     } else {
-        output.push_str("| Recipe | Output | Ingredients |\n| --- | --- | --- |\n");
+        output.push_str("| 配方 | 产出 | 原料 |\n| --- | --- | --- |\n");
         for recipe in &export.recipes {
             let ingredients = recipe
                 .ingredients
                 .iter()
-                .map(|ingredient| format!("{} x {}", ingredient.content.key, ingredient.amount))
+                .map(|ingredient| format!("{} × {}", ingredient.content.key, ingredient.amount))
                 .collect::<Vec<_>>()
                 .join("<br>");
             output.push_str(&format!(
-                "| `{}` | {} x {} | {} |\n",
+                "| `{}` | {} × {} | {} |\n",
                 markdown_cell(&recipe.key),
                 markdown_cell(&recipe.output.key),
                 recipe.output_amount,
@@ -318,9 +318,7 @@ fn content_markdown(export: &ContentRegistryExport) -> String {
         }
     }
     output.push('\n');
-    output.push_str(
-        "IDs, descriptions, tags, sources and full structured data remain available in `content_registry.json`.\n",
-    );
+    output.push_str("ID、描述、标签、来源和完整结构化数据仍保存在 `content_registry.json` 中。\n");
     output
 }
 
@@ -333,14 +331,14 @@ fn format_visual(visual: &lk2_core::content::ContentVisual) -> String {
         .join(", ");
     let biome = visual
         .preferred_biome
-        .map(|biome| format!("biome: {biome:?}"))
-        .unwrap_or_else(|| "biome: -".to_string());
+        .map(|biome| format!("生物群系：{biome:?}"))
+        .unwrap_or_else(|| "生物群系：-".to_string());
     let source_block = visual
         .source_block
-        .map(|block| format!("block: {block:?}"))
-        .unwrap_or_else(|| "block: -".to_string());
+        .map(|block| format!("方块：{block:?}"))
+        .unwrap_or_else(|| "方块：-".to_string());
     format!(
-        "`{}`<br>scale: {}<br>{}; {}",
+        "`{}`<br>缩放：{}<br>{}；{}",
         markdown_cell(&visual.model_path),
         scale,
         biome,
@@ -349,16 +347,23 @@ fn format_visual(visual: &lk2_core::content::ContentVisual) -> String {
 }
 
 fn category_title(category: &str) -> String {
-    category
-        .split('_')
-        .map(|word| {
-            let mut characters = word.chars();
-            characters.next().map_or_else(String::new, |first| {
-                first.to_uppercase().collect::<String>() + characters.as_str()
-            })
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    match category {
+        "resource" => "资源".to_string(),
+        "creature" => "生物".to_string(),
+        "wildlife" => "野生动物".to_string(),
+        "plant" => "植物".to_string(),
+        "resource_node" => "资源节点".to_string(),
+        "drop" => "掉落物".to_string(),
+        "item" => "物品".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn status_label(status: ContentStatus) -> &'static str {
+    match status {
+        ContentStatus::Active => "生效中",
+        ContentStatus::Planned => "计划中",
+    }
 }
 
 fn markdown_cell(value: &str) -> String {
@@ -414,10 +419,12 @@ mod tests {
     fn markdown_report_is_grouped_and_keeps_recipes_readable() {
         let report = content_markdown(&game_content_registry().export());
 
-        assert!(report.contains("# Content Export"));
-        assert!(report.contains("### Creature (4)"));
+        assert!(report.contains("# 内容导出"));
+        assert!(report.contains("### 生物 (4)"));
+        assert!(report.contains("| Key | 名称 | 状态 | 外观 | 产出 | 堆叠上限 |"));
         assert!(report.contains("| `creature.chicken` |"));
-        assert!(report.contains("## Recipes"));
-        assert!(report.contains("resource.dragon_heart x 1"));
+        assert!(report.contains("## 配方"));
+        assert!(report.contains("resource.dragon_heart × 1"));
+        assert!(report.contains("生物群系：Jungle"));
     }
 }

@@ -158,6 +158,117 @@ def make_granular_pine_tree() -> None:
     export_glb("granular_pine_tree")
 
 
+def make_forest_stone_spire() -> None:
+    clear_scene()
+    stone = make_mat("forest_spire_stone", (0.82, 0.84, 0.80), roughness=0.88)
+    stone_light = make_mat("forest_spire_stone_light", (0.94, 0.95, 0.91), roughness=0.84)
+    stone_shadow = make_mat("forest_spire_stone_shadow", (0.58, 0.62, 0.60), roughness=0.92)
+    moss = make_mat("forest_spire_moss", (0.35, 0.48, 0.28), roughness=0.98)
+
+    # A readable stepped monolith: broad broken foot, tapered shaft, and a
+    # narrow cap that remains legible between tall trees.
+    block("spire_foot", (0.0, 0.0, 0.28), (2.20, 1.72, 0.56), stone_shadow, rot=(0.0, 0.0, -0.08))
+    block("spire_foot_slab", (0.10, -0.04, 0.62), (1.72, 1.34, 0.36), stone, rot=(0.0, 0.0, 0.05))
+    block("spire_lower_shoulder", (-0.04, 0.02, 1.18), (1.25, 1.02, 0.74), stone_light, rot=(0.0, 0.0, -0.06))
+    block("spire_lower_shaft", (0.02, 0.02, 2.55), (0.86, 0.74, 2.15), stone, rot=(0.0, 0.0, 0.025))
+    block("spire_upper_shaft", (-0.04, 0.02, 4.38), (0.60, 0.56, 1.55), stone_light, rot=(0.0, 0.0, -0.035))
+    block("spire_cap", (0.0, 0.0, 5.78), (0.38, 0.36, 1.25), stone, rot=(0.0, 0.0, 0.02))
+    block("spire_broken_left", (-0.86, 0.12, 0.92), (0.54, 0.46, 0.48), stone, rot=(0.07, -0.12, -0.24))
+    block("spire_broken_right", (0.82, -0.10, 0.78), (0.46, 0.40, 0.36), stone_light, rot=(-0.05, 0.10, 0.20))
+    block("spire_moss_patch", (-0.72, -0.88, 0.72), (0.42, 0.035, 0.20), moss, rot=(0.0, 0.0, -0.15))
+    block("spire_shadow_patch", (0.30, -0.76, 2.08), (0.22, 0.035, 0.68), stone_shadow, rot=(0.02, 0.0, 0.06))
+    export_glb("forest_stone_spire")
+
+
+def make_granular_birch_tree() -> None:
+    clear_scene()
+    rng = random.Random(1309)
+    bark = make_mat("granular_birch_bark", (0.78, 0.73, 0.58))
+    bark_dark = make_mat("granular_birch_bark_dark", (0.18, 0.15, 0.11))
+    leaf_a = make_mat("granular_birch_leaf_a", (0.30, 0.58, 0.22))
+    leaf_b = make_mat("granular_birch_leaf_b", (0.48, 0.72, 0.25))
+    leaf_c = make_mat("granular_birch_leaf_c", (0.16, 0.39, 0.19))
+
+    cylinder("trunk_low", (0.0, 0.0, 0.68), 0.14, 1.36, bark, vertices=7)
+    cylinder("trunk_high", (0.02, 0.0, 1.55), 0.10, 0.92, bark, vertices=7)
+    for index, (x, z, width) in enumerate(((-0.01, 0.44, 0.11), (0.02, 0.92, 0.08), (-0.01, 1.38, 0.10))):
+        block(f"bark_mark_{index}", (x, -0.145, z), (width, 0.022, 0.035), bark_dark)
+    for index, angle in enumerate((-0.75, 0.25, 1.15, 2.5)):
+        cylinder(
+            f"branch_{index}",
+            (math.cos(angle) * 0.18, math.sin(angle) * 0.18, 1.52 + index * 0.12),
+            0.040,
+            0.62,
+            bark,
+            vertices=5,
+            rot=(math.radians(64.0), 0.0, angle),
+        )
+
+    scatter_leaf_blocks(rng, "birch_core", (0.0, 0.0, 2.22), 54, (0.68, 0.52, 0.48), [leaf_a, leaf_b, leaf_c], (0.10, 0.18), 0.10)
+    scatter_leaf_blocks(rng, "birch_left", (-0.38, 0.04, 2.04), 20, (0.34, 0.28, 0.28), [leaf_b, leaf_a], (0.08, 0.14), 0.06)
+    scatter_leaf_blocks(rng, "birch_right", (0.40, -0.02, 2.10), 22, (0.36, 0.30, 0.30), [leaf_a, leaf_c], (0.08, 0.15), 0.08)
+    export_glb("granular_birch_tree")
+
+
+def make_granular_autumn_tree() -> None:
+    clear_scene()
+    rng = random.Random(1411)
+    bark = make_mat("granular_autumn_bark", (0.36, 0.19, 0.09))
+    bark_light = make_mat("granular_autumn_bark_light", (0.54, 0.29, 0.11))
+    leaf_red = make_mat("granular_autumn_leaf_red", (0.72, 0.18, 0.08))
+    leaf_orange = make_mat("granular_autumn_leaf_orange", (0.95, 0.39, 0.08))
+    leaf_gold = make_mat("granular_autumn_leaf_gold", (0.96, 0.68, 0.12))
+    leaf_brown = make_mat("granular_autumn_leaf_brown", (0.48, 0.25, 0.08))
+
+    cylinder("trunk_low", (0.0, 0.0, 0.66), 0.17, 1.32, bark, vertices=7)
+    cylinder("trunk_high", (-0.02, 0.0, 1.46), 0.12, 0.72, bark_light, vertices=7)
+    for index, angle in enumerate((-0.85, 0.10, 0.95, 2.35)):
+        cylinder(
+            f"branch_{index}",
+            (math.cos(angle) * 0.22, math.sin(angle) * 0.22, 1.42 + index * 0.13),
+            0.050,
+            0.72,
+            bark,
+            vertices=6,
+            rot=(math.radians(62.0), 0.0, angle),
+        )
+
+    scatter_leaf_blocks(rng, "autumn_core", (0.0, 0.0, 2.18), 66, (0.82, 0.62, 0.54), [leaf_orange, leaf_gold, leaf_red, leaf_brown], (0.10, 0.19), 0.14)
+    scatter_leaf_blocks(rng, "autumn_left", (-0.48, 0.05, 2.02), 24, (0.42, 0.34, 0.32), [leaf_red, leaf_orange, leaf_brown], (0.09, 0.16), 0.06)
+    scatter_leaf_blocks(rng, "autumn_right", (0.48, -0.05, 2.08), 25, (0.44, 0.36, 0.34), [leaf_gold, leaf_orange, leaf_red], (0.09, 0.17), 0.08)
+    scatter_leaf_blocks(rng, "autumn_top", (0.05, 0.02, 2.60), 18, (0.40, 0.34, 0.26), [leaf_gold, leaf_orange], (0.08, 0.15), 0.10)
+    export_glb("granular_autumn_tree")
+
+
+def make_granular_willow_tree() -> None:
+    clear_scene()
+    rng = random.Random(1523)
+    bark = make_mat("granular_willow_bark", (0.35, 0.25, 0.14))
+    bark_light = make_mat("granular_willow_bark_light", (0.55, 0.39, 0.19))
+    leaf_a = make_mat("granular_willow_leaf_a", (0.24, 0.54, 0.22))
+    leaf_b = make_mat("granular_willow_leaf_b", (0.46, 0.70, 0.25))
+    leaf_c = make_mat("granular_willow_leaf_c", (0.13, 0.35, 0.18))
+
+    cylinder("trunk_low", (0.0, 0.0, 0.58), 0.20, 1.16, bark, vertices=8)
+    cylinder("trunk_high", (0.0, 0.0, 1.42), 0.14, 0.84, bark_light, vertices=7)
+    for index, angle in enumerate((-1.00, -0.35, 0.35, 1.00, 2.40, 3.00)):
+        cylinder(
+            f"branch_{index}",
+            (math.cos(angle) * 0.24, math.sin(angle) * 0.24, 1.55),
+            0.042,
+            0.78,
+            bark,
+            vertices=5,
+            rot=(math.radians(70.0), 0.0, angle),
+        )
+
+    scatter_leaf_blocks(rng, "willow_core", (0.0, 0.0, 2.20), 70, (0.68, 0.52, 0.34), [leaf_a, leaf_b, leaf_c], (0.09, 0.17), 0.08)
+    scatter_leaf_blocks(rng, "willow_left", (-0.62, 0.0, 1.96), 46, (0.30, 0.25, 0.62), [leaf_a, leaf_b], (0.08, 0.16), -0.12)
+    scatter_leaf_blocks(rng, "willow_right", (0.62, 0.02, 1.98), 46, (0.30, 0.25, 0.64), [leaf_b, leaf_a, leaf_c], (0.08, 0.16), -0.14)
+    scatter_leaf_blocks(rng, "willow_front", (0.0, -0.42, 1.98), 34, (0.36, 0.20, 0.52), [leaf_a, leaf_c], (0.08, 0.15), -0.10)
+    export_glb("granular_willow_tree")
+
+
 def make_granular_wildflowers() -> None:
     clear_scene()
     rng = random.Random(2219)
@@ -250,6 +361,7 @@ def render_preview(path: Path = PREVIEW_PATH) -> Path:
     placements = [
         ("granular_round_tree.glb", (-1.75, 0.45, 0.0)),
         ("granular_pine_tree.glb", (0.85, 0.40, 0.0)),
+        ("forest_stone_spire.glb", (0.05, 1.35, 0.0)),
         ("granular_wildflowers.glb", (-0.55, -1.15, 0.0)),
         ("granular_reed_bank.glb", (1.55, -1.05, 0.0)),
     ]
@@ -281,6 +393,10 @@ def render_preview(path: Path = PREVIEW_PATH) -> Path:
 def build_assets() -> None:
     make_granular_round_tree()
     make_granular_pine_tree()
+    make_forest_stone_spire()
+    make_granular_birch_tree()
+    make_granular_autumn_tree()
+    make_granular_willow_tree()
     make_granular_wildflowers()
     make_granular_reed_bank()
 

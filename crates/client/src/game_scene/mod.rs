@@ -20,48 +20,64 @@
 
 use std::path::{Path, PathBuf};
 
+use avian3d::prelude::{PhysicsDebugPlugin, PhysicsPlugins};
+use avian3d::schedule::PhysicsSchedule;
 use bevy::prelude::*;
+use bevy::render::{
+    RenderPlugin,
+    settings::{Backends, WgpuSettings},
+};
 use bevy::window::{PresentMode, WindowResolution};
+use bevy_hanabi::HanabiPlugin;
+use bevy_tnua::prelude::{TnuaControllerPlugin, TnuaUserControlsSystems};
+use bevy_tnua_avian3d::prelude::TnuaAvian3dPlugin;
 use lk2_core::content::game_content_registry;
 
 use crate::game_scene::animation::{
-    animate_boss, animate_clouds_and_rain, animate_rabbits, animate_sun, animate_tree_sway,
-    animate_wolves, grow_berries, grow_grass, update_ground_after_rain,
+    animate_boss, animate_clouds_and_rain, animate_exported_content_visuals, animate_rabbits,
+    animate_sun, animate_tree_sway, animate_wolves, grow_berries, grow_grass,
+    update_ground_after_rain,
 };
 use crate::game_scene::capture::{exit_preview, maybe_take_screenshot};
 use crate::game_scene::content_visuals::living_content_layout_from_args;
 use crate::game_scene::farm_ui::{
-    handle_farming_actions, handle_farming_buttons, reconcile_farm_visuals, setup_farming_ui,
-    toggle_farming_ui, update_farming_ui, FarmingUiState,
+    FarmingUiState, handle_farming_actions, handle_farming_buttons, reconcile_farm_visuals,
+    setup_farming_ui, toggle_farming_ui, update_farming_ui,
 };
+use crate::game_scene::hud::{setup_gameplay_hud, update_gameplay_hud};
 use crate::game_scene::inventory::{
-    handle_inventory_buttons, setup_inventory_ui, toggle_inventory_ui, update_inventory_ui,
-    InventoryUiState,
+    InventoryUiState, handle_inventory_buttons, setup_inventory_ui, toggle_inventory_ui,
+    update_inventory_ui,
 };
 use crate::game_scene::keybindings::{
-    capture_keybinding_input, handle_keybinding_buttons, setup_keybinding_ui, toggle_keybinding_ui,
-    update_keybinding_ui, KeyBindings, SettingsUiState, UiSettings,
+    KeyBindings, SettingsUiState, UiSettings, capture_keybinding_input, handle_keybinding_buttons,
+    setup_keybinding_ui, toggle_keybinding_ui, update_keybinding_ui,
 };
-use crate::game_scene::offline::{advance_offline_nature, OfflineNature};
+use crate::game_scene::offline::{OfflineNature, advance_offline_nature};
 use crate::game_scene::player::{
-    advance_scene, camera_look_input, player_controls, update_camera, update_cursor_capture,
-    update_player_ik,
+    PlayerControlScheme, advance_scene, camera_look_input, pickup_dragon_katana,
+    player_combat_controls, player_controls, sync_player_physics_state, toggle_collision_debug,
+    update_camera, update_collision_debug, update_cursor_capture, update_player_ik,
 };
 use crate::game_scene::reconcile::reconcile_nature_entities;
 use crate::game_scene::setup::{
-    setup_camera, setup_farm_plots, setup_lighting, setup_living_scene, setup_rendering,
-    setup_terrain,
+    setup_camera, setup_collision_debug, setup_farm_plots, setup_lighting, setup_living_scene,
+    setup_rendering, setup_terrain,
 };
-use crate::game_scene::state::LivingSceneState;
+use crate::game_scene::state::{CollisionDebugState, LivingSceneState};
+use crate::game_scene::stylized_material::{StylizedTerrainMaterial, stylize_tree_materials};
 use crate::game_scene::world_debug::{
-    setup_world_debug_ui, toggle_world_debug_ui, update_world_debug_ui, WorldDebugUiState,
+    WorldDebugUiState, setup_world_debug_ui, toggle_world_debug_ui, update_world_debug_ui,
 };
+use lk2_core::legendary::LegendaryLoadout;
 
 mod animation;
 mod capture;
+mod combat_fx;
 mod content_visuals;
 mod creature_ai;
 mod farm_ui;
+mod hud;
 mod inventory;
 mod keybindings;
 mod offline;
@@ -71,6 +87,7 @@ mod procedural_rig;
 mod reconcile;
 mod setup;
 mod state;
+mod stylized_material;
 mod util;
 mod world_debug;
 
@@ -100,6 +117,14 @@ pub fn run_game_scene() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .set(RenderPlugin {
+                render_creation: WgpuSettings {
+                    backends: Some(Backends::VULKAN),
+                    ..default()
+                }
+                .into(),
+                ..default()
+            })
             .set(AssetPlugin {
                 file_path: asset_root.to_string_lossy().into_owned(),
                 ..default()
@@ -120,6 +145,14 @@ pub fn run_game_scene() {
                 ..default()
             }),
     );
+    app.add_plugins((
+        PhysicsPlugins::default(),
+        PhysicsDebugPlugin,
+        TnuaControllerPlugin::<PlayerControlScheme>::new(PhysicsSchedule),
+        TnuaAvian3dPlugin::new(PhysicsSchedule),
+        HanabiPlugin,
+    ));
+    app.add_plugins(MaterialPlugin::<StylizedTerrainMaterial>::default());
     app.insert_resource(LivingSceneState {
         elapsed: 0.0,
         frame: 0,
@@ -128,14 +161,19 @@ pub fn run_game_scene() {
         exit_deadline: None,
         png_path,
         attack_flash: 0.0,
+        camera_shake: 0.0,
         auto_demo,
         iter_dir,
         frame_dt_over_50ms: 0,
         frame_dt_max_ms: 0.0,
     })
+    .insert_resource(CollisionDebugState {
+        enabled: args.iter().any(|arg| arg == "--collision-debug"),
+    })
     .insert_resource(game_content_registry())
     .insert_resource(living_content_layout_from_args(&args))
     .insert_resource(OfflineNature::playable())
+    .insert_resource(LegendaryLoadout::default())
     .init_resource::<KeyBindings>()
     .init_resource::<UiSettings>()
     .init_resource::<SettingsUiState>()
@@ -150,15 +188,21 @@ pub fn run_game_scene() {
             setup_rendering,
             setup_lighting,
             setup_terrain,
+            setup_collision_debug,
             setup_living_scene,
             setup_farm_plots,
             setup_camera,
             setup_keybinding_ui,
             setup_inventory_ui,
             setup_farming_ui,
+            setup_gameplay_hud,
             setup_world_debug_ui,
         )
             .chain(),
+    );
+    app.add_systems(
+        PhysicsSchedule,
+        player_controls.in_set(TnuaUserControlsSystems),
     );
     app.add_systems(
         Update,
@@ -172,9 +216,13 @@ pub fn run_game_scene() {
             (
                 advance_scene,
                 advance_offline_nature,
+                stylize_tree_materials,
                 reconcile_nature_entities,
                 camera_look_input,
-                player_controls,
+                sync_player_physics_state,
+                pickup_dragon_katana,
+                player_combat_controls,
+                toggle_collision_debug,
                 toggle_keybinding_ui,
                 handle_keybinding_buttons,
                 capture_keybinding_input,
@@ -189,6 +237,8 @@ pub fn run_game_scene() {
                 .chain(),
             (
                 update_player_ik,
+                update_collision_debug,
+                animate_exported_content_visuals,
                 animate_clouds_and_rain,
                 grow_grass,
                 grow_berries,
@@ -209,6 +259,7 @@ pub fn run_game_scene() {
                 update_keybinding_ui,
                 update_inventory_ui,
                 update_farming_ui,
+                update_gameplay_hud,
                 update_world_debug_ui,
                 exit_preview,
             )

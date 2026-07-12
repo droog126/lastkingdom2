@@ -35,7 +35,6 @@ struct LoopArgs {
     server_addr: String,
     first_person: bool,
     audit_pretty_models: bool,
-    no_kenney: bool,
     legacy_voxel: bool,
     hold_forward_test: bool,
     refresh_after_fail: bool,
@@ -82,7 +81,6 @@ impl Default for LoopArgs {
             server_addr: "127.0.0.1:5000".to_string(),
             first_person: false,
             audit_pretty_models: false,
-            no_kenney: false,
             legacy_voxel: false,
             hold_forward_test: false,
             refresh_after_fail: false,
@@ -141,10 +139,6 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         runtime_env(root, &target_dir, &parsed.rust_log)?,
         &parsed.gpu_backend,
     );
-    if parsed.no_kenney {
-        envs.push(("LK2_DISABLE_KENNEY".to_string(), "1".to_string()));
-        println!(">>> Kenney gameplay models OFF <<<");
-    }
     stop_processes(&["lk2-client", "lk2-server"]);
     thread::sleep(Duration::from_secs(1));
 
@@ -647,7 +641,6 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
             Some("auditprettymodels") | Some("audit-pretty-models") => {
                 parsed.audit_pretty_models = true
             }
-            Some("nokenney") | Some("no-kenney") => parsed.no_kenney = true,
             Some("legacyvoxel") | Some("legacy-voxel") => parsed.legacy_voxel = true,
             Some("holdforwardtest") | Some("hold-forward-test") => parsed.hold_forward_test = true,
             Some("refreshafterfail") | Some("refresh-after-fail") => {

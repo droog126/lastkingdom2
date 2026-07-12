@@ -150,23 +150,23 @@ impl HumanoidRig {
         Self {
             left_arm: TwoBoneLimbSpec {
                 root: Vec3::new(-0.31, 1.02, -0.02),
-                upper_len: 0.27,
-                lower_len: 0.27,
+                upper_len: 0.255,
+                lower_len: 0.255,
             },
             right_arm: TwoBoneLimbSpec {
                 root: Vec3::new(0.31, 1.02, -0.02),
-                upper_len: 0.27,
-                lower_len: 0.27,
+                upper_len: 0.255,
+                lower_len: 0.255,
             },
             left_leg: TwoBoneLimbSpec {
                 root: Vec3::new(-0.15, 0.50, 0.03),
-                upper_len: 0.23,
-                lower_len: 0.26,
+                upper_len: 0.235,
+                lower_len: 0.235,
             },
             right_leg: TwoBoneLimbSpec {
                 root: Vec3::new(0.15, 0.50, 0.03),
-                upper_len: 0.23,
-                lower_len: 0.26,
+                upper_len: 0.235,
+                lower_len: 0.235,
             },
         }
     }

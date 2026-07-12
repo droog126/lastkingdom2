@@ -1,7 +1,8 @@
-"""Build 10 more visual models for lastkingdom2: forest/magic/decor variety.
+"""Build visual models for lastkingdom2: forest/magic/decor variety.
 
 Adds: mushroom_red, mushroom_brown, crystal_blue, crystal_pink, treasure_chest,
-      boat, arch_stone, cart, tombstone, haystack.
+      boat, arch_stone, cart, tombstone, haystack, palm, resource_wood,
+      resource_stone.
 
 Output: assets/procedural/pretty/
 
@@ -423,11 +424,91 @@ def make_haystack() -> None:
     export_glb("haystack")
 
 
+# ============================================================== CONTENT REPLACEMENTS
+
+
+def make_palm() -> None:
+    clear_scene()
+    trunk = mat_only("palm_trunk", (0.42, 0.22, 0.09))
+    trunk_light = mat_only("palm_trunk_light", (0.62, 0.34, 0.13))
+    leaf = mat_only("palm_leaf", (0.12, 0.55, 0.16))
+    leaf_light = mat_only("palm_leaf_light", (0.22, 0.72, 0.20))
+    fruit = mat_only("palm_fruit", (0.78, 0.18, 0.05))
+
+    cylinder("trunk", (0.0, 2.0, 0.0), 0.22, 4.0, trunk, vertices=10)
+    cylinder("trunk_highlight", (-0.16, 2.0, -0.01), 0.055, 3.72, trunk_light, vertices=8)
+    for index, angle in enumerate([0.0, 0.75, 1.50, 2.25, 3.0, 3.75, 4.50, 5.25]):
+        radius = 0.70 + 0.10 * (index % 2)
+        frond = uv_sphere(
+            f"frond_{index}",
+            (math.cos(angle) * radius, 4.12, math.sin(angle) * radius),
+            (1.00, 0.10, 0.20),
+            leaf if index % 2 == 0 else leaf_light,
+            10,
+            5,
+        )
+        frond.rotation_euler[2] = angle
+    for index, angle in enumerate((0.35, 2.40, 4.45)):
+        uv_sphere(
+            f"fruit_cluster_{index}",
+            (math.cos(angle) * 0.32, 3.72, math.sin(angle) * 0.32),
+            (0.12, 0.12, 0.12),
+            fruit,
+            8,
+            4,
+        )
+    export_glb("palm")
+
+
+def make_resource_wood() -> None:
+    clear_scene()
+    bark = mat_only("resource_wood_bark", (0.38, 0.18, 0.07))
+    cut = mat_only("resource_wood_cut", (0.78, 0.50, 0.22))
+    moss = mat_only("resource_wood_moss", (0.16, 0.42, 0.12))
+
+    for index, (x, z, angle) in enumerate(((-0.24, 0.11, 0.18), (0.18, 0.16, -0.12))):
+        log = cylinder(
+            f"log_{index}",
+            (x, 0.22 + index * 0.13, z),
+            0.18,
+            0.86,
+            bark,
+            vertices=10,
+        )
+        log.rotation_euler[1] = math.pi * 0.5
+        log.rotation_euler[2] = angle
+        cap = cylinder(
+            f"cut_end_{index}",
+            (x + 0.43, 0.22 + index * 0.13, z),
+            0.145,
+            0.018,
+            cut,
+            vertices=10,
+        )
+        cap.rotation_euler[1] = math.pi * 0.5
+        cap.rotation_euler[2] = angle
+    uv_sphere("moss_patch", (-0.05, 0.47, 0.18), (0.16, 0.05, 0.10), moss, 8, 4)
+    export_glb("resource_wood")
+
+
+def make_resource_stone() -> None:
+    clear_scene()
+    stone = mat_only("resource_stone", (0.35, 0.40, 0.46))
+    stone_light = mat_only("resource_stone_light", (0.58, 0.65, 0.70))
+    moss = mat_only("resource_stone_moss", (0.20, 0.45, 0.18))
+
+    ico_sphere("stone_main", (0.0, 0.24, 0.0), (0.42, 0.28, 0.34), stone, subdivisions=1)
+    ico_sphere("stone_chip", (0.32, 0.16, 0.08), (0.18, 0.12, 0.16), stone_light, subdivisions=1)
+    ico_sphere("stone_chip_small", (-0.28, 0.12, 0.16), (0.14, 0.10, 0.12), stone_light, subdivisions=1)
+    uv_sphere("moss_patch", (-0.10, 0.46, -0.12), (0.16, 0.035, 0.11), moss, 8, 4)
+    export_glb("resource_stone")
+
+
 # ============================================================== MAIN
 
 
 def main() -> None:
-    print("[v3] start building 10 new models...")
+    print("[v3] start building forest, magic, decor, and content replacement models...")
     make_mushroom_red()
     make_mushroom_brown()
     make_crystal_blue()
@@ -438,6 +519,9 @@ def main() -> None:
     make_cart()
     make_tombstone()
     make_haystack()
+    make_palm()
+    make_resource_wood()
+    make_resource_stone()
     print("[v3] done.")
 
 

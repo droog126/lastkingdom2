@@ -511,8 +511,10 @@ def make_tavern() -> None:
     roof = glow_mat("tavern_roof", (0.55, 0.20, 0.18), glow_strength=0.4, roughness=0.8)
     roof_dark = glow_mat("tavern_roof_dark", (0.35, 0.10, 0.08), glow_strength=0.2, roughness=0.85)
     wood = glow_mat("tavern_wood", (0.45, 0.25, 0.10), glow_strength=0.2, roughness=0.9)
+    porch = glow_mat("tavern_porch", (0.58, 0.34, 0.14), glow_strength=0.25, roughness=0.88)
     window_glow = glow_mat("tavern_window", (1.0, 0.80, 0.40), glow_strength=1.4, roughness=0.4)
     sign = glow_mat("tavern_sign", (0.85, 0.65, 0.20), glow_strength=0.9, roughness=0.5)
+    lantern = glow_mat("tavern_lantern", (1.0, 0.55, 0.12), glow_strength=1.0, roughness=0.45)
     chimney = glow_mat("tavern_chimney", (0.50, 0.40, 0.40), glow_strength=0.2, roughness=0.95)
     smoke = mat("tavern_smoke", (0.85, 0.85, 0.90), roughness=0.95, alpha=0.55)
 
@@ -534,6 +536,11 @@ def make_tavern() -> None:
          glow_mat("tavern_door_panel", (0.50, 0.28, 0.10), glow_strength=0.2, roughness=0.85))
     cube("door_panel_r", (0.10, 0.45, 0.78), (0.14, 0.85, 0.02),
          glow_mat("tavern_door_panel", (0.50, 0.28, 0.10), glow_strength=0.2, roughness=0.85))
+
+    cube("porch_floor", (0.0, 0.12, 0.94), (1.55, 0.10, 0.58), porch)
+    cube("porch_roof", (0.0, 1.62, 0.96), (1.70, 0.10, 0.62), roof_dark)
+    cube("door_frame_l", (-0.25, 0.90, 0.82), (0.08, 1.00, 0.08), wood)
+    cube("door_frame_r", (0.25, 0.90, 0.82), (0.08, 1.00, 0.08), wood)
 
     cube("window_fl", (-0.55, 1.20, 0.76), (0.32, 0.32, 0.04), window_glow)
     cube("window_fr", (0.55, 1.20, 0.76), (0.32, 0.32, 0.04), window_glow)
@@ -561,6 +568,10 @@ def make_tavern() -> None:
     cube("sign_text", (0.0, 2.30, 0.98), (0.90, 0.30, 0.02),
          glow_mat("tavern_sign_text", (0.95, 0.55, 0.20), glow_strength=0.9))
     cube("sign_bottom", (0.0, 1.90, 0.88), (0.50, 0.20, 0.04), wood)
+
+    for x in (-0.70, 0.70):
+        cube(f"lantern_hook_{x}", (x, 1.70, 0.91), (0.05, 0.20, 0.05), wood)
+        uv_sphere(f"lantern_{x}", (x, 1.56, 0.91), (0.10, 0.10, 0.10), lantern, 8, 5)
 
     for px in [-0.85, 0.85]:
         cube("post_base", (px, 0.05, 0.95), (0.20, 0.10, 0.20), wood)

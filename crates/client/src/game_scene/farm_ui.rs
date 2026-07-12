@@ -6,7 +6,8 @@ use lk2_core::farming::{CropKind, FarmingError};
 use super::inventory::InventoryUiState;
 use super::keybindings::{GameAction, KeyBindings, UiSettings};
 use super::offline::OfflineNature;
-use super::state::{crop_material_index, FarmVisualMaterials, FARM_PLOT_POSITIONS};
+use super::state::{FARM_PLOT_POSITIONS, FarmVisualMaterials, crop_material_index};
+use super::util::PLAYER_PHYSICS_CENTER_HEIGHT;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FarmCommand {
@@ -292,9 +293,10 @@ pub fn handle_farming_actions(
         state.status = "找不到玩家位置".into();
         return;
     };
+    let player_position = player.translation - Vec3::Y * PLAYER_PHYSICS_CENTER_HEIGHT;
     let plot_id = match command {
-        FarmCommand::Plant => nearest_plot_id(player.translation, &nature, false),
-        FarmCommand::Harvest => nearest_plot_id(player.translation, &nature, true),
+        FarmCommand::Plant => nearest_plot_id(player_position, &nature, false),
+        FarmCommand::Harvest => nearest_plot_id(player_position, &nature, true),
     };
     let Some(plot_id) = plot_id else {
         state.status = "请靠近一块可用农田".into();
@@ -379,7 +381,10 @@ pub(crate) fn update_farming_ui(
     nature: Res<OfflineNature>,
     state: Res<FarmingUiState>,
     ui_settings: Res<UiSettings>,
-    mut root: Query<(&mut Visibility, &mut BackgroundColor), With<FarmingUiRoot>>,
+    mut root: Query<
+        (&mut Visibility, &mut BackgroundColor),
+        (With<FarmingUiRoot>, Without<Button>),
+    >,
     mut body: Query<&mut Text, (With<FarmingBodyText>, Without<FarmingStatusText>)>,
     mut status: Query<&mut Text, (With<FarmingStatusText>, Without<FarmingBodyText>)>,
     mut crop_buttons: Query<(&FarmCropButton, &Interaction, &mut BackgroundColor), With<Button>>,

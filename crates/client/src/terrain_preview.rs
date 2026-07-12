@@ -13,6 +13,10 @@ use bevy::pbr::{AtmosphereSettings, ScreenSpaceReflections};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::render::{
+    RenderPlugin,
+    settings::{Backends, WgpuSettings},
+};
 use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, WindowResolution};
 use bevy_world_serialization::WorldAsset;
@@ -20,6 +24,13 @@ use bevy_world_serialization::WorldAsset;
 pub const TERRAIN_PREVIEW_OUTPUT_DIR: &str = "screenshots/terrain_preview";
 
 const STABILIZATION_FRAMES: u64 = 180;
+const TREE_PATHS: [&str; 5] = [
+    "procedural/pretty/sokpop_tree.glb",
+    "procedural/pretty/granular_round_tree.glb",
+    "procedural/pretty/granular_pine_tree.glb",
+    "procedural/pretty/granular_birch_tree.glb",
+    "procedural/pretty/granular_autumn_tree.glb",
+];
 
 #[derive(Resource)]
 struct TerrainPreviewState {
@@ -48,6 +59,14 @@ pub fn run_terrain_preview() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .set(RenderPlugin {
+                render_creation: WgpuSettings {
+                    backends: Some(Backends::VULKAN),
+                    ..default()
+                }
+                .into(),
+                ..default()
+            })
             .set(AssetPlugin {
                 file_path: asset_root.to_string_lossy().into_owned(),
                 ..default()
@@ -466,12 +485,12 @@ fn spawn_wild_side(
         (-29.0, -5.0, 1.25),
         (-22.0, -1.0, 1.18),
     ];
-    for (x, z, scale) in trees {
+    for (index, (x, z, scale)) in trees.into_iter().enumerate() {
         spawn_asset(
             commands,
             asset_server,
             state,
-            "procedural/pretty/sokpop_tree.glb",
+            TREE_PATHS[index % TREE_PATHS.len()],
             Vec3::new(x, 0.0, z),
             scale,
             0.0,
@@ -695,19 +714,22 @@ fn spawn_village_decor(
             Transform::from_xyz(x, 0.7, z),
         ));
     }
-    for (x, z) in [
+    for (index, (x, z)) in [
         (3.0, 8.0),
         (12.0, 24.0),
         (30.0, -26.0),
         (34.0, -8.0),
         (3.0, -10.0),
         (25.0, 30.0),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         spawn_asset(
             commands,
             asset_server,
             state,
-            "procedural/pretty/sokpop_tree.glb",
+            TREE_PATHS[(index + 2) % TREE_PATHS.len()],
             Vec3::new(x, 0.0, z),
             1.0,
             0.0,

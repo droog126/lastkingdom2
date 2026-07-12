@@ -12,9 +12,11 @@
       "cloud_puff",
       "sokpop_gatherer",
       "sokpop_tree",
-      "tree",
       "granular_round_tree",
       "granular_pine_tree",
+      "granular_birch_tree",
+      "granular_autumn_tree",
+      "granular_willow_tree",
       "granular_wildflowers",
       "granular_reed_bank",
       "fallen_stick",
@@ -82,7 +84,10 @@
       "haystack",
       "cauldron",
       "cooking_station",
-      "spit_roast"
+      "spit_roast",
+      "palm",
+      "resource_wood",
+      "resource_stone"
     ],
     "weapons": [
       "sword",

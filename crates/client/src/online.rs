@@ -5,6 +5,10 @@ use std::time::{Duration, Instant};
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::render::{
+    RenderPlugin,
+    settings::{Backends, WgpuSettings},
+};
 use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, WindowResolution};
 use leafwing_input_manager::prelude::{ActionState, InputMap};
@@ -103,6 +107,14 @@ pub fn run_online_scene() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .set(RenderPlugin {
+                render_creation: WgpuSettings {
+                    backends: Some(Backends::VULKAN),
+                    ..default()
+                }
+                .into(),
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Last Kingdom - Online".into(),
@@ -507,13 +519,24 @@ fn sync_replicated_players(
         &PlayerPos,
         Option<&EcoSnapshot>,
         Option<&mut Transform>,
-        Option<&OnlinePlayerVisual>,
+        Option<&mut OnlinePlayerVisual>,
     )>,
     mut nature: ResMut<NatureSnapshotBuffer>,
 ) {
     for (entity, position, eco_snapshot, transform, visual) in players.iter_mut() {
         if let Some(snapshot) = eco_snapshot {
             let _ = nature.push(nature_snapshot_from_protocol(snapshot));
+        }
+        // Lightyear applies replicated components in PreUpdate. This system
+        // runs afterward and is the sole writer of online player visual
+        // transforms, so the server's PlayerPos remains authoritative for
+        // both the locally controlled player and remote players.
+        if !position.is_finite() {
+            warn!(
+                "[net] ignored non-finite authoritative PlayerPos on {:?}",
+                entity
+            );
+            continue;
         }
         if visual.is_none() {
             commands.entity(entity).insert((
