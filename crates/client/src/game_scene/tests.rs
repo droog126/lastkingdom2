@@ -4,26 +4,34 @@ use std::path::PathBuf;
 
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::animation::{
-    animate_boss, animate_clouds_and_rain, animate_rabbits, animate_tree_sway, rabbit_ai_decision,
-    RabbitFoodTarget,
+    animate_boss, animate_clouds_and_rain, animate_rabbits, animate_sun, animate_tree_sway,
+    animate_wolves, living_sun_transform, rabbit_ai_decision, RabbitFoodTarget,
 };
 use super::content_visuals::{
-    content_cell_position, living_content_layout_from_args, parse_content_profile,
-    parse_content_seed, DEFAULT_LIVING_CONTENT_SEED, LIVING_CONTENT_DIMENSIONS,
+    content_cell_position, is_monster_anchor, living_content_layout_from_args,
+    parse_content_profile, parse_content_seed, DEFAULT_LIVING_CONTENT_SEED,
+    LIVING_CONTENT_DIMENSIONS, MONSTER_ANCHOR_PILLAR_SCALE, MONSTER_DECORATIVE_MARKER_SCALE,
 };
 use super::creature_ai::{decide_creature_intent, AiContext, AiMood, AiTarget, CreatureAiProfile};
-use super::keybindings::KeyBindings;
+use super::inventory::InventoryUiState;
+use super::keybindings::{Binding, GameAction, KeyBindings};
 use super::offline::OfflineNature;
-use super::player::camera_look_input;
+use super::player::{camera_look_input, update_cursor_capture};
 use super::procedural_motion::{heading_yaw, hop_height, smooth_follow_alpha, ProceduralTreeSway};
-use super::procedural_rig::{apply_segment_between, TwoBoneLimb};
+use super::procedural_rig::{
+    apply_segment_between, DragonRig, DragonTargets, HumanoidRig, HumanoidTargets, QuadrupedRig,
+    QuadrupedTargets, TwoBoneLimb, TwoBoneLimbSpec, TwoBoneSolution,
+};
 use super::state::{
-    BossActor, Cloud, LivingCameraRig, LivingSceneState, PlayerActor, PlayerIkPart,
-    PlayerIkPartKind, PlayerJump, PlayerMotion, Rabbit, RabbitAi, RabbitMood, RainDrop, SlashFx,
+    BossActor, Cloud, GrassTuft, LivingCameraRig, LivingSceneState, LivingSun, PlayerActor,
+    PlayerIkPart, PlayerIkPartKind, PlayerJump, PlayerMotion, Rabbit, RabbitAi, RabbitMood,
+    RainDrop, SlashFx, Wolf, WolfAi,
 };
 use super::util::hash01;
+use super::world_debug::{content_debug_text, toggle_world_debug_ui, WorldDebugUiState};
 use lk2_core::constant;
 use lk2_core::pvp::{Health, PvpCombatant, SimpleWeapon};
 use lk2_core::world::content::{
@@ -76,6 +84,33 @@ fn content_seed_and_profile_parse_from_game_scene_args() {
 }
 
 #[test]
+fn f2_opens_content_debug_by_default() {
+    let bindings = KeyBindings::default();
+
+    assert_eq!(
+        bindings.binding(GameAction::OpenWorldStatus),
+        Binding::Key(KeyCode::F2)
+    );
+}
+
+#[test]
+fn f2_toggles_content_debug_panel_state() {
+    let mut app = App::new();
+    app.insert_resource(KeyBindings::default())
+        .insert_resource(WorldDebugUiState::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .add_systems(Update, toggle_world_debug_ui);
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::F2);
+    app.update();
+
+    assert!(app.world().resource::<WorldDebugUiState>().open);
+}
+
+#[test]
 fn content_layout_maps_volume_cells_to_scene_space() {
     let center = content_cell_position(LIVING_CONTENT_DIMENSIONS, [2, 1, 2]);
     let corner = content_cell_position(LIVING_CONTENT_DIMENSIONS, [0, 1, 0]);
@@ -94,11 +129,38 @@ fn living_content_layout_uses_spice_profiles() {
     ];
     let layout = living_content_layout_from_args(&args);
 
+    assert_eq!(layout.profile, ContentSpiceProfile::MonsterMarch);
     assert_eq!(layout.volume.get([2, 1, 2]), Some(GAME_CONTENT_SETTLEMENT));
     assert!(
         layout.volume.count(GAME_CONTENT_MONSTER_TERRITORY) > 4,
         "monster profile should create a readable monster territory"
     );
+}
+
+#[test]
+fn content_debug_text_shows_profile_grid_and_pillar_rule() {
+    let args = vec![
+        "lk2-client".to_string(),
+        "--content-seed=99".to_string(),
+        "--content-profile=monster".to_string(),
+    ];
+    let layout = living_content_layout_from_args(&args);
+    let text = content_debug_text(&layout);
+
+    assert!(text.contains("配置 MonsterMarch"));
+    assert!(text.contains("地表 y=1"));
+    assert!(text.contains("地下 y=0"));
+    assert!(text.contains("大型锚点 [1,1,1]"));
+    assert!(text.contains("A "));
+}
+
+#[test]
+fn only_required_monster_cell_is_a_large_pillar_anchor() {
+    assert!(is_monster_anchor([1, 1, 1]));
+    assert!(!is_monster_anchor([0, 1, 1]));
+    assert!(!is_monster_anchor([2, 1, 2]));
+    assert!(MONSTER_ANCHOR_PILLAR_SCALE > MONSTER_DECORATIVE_MARKER_SCALE * 5.0);
+    assert!(MONSTER_DECORATIVE_MARKER_SCALE <= 0.1);
 }
 
 #[test]
@@ -163,6 +225,42 @@ fn tree_sway_update_runs_without_query_conflicts() {
 }
 
 #[test]
+fn living_sun_transform_rotates_around_scene_center() {
+    let initial = living_sun_transform(0.0);
+    let later = living_sun_transform(14.0);
+
+    assert!(initial.translation.distance(Vec3::new(-24.0, 38.0, 18.0)) < 0.001);
+    assert_eq!(initial.translation.y, 38.0);
+    assert_eq!(later.translation.y, 38.0);
+    assert!(initial.translation.distance(later.translation) > 20.0);
+    assert!(initial.rotation.dot(later.rotation).abs() < 0.98);
+}
+
+#[test]
+fn sun_animation_update_runs_without_query_conflicts() {
+    let mut app = App::new();
+    let mut state = test_scene_state();
+    state.elapsed = 7.0;
+    app.insert_resource(state).add_systems(Update, animate_sun);
+    app.world_mut()
+        .spawn((LivingSun, Transform::from_xyz(-24.0, 38.0, 18.0)));
+
+    app.update();
+
+    let transform = app
+        .world_mut()
+        .query::<&Transform>()
+        .single(app.world())
+        .expect("sun should remain spawned");
+    assert!(
+        transform
+            .translation
+            .distance(living_sun_transform(7.0).translation)
+            < 0.001
+    );
+}
+
+#[test]
 fn procedural_motion_helpers_keep_expected_bounds() {
     assert_eq!(hop_height(std::f32::consts::PI, 2.0), 0.0);
     assert!((smooth_follow_alpha(0.0, 8.0) - 0.0).abs() < f32::EPSILON);
@@ -211,6 +309,33 @@ fn rabbit_ai_update_runs_without_query_conflicts() {
         RabbitAi::default(),
         Transform::default(),
     ));
+    app.world_mut().spawn((
+        GrassTuft {
+            growth_threshold: 0.0,
+            mature_scale: Vec3::ONE,
+        },
+        Transform::from_xyz(2.0, 0.0, 0.0).with_scale(Vec3::splat(1.0)),
+    ));
+
+    app.update();
+}
+
+#[test]
+fn wolf_animation_update_runs_without_query_conflicts() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(test_scene_state())
+        .init_resource::<OfflineNature>()
+        .add_systems(Update, animate_wolves);
+    app.world_mut().spawn((
+        Rabbit { id: 1, phase: 0.0 },
+        Transform::from_xyz(2.0, 0.0, 0.0),
+    ));
+    app.world_mut().spawn((
+        Wolf { id: 0, phase: 0.0 },
+        WolfAi::default(),
+        Transform::default(),
+    ));
 
     app.update();
 }
@@ -226,6 +351,7 @@ fn space_jumps_without_attacking_and_left_click_attacks() {
             slash_material: Handle::default(),
         })
         .insert_resource(LivingCameraRig::default())
+        .insert_resource(InventoryUiState::default())
         .insert_resource(KeyBindings::default())
         .insert_resource(ButtonInput::<MouseButton>::default())
         .add_systems(Update, super::player::player_controls);
@@ -272,6 +398,7 @@ fn c_toggles_camera_mode() {
     let mut app = App::new();
     app.init_resource::<Time>()
         .insert_resource(LivingCameraRig::default())
+        .insert_resource(InventoryUiState::default())
         .insert_resource(KeyBindings::default())
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(ButtonInput::<MouseButton>::default())
@@ -304,6 +431,64 @@ fn c_toggles_camera_mode() {
 }
 
 #[test]
+fn inventory_open_blocks_camera_input() {
+    let mut inventory = InventoryUiState::default();
+    inventory.open = true;
+
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(LivingCameraRig::default())
+        .insert_resource(inventory)
+        .insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .add_message::<MouseMotion>()
+        .add_systems(Update, camera_look_input);
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyC);
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<LivingCameraRig>().mode,
+        super::state::CameraMode::FirstPerson
+    );
+}
+
+#[test]
+fn cursor_capture_follows_ui_state() {
+    let mut app = App::new();
+    app.insert_resource(KeyBindings::default())
+        .insert_resource(InventoryUiState::default())
+        .add_systems(Update, update_cursor_capture);
+    app.world_mut()
+        .spawn((CursorOptions::default(), PrimaryWindow));
+
+    app.update();
+    {
+        let cursor_options = app
+            .world_mut()
+            .query_filtered::<&CursorOptions, With<PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary cursor options should exist");
+        assert!(!cursor_options.visible);
+        assert_eq!(cursor_options.grab_mode, CursorGrabMode::Locked);
+    }
+
+    app.world_mut().resource_mut::<InventoryUiState>().open = true;
+    app.update();
+
+    let cursor_options = app
+        .world_mut()
+        .query_filtered::<&CursorOptions, With<PrimaryWindow>>()
+        .single(app.world())
+        .expect("primary cursor options should exist");
+    assert!(cursor_options.visible);
+    assert_eq!(cursor_options.grab_mode, CursorGrabMode::None);
+}
+
+#[test]
 fn two_bone_solver_keeps_limb_lengths_reachable() {
     let root = Vec3::new(0.0, 1.0, 0.0);
     let target = Vec3::new(0.45, 0.55, -0.15);
@@ -318,6 +503,125 @@ fn two_bone_solver_keeps_limb_lengths_reachable() {
 
     assert!((solution.joint.distance(root) - 0.38).abs() < 0.001);
     assert!((solution.joint.distance(target) - 0.42).abs() < 0.001);
+}
+
+#[test]
+fn humanoid_rig_solves_all_player_avatar_limbs() {
+    let rig = HumanoidRig::player_avatar();
+    let solved = rig.solve(HumanoidTargets {
+        left_hand: Vec3::new(-0.40, 0.58, 0.08),
+        right_hand: Vec3::new(0.40, 0.58, 0.08),
+        left_foot: Vec3::new(-0.15, 0.06, 0.03),
+        right_foot: Vec3::new(0.15, 0.06, 0.03),
+        left_elbow_pole: Vec3::new(-0.58, 0.80, 0.32),
+        right_elbow_pole: Vec3::new(0.58, 0.80, 0.32),
+        left_knee_pole: Vec3::new(-0.27, 0.25, 0.30),
+        right_knee_pole: Vec3::new(0.27, 0.25, 0.30),
+    });
+
+    for (spec, solution) in [
+        (rig.left_arm, solved.left_arm),
+        (rig.right_arm, solved.right_arm),
+        (rig.left_leg, solved.left_leg),
+        (rig.right_leg, solved.right_leg),
+    ] {
+        assert_eq!(solution.root, spec.root);
+        assert!((solution.joint.distance(solution.root) - spec.upper_len).abs() < 0.001);
+        assert!((solution.joint.distance(solution.target) - spec.lower_len).abs() < 0.001);
+    }
+}
+
+#[test]
+fn humanoid_idle_ik_keeps_a_readable_upright_silhouette() {
+    let motion = PlayerMotion {
+        grounded: true,
+        ..default()
+    };
+    let pose = super::player::procedural_player_pose(
+        1.0,
+        0.0,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+    );
+    let solved = HumanoidRig::player_avatar().solve(HumanoidTargets {
+        left_hand: pose.left_hand,
+        right_hand: pose.right_hand,
+        left_foot: pose.left_foot,
+        right_foot: pose.right_foot,
+        left_elbow_pole: pose.left_elbow_pole,
+        right_elbow_pole: pose.right_elbow_pole,
+        left_knee_pole: pose.left_knee_pole,
+        right_knee_pole: pose.right_knee_pole,
+    });
+
+    assert!(solved.left_leg.joint.z > 0.0);
+    assert!(solved.right_leg.joint.z > 0.0);
+    assert!(solved.left_leg.joint.y < solved.left_leg.root.y);
+    assert!(solved.right_leg.joint.y < solved.right_leg.root.y);
+    assert!(solved.left_arm.joint.x < solved.left_arm.root.x);
+    assert!(solved.right_arm.joint.x > solved.right_arm.root.x);
+}
+
+fn assert_limb_matches_spec(spec: TwoBoneLimbSpec, solution: TwoBoneSolution) {
+    assert_eq!(solution.root, spec.root);
+    assert!((solution.joint.distance(solution.root) - spec.upper_len).abs() < 0.001);
+    assert!((solution.joint.distance(solution.target) - spec.lower_len).abs() < 0.001);
+}
+
+#[test]
+fn quadruped_rig_solves_all_rabbit_limbs() {
+    let rig = QuadrupedRig::rabbit();
+    let solved = rig.solve(QuadrupedTargets {
+        front_left_foot: Vec3::new(-0.12, 0.02, -0.28),
+        front_right_foot: Vec3::new(0.12, 0.02, -0.28),
+        hind_left_foot: Vec3::new(-0.18, 0.02, 0.34),
+        hind_right_foot: Vec3::new(0.18, 0.02, 0.34),
+        front_left_pole: Vec3::new(-0.20, 0.20, -0.36),
+        front_right_pole: Vec3::new(0.20, 0.20, -0.36),
+        hind_left_pole: Vec3::new(-0.28, 0.18, 0.42),
+        hind_right_pole: Vec3::new(0.28, 0.18, 0.42),
+    });
+
+    for (spec, solution) in [
+        (rig.front_left, solved.front_left),
+        (rig.front_right, solved.front_right),
+        (rig.hind_left, solved.hind_left),
+        (rig.hind_right, solved.hind_right),
+    ] {
+        assert_limb_matches_spec(spec, solution);
+    }
+}
+
+#[test]
+fn dragon_rig_solves_legs_and_wings() {
+    let rig = DragonRig::hoplite_boss();
+    let solved = rig.solve(DragonTargets {
+        front_left_foot: Vec3::new(-0.55, 0.06, -0.78),
+        front_right_foot: Vec3::new(0.55, 0.06, -0.78),
+        hind_left_foot: Vec3::new(-0.70, 0.05, 0.78),
+        hind_right_foot: Vec3::new(0.70, 0.05, 0.78),
+        left_wing_tip: Vec3::new(-2.12, 1.34, -0.04),
+        right_wing_tip: Vec3::new(2.12, 1.34, -0.04),
+        front_left_pole: Vec3::new(-0.72, 0.48, -0.98),
+        front_right_pole: Vec3::new(0.72, 0.48, -0.98),
+        hind_left_pole: Vec3::new(-0.86, 0.42, 0.98),
+        hind_right_pole: Vec3::new(0.86, 0.42, 0.98),
+        left_wing_pole: Vec3::new(-1.20, 1.86, -0.42),
+        right_wing_pole: Vec3::new(1.20, 1.86, -0.42),
+    });
+
+    for (spec, solution) in [
+        (rig.front_left_leg, solved.front_left_leg),
+        (rig.front_right_leg, solved.front_right_leg),
+        (rig.hind_left_leg, solved.hind_left_leg),
+        (rig.hind_right_leg, solved.hind_right_leg),
+        (rig.left_wing, solved.left_wing),
+        (rig.right_wing, solved.right_wing),
+    ] {
+        assert_limb_matches_spec(spec, solution);
+    }
 }
 
 #[test]
@@ -351,14 +655,38 @@ fn procedural_pose_walks_feet_in_opposition() {
     );
 
     assert!(pose.left_foot.z > pose.right_foot.z);
-    assert!(pose.left_foot.y > pose.right_foot.y);
+    assert!(pose.right_hand.z > pose.left_hand.z + 0.30);
+    assert!(pose.right_hand.y > pose.left_hand.y);
+    assert!(pose.left_foot.y <= pose.right_foot.y + 0.02);
     assert!(pose.torso_roll > 0.0);
     assert!(pose.gait > 0.95);
     assert_eq!(pose.stride_phase, std::f32::consts::FRAC_PI_2);
 }
 
 #[test]
-fn procedural_pose_attack_extends_right_hand() {
+fn procedural_pose_lifts_swing_foot_during_step() {
+    let motion = PlayerMotion {
+        smoothed_speed: super::util::PLAYER_SPEED,
+        stride_phase: 0.0,
+        grounded: true,
+        ..default()
+    };
+    let pose = super::player::procedural_player_pose(
+        1.0,
+        0.0,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+    );
+
+    assert!(pose.left_foot.y > pose.right_foot.y + 0.16);
+    assert!((pose.left_foot.z - pose.right_foot.z).abs() < 0.02);
+    assert!(pose.left_knee_pole.y > pose.right_knee_pole.y);
+}
+
+#[test]
+fn procedural_pose_attack_extends_visual_right_hand() {
     let motion = PlayerMotion {
         grounded: true,
         ..default()
@@ -374,10 +702,33 @@ fn procedural_pose_attack_extends_right_hand() {
         0.0,
     );
 
-    assert!(attacking.right_hand.z < idle.right_hand.z - 0.30);
-    assert!(attacking.right_hand.y > idle.right_hand.y);
+    assert!(attacking.left_hand.z > idle.left_hand.z + 0.30);
+    assert!(attacking.left_hand.y > idle.left_hand.y);
+    assert!((attacking.right_hand.z - idle.right_hand.z).abs() < 0.01);
     assert!(attacking.attack > idle.attack);
     assert_eq!(attacking.airborne, 0.0);
+}
+
+#[test]
+fn held_stick_tracks_visual_right_side() {
+    let motion = PlayerMotion {
+        grounded: true,
+        ..default()
+    };
+    let pose = super::player::procedural_player_pose(
+        1.0,
+        0.0,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+    );
+    let (start, end) = super::player::held_stick_segment(&pose);
+
+    assert!(start.x < 0.0);
+    assert!(end.x < start.x);
+    assert!(start.distance(pose.left_hand) < start.distance(pose.right_hand));
+    assert!(end.z > start.z);
 }
 
 #[test]
@@ -387,7 +738,7 @@ fn rabbit_ai_flees_when_player_is_close() {
         Some(Vec3::new(1.0, 0.0, 0.0)),
         &[RabbitFoodTarget {
             position: Vec3::new(0.0, 0.0, 4.0),
-            fruit: 2,
+            value: 2.0,
         }],
     );
 
@@ -399,6 +750,18 @@ fn rabbit_ai_flees_when_player_is_close() {
 }
 
 #[test]
+fn rabbit_flee_target_extends_from_rabbit_position() {
+    let decision = rabbit_ai_decision(
+        Vec3::new(10.0, 0.0, 0.0),
+        Some(Vec3::new(11.0, 0.0, 0.0)),
+        &[],
+    );
+
+    assert_eq!(decision.mood, RabbitMood::Flee);
+    assert_eq!(decision.target, Vec3::new(6.0, 0.0, 0.0));
+}
+
+#[test]
 fn rabbit_ai_seeks_nearest_fruiting_berry_when_safe() {
     let decision = rabbit_ai_decision(
         Vec3::ZERO,
@@ -406,21 +769,36 @@ fn rabbit_ai_seeks_nearest_fruiting_berry_when_safe() {
         &[
             RabbitFoodTarget {
                 position: Vec3::new(4.0, 0.0, 0.0),
-                fruit: 0,
+                value: 0.0,
             },
             RabbitFoodTarget {
                 position: Vec3::new(0.0, 0.0, 3.0),
-                fruit: 1,
+                value: 1.0,
             },
             RabbitFoodTarget {
                 position: Vec3::new(0.0, 0.0, 6.0),
-                fruit: 2,
+                value: 2.0,
             },
         ],
     );
 
     assert_eq!(decision.mood, RabbitMood::Forage);
     assert_eq!(decision.target, Vec3::new(0.0, 0.0, 3.0));
+}
+
+#[test]
+fn rabbit_ai_grazes_visible_grass_when_no_fruiting_berries() {
+    let decision = rabbit_ai_decision(
+        Vec3::ZERO,
+        None,
+        &[RabbitFoodTarget {
+            position: Vec3::new(0.35, 0.0, 0.0),
+            value: 0.4,
+        }],
+    );
+
+    assert_eq!(decision.mood, RabbitMood::Graze);
+    assert_eq!(decision.target, Vec3::new(0.35, 0.0, 0.0));
 }
 
 #[test]
@@ -431,7 +809,7 @@ fn rabbit_ai_idles_without_fruiting_berries() {
         None,
         &[RabbitFoodTarget {
             position: Vec3::new(0.0, 0.0, 3.0),
-            fruit: 0,
+            value: 0.0,
         }],
     );
 
@@ -467,6 +845,46 @@ fn shared_ai_dragon_attacks_prey_inside_attack_range() {
     }];
     let intent = decide_creature_intent(
         CreatureAiProfile::dragon(),
+        AiContext {
+            self_pos: Vec3::ZERO,
+            threat: None,
+            food: &[],
+            prey: &prey,
+        },
+    );
+
+    assert_eq!(intent.mood, AiMood::Attack);
+    assert_eq!(intent.target, prey[0].position);
+}
+
+#[test]
+fn shared_ai_wolf_chases_rabbit_prey() {
+    let prey = [AiTarget {
+        position: Vec3::new(4.0, 0.0, 0.0),
+        value: 1.0,
+    }];
+    let intent = decide_creature_intent(
+        CreatureAiProfile::wolf(),
+        AiContext {
+            self_pos: Vec3::ZERO,
+            threat: None,
+            food: &[],
+            prey: &prey,
+        },
+    );
+
+    assert_eq!(intent.mood, AiMood::Chase);
+    assert_eq!(intent.target, prey[0].position);
+}
+
+#[test]
+fn shared_ai_wolf_pounces_inside_attack_range() {
+    let prey = [AiTarget {
+        position: Vec3::new(0.65, 0.0, 0.0),
+        value: 1.0,
+    }];
+    let intent = decide_creature_intent(
+        CreatureAiProfile::wolf(),
         AiContext {
             self_pos: Vec3::ZERO,
             threat: None,

@@ -1,0 +1,31 @@
+id,key,display_name,category,status,description,source,model_path,scale,preferred_biome,source_block,produced_resources,stack_limit
+2698212253,creature.chicken,creature chicken,creature,planned,Registered ecology content: creature.chicken,"{""Ecology"":{""Creature"":""Chicken""}}",animals/chicken.glb,"0.3,0.3,0.3",Jungle,,273424627:resource.apple:1,
+220450201,creature.cow,creature cow,creature,planned,Registered ecology content: creature.cow,"{""Ecology"":{""Creature"":""Cow""}}",animals/cow.glb,"0.38,0.38,0.38",Jungle,,3779113125:resource.food:1,
+1194891038,creature.pig,creature pig,creature,planned,Registered ecology content: creature.pig,"{""Ecology"":{""Creature"":""Pig""}}",animals/pig.glb,"0.34,0.34,0.34",Jungle,,3779113125:resource.food:1,
+2427736337,creature.sheep,creature sheep,creature,planned,Registered ecology content: creature.sheep,"{""Ecology"":{""Creature"":""Sheep""}}",animals/sheep.glb,"0.34,0.34,0.34",Tundra,,3779113125:resource.food:1,
+3318998852,item.reaper_scythe,死神镰刀,item,planned,Legendary equipment: item.reaper_scythe,"{""Item"":""ReaperScythe""}",procedural/pretty/hoplite_reaper_scythe.glb,"1,1,1",,,,1
+3996179523,resource.bloodthistle_seeds,血蓟种子,resource,planned,Registered resource with a stack limit of 200,"{""Resource"":""BloodthistleSeeds""}",,,,,,200
+2095528292,resource.core_of_ice_giant,冰霜巨人核心,resource,planned,Registered resource with a stack limit of 50,"{""Resource"":""CoreOfIceGiant""}",,,,,,50
+2680361301,resource.dragon_heart,龙心,resource,planned,Registered resource with a stack limit of 4,"{""Resource"":""DragonHeart""}",,,,,,4
+2658853855,resource.dragon_scale,龙鳞,resource,planned,Registered resource with a stack limit of 64,"{""Resource"":""DragonScale""}",,,,,,64
+383834788,resource.earth_rune,大地符文,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""EarthRune""}",,,,,,20
+3439618045,resource.eye_of_the_deep,深海之眼,resource,planned,Registered resource with a stack limit of 10,"{""Resource"":""EyeOfTheDeep""}",,,,,,10
+1916743800,resource.frostleaf_seeds,霜叶草种子,resource,planned,Registered resource with a stack limit of 200,"{""Resource"":""FrostleafSeeds""}",,,,,,200
+2932007319,resource.grip_of_firelord,炎魔的握柄,resource,planned,Registered resource with a stack limit of 50,"{""Resource"":""GripOfFirelord""}",,,,,,50
+2583337159,resource.guardian_fragment,守护者碎片,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""GuardianFragment""}",,,,,,20
+1961933222,resource.hardened_wood,硬化木材,resource,planned,Registered resource with a stack limit of 500,"{""Resource"":""HardenedWood""}",,,,,,500
+1637103848,resource.phoenix_feather,凤凰羽毛,resource,planned,Registered resource with a stack limit of 10,"{""Resource"":""PhoenixFeather""}",,,,,,10
+4173096726,resource.relic_core,遗迹核心,resource,planned,Registered resource with a stack limit of 48,"{""Resource"":""RelicCore""}",,,,,,48
+23265295,resource.rune_powder,符文粉,resource,planned,Registered resource with a stack limit of 900,"{""Resource"":""RunePowder""}",,,,,,900
+115931863,resource.rune_stone,符文石,resource,planned,Registered resource with a stack limit of 1400,"{""Resource"":""RuneStone""}",,,,,,1400
+2586540024,resource.sands_of_time,时光沙,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""SandsOfTime""}",,,,,,20
+2169622066,resource.soul,灵魂,resource,planned,Registered resource with a stack limit of 1000,"{""Resource"":""Soul""}",,,,,,1000
+377645429,resource.sovereign_spark,王权火种,resource,planned,Registered resource with a stack limit of 6,"{""Resource"":""SovereignSpark""}",,,,,,6
+1617499059,resource.spark_fragment,火种碎片,resource,planned,Registered resource with a stack limit of 18,"{""Resource"":""SparkFragment""}",,,,,,18
+2090748777,resource.spirit_essence,灵质,resource,planned,Registered resource with a stack limit of 2400,"{""Resource"":""SpiritEssence""}",,,,,,2400
+3532959360,resource.star_sand,星砂,resource,planned,Registered resource with a stack limit of 900,"{""Resource"":""StarSand""}",,,,,,900
+587049916,resource.storm_core,风暴核心,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""StormCore""}",,,,,,20
+3380787316,resource.vampire_fang,吸血鬼之牙,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""VampireFang""}",,,,,,20
+3608324198,resource.void_essence,虚空精华,resource,planned,Registered resource with a stack limit of 100,"{""Resource"":""VoidEssence""}",,,,,,100
+1511221322,resource.whisper_of_treant,古树低语,resource,planned,Registered resource with a stack limit of 50,"{""Resource"":""WhisperOfTreant""}",,,,,,50
+3758772083,resource.wraith_fiber,幽魂纤维,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""WraithFiber""}",,,,,,20

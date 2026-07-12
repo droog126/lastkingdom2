@@ -1,0 +1,1462 @@
+{
+  "schema_version": 2,
+  "content": [
+    {
+      "id": 2698212253,
+      "key": "creature.chicken",
+      "display_name": "creature chicken",
+      "category": "Creature",
+      "status": "Planned",
+      "description": "Registered ecology content: creature.chicken",
+      "tags": [
+        "creature"
+      ],
+      "source": {
+        "Ecology": {
+          "Creature": "Chicken"
+        }
+      },
+      "visual": {
+        "model_path": "animals/chicken.glb",
+        "scale": [
+          0.3,
+          0.3,
+          0.3
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 273424627,
+            "key": "resource.apple"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 220450201,
+      "key": "creature.cow",
+      "display_name": "creature cow",
+      "category": "Creature",
+      "status": "Planned",
+      "description": "Registered ecology content: creature.cow",
+      "tags": [
+        "creature"
+      ],
+      "source": {
+        "Ecology": {
+          "Creature": "Cow"
+        }
+      },
+      "visual": {
+        "model_path": "animals/cow.glb",
+        "scale": [
+          0.38,
+          0.38,
+          0.38
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3779113125,
+            "key": "resource.food"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 1194891038,
+      "key": "creature.pig",
+      "display_name": "creature pig",
+      "category": "Creature",
+      "status": "Planned",
+      "description": "Registered ecology content: creature.pig",
+      "tags": [
+        "creature"
+      ],
+      "source": {
+        "Ecology": {
+          "Creature": "Pig"
+        }
+      },
+      "visual": {
+        "model_path": "animals/pig.glb",
+        "scale": [
+          0.34,
+          0.34,
+          0.34
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3779113125,
+            "key": "resource.food"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 2427736337,
+      "key": "creature.sheep",
+      "display_name": "creature sheep",
+      "category": "Creature",
+      "status": "Planned",
+      "description": "Registered ecology content: creature.sheep",
+      "tags": [
+        "creature"
+      ],
+      "source": {
+        "Ecology": {
+          "Creature": "Sheep"
+        }
+      },
+      "visual": {
+        "model_path": "animals/sheep.glb",
+        "scale": [
+          0.34,
+          0.34,
+          0.34
+        ],
+        "preferred_biome": "Tundra",
+        "source_block": null
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3779113125,
+            "key": "resource.food"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 1978454099,
+      "key": "drop.berry_fruit",
+      "display_name": "drop berry fruit",
+      "category": "Drop",
+      "status": "Active",
+      "description": "Registered ecology content: drop.berry_fruit",
+      "tags": [
+        "drop"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceDrop": "BerryFruit"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/eco/berry_fruit.glb",
+        "scale": [
+          0.52,
+          0.52,
+          0.52
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": "BerryThicket"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 273424627,
+            "key": "resource.apple"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 3011426699,
+      "key": "drop.stone",
+      "display_name": "drop stone",
+      "category": "Drop",
+      "status": "Active",
+      "description": "Registered ecology content: drop.stone",
+      "tags": [
+        "drop"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceDrop": "Stone"
+        }
+      },
+      "visual": {
+        "model_path": "kenney/curated/survival_props/kenney_resource_stone.glb",
+        "scale": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "preferred_biome": null,
+        "source_block": "Stone"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 1647199502,
+            "key": "resource.stone"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 2739635055,
+      "key": "drop.wood",
+      "display_name": "drop wood",
+      "category": "Drop",
+      "status": "Active",
+      "description": "Registered ecology content: drop.wood",
+      "tags": [
+        "drop"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceDrop": "Wood"
+        }
+      },
+      "visual": {
+        "model_path": "kenney/curated/survival_props/kenney_resource_wood.glb",
+        "scale": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "preferred_biome": null,
+        "source_block": "Wood"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 252128356,
+            "key": "resource.wood"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 2309316802,
+      "key": "item.dragon_katana",
+      "display_name": "龙武士刀",
+      "category": "Item",
+      "status": "Active",
+      "description": "Legendary equipment: item.dragon_katana",
+      "tags": [
+        "item",
+        "equipment"
+      ],
+      "source": {
+        "Item": "DragonKatana"
+      },
+      "visual": {
+        "model_path": "procedural/pretty/hoplite_dragon_katana.glb",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "preferred_biome": null,
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": 1
+    },
+    {
+      "id": 3318998852,
+      "key": "item.reaper_scythe",
+      "display_name": "死神镰刀",
+      "category": "Item",
+      "status": "Planned",
+      "description": "Legendary equipment: item.reaper_scythe",
+      "tags": [
+        "item",
+        "equipment"
+      ],
+      "source": {
+        "Item": "ReaperScythe"
+      },
+      "visual": {
+        "model_path": "procedural/pretty/hoplite_reaper_scythe.glb",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "preferred_biome": null,
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": 1
+    },
+    {
+      "id": 88675769,
+      "key": "plant.fallen_stick",
+      "display_name": "plant fallen stick",
+      "category": "Plant",
+      "status": "Active",
+      "description": "Registered ecology content: plant.fallen_stick",
+      "tags": [
+        "plant"
+      ],
+      "source": {
+        "Ecology": {
+          "Tree": "FallenStick"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/fallen_stick.glb",
+        "scale": [
+          0.62,
+          0.62,
+          0.62
+        ],
+        "preferred_biome": null,
+        "source_block": "Wood"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 252128356,
+            "key": "resource.wood"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 1750526820,
+      "key": "plant.palm",
+      "display_name": "plant palm",
+      "category": "Plant",
+      "status": "Active",
+      "description": "Registered ecology content: plant.palm",
+      "tags": [
+        "plant"
+      ],
+      "source": {
+        "Ecology": {
+          "Tree": "Palm"
+        }
+      },
+      "visual": {
+        "model_path": "kenney/curated/coastal_and_pirate/kenney_palm_straight.glb",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "preferred_biome": "Desert",
+        "source_block": "Wood"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 252128356,
+            "key": "resource.wood"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 3267725547,
+      "key": "plant.sokpop_tree",
+      "display_name": "plant sokpop tree",
+      "category": "Plant",
+      "status": "Active",
+      "description": "Registered ecology content: plant.sokpop_tree",
+      "tags": [
+        "plant"
+      ],
+      "source": {
+        "Ecology": {
+          "Tree": "Sokpop"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/sokpop_tree.glb",
+        "scale": [
+          0.72,
+          0.72,
+          0.72
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": "Wood"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 252128356,
+            "key": "resource.wood"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 273424627,
+      "key": "resource.apple",
+      "display_name": "苹果",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 5000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Apple"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 5000
+    },
+    {
+      "id": 3996179523,
+      "key": "resource.bloodthistle_seeds",
+      "display_name": "血蓟种子",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 200",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "BloodthistleSeeds"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 200
+    },
+    {
+      "id": 4081220126,
+      "key": "resource.carrot",
+      "display_name": "胡萝卜",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 2000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Carrot"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 2000
+    },
+    {
+      "id": 2095528292,
+      "key": "resource.core_of_ice_giant",
+      "display_name": "冰霜巨人核心",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 50",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "CoreOfIceGiant"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 50
+    },
+    {
+      "id": 2680361301,
+      "key": "resource.dragon_heart",
+      "display_name": "龙心",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 4",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "DragonHeart"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 4
+    },
+    {
+      "id": 2658853855,
+      "key": "resource.dragon_scale",
+      "display_name": "龙鳞",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 64",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "DragonScale"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 64
+    },
+    {
+      "id": 383834788,
+      "key": "resource.earth_rune",
+      "display_name": "大地符文",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 20",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "EarthRune"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20
+    },
+    {
+      "id": 3439618045,
+      "key": "resource.eye_of_the_deep",
+      "display_name": "深海之眼",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 10",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "EyeOfTheDeep"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 10
+    },
+    {
+      "id": 3779113125,
+      "key": "resource.food",
+      "display_name": "食物",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 20000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Food"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20000
+    },
+    {
+      "id": 3236805234,
+      "key": "resource.frostcore",
+      "display_name": "霜心晶体",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 200",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Frostcore"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 200
+    },
+    {
+      "id": 1916743800,
+      "key": "resource.frostleaf_seeds",
+      "display_name": "霜叶草种子",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 200",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "FrostleafSeeds"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 200
+    },
+    {
+      "id": 2932007319,
+      "key": "resource.grip_of_firelord",
+      "display_name": "炎魔的握柄",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 50",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "GripOfFirelord"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 50
+    },
+    {
+      "id": 2583337159,
+      "key": "resource.guardian_fragment",
+      "display_name": "守护者碎片",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 20",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "GuardianFragment"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20
+    },
+    {
+      "id": 1961933222,
+      "key": "resource.hardened_wood",
+      "display_name": "硬化木材",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 500",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "HardenedWood"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 500
+    },
+    {
+      "id": 1510403545,
+      "key": "resource.living_root",
+      "display_name": "活根",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 200",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "LivingRoot"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 200
+    },
+    {
+      "id": 1637103848,
+      "key": "resource.phoenix_feather",
+      "display_name": "凤凰羽毛",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 10",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "PhoenixFeather"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 10
+    },
+    {
+      "id": 3893902990,
+      "key": "resource.potato",
+      "display_name": "土豆",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 2000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Potato"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 2000
+    },
+    {
+      "id": 4173096726,
+      "key": "resource.relic_core",
+      "display_name": "遗迹核心",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 48",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "RelicCore"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 48
+    },
+    {
+      "id": 23265295,
+      "key": "resource.rune_powder",
+      "display_name": "符文粉",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 900",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "RunePowder"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 900
+    },
+    {
+      "id": 115931863,
+      "key": "resource.rune_stone",
+      "display_name": "符文石",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 1400",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "RuneStone"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 1400
+    },
+    {
+      "id": 2586540024,
+      "key": "resource.sands_of_time",
+      "display_name": "时光沙",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 20",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "SandsOfTime"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20
+    },
+    {
+      "id": 2169622066,
+      "key": "resource.soul",
+      "display_name": "灵魂",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 1000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Soul"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 1000
+    },
+    {
+      "id": 377645429,
+      "key": "resource.sovereign_spark",
+      "display_name": "王权火种",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 6",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "SovereignSpark"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 6
+    },
+    {
+      "id": 1617499059,
+      "key": "resource.spark_fragment",
+      "display_name": "火种碎片",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 18",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "SparkFragment"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 18
+    },
+    {
+      "id": 2090748777,
+      "key": "resource.spirit_essence",
+      "display_name": "灵质",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 2400",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "SpiritEssence"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 2400
+    },
+    {
+      "id": 3532959360,
+      "key": "resource.star_sand",
+      "display_name": "星砂",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 900",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "StarSand"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 900
+    },
+    {
+      "id": 1647199502,
+      "key": "resource.stone",
+      "display_name": "石头",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 10000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Stone"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 10000
+    },
+    {
+      "id": 587049916,
+      "key": "resource.storm_core",
+      "display_name": "风暴核心",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 20",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "StormCore"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20
+    },
+    {
+      "id": 3653429450,
+      "key": "resource.sunstone",
+      "display_name": "阳炎石",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 200",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Sunstone"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 200
+    },
+    {
+      "id": 3380787316,
+      "key": "resource.vampire_fang",
+      "display_name": "吸血鬼之牙",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 20",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "VampireFang"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20
+    },
+    {
+      "id": 3608324198,
+      "key": "resource.void_essence",
+      "display_name": "虚空精华",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 100",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "VoidEssence"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 100
+    },
+    {
+      "id": 3432226481,
+      "key": "resource.wheat_seeds",
+      "display_name": "小麦种子",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 1000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "WheatSeeds"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 1000
+    },
+    {
+      "id": 1511221322,
+      "key": "resource.whisper_of_treant",
+      "display_name": "古树低语",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 50",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "WhisperOfTreant"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 50
+    },
+    {
+      "id": 252128356,
+      "key": "resource.wood",
+      "display_name": "木头",
+      "category": "Resource",
+      "status": "Active",
+      "description": "Registered resource with a stack limit of 10000",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "Wood"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 10000
+    },
+    {
+      "id": 3758772083,
+      "key": "resource.wraith_fiber",
+      "display_name": "幽魂纤维",
+      "category": "Resource",
+      "status": "Planned",
+      "description": "Registered resource with a stack limit of 20",
+      "tags": [
+        "resource"
+      ],
+      "source": {
+        "Resource": "WraithFiber"
+      },
+      "visual": null,
+      "produced_resources": [],
+      "stack_limit": 20
+    },
+    {
+      "id": 3630834623,
+      "key": "resource_node.berry_bush",
+      "display_name": "resource node berry bush",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.berry_bush",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "BerryBush"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/eco/berry_bush.glb",
+        "scale": [
+          0.82,
+          0.82,
+          0.82
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": "BerryThicket"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 273424627,
+            "key": "resource.apple"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 3197872499,
+      "key": "resource_node.flower",
+      "display_name": "resource node flower",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.flower",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "Flower"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/flower_0.glb",
+        "scale": [
+          0.46,
+          0.46,
+          0.46
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": null
+    },
+    {
+      "id": 1394771439,
+      "key": "resource_node.frost_crystal",
+      "display_name": "resource node frost crystal",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.frost_crystal",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "FrostCrystal"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/crystal_blue.glb",
+        "scale": [
+          0.9,
+          0.9,
+          0.9
+        ],
+        "preferred_biome": "Tundra",
+        "source_block": "FrostcoreOre"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3236805234,
+            "key": "resource.frostcore"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 1609247141,
+      "key": "resource_node.mushroom_brown",
+      "display_name": "resource node mushroom brown",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.mushroom_brown",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "MushroomBrown"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/mushroom_brown.glb",
+        "scale": [
+          0.58,
+          0.58,
+          0.58
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3779113125,
+            "key": "resource.food"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 2270473266,
+      "key": "resource_node.mushroom_red",
+      "display_name": "resource node mushroom red",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.mushroom_red",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "MushroomRed"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/mushroom_red.glb",
+        "scale": [
+          0.58,
+          0.58,
+          0.58
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3779113125,
+            "key": "resource.food"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 3920955012,
+      "key": "resource_node.rock_mid",
+      "display_name": "resource node rock mid",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.rock_mid",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "RockMid"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/rock_mid.glb",
+        "scale": [
+          0.82,
+          0.82,
+          0.82
+        ],
+        "preferred_biome": null,
+        "source_block": "Stone"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 1647199502,
+            "key": "resource.stone"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 1917969160,
+      "key": "resource_node.rock_moss",
+      "display_name": "resource node rock moss",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.rock_moss",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "RockMoss"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/rock_moss.glb",
+        "scale": [
+          0.82,
+          0.82,
+          0.82
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": "LivingRoot"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 1510403545,
+            "key": "resource.living_root"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 969629842,
+      "key": "resource_node.sunstone_crystal",
+      "display_name": "resource node sunstone crystal",
+      "category": "ResourceNode",
+      "status": "Active",
+      "description": "Registered ecology content: resource_node.sunstone_crystal",
+      "tags": [
+        "resource-node"
+      ],
+      "source": {
+        "Ecology": {
+          "ResourceNode": "SunstoneCrystal"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/crystal_pink.glb",
+        "scale": [
+          0.9,
+          0.9,
+          0.9
+        ],
+        "preferred_biome": "Desert",
+        "source_block": "SunstoneOre"
+      },
+      "produced_resources": [
+        {
+          "content": {
+            "id": 3653429450,
+            "key": "resource.sunstone"
+          },
+          "amount": 1
+        }
+      ],
+      "stack_limit": null
+    },
+    {
+      "id": 4226691041,
+      "key": "wildlife.bear",
+      "display_name": "wildlife bear",
+      "category": "Wildlife",
+      "status": "Active",
+      "description": "Registered ecology content: wildlife.bear",
+      "tags": [
+        "wildlife"
+      ],
+      "source": {
+        "Ecology": {
+          "Wildlife": "Bear"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/bear.glb",
+        "scale": [
+          0.85,
+          0.85,
+          0.85
+        ],
+        "preferred_biome": "Tundra",
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": null
+    },
+    {
+      "id": 853210439,
+      "key": "wildlife.deer",
+      "display_name": "wildlife deer",
+      "category": "Wildlife",
+      "status": "Active",
+      "description": "Registered ecology content: wildlife.deer",
+      "tags": [
+        "wildlife"
+      ],
+      "source": {
+        "Ecology": {
+          "Wildlife": "Deer"
+        }
+      },
+      "visual": {
+        "model_path": "kenney/curated/animals/kenney_deer.glb",
+        "scale": [
+          0.85,
+          0.85,
+          0.85
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": null
+    },
+    {
+      "id": 934719624,
+      "key": "wildlife.fox",
+      "display_name": "wildlife fox",
+      "category": "Wildlife",
+      "status": "Active",
+      "description": "Registered ecology content: wildlife.fox",
+      "tags": [
+        "wildlife"
+      ],
+      "source": {
+        "Ecology": {
+          "Wildlife": "Fox"
+        }
+      },
+      "visual": {
+        "model_path": "kenney/curated/animals/kenney_fox.glb",
+        "scale": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "preferred_biome": "Tundra",
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": null
+    },
+    {
+      "id": 1467866471,
+      "key": "wildlife.rabbit",
+      "display_name": "wildlife rabbit",
+      "category": "Wildlife",
+      "status": "Active",
+      "description": "Registered ecology content: wildlife.rabbit",
+      "tags": [
+        "wildlife"
+      ],
+      "source": {
+        "Ecology": {
+          "Wildlife": "Rabbit"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/eco/rabbit.glb",
+        "scale": [
+          0.48,
+          0.48,
+          0.48
+        ],
+        "preferred_biome": "Jungle",
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": null
+    },
+    {
+      "id": 1645192171,
+      "key": "wildlife.wolf",
+      "display_name": "wildlife wolf",
+      "category": "Wildlife",
+      "status": "Active",
+      "description": "Registered ecology content: wildlife.wolf",
+      "tags": [
+        "wildlife"
+      ],
+      "source": {
+        "Ecology": {
+          "Wildlife": "Wolf"
+        }
+      },
+      "visual": {
+        "model_path": "procedural/pretty/wolf.glb",
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ],
+        "preferred_biome": "Tundra",
+        "source_block": null
+      },
+      "produced_resources": [],
+      "stack_limit": null
+    }
+  ],
+  "recipes": [
+    {
+      "id": 541285104,
+      "key": "recipe.item.dragon_katana",
+      "display_name": "Craft 龙武士刀",
+      "output": {
+        "id": 2309316802,
+        "key": "item.dragon_katana"
+      },
+      "output_amount": 1,
+      "ingredients": [
+        {
+          "content": {
+            "id": 2680361301,
+            "key": "resource.dragon_heart"
+          },
+          "amount": 1
+        },
+        {
+          "content": {
+            "id": 2658853855,
+            "key": "resource.dragon_scale"
+          },
+          "amount": 4
+        }
+      ]
+    }
+  ]
+}

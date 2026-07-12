@@ -145,6 +145,12 @@ health-iter ITER_DIR:
 scenario JSON:
     just xtask scenario --json {{JSON}}
 
+export-content *ARGS:
+    just xtask export-content {{ARGS}}
+
+export *ARGS:
+    just xtask export-content {{ARGS}}
+
 audit-tdd:
     just xtask audit-tdd
 

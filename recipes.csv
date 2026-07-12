@@ -1,0 +1,3 @@
+recipe_id,recipe_key,display_name,output_id,output_key,output_amount,ingredient_id,ingredient_key,ingredient_amount
+541285104,recipe.item.dragon_katana,Craft 龙武士刀,2309316802,item.dragon_katana,1,2680361301,resource.dragon_heart,1
+541285104,recipe.item.dragon_katana,Craft 龙武士刀,2309316802,item.dragon_katana,1,2658853855,resource.dragon_scale,4

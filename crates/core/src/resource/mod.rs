@@ -8,6 +8,7 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceKind {
     Wood,
+    Stone,
     HardenedWood,
     Apple,
     WheatSeeds,
@@ -55,6 +56,7 @@ impl ResourceKind {
         use ResourceKind::*;
         match self {
             Wood => 10_000,
+            Stone => 10_000,
             HardenedWood => 500,
             Apple => 5_000,
             WheatSeeds => 1_000,
@@ -103,6 +105,7 @@ impl ResourceKind {
     pub const fn label_zh(self) -> &'static str {
         use ResourceKind::*;
         match self {
+            Stone => "石头",
             Wood => "木头",
             HardenedWood => "硬化木材",
             Apple => "苹果",
@@ -143,6 +146,7 @@ impl ResourceKind {
 
     pub const ALL: &'static [ResourceKind] = &[
         ResourceKind::Wood,
+        ResourceKind::Stone,
         ResourceKind::HardenedWood,
         ResourceKind::Apple,
         ResourceKind::WheatSeeds,

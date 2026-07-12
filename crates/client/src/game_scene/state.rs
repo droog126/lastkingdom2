@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use bevy::prelude::*;
+use lk2_core::farming::CropKind;
 
 #[derive(Resource)]
 pub struct LivingSceneState {
@@ -86,6 +87,9 @@ pub struct BossActor {
 #[derive(Component)]
 pub struct LivingSceneCamera;
 
+#[derive(Component)]
+pub struct LivingSun;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlayerIkPartKind {
     Torso,
@@ -152,6 +156,67 @@ pub struct RabbitAi {
     pub mood: RabbitMood,
     pub target: Vec3,
     pub hop_phase: f32,
+}
+
+#[derive(Component)]
+pub struct Wolf {
+    pub id: u32,
+    pub phase: f32,
+}
+
+#[derive(Component)]
+pub struct WildlifeAnimal {
+    pub id: u32,
+}
+
+#[derive(Component)]
+pub struct PlantNode {
+    pub id: u32,
+}
+
+pub const FARM_PLOT_POSITIONS: [Vec3; 3] = [
+    Vec3::new(-5.0, 0.0, 7.0),
+    Vec3::new(0.0, 0.0, 7.0),
+    Vec3::new(5.0, 0.0, 7.0),
+];
+
+#[derive(Component)]
+pub struct FarmCropVisual {
+    pub id: u32,
+}
+
+#[derive(Resource)]
+pub struct FarmVisualMaterials {
+    pub crop_materials: [Handle<StandardMaterial>; 3],
+}
+
+#[must_use]
+pub const fn crop_material_index(kind: CropKind) -> usize {
+    match kind {
+        CropKind::Wheat => 0,
+        CropKind::Carrot => 1,
+        CropKind::Potato => 2,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WolfMood {
+    Idle,
+    Chase,
+    Pounce,
+}
+
+impl Default for WolfMood {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Component, Default)]
+pub struct WolfAi {
+    pub mood: WolfMood,
+    pub target: Vec3,
+    pub run_phase: f32,
 }
 
 #[derive(Component)]

@@ -58,6 +58,17 @@ impl CreatureAiProfile {
             feeds: false,
         }
     }
+
+    pub const fn wolf() -> Self {
+        Self {
+            threat_radius: 0.0,
+            flee_distance: 0.0,
+            forage_distance: 0.0,
+            attack_range: 0.85,
+            aggression: 1.0,
+            feeds: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -129,7 +129,7 @@ impl BlockType {
         use ResourceKind as R;
         match self {
             Air | Dirt | Grass | Sand | Snow | Leaves | Water => None,
-            Stone => Some((R::Wood, 0)),
+            Stone => Some((R::Stone, 1)),
             Wood => Some((R::Wood, 5)),
             IronOre => Some((R::Wood, 0)),
             SunstoneOre => Some((R::Sunstone, 1)),
@@ -1096,6 +1096,7 @@ mod tests {
 
     #[test]
     fn block_yields_match() {
+        assert_eq!(BlockType::Stone.yields(), Some((ResourceKind::Stone, 1)));
         assert_eq!(
             BlockType::SunstoneOre.yields(),
             Some((ResourceKind::Sunstone, 1))
@@ -1105,6 +1106,19 @@ mod tests {
             BlockType::BerryThicket.yields(),
             Some((ResourceKind::Apple, 1))
         );
+    }
+
+    #[test]
+    fn gather_stone_adds_stone_to_pool() {
+        let mut world = World::new(8);
+        world.set(1, 1, 1, BlockType::Stone);
+        let mut pool = GlobalResourcePool::new();
+
+        let result = gather_block(&mut world, &mut pool, 1, 1, 1, 42).unwrap();
+
+        assert_eq!(result, Some((ResourceKind::Stone, 1)));
+        assert_eq!(pool.get(ResourceKind::Stone), 1);
+        assert_eq!(world.get(1, 1, 1), BlockType::Air);
     }
 
     #[test]

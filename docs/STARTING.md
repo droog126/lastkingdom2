@@ -12,6 +12,17 @@
 just build
 ```
 
+## Content export
+
+```powershell
+just export
+```
+
+This writes a human-readable `content.md` catalog, the complete registry plus
+`content_active.*` and `content_planned.*` views, `recipes.csv`, and `manifest.json` to the
+current directory. `just export-content` remains an alias. Use `just export --out=PATH` for
+another output directory.
+
 需要生成模型时再安装 Blender；普通构建和运行不需要 Blender。
 
 额外工程命令需要安装 `cargo-nextest`、`cargo-machete`、`cargo-llvm-cov` 和 `cargo-insta`：

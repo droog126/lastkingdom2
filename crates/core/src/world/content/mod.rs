@@ -12,6 +12,7 @@ pub use game::{
     GAME_CONTENT_MONSTER_TERRITORY, GAME_CONTENT_SETTLEMENT, GAME_CONTENT_TREASURE_VAULT,
     GAME_CONTENT_VERTICAL_PASSAGE, GAME_CONTENT_WILDERNESS, GameContentTheme,
     GameContentVolumeConfig, game_content_catalog, generate_game_content_volume,
+    resolve_content_spice_profile,
 };
 pub use materialize::{
     CONTENT_CELL_SIZE, ContentAnchor, ContentMaterializeError, MaterializedContent,

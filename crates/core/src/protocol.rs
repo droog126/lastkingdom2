@@ -71,6 +71,19 @@ pub mod messages {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct ChatMessage {
+        pub client_tick: u64,
+        pub text: String,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct ChatBroadcast {
+        pub server_tick: u64,
+        pub sender: String,
+        pub text: String,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct PingMessage {
         pub client_id: u64,
         pub sequence: u64,
@@ -276,6 +289,10 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<messages::AttackResult>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<messages::GameplayFeedback>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<messages::ChatMessage>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<messages::ChatBroadcast>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<messages::PingMessage>()
             .add_direction(NetworkDirection::ClientToServer);
@@ -878,6 +895,29 @@ mod tests {
         assert_eq!(decoded.tick, 1000);
         assert_eq!(decoded.player_block, [16, 8, 32]);
         assert!(matches!(decoded.kind, GameplayCommandKind::FoundNation));
+    }
+
+    #[test]
+    fn chat_messages_json_roundtrip() {
+        let chat = messages::ChatMessage {
+            client_tick: 44,
+            text: "hello kingdom".into(),
+        };
+        let json = serde_json::to_string(&chat).unwrap();
+        let decoded: messages::ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.client_tick, 44);
+        assert_eq!(decoded.text, "hello kingdom");
+
+        let broadcast = messages::ChatBroadcast {
+            server_tick: 55,
+            sender: "Player(1)".into(),
+            text: "received".into(),
+        };
+        let json = serde_json::to_string(&broadcast).unwrap();
+        let decoded: messages::ChatBroadcast = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.server_tick, 55);
+        assert_eq!(decoded.sender, "Player(1)");
+        assert_eq!(decoded.text, "received");
     }
 
     #[test]

@@ -1,0 +1,61 @@
+id,key,display_name,category,status,description,source,model_path,scale,preferred_biome,source_block,produced_resources,stack_limit
+2698212253,creature.chicken,creature chicken,creature,planned,Registered ecology content: creature.chicken,"{""Ecology"":{""Creature"":""Chicken""}}",animals/chicken.glb,"0.3,0.3,0.3",Jungle,,273424627:resource.apple:1,
+220450201,creature.cow,creature cow,creature,planned,Registered ecology content: creature.cow,"{""Ecology"":{""Creature"":""Cow""}}",animals/cow.glb,"0.38,0.38,0.38",Jungle,,3779113125:resource.food:1,
+1194891038,creature.pig,creature pig,creature,planned,Registered ecology content: creature.pig,"{""Ecology"":{""Creature"":""Pig""}}",animals/pig.glb,"0.34,0.34,0.34",Jungle,,3779113125:resource.food:1,
+2427736337,creature.sheep,creature sheep,creature,planned,Registered ecology content: creature.sheep,"{""Ecology"":{""Creature"":""Sheep""}}",animals/sheep.glb,"0.34,0.34,0.34",Tundra,,3779113125:resource.food:1,
+1978454099,drop.berry_fruit,drop berry fruit,drop,active,Registered ecology content: drop.berry_fruit,"{""Ecology"":{""ResourceDrop"":""BerryFruit""}}",procedural/eco/berry_fruit.glb,"0.52,0.52,0.52",Jungle,BerryThicket,273424627:resource.apple:1,
+3011426699,drop.stone,drop stone,drop,active,Registered ecology content: drop.stone,"{""Ecology"":{""ResourceDrop"":""Stone""}}",kenney/curated/survival_props/kenney_resource_stone.glb,"0.8,0.8,0.8",,Stone,1647199502:resource.stone:1,
+2739635055,drop.wood,drop wood,drop,active,Registered ecology content: drop.wood,"{""Ecology"":{""ResourceDrop"":""Wood""}}",kenney/curated/survival_props/kenney_resource_wood.glb,"0.8,0.8,0.8",,Wood,252128356:resource.wood:1,
+2309316802,item.dragon_katana,龙武士刀,item,active,Legendary equipment: item.dragon_katana,"{""Item"":""DragonKatana""}",procedural/pretty/hoplite_dragon_katana.glb,"1,1,1",,,,1
+3318998852,item.reaper_scythe,死神镰刀,item,planned,Legendary equipment: item.reaper_scythe,"{""Item"":""ReaperScythe""}",procedural/pretty/hoplite_reaper_scythe.glb,"1,1,1",,,,1
+88675769,plant.fallen_stick,plant fallen stick,plant,active,Registered ecology content: plant.fallen_stick,"{""Ecology"":{""Tree"":""FallenStick""}}",procedural/pretty/fallen_stick.glb,"0.62,0.62,0.62",,Wood,252128356:resource.wood:1,
+1750526820,plant.palm,plant palm,plant,active,Registered ecology content: plant.palm,"{""Ecology"":{""Tree"":""Palm""}}",kenney/curated/coastal_and_pirate/kenney_palm_straight.glb,"1,1,1",Desert,Wood,252128356:resource.wood:1,
+3267725547,plant.sokpop_tree,plant sokpop tree,plant,active,Registered ecology content: plant.sokpop_tree,"{""Ecology"":{""Tree"":""Sokpop""}}",procedural/pretty/sokpop_tree.glb,"0.72,0.72,0.72",Jungle,Wood,252128356:resource.wood:1,
+273424627,resource.apple,苹果,resource,active,Registered resource with a stack limit of 5000,"{""Resource"":""Apple""}",,,,,,5000
+3996179523,resource.bloodthistle_seeds,血蓟种子,resource,planned,Registered resource with a stack limit of 200,"{""Resource"":""BloodthistleSeeds""}",,,,,,200
+4081220126,resource.carrot,胡萝卜,resource,active,Registered resource with a stack limit of 2000,"{""Resource"":""Carrot""}",,,,,,2000
+2095528292,resource.core_of_ice_giant,冰霜巨人核心,resource,planned,Registered resource with a stack limit of 50,"{""Resource"":""CoreOfIceGiant""}",,,,,,50
+2680361301,resource.dragon_heart,龙心,resource,planned,Registered resource with a stack limit of 4,"{""Resource"":""DragonHeart""}",,,,,,4
+2658853855,resource.dragon_scale,龙鳞,resource,planned,Registered resource with a stack limit of 64,"{""Resource"":""DragonScale""}",,,,,,64
+383834788,resource.earth_rune,大地符文,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""EarthRune""}",,,,,,20
+3439618045,resource.eye_of_the_deep,深海之眼,resource,planned,Registered resource with a stack limit of 10,"{""Resource"":""EyeOfTheDeep""}",,,,,,10
+3779113125,resource.food,食物,resource,active,Registered resource with a stack limit of 20000,"{""Resource"":""Food""}",,,,,,20000
+3236805234,resource.frostcore,霜心晶体,resource,active,Registered resource with a stack limit of 200,"{""Resource"":""Frostcore""}",,,,,,200
+1916743800,resource.frostleaf_seeds,霜叶草种子,resource,planned,Registered resource with a stack limit of 200,"{""Resource"":""FrostleafSeeds""}",,,,,,200
+2932007319,resource.grip_of_firelord,炎魔的握柄,resource,planned,Registered resource with a stack limit of 50,"{""Resource"":""GripOfFirelord""}",,,,,,50
+2583337159,resource.guardian_fragment,守护者碎片,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""GuardianFragment""}",,,,,,20
+1961933222,resource.hardened_wood,硬化木材,resource,planned,Registered resource with a stack limit of 500,"{""Resource"":""HardenedWood""}",,,,,,500
+1510403545,resource.living_root,活根,resource,active,Registered resource with a stack limit of 200,"{""Resource"":""LivingRoot""}",,,,,,200
+1637103848,resource.phoenix_feather,凤凰羽毛,resource,planned,Registered resource with a stack limit of 10,"{""Resource"":""PhoenixFeather""}",,,,,,10
+3893902990,resource.potato,土豆,resource,active,Registered resource with a stack limit of 2000,"{""Resource"":""Potato""}",,,,,,2000
+4173096726,resource.relic_core,遗迹核心,resource,planned,Registered resource with a stack limit of 48,"{""Resource"":""RelicCore""}",,,,,,48
+23265295,resource.rune_powder,符文粉,resource,planned,Registered resource with a stack limit of 900,"{""Resource"":""RunePowder""}",,,,,,900
+115931863,resource.rune_stone,符文石,resource,planned,Registered resource with a stack limit of 1400,"{""Resource"":""RuneStone""}",,,,,,1400
+2586540024,resource.sands_of_time,时光沙,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""SandsOfTime""}",,,,,,20
+2169622066,resource.soul,灵魂,resource,planned,Registered resource with a stack limit of 1000,"{""Resource"":""Soul""}",,,,,,1000
+377645429,resource.sovereign_spark,王权火种,resource,planned,Registered resource with a stack limit of 6,"{""Resource"":""SovereignSpark""}",,,,,,6
+1617499059,resource.spark_fragment,火种碎片,resource,planned,Registered resource with a stack limit of 18,"{""Resource"":""SparkFragment""}",,,,,,18
+2090748777,resource.spirit_essence,灵质,resource,planned,Registered resource with a stack limit of 2400,"{""Resource"":""SpiritEssence""}",,,,,,2400
+3532959360,resource.star_sand,星砂,resource,planned,Registered resource with a stack limit of 900,"{""Resource"":""StarSand""}",,,,,,900
+1647199502,resource.stone,石头,resource,active,Registered resource with a stack limit of 10000,"{""Resource"":""Stone""}",,,,,,10000
+587049916,resource.storm_core,风暴核心,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""StormCore""}",,,,,,20
+3653429450,resource.sunstone,阳炎石,resource,active,Registered resource with a stack limit of 200,"{""Resource"":""Sunstone""}",,,,,,200
+3380787316,resource.vampire_fang,吸血鬼之牙,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""VampireFang""}",,,,,,20
+3608324198,resource.void_essence,虚空精华,resource,planned,Registered resource with a stack limit of 100,"{""Resource"":""VoidEssence""}",,,,,,100
+3432226481,resource.wheat_seeds,小麦种子,resource,active,Registered resource with a stack limit of 1000,"{""Resource"":""WheatSeeds""}",,,,,,1000
+1511221322,resource.whisper_of_treant,古树低语,resource,planned,Registered resource with a stack limit of 50,"{""Resource"":""WhisperOfTreant""}",,,,,,50
+252128356,resource.wood,木头,resource,active,Registered resource with a stack limit of 10000,"{""Resource"":""Wood""}",,,,,,10000
+3758772083,resource.wraith_fiber,幽魂纤维,resource,planned,Registered resource with a stack limit of 20,"{""Resource"":""WraithFiber""}",,,,,,20
+3630834623,resource_node.berry_bush,resource node berry bush,resource_node,active,Registered ecology content: resource_node.berry_bush,"{""Ecology"":{""ResourceNode"":""BerryBush""}}",procedural/eco/berry_bush.glb,"0.82,0.82,0.82",Jungle,BerryThicket,273424627:resource.apple:1,
+3197872499,resource_node.flower,resource node flower,resource_node,active,Registered ecology content: resource_node.flower,"{""Ecology"":{""ResourceNode"":""Flower""}}",procedural/pretty/flower_0.glb,"0.46,0.46,0.46",Jungle,,,
+1394771439,resource_node.frost_crystal,resource node frost crystal,resource_node,active,Registered ecology content: resource_node.frost_crystal,"{""Ecology"":{""ResourceNode"":""FrostCrystal""}}",procedural/pretty/crystal_blue.glb,"0.9,0.9,0.9",Tundra,FrostcoreOre,3236805234:resource.frostcore:1,
+1609247141,resource_node.mushroom_brown,resource node mushroom brown,resource_node,active,Registered ecology content: resource_node.mushroom_brown,"{""Ecology"":{""ResourceNode"":""MushroomBrown""}}",procedural/pretty/mushroom_brown.glb,"0.58,0.58,0.58",Jungle,,3779113125:resource.food:1,
+2270473266,resource_node.mushroom_red,resource node mushroom red,resource_node,active,Registered ecology content: resource_node.mushroom_red,"{""Ecology"":{""ResourceNode"":""MushroomRed""}}",procedural/pretty/mushroom_red.glb,"0.58,0.58,0.58",Jungle,,3779113125:resource.food:1,
+3920955012,resource_node.rock_mid,resource node rock mid,resource_node,active,Registered ecology content: resource_node.rock_mid,"{""Ecology"":{""ResourceNode"":""RockMid""}}",procedural/pretty/rock_mid.glb,"0.82,0.82,0.82",,Stone,1647199502:resource.stone:1,
+1917969160,resource_node.rock_moss,resource node rock moss,resource_node,active,Registered ecology content: resource_node.rock_moss,"{""Ecology"":{""ResourceNode"":""RockMoss""}}",procedural/pretty/rock_moss.glb,"0.82,0.82,0.82",Jungle,LivingRoot,1510403545:resource.living_root:1,
+969629842,resource_node.sunstone_crystal,resource node sunstone crystal,resource_node,active,Registered ecology content: resource_node.sunstone_crystal,"{""Ecology"":{""ResourceNode"":""SunstoneCrystal""}}",procedural/pretty/crystal_pink.glb,"0.9,0.9,0.9",Desert,SunstoneOre,3653429450:resource.sunstone:1,
+4226691041,wildlife.bear,wildlife bear,wildlife,active,Registered ecology content: wildlife.bear,"{""Ecology"":{""Wildlife"":""Bear""}}",procedural/pretty/bear.glb,"0.85,0.85,0.85",Tundra,,,
+853210439,wildlife.deer,wildlife deer,wildlife,active,Registered ecology content: wildlife.deer,"{""Ecology"":{""Wildlife"":""Deer""}}",kenney/curated/animals/kenney_deer.glb,"0.85,0.85,0.85",Jungle,,,
+934719624,wildlife.fox,wildlife fox,wildlife,active,Registered ecology content: wildlife.fox,"{""Ecology"":{""Wildlife"":""Fox""}}",kenney/curated/animals/kenney_fox.glb,"0.8,0.8,0.8",Tundra,,,
+1467866471,wildlife.rabbit,wildlife rabbit,wildlife,active,Registered ecology content: wildlife.rabbit,"{""Ecology"":{""Wildlife"":""Rabbit""}}",procedural/eco/rabbit.glb,"0.48,0.48,0.48",Jungle,,,
+1645192171,wildlife.wolf,wildlife wolf,wildlife,active,Registered ecology content: wildlife.wolf,"{""Ecology"":{""Wildlife"":""Wolf""}}",procedural/pretty/wolf.glb,"0.7,0.7,0.7",Tundra,,,

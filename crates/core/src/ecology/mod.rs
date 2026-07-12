@@ -1,5 +1,6 @@
 use bevy::prelude::Component;
 use bevy::prelude::Vec3;
+use serde::{Deserialize, Serialize};
 
 use self::animals::CreatureKind;
 use crate::resource::ResourceKind;
@@ -12,7 +13,7 @@ pub mod threats;
 
 pub use cycle::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EcologyKind {
     Creature(CreatureKind),
     Wildlife(WildlifeKind),
@@ -21,7 +22,7 @@ pub enum EcologyKind {
     ResourceDrop(ResourceDropKind),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WildlifeKind {
     Rabbit,
     Deer,
@@ -30,14 +31,14 @@ pub enum WildlifeKind {
     Wolf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TreeKind {
     Sokpop,
     FallenStick,
     Palm,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceNodeKind {
     BerryBush,
     MushroomRed,
@@ -49,7 +50,7 @@ pub enum ResourceNodeKind {
     FrostCrystal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceDropKind {
     BerryFruit,
     Wood,
@@ -235,7 +236,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
         kind: EcologyKind::ResourceNode(ResourceNodeKind::RockMid),
         model_path: "procedural/pretty/rock_mid.glb",
         visual_scale: Vec3::splat(0.82),
-        produced_resource: Some(ResourceKind::Wood),
+        produced_resource: Some(ResourceKind::Stone),
         preferred_biome: None,
         source_block: Some(BlockType::Stone),
     },
@@ -283,7 +284,7 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
         kind: EcologyKind::ResourceDrop(ResourceDropKind::Stone),
         model_path: "kenney/curated/survival_props/kenney_resource_stone.glb",
         visual_scale: Vec3::splat(0.8),
-        produced_resource: Some(ResourceKind::Wood),
+        produced_resource: Some(ResourceKind::Stone),
         preferred_biome: None,
         source_block: Some(BlockType::Stone),
     },
@@ -594,5 +595,17 @@ mod tests {
         assert_eq!(entity.block_pos, [4, 12, 7]);
         assert_eq!(model.path, "procedural/pretty/sokpop_tree.glb");
         assert_eq!(harvest.unwrap().kind, ResourceKind::Wood);
+    }
+
+    #[test]
+    fn stone_ecology_content_yields_stone() {
+        assert_eq!(
+            ecology_entry(EcologyKind::ResourceNode(ResourceNodeKind::RockMid)).produced_resource,
+            Some(ResourceKind::Stone)
+        );
+        assert_eq!(
+            ecology_entry(EcologyKind::ResourceDrop(ResourceDropKind::Stone)).produced_resource,
+            Some(ResourceKind::Stone)
+        );
     }
 }

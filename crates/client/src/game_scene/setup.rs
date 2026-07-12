@@ -12,8 +12,9 @@ use super::content_visuals::{spawn_content_visuals, LivingContentLayout};
 use super::offline::OfflineNature;
 use super::procedural_motion::ProceduralTreeSway;
 use super::state::{
-    BossActor, Cloud, GrassTuft, LivingCameraRig, LivingSceneCamera, PlayerActor, PlayerIkPart,
-    PlayerIkPartKind, PlayerJump, PlayerMotion, RainDrop, SceneMaterials,
+    BossActor, Cloud, FarmVisualMaterials, GrassTuft, LivingCameraRig, LivingSceneCamera,
+    LivingSun, PlayerActor, PlayerIkPart, PlayerIkPartKind, PlayerJump, PlayerMotion, RainDrop,
+    SceneMaterials, FARM_PLOT_POSITIONS,
 };
 use super::util::{
     hash01, spawn_asset, BOSS_PATH, BRANCH_PATH, CLOUD_PATH, HILL_PATH, PINE_TREE_PATH, ROCK_PATH,
@@ -25,7 +26,7 @@ pub fn setup_rendering(mut commands: Commands) {
     commands.insert_resource(ClearColor(Color::srgb(0.47, 0.61, 0.72)));
     commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.82, 0.90, 0.84),
-        brightness: 0.58,
+        brightness: 0.82,
         affects_lightmapped_meshes: true,
     });
 }
@@ -33,17 +34,18 @@ pub fn setup_rendering(mut commands: Commands) {
 pub fn setup_lighting(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
-            illuminance: 24_000.0,
+            illuminance: 20_000.0,
             shadow_maps_enabled: true,
             color: Color::srgb(1.0, 0.91, 0.76),
             ..default()
         },
         Transform::from_xyz(-24.0, 38.0, 18.0).looking_at(Vec3::ZERO, Vec3::Y),
+        LivingSun,
         VolumetricLight,
     ));
     commands.spawn((
         DirectionalLight {
-            illuminance: 4_500.0,
+            illuminance: 8_000.0,
             shadow_maps_enabled: false,
             color: Color::srgb(0.58, 0.72, 1.0),
             ..default()
@@ -297,6 +299,69 @@ pub fn setup_living_scene(
                 Name::new("pooled_rain_drop"),
             ));
         }
+    }
+}
+
+pub fn setup_farm_plots(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let soil_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.30, 0.17, 0.09),
+        perceptual_roughness: 0.98,
+        ..default()
+    });
+    let border_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.48, 0.29, 0.13),
+        perceptual_roughness: 0.96,
+        ..default()
+    });
+    let crop_materials = [
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.78, 0.67, 0.18),
+            perceptual_roughness: 0.84,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.90, 0.24, 0.12),
+            perceptual_roughness: 0.82,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.58, 0.38, 0.20),
+            perceptual_roughness: 0.90,
+            ..default()
+        }),
+    ];
+    let soil_mesh = meshes.add(Cuboid::new(3.8, 0.12, 3.0));
+    let border_mesh = meshes.add(Cuboid::new(4.1, 0.16, 3.3));
+    let crop_mesh = meshes.add(Cone::new(0.26, 0.92));
+    commands.insert_resource(FarmVisualMaterials {
+        crop_materials: crop_materials.clone(),
+    });
+
+    for (id, position) in FARM_PLOT_POSITIONS.into_iter().enumerate() {
+        commands.spawn((
+            Mesh3d(border_mesh.clone()),
+            MeshMaterial3d(border_material.clone()),
+            Transform::from_translation(position - Vec3::Y * 0.01),
+            Name::new("farm_plot_border"),
+        ));
+        commands.spawn((
+            Mesh3d(soil_mesh.clone()),
+            MeshMaterial3d(soil_material.clone()),
+            Transform::from_translation(position + Vec3::Y * 0.08),
+            Name::new("farm_plot_soil"),
+        ));
+        commands.spawn((
+            Mesh3d(crop_mesh.clone()),
+            MeshMaterial3d(crop_materials[0].clone()),
+            Transform::from_translation(position + Vec3::Y * 0.58).with_scale(Vec3::ZERO),
+            Visibility::Hidden,
+            super::state::FarmCropVisual { id: id as u32 },
+            Name::new("farm_plot_crop"),
+        ));
     }
 }
 

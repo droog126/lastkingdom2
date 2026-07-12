@@ -2,6 +2,7 @@ mod args;
 mod artifacts;
 mod assertions;
 mod audit;
+mod content_export;
 mod doc_audit;
 mod health;
 mod loop_cmd;
@@ -63,6 +64,7 @@ fn main() -> ExitCode {
         "clean-runs" | "clean-logs" => loop_cmd::clean_runs(&root),
         "motion-analyze" => motion::analyze(&root, &args),
         "scenario" | "run-scenario" => loop_cmd::scenario(&root, &args),
+        "export" | "export-content" | "content-export" => content_export::run(&root, &args),
         "tdd" => tdd::run(&root, &args),
         "dev" => run_dev(&root, &args),
         "audit-tdd" => audit::tdd(&root),
@@ -119,6 +121,7 @@ fn print_help() {
     println!("  audit-skills");
     println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
     println!("  scenario --json scenarios/*.json");
+    println!("  export [--out=PATH] (alias: export-content)");
     println!("  model-preview-all [--only=<stem>] [--limit=N] [--skip-build]");
 }
 

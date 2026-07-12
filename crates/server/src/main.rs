@@ -11,7 +11,8 @@ use lk2_core::protocol::components::{
     EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
 };
 use lk2_core::protocol::messages::{
-    BuildRecipe, GameplayCommand, GameplayCommandKind, GameplayFeedback, PingMessage, PongMessage,
+    BuildRecipe, ChatBroadcast, ChatMessage, GameplayCommand, GameplayCommandKind,
+    GameplayFeedback, PingMessage, PongMessage,
 };
 use lk2_core::protocol::{ControlChannel, PlayerAction, StateChannel};
 
@@ -724,6 +725,51 @@ fn broadcast_gameplay_feedback(
     }
 }
 
+fn relay_chat_messages(
+    clock: Res<SimClock>,
+    mut receivers: Query<(
+        Option<&lightyear::prelude::RemoteId>,
+        &mut lightyear::prelude::MessageReceiver<ChatMessage>,
+    )>,
+    server_q: Query<&lightyear::prelude::Server, With<lightyear_connection::server::Started>>,
+    mut sender: lightyear::prelude::ServerMultiMessageSender<()>,
+) {
+    let Ok(server) = server_q.single() else {
+        return;
+    };
+    for (remote_id, mut receiver) in receivers.iter_mut() {
+        let sender_name =
+            remote_id.map_or_else(|| "Player".to_string(), |id| format!("{:?}", id.0));
+        for message in receiver.receive() {
+            let text = sanitize_chat_text(&message.text);
+            if text.is_empty() {
+                continue;
+            }
+            info!("[chat] {}: {}", sender_name, text);
+            let broadcast = ChatBroadcast {
+                server_tick: clock.tick,
+                sender: sender_name.clone(),
+                text,
+            };
+            let _ = sender.send::<_, ControlChannel>(
+                &broadcast,
+                server,
+                &lightyear::prelude::NetworkTarget::All,
+            );
+        }
+    }
+}
+
+fn sanitize_chat_text(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_control())
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(120)
+        .collect()
+}
+
 fn maintain_anti_stuck(
     world: &GameWorld,
     player: &mut PlayerState,
@@ -1032,6 +1078,8 @@ fn main() {
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(SimplePvpAuthorityPlugin)
         .add_plugins(NatureServerProjectionPlugin)
+        .add_message::<ChatBroadcast>()
+        .add_message::<ChatMessage>()
         .add_message::<GameplayCommand>()
         .add_message::<GameplayFeedback>()
         .add_message::<PingMessage>()
@@ -1108,6 +1156,7 @@ fn main() {
                 apply_leafwing_input,
                 echo_ping_messages,
                 broadcast_gameplay_feedback,
+                relay_chat_messages,
                 sync_authoritative_snapshot_components,
                 broadcast_player_pos,
             )

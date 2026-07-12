@@ -84,7 +84,7 @@ pub fn generate_game_content_volume(
 
     let profile = config
         .profile
-        .unwrap_or_else(|| choose_spice_profile(config.seed));
+        .unwrap_or_else(|| resolve_content_spice_profile(config.seed));
     let [width, height, depth] = config.dimensions;
     let mut volume = ContentVolume::new(
         config.dimensions,
@@ -178,7 +178,7 @@ fn allow_horizontal(
     builder.allow_bidirectional(second, Direction3::PosZ, first)
 }
 
-fn choose_spice_profile(seed: u64) -> ContentSpiceProfile {
+pub fn resolve_content_spice_profile(seed: u64) -> ContentSpiceProfile {
     let hash = mix64(seed ^ 0x51A1_CE5E_ED5);
     let rare_roll = (hash >> 56) as u8;
     if rare_roll < 24 {

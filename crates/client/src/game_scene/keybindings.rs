@@ -15,11 +15,17 @@ pub enum GameAction {
     ToggleCamera,
     CameraTurnLeft,
     CameraTurnRight,
+    OpenInventory,
+    OpenWorldStatus,
     OpenBindings,
+    CycleCrop,
+    PlantCrop,
+    HarvestCrop,
+    OpenFarming,
 }
 
 impl GameAction {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 16] = [
         Self::MoveForward,
         Self::MoveBackward,
         Self::MoveLeft,
@@ -29,21 +35,33 @@ impl GameAction {
         Self::ToggleCamera,
         Self::CameraTurnLeft,
         Self::CameraTurnRight,
+        Self::OpenInventory,
+        Self::OpenWorldStatus,
         Self::OpenBindings,
+        Self::CycleCrop,
+        Self::PlantCrop,
+        Self::HarvestCrop,
+        Self::OpenFarming,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::MoveForward => "Move forward",
-            Self::MoveBackward => "Move backward",
-            Self::MoveLeft => "Move left",
-            Self::MoveRight => "Move right",
-            Self::Jump => "Jump",
-            Self::Attack => "Attack",
-            Self::ToggleCamera => "Toggle camera",
-            Self::CameraTurnLeft => "Turn camera left",
-            Self::CameraTurnRight => "Turn camera right",
-            Self::OpenBindings => "Open key bindings",
+            Self::MoveForward => "向前移动",
+            Self::MoveBackward => "后退",
+            Self::MoveLeft => "向左移动",
+            Self::MoveRight => "向右移动",
+            Self::Jump => "跳跃",
+            Self::Attack => "攻击",
+            Self::ToggleCamera => "切换视角",
+            Self::CameraTurnLeft => "向左转视角",
+            Self::CameraTurnRight => "向右转视角",
+            Self::OpenInventory => "打开背包",
+            Self::OpenWorldStatus => "打开内容调试",
+            Self::OpenBindings => "打开设置菜单",
+            Self::CycleCrop => "选择作物",
+            Self::PlantCrop => "种植作物",
+            Self::HarvestCrop => "收获作物",
+            Self::OpenFarming => "打开农田",
         }
     }
 }
@@ -60,14 +78,14 @@ impl Binding {
         match self {
             Self::Key(key) => key_label(key),
             Self::Mouse(button) => match button {
-                MouseButton::Left => "Mouse left".into(),
-                MouseButton::Right => "Mouse right".into(),
-                MouseButton::Middle => "Mouse middle".into(),
-                MouseButton::Back => "Mouse back".into(),
-                MouseButton::Forward => "Mouse forward".into(),
-                MouseButton::Other(index) => format!("Mouse {index}"),
+                MouseButton::Left => "鼠标左键".into(),
+                MouseButton::Right => "鼠标右键".into(),
+                MouseButton::Middle => "鼠标中键".into(),
+                MouseButton::Back => "鼠标后退键".into(),
+                MouseButton::Forward => "鼠标前进键".into(),
+                MouseButton::Other(index) => format!("鼠标按键 {index}"),
             },
-            Self::Unbound => "Unbound".into(),
+            Self::Unbound => "未绑定".into(),
         }
     }
 }
@@ -105,9 +123,9 @@ impl SettingsPage {
 
     const fn label(self) -> &'static str {
         match self {
-            Self::Controls => "Controls",
-            Self::Ui => "UI",
-            Self::Algorithm => "Algorithm",
+            Self::Controls => "操作",
+            Self::Ui => "界面",
+            Self::Algorithm => "算法",
         }
     }
 }
@@ -137,7 +155,13 @@ impl Default for KeyBindings {
         bindings.insert(GameAction::ToggleCamera, Binding::Key(KeyCode::KeyC));
         bindings.insert(GameAction::CameraTurnLeft, Binding::Key(KeyCode::KeyQ));
         bindings.insert(GameAction::CameraTurnRight, Binding::Key(KeyCode::KeyE));
+        bindings.insert(GameAction::OpenInventory, Binding::Key(KeyCode::KeyI));
+        bindings.insert(GameAction::OpenWorldStatus, Binding::Key(KeyCode::F2));
         bindings.insert(GameAction::OpenBindings, Binding::Key(KeyCode::F1));
+        bindings.insert(GameAction::CycleCrop, Binding::Key(KeyCode::KeyR));
+        bindings.insert(GameAction::PlantCrop, Binding::Key(KeyCode::KeyF));
+        bindings.insert(GameAction::HarvestCrop, Binding::Key(KeyCode::KeyG));
+        bindings.insert(GameAction::OpenFarming, Binding::Key(KeyCode::KeyO));
         Self {
             bindings,
             menu_open: false,
@@ -264,7 +288,7 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
 
     commands.entity(root).with_children(|parent| {
         parent.spawn((
-            Text::new("KEY BINDINGS"),
+            Text::new("设置"),
             TextFont {
                 font: FontSource::UiSansSerif,
                 font_size: FontSize::Px(22.0),
@@ -274,7 +298,7 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
             TextColor(Color::srgb(0.86, 0.96, 0.95)),
         ));
         parent.spawn((
-            Text::new("Click a binding, then press a key or mouse button"),
+            Text::new("点击要修改的按键，然后按下键盘或鼠标按钮"),
             TextFont {
                 font: FontSource::UiSansSerif,
                 font_size: FontSize::Px(13.0),
@@ -283,16 +307,31 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
             TextColor(Color::srgba(0.70, 0.78, 0.80, 0.95)),
         ));
 
+        parent
+            .spawn((Node {
+                width: percent(100),
+                column_gap: px(6),
+                ..default()
+            },))
+            .with_children(|tabs| {
+                for page in SettingsPage::ALL {
+                    spawn_settings_tab(tabs, page);
+                }
+            });
+
         for action in GameAction::ALL {
             parent
-                .spawn((Node {
-                    width: percent(100),
-                    min_height: px(34),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    column_gap: px(12),
-                    ..default()
-                },))
+                .spawn((
+                    Node {
+                        width: percent(100),
+                        min_height: px(34),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        column_gap: px(12),
+                        ..default()
+                    },
+                    SettingsSection(SettingsPage::Controls),
+                ))
                 .with_children(|row| {
                     row.spawn((
                         Text::new(action.label()),
@@ -335,7 +374,7 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
         }
 
         parent.spawn((
-            Text::new("UI DISPLAY"),
+            Text::new("界面显示"),
             TextFont {
                 font: FontSource::UiSansSerif,
                 font_size: FontSize::Px(14.0),
@@ -343,21 +382,46 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
                 ..default()
             },
             TextColor(Color::srgb(0.55, 0.84, 0.82)),
+            SettingsSection(SettingsPage::Ui),
         ));
         spawn_ui_setting_row(
             parent,
-            "UI scale",
+            "界面缩放",
             UiSettingControl::ScaleDown,
             UiSettingControl::ScaleUp,
             UiScaleValueText,
+            SettingsPage::Ui,
         );
         spawn_ui_setting_row(
             parent,
-            "Panel opacity",
+            "面板不透明度",
             UiSettingControl::OpacityDown,
             UiSettingControl::OpacityUp,
             UiOpacityValueText,
+            SettingsPage::Ui,
         );
+
+        parent
+            .spawn((
+                Node {
+                    width: percent(100),
+                    min_height: px(42),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                SettingsSection(SettingsPage::Algorithm),
+            ))
+            .with_children(|section| {
+                section.spawn((
+                    Text::new("暂无算法设置。"),
+                    TextFont {
+                        font: FontSource::UiSansSerif,
+                        font_size: FontSize::Px(14.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.70, 0.78, 0.80, 0.95)),
+                ));
+            });
 
         parent.spawn((
             Text::new(""),
@@ -394,7 +458,7 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
                 ))
                 .with_children(|button| {
                     button.spawn((
-                        Text::new("Reset defaults"),
+                        Text::new("恢复默认"),
                         TextFont {
                             font: FontSource::UiSansSerif,
                             font_size: FontSize::Px(13.0),
@@ -419,7 +483,7 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
                 ))
                 .with_children(|button| {
                     button.spawn((
-                        Text::new("Close"),
+                        Text::new("关闭"),
                         TextFont {
                             font: FontSource::UiSansSerif,
                             font_size: FontSize::Px(13.0),
@@ -432,22 +496,54 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
     });
 }
 
+fn spawn_settings_tab(parent: &mut ChildSpawnerCommands, page: SettingsPage) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                flex_grow: 1.0,
+                min_height: px(30),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(5)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.10, 0.19, 0.22, 1.0)),
+            SettingsTabButton(page),
+        ))
+        .with_children(|tab| {
+            tab.spawn((
+                Text::new(page.label()),
+                TextFont {
+                    font: FontSource::UiSansSerif,
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
 fn spawn_ui_setting_row<C: Component>(
     parent: &mut ChildSpawnerCommands,
     label: &'static str,
     decrease: UiSettingControl,
     increase: UiSettingControl,
     value_marker: C,
+    page: SettingsPage,
 ) {
     parent
-        .spawn((Node {
-            width: percent(100),
-            min_height: px(30),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::SpaceBetween,
-            column_gap: px(8),
-            ..default()
-        },))
+        .spawn((
+            Node {
+                width: percent(100),
+                min_height: px(30),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: px(8),
+                ..default()
+            },
+            SettingsSection(page),
+        ))
         .with_children(|row| {
             row.spawn((
                 Text::new(label),
@@ -529,6 +625,7 @@ pub fn handle_keybinding_buttons(
     mut bindings: ResMut<KeyBindings>,
     mut ui_settings: ResMut<UiSettings>,
     mut ui_scale: ResMut<UiScale>,
+    mut ui_state: ResMut<SettingsUiState>,
     buttons: Query<
         (
             &Interaction,
@@ -536,11 +633,14 @@ pub fn handle_keybinding_buttons(
             Option<&ResetBindingsButton>,
             Option<&CloseBindingsButton>,
             Option<&UiSettingButton>,
+            Option<&SettingsTabButton>,
         ),
         Changed<Interaction>,
     >,
 ) {
-    for (interaction, binding_button, reset_button, close_button, ui_setting_button) in &buttons {
+    for (interaction, binding_button, reset_button, close_button, ui_setting_button, tab_button) in
+        &buttons
+    {
         if *interaction != Interaction::Pressed {
             continue;
         }
@@ -551,6 +651,8 @@ pub fn handle_keybinding_buttons(
             bindings.reset();
             ui_settings.panel_opacity = UiSettings::default().panel_opacity;
             ui_scale.0 = 1.0;
+        } else if let Some(tab_button) = tab_button {
+            ui_state.page = tab_button.0;
         } else if let Some(ui_setting_button) = ui_setting_button {
             match ui_setting_button.0 {
                 UiSettingControl::ScaleDown => ui_scale.0 = (ui_scale.0 - 0.1).max(0.8),
@@ -592,8 +694,9 @@ pub fn update_keybinding_ui(
     bindings: Res<KeyBindings>,
     ui_settings: Res<UiSettings>,
     ui_scale: Res<UiScale>,
+    ui_state: Res<SettingsUiState>,
     mut root: Query<&mut Visibility, With<KeybindingUiRoot>>,
-    mut root_background: Query<&mut BackgroundColor, (With<KeybindingUiRoot>, Without<Button>)>,
+    mut sections: Query<(&SettingsSection, &mut Node)>,
     mut values: Query<
         (&BindingValueText, &mut Text),
         (
@@ -629,7 +732,11 @@ pub fn update_keybinding_ui(
             Without<UiScaleValueText>,
         ),
     >,
-    mut buttons: Query<(&Interaction, &mut BackgroundColor), With<Button>>,
+    mut backgrounds: ParamSet<(
+        Query<&mut BackgroundColor, (With<KeybindingUiRoot>, Without<Button>)>,
+        Query<(&Interaction, &mut BackgroundColor), (With<Button>, Without<SettingsTabButton>)>,
+        Query<(&SettingsTabButton, &mut BackgroundColor)>,
+    )>,
 ) {
     if let Ok(mut visibility) = root.single_mut() {
         *visibility = if bindings.menu_open {
@@ -638,8 +745,15 @@ pub fn update_keybinding_ui(
             Visibility::Hidden
         };
     }
-    if let Ok(mut background) = root_background.single_mut() {
+    if let Ok(mut background) = backgrounds.p0().single_mut() {
         background.0 = Color::srgba(0.035, 0.05, 0.075, ui_settings.panel_opacity);
+    }
+    for (section, mut node) in &mut sections {
+        node.display = if section.0 == ui_state.page {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
     for (value, mut text) in &mut values {
         text.0 = if bindings.listening == Some(value.0) {
@@ -650,8 +764,8 @@ pub fn update_keybinding_ui(
     }
     if let Ok(mut text) = status.single_mut() {
         text.0 = bindings.listening.map_or_else(
-            || "F1 opens or closes this panel".into(),
-            |action| format!("Binding {}: press a key or mouse button", action.label()),
+            || "F1 打开或关闭此面板".into(),
+            |action| format!("正在设置「{}」：请按下键盘或鼠标按钮", action.label()),
         );
     }
     if let Ok(mut text) = scale_value.single_mut() {
@@ -660,29 +774,36 @@ pub fn update_keybinding_ui(
     if let Ok(mut text) = opacity_value.single_mut() {
         text.0 = format!("{:.1}", ui_settings.panel_opacity);
     }
-    for (interaction, mut background) in &mut buttons {
+    for (interaction, mut background) in &mut backgrounds.p1() {
         background.0 = match interaction {
             Interaction::Pressed => Color::srgba(0.22, 0.46, 0.47, 1.0),
             Interaction::Hovered => Color::srgba(0.16, 0.34, 0.36, 1.0),
             Interaction::None => Color::srgba(0.10, 0.19, 0.22, 1.0),
         };
     }
+    for (tab, mut background) in &mut backgrounds.p2() {
+        background.0 = if tab.0 == ui_state.page {
+            Color::srgba(0.22, 0.46, 0.47, 1.0)
+        } else {
+            Color::srgba(0.10, 0.19, 0.22, 1.0)
+        };
+    }
 }
 
 fn key_label(key: KeyCode) -> String {
     match key {
-        KeyCode::Space => "Space".into(),
+        KeyCode::Space => "空格".into(),
         KeyCode::Escape => "Esc".into(),
-        KeyCode::Enter => "Enter".into(),
+        KeyCode::Enter => "回车".into(),
         KeyCode::Tab => "Tab".into(),
-        KeyCode::ShiftLeft => "Left Shift".into(),
-        KeyCode::ShiftRight => "Right Shift".into(),
-        KeyCode::ControlLeft => "Left Ctrl".into(),
-        KeyCode::ControlRight => "Right Ctrl".into(),
-        KeyCode::ArrowUp => "Arrow up".into(),
-        KeyCode::ArrowDown => "Arrow down".into(),
-        KeyCode::ArrowLeft => "Arrow left".into(),
-        KeyCode::ArrowRight => "Arrow right".into(),
+        KeyCode::ShiftLeft => "左 Shift".into(),
+        KeyCode::ShiftRight => "右 Shift".into(),
+        KeyCode::ControlLeft => "左 Ctrl".into(),
+        KeyCode::ControlRight => "右 Ctrl".into(),
+        KeyCode::ArrowUp => "上方向键".into(),
+        KeyCode::ArrowDown => "下方向键".into(),
+        KeyCode::ArrowLeft => "左方向键".into(),
+        KeyCode::ArrowRight => "右方向键".into(),
         other => format!("{other:?}").trim_start_matches("Key").to_string(),
     }
 }
@@ -705,6 +826,10 @@ mod tests {
         assert_eq!(
             bindings.binding(GameAction::ToggleCamera),
             Binding::Key(KeyCode::KeyC)
+        );
+        assert_eq!(
+            bindings.binding(GameAction::OpenWorldStatus),
+            Binding::Key(KeyCode::F2)
         );
     }
 

@@ -616,7 +616,12 @@ impl EcoCycle {
     }
 
     fn grow_plants_from_rain(&mut self, report: &mut EcoTickReport) {
-        while self.plants.len() < PLANT_NODE_CAP && self.rain + f32::EPSILON >= RAIN_PER_PLANT {
+        // Establish the first two plant nodes before allocating rain to the
+        // berry stage. Once berries are full, remaining rain can grow plants.
+        while self.plants.len() < PLANT_NODE_CAP
+            && (self.plants.len() < 2 || self.berries.len() >= BERRY_BUSH_CAP)
+            && self.rain + f32::EPSILON >= RAIN_PER_PLANT
+        {
             let id = next_id_for(self.plants.iter().map(|plant| plant.id));
             let kind = if id % 3 == 0 {
                 ResourceNodeKind::Flower
@@ -676,9 +681,9 @@ impl EcoCycle {
         {
             let id = next_id_for(self.wildlife.iter().map(|animal| animal.id));
             let kind = match id % 4 {
-                0 => WildlifeKind::Deer,
-                1 => WildlifeKind::Fox,
-                2 => WildlifeKind::Wolf,
+                0 => WildlifeKind::Wolf,
+                1 => WildlifeKind::Deer,
+                2 => WildlifeKind::Fox,
                 _ => WildlifeKind::Bear,
             };
             let origin = self.rabbits[id as usize % self.rabbits.len()].pos;
@@ -774,6 +779,10 @@ mod tests {
         assert!(eco.berry_count() >= BERRY_BUSHES_PER_RABBIT);
         assert!(eco.rabbit_count() >= RABBITS_PER_WILDLIFE);
         assert!(eco.wildlife_count() >= 1);
+        assert_eq!(
+            eco.wildlife.first().map(|animal| animal.kind),
+            Some(WildlifeKind::Wolf)
+        );
     }
 
     #[test]

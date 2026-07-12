@@ -9,31 +9,37 @@ use super::util::{
     TREE_PATH,
 };
 use lk2_core::world::content::{
-    game_content_catalog, generate_game_content_volume, ContentSpiceProfile, ContentVolume,
-    GameContentTheme, GameContentVolumeConfig, GAME_CONTENT_CAVERN, GAME_CONTENT_DUNGEON,
-    GAME_CONTENT_EMPTY, GAME_CONTENT_MONSTER_TERRITORY, GAME_CONTENT_SETTLEMENT,
-    GAME_CONTENT_TREASURE_VAULT, GAME_CONTENT_VERTICAL_PASSAGE, GAME_CONTENT_WILDERNESS,
+    game_content_catalog, generate_game_content_volume, resolve_content_spice_profile,
+    ContentSpiceProfile, ContentVolume, GameContentTheme, GameContentVolumeConfig,
+    GAME_CONTENT_CAVERN, GAME_CONTENT_DUNGEON, GAME_CONTENT_EMPTY, GAME_CONTENT_MONSTER_TERRITORY,
+    GAME_CONTENT_SETTLEMENT, GAME_CONTENT_TREASURE_VAULT, GAME_CONTENT_VERTICAL_PASSAGE,
+    GAME_CONTENT_WILDERNESS,
 };
 
 pub const LIVING_CONTENT_DIMENSIONS: [usize; 3] = [5, 3, 5];
 pub const DEFAULT_LIVING_CONTENT_SEED: u64 = 0x1A57_51CE;
 pub const CONTENT_CELL_SPACING: f32 = 8.4;
+pub(crate) const MONSTER_ANCHOR_PILLAR_SCALE: f32 = 0.52;
+pub(crate) const MONSTER_DECORATIVE_MARKER_SCALE: f32 = 0.08;
 
 #[derive(Resource, Clone, Debug)]
 pub struct LivingContentLayout {
     pub volume: ContentVolume,
+    pub profile: ContentSpiceProfile,
 }
 
 impl LivingContentLayout {
     pub fn generate(seed: u64, profile: Option<ContentSpiceProfile>) -> Self {
         let catalog = game_content_catalog(GameContentTheme::Frontier);
+        let active_profile = profile.unwrap_or_else(|| resolve_content_spice_profile(seed));
         let mut config = GameContentVolumeConfig::new(LIVING_CONTENT_DIMENSIONS, seed);
-        if let Some(profile) = profile {
-            config = config.with_profile(profile);
-        }
+        config = config.with_profile(active_profile);
         let volume = generate_game_content_volume(&catalog, &config)
             .expect("living scene content dimensions and catalog should generate");
-        Self { volume }
+        Self {
+            volume,
+            profile: active_profile,
+        }
     }
 }
 
@@ -70,6 +76,15 @@ pub fn content_cell_position(dimensions: [usize; 3], cell: [usize; 3]) -> Vec3 {
         0.04,
         (cell[2] as f32 - center_z) * CONTENT_CELL_SPACING,
     )
+}
+
+pub(crate) const fn content_profile_label(profile: ContentSpiceProfile) -> &'static str {
+    match profile {
+        ContentSpiceProfile::HomesteadWilds => "HomesteadWilds",
+        ContentSpiceProfile::MonsterMarch => "MonsterMarch",
+        ContentSpiceProfile::CrystalDescent => "CrystalDescent",
+        ContentSpiceProfile::CavernGarden => "CavernGarden",
+    }
 }
 
 pub fn spawn_content_visuals(
@@ -134,7 +149,11 @@ fn spawn_surface_content(
         GAME_CONTENT_MONSTER_TERRITORY => {
             let is_anchor = is_monster_anchor(cell);
             if is_anchor || !is_initial_view_corridor(base) {
-                let pillar_scale = if is_anchor { 0.52 } else { 0.16 };
+                let pillar_scale = if is_anchor {
+                    MONSTER_ANCHOR_PILLAR_SCALE
+                } else {
+                    MONSTER_DECORATIVE_MARKER_SCALE
+                };
                 spawn_asset(
                     commands,
                     asset_server,
@@ -282,6 +301,6 @@ fn is_initial_view_corridor(position: Vec3) -> bool {
     position.z > 0.0 && position.x.abs() < CONTENT_CELL_SPACING * 1.35
 }
 
-fn is_monster_anchor(cell: [usize; 3]) -> bool {
+pub(crate) fn is_monster_anchor(cell: [usize; 3]) -> bool {
     cell == [1, 1, 1]
 }

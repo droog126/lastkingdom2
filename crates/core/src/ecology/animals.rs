@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use serde::{Deserialize, Serialize};
 
 use crate::combat::Health as CombatHealth;
 #[cfg(feature = "client-render")]
@@ -12,7 +13,7 @@ use crate::resource::{GlobalResourcePool, PoolError, ResourceKind};
 use crate::world::BlockType;
 use crate::world::World as GameWorld;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CreatureKind {
     Pig,
     Sheep,

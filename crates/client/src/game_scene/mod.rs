@@ -22,31 +22,47 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::window::{PresentMode, WindowResolution};
+use lk2_core::content::game_content_registry;
 
 use crate::game_scene::animation::{
-    animate_boss, animate_clouds_and_rain, animate_rabbits, animate_tree_sway, grow_berries,
-    grow_grass, update_ground_after_rain,
+    animate_boss, animate_clouds_and_rain, animate_rabbits, animate_sun, animate_tree_sway,
+    animate_wolves, grow_berries, grow_grass, update_ground_after_rain,
 };
 use crate::game_scene::capture::{exit_preview, maybe_take_screenshot};
 use crate::game_scene::content_visuals::living_content_layout_from_args;
+use crate::game_scene::farm_ui::{
+    handle_farming_actions, handle_farming_buttons, reconcile_farm_visuals, setup_farming_ui,
+    toggle_farming_ui, update_farming_ui, FarmingUiState,
+};
+use crate::game_scene::inventory::{
+    handle_inventory_buttons, setup_inventory_ui, toggle_inventory_ui, update_inventory_ui,
+    InventoryUiState,
+};
 use crate::game_scene::keybindings::{
     capture_keybinding_input, handle_keybinding_buttons, setup_keybinding_ui, toggle_keybinding_ui,
-    update_keybinding_ui, KeyBindings, UiSettings,
+    update_keybinding_ui, KeyBindings, SettingsUiState, UiSettings,
 };
 use crate::game_scene::offline::{advance_offline_nature, OfflineNature};
 use crate::game_scene::player::{
-    advance_scene, camera_look_input, player_controls, update_camera, update_player_ik,
+    advance_scene, camera_look_input, player_controls, update_camera, update_cursor_capture,
+    update_player_ik,
 };
 use crate::game_scene::reconcile::reconcile_nature_entities;
 use crate::game_scene::setup::{
-    setup_camera, setup_lighting, setup_living_scene, setup_rendering, setup_terrain,
+    setup_camera, setup_farm_plots, setup_lighting, setup_living_scene, setup_rendering,
+    setup_terrain,
 };
 use crate::game_scene::state::LivingSceneState;
+use crate::game_scene::world_debug::{
+    setup_world_debug_ui, toggle_world_debug_ui, update_world_debug_ui, WorldDebugUiState,
+};
 
 mod animation;
 mod capture;
 mod content_visuals;
 mod creature_ai;
+mod farm_ui;
+mod inventory;
 mod keybindings;
 mod offline;
 mod player;
@@ -56,6 +72,7 @@ mod reconcile;
 mod setup;
 mod state;
 mod util;
+mod world_debug;
 
 #[cfg(test)]
 mod tests;
@@ -116,10 +133,17 @@ pub fn run_game_scene() {
         frame_dt_over_50ms: 0,
         frame_dt_max_ms: 0.0,
     })
+    .insert_resource(game_content_registry())
     .insert_resource(living_content_layout_from_args(&args))
-    .init_resource::<OfflineNature>()
+    .insert_resource(OfflineNature::playable())
     .init_resource::<KeyBindings>()
-    .init_resource::<UiSettings>();
+    .init_resource::<UiSettings>()
+    .init_resource::<SettingsUiState>()
+    .init_resource::<InventoryUiState>()
+    .init_resource::<FarmingUiState>()
+    .insert_resource(WorldDebugUiState {
+        open: args.iter().any(|arg| arg == "--content-debug-open"),
+    });
     app.add_systems(
         Startup,
         (
@@ -127,34 +151,68 @@ pub fn run_game_scene() {
             setup_lighting,
             setup_terrain,
             setup_living_scene,
+            setup_farm_plots,
             setup_camera,
             setup_keybinding_ui,
+            setup_inventory_ui,
+            setup_farming_ui,
+            setup_world_debug_ui,
         )
             .chain(),
     );
     app.add_systems(
         Update,
+        animate_sun
+            .after(advance_scene)
+            .before(maybe_take_screenshot),
+    );
+    app.add_systems(
+        Update,
         (
-            advance_scene,
-            advance_offline_nature,
-            reconcile_nature_entities,
-            camera_look_input,
-            player_controls,
-            toggle_keybinding_ui,
-            handle_keybinding_buttons,
-            capture_keybinding_input,
-            update_player_ik,
-            animate_clouds_and_rain,
-            grow_grass,
-            grow_berries,
-            animate_rabbits,
-            animate_boss,
-            animate_tree_sway,
-            update_camera,
-            update_ground_after_rain,
-            maybe_take_screenshot,
-            update_keybinding_ui,
-            exit_preview,
+            (
+                advance_scene,
+                advance_offline_nature,
+                reconcile_nature_entities,
+                camera_look_input,
+                player_controls,
+                toggle_keybinding_ui,
+                handle_keybinding_buttons,
+                capture_keybinding_input,
+                toggle_inventory_ui,
+                handle_inventory_buttons,
+                toggle_farming_ui,
+                handle_farming_buttons,
+                handle_farming_actions,
+                toggle_world_debug_ui,
+                update_cursor_capture,
+            )
+                .chain(),
+            (
+                update_player_ik,
+                animate_clouds_and_rain,
+                grow_grass,
+                grow_berries,
+                animate_rabbits,
+                animate_wolves,
+                reconcile_farm_visuals,
+            )
+                .chain(),
+            (
+                animate_boss,
+                animate_tree_sway,
+                update_camera,
+                update_ground_after_rain,
+                maybe_take_screenshot,
+            )
+                .chain(),
+            (
+                update_keybinding_ui,
+                update_inventory_ui,
+                update_farming_ui,
+                update_world_debug_ui,
+                exit_preview,
+            )
+                .chain(),
         )
             .chain(),
     );

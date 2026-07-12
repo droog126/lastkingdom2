@@ -2,9 +2,12 @@
 
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
+use super::farm_ui::FarmingUiState;
+use super::inventory::InventoryUiState;
 use super::keybindings::{GameAction, KeyBindings};
-use super::procedural_rig::{apply_local_pose, apply_local_segment, TwoBoneLimb};
+use super::procedural_rig::{apply_local_pose, apply_local_segment, HumanoidRig, HumanoidTargets};
 use super::state::{
     BossActor, CameraMode, LivingCameraRig, LivingSceneCamera, LivingSceneState, PlayerActor,
     PlayerIkPart, PlayerIkPartKind, PlayerJump, PlayerMotion, SlashFx,
@@ -30,6 +33,32 @@ pub fn advance_scene(
     }
 }
 
+pub fn update_cursor_capture(
+    bindings: Res<KeyBindings>,
+    inventory: Res<InventoryUiState>,
+    farming: Option<Res<FarmingUiState>>,
+    mut cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let farming_open = farming.as_ref().is_some_and(|state| state.open);
+    let gameplay_active = !bindings.menu_open && !inventory.open && !farming_open;
+    let visible = !gameplay_active;
+    let grab_mode = if gameplay_active {
+        CursorGrabMode::Locked
+    } else {
+        CursorGrabMode::None
+    };
+
+    let Ok(mut cursor_options) = cursor_options.single_mut() else {
+        return;
+    };
+    if cursor_options.visible != visible {
+        cursor_options.visible = visible;
+    }
+    if cursor_options.grab_mode != grab_mode {
+        cursor_options.grab_mode = grab_mode;
+    }
+}
+
 pub fn camera_look_input(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -37,8 +66,11 @@ pub fn camera_look_input(
     mut mouse_motion: MessageReader<MouseMotion>,
     mut camera_rig: ResMut<LivingCameraRig>,
     bindings: Res<KeyBindings>,
+    inventory: Res<InventoryUiState>,
+    farming: Option<Res<FarmingUiState>>,
 ) {
-    if bindings.menu_open {
+    let farming_open = farming.as_ref().is_some_and(|state| state.open);
+    if bindings.menu_open || inventory.open || farming_open {
         return;
     }
     if bindings.just_pressed(GameAction::ToggleCamera, &keys, &mouse) {
@@ -74,6 +106,8 @@ pub fn player_controls(
     mut commands: Commands,
     mut state: ResMut<LivingSceneState>,
     scene_materials: Res<super::state::SceneMaterials>,
+    inventory: Res<InventoryUiState>,
+    farming: Option<Res<FarmingUiState>>,
     mut players: Query<
         (
             &mut Transform,
@@ -86,7 +120,8 @@ pub fn player_controls(
     >,
     mut bosses: Query<(&Transform, &mut Health), (With<BossActor>, Without<PlayerActor>)>,
 ) {
-    if bindings.menu_open {
+    let farming_open = farming.as_ref().is_some_and(|state| state.open);
+    if bindings.menu_open || inventory.open || farming_open {
         return;
     }
     let Ok((mut player, mut combatant, weapon, mut jump, mut motion)) = players.single_mut() else {
@@ -191,10 +226,17 @@ pub fn player_controls(
 
 pub fn update_camera(
     time: Res<Time>,
+    bindings: Res<KeyBindings>,
+    inventory: Res<InventoryUiState>,
+    farming: Option<Res<FarmingUiState>>,
     camera_rig: Res<LivingCameraRig>,
     players: Query<&Transform, (With<PlayerActor>, Without<LivingSceneCamera>)>,
     mut cameras: Query<&mut Transform, (With<LivingSceneCamera>, Without<PlayerActor>)>,
 ) {
+    let farming_open = farming.as_ref().is_some_and(|state| state.open);
+    if bindings.menu_open || inventory.open || farming_open {
+        return;
+    }
     let (Ok(player), Ok(mut camera)) = (players.single(), cameras.single_mut()) else {
         return;
     };
@@ -240,38 +282,16 @@ pub fn update_player_ik(
         camera_rig.pitch,
     );
 
-    let left_arm = TwoBoneLimb {
-        root: Vec3::new(-0.31, 1.02, -0.02),
-        target: pose.left_hand,
-        pole: pose.left_elbow_pole,
-        upper_len: 0.35,
-        lower_len: 0.34,
-    }
-    .solve();
-    let right_arm = TwoBoneLimb {
-        root: Vec3::new(0.31, 1.02, -0.02),
-        target: pose.right_hand,
-        pole: pose.right_elbow_pole,
-        upper_len: 0.35,
-        lower_len: 0.34,
-    }
-    .solve();
-    let left_leg = TwoBoneLimb {
-        root: Vec3::new(-0.15, 0.50, 0.03),
-        target: pose.left_foot,
-        pole: pose.left_knee_pole,
-        upper_len: 0.38,
-        lower_len: 0.44,
-    }
-    .solve();
-    let right_leg = TwoBoneLimb {
-        root: Vec3::new(0.15, 0.50, 0.03),
-        target: pose.right_foot,
-        pole: pose.right_knee_pole,
-        upper_len: 0.38,
-        lower_len: 0.44,
-    }
-    .solve();
+    let solved = HumanoidRig::player_avatar().solve(HumanoidTargets {
+        left_hand: pose.left_hand,
+        right_hand: pose.right_hand,
+        left_foot: pose.left_foot,
+        right_foot: pose.right_foot,
+        left_elbow_pole: pose.left_elbow_pole,
+        right_elbow_pole: pose.right_elbow_pole,
+        left_knee_pole: pose.left_knee_pole,
+        right_knee_pole: pose.right_knee_pole,
+    });
 
     for (part, mut transform, visibility) in &mut parts {
         if let Some(mut visibility) = visibility {
@@ -314,29 +334,41 @@ pub fn update_player_ik(
             PlayerIkPartKind::EyeL => apply_local_pose(
                 &mut transform,
                 player,
-                Vec3::new(-0.11, 1.46, -0.32),
+                Vec3::new(-0.11, 1.46, 0.32),
                 Quat::IDENTITY,
                 Vec3::ONE,
             ),
             PlayerIkPartKind::EyeR => apply_local_pose(
                 &mut transform,
                 player,
-                Vec3::new(0.11, 1.46, -0.32),
+                Vec3::new(0.11, 1.46, 0.32),
                 Quat::IDENTITY,
                 Vec3::ONE,
             ),
-            PlayerIkPartKind::ArmUpperL => {
-                apply_local_segment(&mut transform, player, left_arm.root, left_arm.joint)
-            }
-            PlayerIkPartKind::ArmLowerL => {
-                apply_local_segment(&mut transform, player, left_arm.joint, left_arm.target)
-            }
-            PlayerIkPartKind::ArmUpperR => {
-                apply_local_segment(&mut transform, player, right_arm.root, right_arm.joint)
-            }
-            PlayerIkPartKind::ArmLowerR => {
-                apply_local_segment(&mut transform, player, right_arm.joint, right_arm.target)
-            }
+            PlayerIkPartKind::ArmUpperL => apply_local_segment(
+                &mut transform,
+                player,
+                solved.left_arm.root,
+                solved.left_arm.joint,
+            ),
+            PlayerIkPartKind::ArmLowerL => apply_local_segment(
+                &mut transform,
+                player,
+                solved.left_arm.joint,
+                solved.left_arm.target,
+            ),
+            PlayerIkPartKind::ArmUpperR => apply_local_segment(
+                &mut transform,
+                player,
+                solved.right_arm.root,
+                solved.right_arm.joint,
+            ),
+            PlayerIkPartKind::ArmLowerR => apply_local_segment(
+                &mut transform,
+                player,
+                solved.right_arm.joint,
+                solved.right_arm.target,
+            ),
             PlayerIkPartKind::HandL => apply_local_pose(
                 &mut transform,
                 player,
@@ -351,45 +383,55 @@ pub fn update_player_ik(
                 Quat::IDENTITY,
                 Vec3::ONE,
             ),
-            PlayerIkPartKind::LegUpperL => {
-                apply_local_segment(&mut transform, player, left_leg.root, left_leg.joint)
-            }
-            PlayerIkPartKind::LegLowerL => {
-                apply_local_segment(&mut transform, player, left_leg.joint, left_leg.target)
-            }
-            PlayerIkPartKind::LegUpperR => {
-                apply_local_segment(&mut transform, player, right_leg.root, right_leg.joint)
-            }
-            PlayerIkPartKind::LegLowerR => {
-                apply_local_segment(&mut transform, player, right_leg.joint, right_leg.target)
-            }
+            PlayerIkPartKind::LegUpperL => apply_local_segment(
+                &mut transform,
+                player,
+                solved.left_leg.root,
+                solved.left_leg.joint,
+            ),
+            PlayerIkPartKind::LegLowerL => apply_local_segment(
+                &mut transform,
+                player,
+                solved.left_leg.joint,
+                solved.left_leg.target,
+            ),
+            PlayerIkPartKind::LegUpperR => apply_local_segment(
+                &mut transform,
+                player,
+                solved.right_leg.root,
+                solved.right_leg.joint,
+            ),
+            PlayerIkPartKind::LegLowerR => apply_local_segment(
+                &mut transform,
+                player,
+                solved.right_leg.joint,
+                solved.right_leg.target,
+            ),
             PlayerIkPartKind::BootL => apply_local_pose(
                 &mut transform,
                 player,
-                pose.left_foot + Vec3::new(0.0, -0.02, -0.08),
+                pose.left_foot + Vec3::new(0.0, -0.02, 0.08),
                 Quat::from_rotation_x(pose.left_boot_pitch),
                 Vec3::ONE,
             ),
             PlayerIkPartKind::BootR => apply_local_pose(
                 &mut transform,
                 player,
-                pose.right_foot + Vec3::new(0.0, -0.02, -0.08),
+                pose.right_foot + Vec3::new(0.0, -0.02, 0.08),
                 Quat::from_rotation_x(pose.right_boot_pitch),
                 Vec3::ONE,
             ),
             PlayerIkPartKind::Basket => apply_local_pose(
                 &mut transform,
                 player,
-                Vec3::new(0.0, 0.76, 0.28),
+                Vec3::new(0.0, 0.76, -0.28),
                 Quat::IDENTITY,
                 Vec3::ONE,
             ),
-            PlayerIkPartKind::Stick => apply_local_segment(
-                &mut transform,
-                player,
-                pose.right_hand + Vec3::new(0.02, -0.05, -0.06),
-                pose.right_hand + Vec3::new(0.34, -0.18, -0.52 - pose.attack * 0.20),
-            ),
+            PlayerIkPartKind::Stick => {
+                let (start, end) = held_stick_segment(&pose);
+                apply_local_segment(&mut transform, player, start, end);
+            }
         }
     }
 }
@@ -405,6 +447,13 @@ fn camera_direction(yaw: f32, pitch: f32) -> Vec3 {
 
 pub fn first_person_eye(player_position: Vec3) -> Vec3 {
     player_position + Vec3::new(0.0, 1.54, 0.0)
+}
+
+pub(crate) fn held_stick_segment(pose: &ProceduralPlayerPose) -> (Vec3, Vec3) {
+    (
+        pose.left_hand + Vec3::new(-0.02, -0.05, 0.06),
+        pose.left_hand + Vec3::new(-0.34, -0.18, 0.52 + pose.attack * 0.20),
+    )
 }
 
 #[allow(dead_code)]
@@ -452,27 +501,29 @@ pub fn procedural_player_pose(
     let fall = (-jump.vertical_velocity / PLAYER_JUMP_SPEED).clamp(0.0, 1.0);
     let breathe = (elapsed * 2.4).sin();
     let body_bob =
-        breathe * 0.012 * (1.0 - gait) + stride_cos.abs() * gait * 0.026 + jump_up * 0.020
+        breathe * 0.012 * (1.0 - gait) + stride_sin.abs() * gait * 0.040 + jump_up * 0.020
             - fall * 0.025;
-    let torso_pitch = -gait * 0.08 + jump_up * 0.10 - fall * 0.12 - attack * 0.10;
-    let torso_roll = stride_sin * gait * 0.035;
+    let torso_pitch = -gait * 0.13 + jump_up * 0.10 - fall * 0.12 - attack * 0.10;
+    let torso_roll = stride_sin * gait * 0.055;
     let head_pitch = camera_pitch * 0.25 + jump_up * 0.05 - fall * 0.06;
     let swing = stride_sin * gait;
-    let foot_spread = 0.15 + gait * 0.02;
+    let foot_spread = 0.16 + gait * 0.03;
     let ground_y = 0.06;
-    let foot_stride = 0.30 * gait;
-    let left_lift = stride_sin.max(0.0) * gait * 0.15;
-    let right_lift = (-stride_sin).max(0.0) * gait * 0.15;
+    let foot_stride = 0.42 * gait;
+    let left_swing = stride_cos.max(0.0);
+    let right_swing = (-stride_cos).max(0.0);
+    let left_lift = left_swing.powf(0.75) * gait * 0.22;
+    let right_lift = right_swing.powf(0.75) * gait * 0.22;
     let air_tuck = airborne * (0.10 + jump_up * 0.08);
     let left_foot = Vec3::new(
         -foot_spread,
         ground_y + left_lift + air_tuck,
-        -0.03 + stride_sin * foot_stride - airborne * 0.10,
+        0.03 + stride_sin * foot_stride + airborne * 0.10,
     );
     let right_foot = Vec3::new(
         foot_spread,
         ground_y + right_lift + air_tuck,
-        -0.03 - stride_sin * foot_stride - airborne * 0.10,
+        0.03 - stride_sin * foot_stride + airborne * 0.10,
     );
 
     let (left_hand, right_hand, left_elbow_pole, right_elbow_pole) =
@@ -493,10 +544,18 @@ pub fn procedural_player_pose(
         right_foot,
         left_elbow_pole,
         right_elbow_pole,
-        left_knee_pole: Vec3::new(-0.27, 0.25 + airborne * 0.10, -0.30),
-        right_knee_pole: Vec3::new(0.27, 0.25 + airborne * 0.10, -0.30),
-        left_boot_pitch: gait * stride_sin.max(0.0) * -0.42 + airborne * 0.25,
-        right_boot_pitch: gait * (-stride_sin).max(0.0) * -0.42 + airborne * 0.25,
+        left_knee_pole: Vec3::new(
+            -0.29,
+            0.28 + left_lift * 0.45 + airborne * 0.10,
+            0.26 + left_swing * 0.14,
+        ),
+        right_knee_pole: Vec3::new(
+            0.29,
+            0.28 + right_lift * 0.45 + airborne * 0.10,
+            0.26 + right_swing * 0.14,
+        ),
+        left_boot_pitch: gait * (left_swing * -0.58 + right_swing * 0.16) + airborne * 0.25,
+        right_boot_pitch: gait * (right_swing * -0.58 + left_swing * 0.16) + airborne * 0.25,
     }
 }
 
@@ -508,29 +567,33 @@ fn procedural_arm_pose(
 ) -> (Vec3, Vec3, Vec3, Vec3) {
     if first_person {
         (
-            Vec3::new(-0.25, 1.04 + swing * 0.04 + airborne * 0.05, -0.50),
+            Vec3::new(
+                -0.25,
+                1.04 - swing * 0.05 + attack * 0.07 + airborne * 0.05,
+                0.50 - swing * 0.10 + attack * 0.42,
+            ),
             Vec3::new(
                 0.25,
-                1.02 - swing * 0.04 + attack * 0.07 + airborne * 0.04,
-                -0.54 - attack * 0.42,
+                1.02 + swing * 0.05 + airborne * 0.04,
+                0.54 + swing * 0.10,
             ),
-            Vec3::new(-0.58, 0.90, -0.36),
-            Vec3::new(0.58, 0.90, -0.36 - attack * 0.12),
+            Vec3::new(-0.58, 0.90, 0.36 + attack * 0.12),
+            Vec3::new(0.58, 0.90, 0.36),
         )
     } else {
         (
             Vec3::new(
                 -0.40,
-                0.58 - swing * 0.08 + airborne * 0.10,
-                -0.08 + swing * 0.12,
+                0.62 - swing * 0.12 + attack * 0.18 + airborne * 0.10,
+                0.10 - swing * 0.22 + attack * 0.38,
             ),
             Vec3::new(
                 0.40,
-                0.58 + swing * 0.08 + attack * 0.18 + airborne * 0.10,
-                -0.08 - swing * 0.12 - attack * 0.38,
+                0.62 + swing * 0.12 + airborne * 0.10,
+                0.10 + swing * 0.22,
             ),
-            Vec3::new(-0.58, 0.80 + airborne * 0.10, -0.32),
-            Vec3::new(0.58, 0.80 + airborne * 0.10, -0.32 - attack * 0.10),
+            Vec3::new(-0.58, 0.80 + airborne * 0.10, 0.32 + attack * 0.10),
+            Vec3::new(0.58, 0.80 + airborne * 0.10, 0.32),
         )
     }
 }

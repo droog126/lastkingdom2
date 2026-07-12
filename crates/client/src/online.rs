@@ -2,18 +2,19 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, WindowResolution};
 use leafwing_input_manager::prelude::{ActionState, InputMap};
-use lightyear::prelude::MessageSender;
 use lightyear::prelude::{Connect, LocalAddr, PeerAddr, UdpIo, client::ClientPlugins};
+use lightyear::prelude::{MessageReceiver, MessageSender};
 use lightyear_netcode::prelude::Authentication;
 use lightyear_netcode::prelude::client::{NetcodeClient, NetcodeConfig};
 use lk2_core::protocol::components::{EcoSnapshot, GameplayHudState, PlayerPos};
 use lk2_core::protocol::messages::{
-    AttackInput, BuildRecipe, GameplayCommand, GameplayCommandKind,
+    AttackInput, BuildRecipe, ChatBroadcast, ChatMessage, GameplayCommand, GameplayCommandKind,
 };
 use lk2_core::protocol::{ControlChannel, PlayerAction, ProtocolPlugin};
 use lk2_core::transport::{
@@ -43,6 +44,16 @@ struct OnlineCamera;
 
 #[derive(Component)]
 struct OnlineHudText;
+
+#[derive(Component)]
+struct OnlineChatText;
+
+#[derive(Resource, Default)]
+struct OnlineChatState {
+    composing: bool,
+    draft: String,
+    log: Vec<String>,
+}
 
 #[derive(Resource)]
 struct OnlineAutoDemo {
@@ -114,6 +125,7 @@ pub fn run_online_scene() {
     .add_plugins(ProtocolPlugin)
     .insert_resource(OnlineConnection { server_addr })
     .insert_resource(OnlineAutoDemo::from_args(&args))
+    .init_resource::<OnlineChatState>()
     .init_resource::<NatureSnapshotBuffer>()
     .add_systems(Startup, (setup_online_scene, spawn_netcode_client).chain())
     .add_systems(
@@ -121,9 +133,13 @@ pub fn run_online_scene() {
         (
             connect_netcode_client,
             install_player_input_maps,
+            handle_online_chat_input,
+            suppress_online_actions_while_chatting,
             send_online_action_messages,
+            receive_online_chat_messages,
             sync_replicated_players,
             update_online_overlay,
+            update_online_chat_ui,
             follow_online_camera,
             log_connection_state,
             online_auto_demo_capture,
@@ -189,7 +205,7 @@ fn setup_online_scene(
         },
         BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.62)),
         children![(
-            Text::new("ONLINE\nwaiting for server snapshot"),
+            Text::new("在线\n等待服务器快照"),
             TextFont {
                 font: FontSource::UiMonospace,
                 font_size: FontSize::Rem(0.94),
@@ -200,6 +216,31 @@ fn setup_online_scene(
             LetterSpacing::Px(0.3),
             TextColor(Color::WHITE),
             OnlineHudText,
+        )],
+    ));
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(12),
+            bottom: px(12),
+            width: px(560),
+            padding: UiRect::all(px(10)),
+            border_radius: BorderRadius::all(px(6)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.68)),
+        children![(
+            Text::new("聊天  按 Enter 输入"),
+            TextFont {
+                font: FontSource::UiMonospace,
+                font_size: FontSize::Rem(0.86),
+                weight: FontWeight::MEDIUM,
+                width: FontWidth::SEMI_CONDENSED,
+                ..default()
+            },
+            LetterSpacing::Px(0.2),
+            TextColor(Color::srgb(0.88, 0.94, 0.96)),
+            OnlineChatText,
         )],
     ));
 }
@@ -279,6 +320,7 @@ fn install_player_input_maps(
 fn send_online_action_messages(
     players: Query<(&ActionState<PlayerAction>, Option<&GameplayHudState>), With<PlayerPos>>,
     cameras: Query<&Transform, With<OnlineCamera>>,
+    chat: Res<OnlineChatState>,
     mut clients: Query<
         (
             &mut MessageSender<GameplayCommand>,
@@ -287,6 +329,9 @@ fn send_online_action_messages(
         With<NetcodeClient>,
     >,
 ) {
+    if chat.composing {
+        return;
+    }
     let Ok((actions, hud)) = players.single() else {
         return;
     };
@@ -328,6 +373,132 @@ fn send_online_action_messages(
     }
 }
 
+fn handle_online_chat_input(
+    mut keyboard_inputs: MessageReader<KeyboardInput>,
+    mut chat: ResMut<OnlineChatState>,
+    players: Query<Option<&GameplayHudState>, With<PlayerPos>>,
+    mut clients: Query<&mut MessageSender<ChatMessage>, With<NetcodeClient>>,
+) {
+    for event in keyboard_inputs.read() {
+        if !event.state.is_pressed() || event.repeat {
+            continue;
+        }
+        match &event.logical_key {
+            Key::Enter => {
+                if chat.composing {
+                    let text = sanitize_chat_text(&chat.draft);
+                    chat.draft.clear();
+                    chat.composing = false;
+                    if !text.is_empty() {
+                        let tick = players
+                            .iter()
+                            .next()
+                            .and_then(|hud| hud.map(|state| state.tick))
+                            .unwrap_or(0);
+                        if let Ok(mut sender) = clients.single_mut() {
+                            sender.send::<ControlChannel>(ChatMessage {
+                                client_tick: tick,
+                                text,
+                            });
+                        }
+                    }
+                } else {
+                    chat.composing = true;
+                    chat.draft.clear();
+                }
+            }
+            Key::Escape => {
+                if chat.composing {
+                    chat.composing = false;
+                    chat.draft.clear();
+                }
+            }
+            Key::Backspace => {
+                if chat.composing {
+                    chat.draft.pop();
+                }
+            }
+            _ => {
+                if chat.composing {
+                    if let Some(text) = &event.text {
+                        append_chat_text(&mut chat.draft, text);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn receive_online_chat_messages(
+    mut chat: ResMut<OnlineChatState>,
+    mut clients: Query<&mut MessageReceiver<ChatBroadcast>, With<NetcodeClient>>,
+) {
+    let Ok(mut receiver) = clients.single_mut() else {
+        return;
+    };
+    for message in receiver.receive() {
+        chat.log.push(format!(
+            "[{}] {}: {}",
+            message.server_tick, message.sender, message.text
+        ));
+    }
+    let overflow = chat.log.len().saturating_sub(6);
+    if overflow > 0 {
+        chat.log.drain(0..overflow);
+    }
+}
+
+fn suppress_online_actions_while_chatting(
+    chat: Res<OnlineChatState>,
+    mut players: Query<&mut ActionState<PlayerAction>, With<PlayerPos>>,
+) {
+    if !chat.composing {
+        return;
+    }
+    for mut actions in &mut players {
+        actions.reset_all();
+    }
+}
+
+fn update_online_chat_ui(
+    chat: Res<OnlineChatState>,
+    mut text: Query<&mut Text, With<OnlineChatText>>,
+) {
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+    let mut lines = Vec::new();
+    lines.push(if chat.composing {
+        format!("聊天  > {}", chat.draft)
+    } else {
+        "聊天  按 Enter 输入".to_string()
+    });
+    lines.extend(chat.log.iter().cloned());
+    text.0 = lines.join("\n");
+}
+
+fn append_chat_text(draft: &mut String, text: &str) {
+    for ch in text.chars() {
+        if ch.is_control() {
+            continue;
+        }
+        if draft.chars().count() >= 120 {
+            break;
+        }
+        draft.push(ch);
+    }
+}
+
+fn sanitize_chat_text(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_control())
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(120)
+        .collect()
+}
+
 fn sync_replicated_players(
     mut commands: Commands,
     assets: Res<OnlineVisualAssets>,
@@ -365,7 +536,7 @@ fn update_online_overlay(
         return;
     };
     let Some((pos, hud, eco)) = players.iter().next() else {
-        text.0 = "ONLINE\nwaiting for server snapshot".to_string();
+        text.0 = "在线\n等待服务器快照".to_string();
         return;
     };
     text.0 = online_overlay_text(pos, hud, eco);
@@ -395,7 +566,7 @@ fn online_overlay_text(
         )
     });
     format!(
-        "ONLINE\nTick {tick}  Block [{}, {}, {}]  Nation {nation}\nWood {wood}  Food {food}  Flags {flags}  Nations {nations}  Monsters {monsters}\nClouds {clouds}  Plants {plants}  Animals {animals}  Rainfall {:.1}",
+        "在线\nTick {tick}  区块 [{}, {}, {}]  国家 {nation}\n木头 {wood}  食物 {food}  旗帜 {flags}  国家数 {nations}  怪物 {monsters}\n云朵 {clouds}  植物 {plants}  动物 {animals}  降雨 {:.1}",
         block[0], block[1], block[2], rainfall
     )
 }

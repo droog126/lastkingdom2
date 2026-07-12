@@ -12,10 +12,16 @@ Read [AGENTS.md](AGENTS.md) before changing the repository. Human-facing documen
 ```sh
 just build
 just offline
+just export
 ```
 
 The normal play aliases route through `xtask play`, which builds when needed and archives runtime
 errors under `run-logs/`.
+
+`just export` writes a stable content package to the current directory. It includes the
+human-readable `content.md` catalog, complete registry JSON, active-content and planned-content
+JSON/CSV views, recipes, and a manifest. `just export-content` remains an alias. Use
+`just export --out=PATH` to choose another output directory.
 
 The historical closed-loop artifact contract remains in the repository, but `just loop` is
 temporarily unavailable while its runtime producer is migrated to the focused client.

@@ -1,0 +1,27 @@
+{
+  "active_count": 30,
+  "categories": {
+    "creature": 4,
+    "drop": 3,
+    "item": 2,
+    "plant": 3,
+    "resource": 35,
+    "resource_node": 8,
+    "wildlife": 5
+  },
+  "content_count": 60,
+  "files": [
+    "content_registry.json",
+    "content_active.json",
+    "content_planned.json",
+    "content.csv",
+    "content_active.csv",
+    "content_planned.csv",
+    "recipes.csv",
+    "content.md",
+    "manifest.json"
+  ],
+  "planned_count": 30,
+  "recipe_count": 1,
+  "schema_version": 2
+}

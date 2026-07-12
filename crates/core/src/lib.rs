@@ -3,8 +3,10 @@
 pub mod clock;
 pub mod combat;
 pub mod constant;
+pub mod content;
 pub mod diagnostics;
 pub mod ecology;
+pub mod farming;
 #[cfg(feature = "experimental-gameplay")]
 pub mod equipment;
 pub mod legendary;
