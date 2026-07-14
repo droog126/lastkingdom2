@@ -5191,6 +5191,7 @@ dependencies = [
  "bevy_world_serialization",
  "leafwing-input-manager",
  "lightyear",
+ "lightyear_avian3d",
  "lightyear_netcode",
  "lk2-core",
  "serde",
@@ -5205,6 +5206,7 @@ dependencies = [
  "insta",
  "leafwing-input-manager",
  "lightyear",
+ "lightyear_avian3d",
  "lightyear_inputs_leafwing",
  "rand 0.10.2",
  "serde",
@@ -5215,9 +5217,11 @@ dependencies = [
 name = "lk2-server"
 version = "0.1.0"
 dependencies = [
+ "avian3d",
  "bevy",
  "leafwing-input-manager",
  "lightyear",
+ "lightyear_avian3d",
  "lightyear_connection",
  "lightyear_netcode",
  "lk2-core",

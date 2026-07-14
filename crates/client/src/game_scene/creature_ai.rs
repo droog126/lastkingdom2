@@ -69,6 +69,39 @@ impl CreatureAiProfile {
             feeds: false,
         }
     }
+
+    pub const fn deer() -> Self {
+        Self {
+            threat_radius: 5.0,
+            flee_distance: 6.0,
+            forage_distance: 0.9,
+            attack_range: 0.0,
+            aggression: 0.0,
+            feeds: true,
+        }
+    }
+
+    pub const fn fox() -> Self {
+        Self {
+            threat_radius: 0.0,
+            flee_distance: 0.0,
+            forage_distance: 0.0,
+            attack_range: 1.25,
+            aggression: 0.65,
+            feeds: false,
+        }
+    }
+
+    pub const fn bear() -> Self {
+        Self {
+            threat_radius: 0.0,
+            flee_distance: 0.0,
+            forage_distance: 0.9,
+            attack_range: 0.0,
+            aggression: 0.0,
+            feeds: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

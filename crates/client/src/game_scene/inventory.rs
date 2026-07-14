@@ -1,11 +1,13 @@
 //! Inventory and crafting overview for the offline playable scene.
 
 use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
 use lk2_core::content::{ContentRegistry, resource_content_id};
 use lk2_core::resource::ResourceKind;
 
 use super::keybindings::{GameAction, KeyBindings};
 use super::offline::OfflineNature;
+use super::ui_drag::{UiDragHandle, UiDragPanel};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InventoryTab {
@@ -61,6 +63,9 @@ pub fn setup_inventory_ui(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.035, 0.05, 0.075, 0.96)),
             BorderColor::all(Color::srgba(0.34, 0.72, 0.76, 0.8)),
+            UiTransform::from_translation(Val2::px(0.0, 0.0)),
+            UiDragPanel,
+            ZIndex(0),
             Visibility::Hidden,
             InventoryUiRoot,
         ))
@@ -76,6 +81,9 @@ pub fn setup_inventory_ui(mut commands: Commands) {
                 ..default()
             },
             TextColor(Color::srgb(0.86, 0.96, 0.95)),
+            Interaction::None,
+            FocusPolicy::Block,
+            UiDragHandle(root),
         ));
         parent
             .spawn((Node {

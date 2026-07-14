@@ -36,8 +36,8 @@ impl Plugin for NatureServerPlugin {
     }
 }
 
-/// Projects the legacy server's single authoritative `EcoCycle` report without
-/// starting the standalone authority adapter used by focused tests.
+/// Projects the server's primary `NatureRegionWorld` report without starting
+/// the standalone authority adapter used by focused tests.
 pub struct NatureServerProjectionPlugin;
 
 impl Plugin for NatureServerProjectionPlugin {

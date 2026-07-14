@@ -7,12 +7,14 @@ use std::time::Instant;
 use avian3d::prelude::PhysicsGizmos;
 use bevy::prelude::*;
 use lk2_core::farming::CropKind;
+use lk2_core::legendary::LegendaryWeapon;
 use lk2_core::world::terrain::{self, LandformModule, TerrainPipeline};
 
+use super::creature_ai::AiMood;
 use super::stylized_material::StylizedTerrainMaterial;
 
 pub const PROCEDURAL_TERRAIN_CENTER: i32 = 48;
-pub const PROCEDURAL_TERRAIN_RADIUS: i32 = 46;
+pub const PROCEDURAL_TERRAIN_RADIUS: i32 = 64;
 const PROCEDURAL_TERRAIN_REFERENCE_SURFACE: f32 = 20.0;
 const PROCEDURAL_TERRAIN_HEIGHT_SCALE: f32 = 0.14;
 const PROCEDURAL_TERRAIN_SEA_LEVEL: f32 = 12.0;
@@ -22,6 +24,26 @@ const PROCEDURAL_TERRAIN_GRID_STEP: i32 = 2;
 pub struct ProceduralTerrainSurface {
     pub pipeline: Arc<TerrainPipeline>,
     pub landform: LandformModule,
+    pub deformations: Vec<TerrainDeformation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainDeformation {
+    pub center: Vec2,
+    pub radius: f32,
+    pub depth: f32,
+}
+
+#[derive(Resource, Default)]
+pub struct TerrainRebuildState {
+    pub requested: bool,
+}
+
+#[derive(Resource, Default)]
+pub struct TerrainUndergroundState {
+    pub requested: bool,
+    pub chunk: Option<lk2_core::world::TerrainChunkCoord>,
+    pub target: Option<[i32; 3]>,
 }
 
 #[derive(Resource, Default)]
@@ -40,6 +62,7 @@ impl ProceduralTerrainSurface {
         Self {
             pipeline: Arc::new(terrain::presets::default_preset()),
             landform: LandformModule::default(),
+            deformations: Vec::new(),
         }
     }
 
@@ -71,16 +94,47 @@ impl ProceduralTerrainSurface {
         }
     }
 
-    fn vertex_ground_height(&self, x: i32, z: i32) -> f32 {
-        let surface = self
-            .pipeline
-            .surface_f32(x, z)
-            .unwrap_or(PROCEDURAL_TERRAIN_SEA_LEVEL + 1.0);
-        self.render_height(if self.is_water_at(x, z, surface) {
+    pub fn ground_height_at_world(&self, x: i32, z: i32) -> f32 {
+        let base_surface = self.base_surface_at_world(x, z);
+        let surface = if self.is_water_at(x, z, base_surface) {
             PROCEDURAL_TERRAIN_SEA_LEVEL
         } else {
-            surface
+            self.deformed_surface_at_world(x as f32, z as f32, base_surface)
+        };
+        self.render_height(surface)
+    }
+
+    pub fn dig_at(&mut self, local_position: Vec3, radius: f32, depth: f32) {
+        self.deformations.push(TerrainDeformation {
+            center: Vec2::new(
+                PROCEDURAL_TERRAIN_CENTER as f32 + local_position.x,
+                PROCEDURAL_TERRAIN_CENTER as f32 + local_position.z,
+            ),
+            radius: radius.max(0.1),
+            depth: depth.max(0.0),
+        });
+    }
+
+    fn base_surface_at_world(&self, x: i32, z: i32) -> f32 {
+        self.pipeline
+            .surface_f32(x, z)
+            .unwrap_or(PROCEDURAL_TERRAIN_SEA_LEVEL + 1.0)
+    }
+
+    fn deformed_surface_at_world(&self, x: f32, z: f32, base_surface: f32) -> f32 {
+        self.deformations.iter().fold(base_surface, |surface, edit| {
+            let distance = Vec2::new(x, z).distance(edit.center);
+            if distance >= edit.radius {
+                return surface;
+            }
+            let t = 1.0 - distance / edit.radius;
+            let smooth = t * t * (3.0 - 2.0 * t);
+            (surface - edit.depth * smooth).max(0.1)
         })
+    }
+
+    fn vertex_ground_height(&self, x: i32, z: i32) -> f32 {
+        self.ground_height_at_world(x, z)
     }
 
     pub fn is_water_at(&self, x: i32, z: i32, surface: f32) -> bool {
@@ -160,6 +214,26 @@ impl Default for LivingCameraRig {
 #[derive(Component)]
 pub struct PlayerActor;
 
+#[derive(Component)]
+pub struct ExplorableBuilding {
+    pub interior: Option<Entity>,
+}
+
+#[derive(Component)]
+pub struct BuildingInteriorRoot;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildingPrompt {
+    Enter,
+    Exit,
+}
+
+#[derive(Resource, Default)]
+pub struct BuildingExplorationState {
+    pub active: Option<Entity>,
+    pub prompt: Option<BuildingPrompt>,
+}
+
 #[derive(Component, Default)]
 pub struct PlayerMotion {
     pub planar_velocity: Vec3,
@@ -169,6 +243,19 @@ pub struct PlayerMotion {
     pub airborne_time: f32,
     pub grounded: bool,
     pub moving: bool,
+    /// World-space contacts used by the presentation IK. These are not
+    /// authoritative movement state; they only keep a support foot planted
+    /// while the body moves past it.
+    pub left_foot_target: Vec3,
+    pub right_foot_target: Vec3,
+    pub step_start: Vec3,
+    pub step_goal: Vec3,
+    pub step_progress: f32,
+    pub step_duration: f32,
+    pub stepping_left: bool,
+    pub foot_targets_initialized: bool,
+    pub left_foot_lift: f32,
+    pub right_foot_lift: f32,
 }
 
 #[derive(Component, Default)]
@@ -245,7 +332,12 @@ pub struct PlayerIkPart {
 pub struct DragonKatanaPickup;
 
 #[derive(Component)]
-pub struct HeldWeaponVisual;
+pub struct ReaperScythePickup;
+
+#[derive(Component)]
+pub struct HeldWeaponVisual {
+    pub weapon: LegendaryWeapon,
+}
 
 #[derive(Component)]
 pub struct GrassTuft {
@@ -295,6 +387,23 @@ pub struct Wolf {
 #[derive(Component)]
 pub struct WildlifeAnimal {
     pub id: u32,
+}
+
+#[derive(Component)]
+pub struct WildlifeAi {
+    pub mood: AiMood,
+    pub target: Vec3,
+    pub phase: f32,
+}
+
+impl Default for WildlifeAi {
+    fn default() -> Self {
+        Self {
+            mood: AiMood::Idle,
+            target: Vec3::ZERO,
+            phase: 0.0,
+        }
+    }
 }
 
 #[derive(Component)]

@@ -10,6 +10,7 @@ use bevy::shader::ShaderRef;
 pub const STYLIZED_TERRAIN_SHADER: &str = "shaders/stylized_terrain.wgsl";
 
 pub type StylizedTerrainMaterial = ExtendedMaterial<StandardMaterial, StylizedTerrainExtension>;
+pub type GrassWindMaterial = ExtendedMaterial<StandardMaterial, GrassWindExtension>;
 
 #[derive(Resource, Clone)]
 pub struct TreeShadowAssets {
@@ -39,10 +40,49 @@ pub struct StylizedTerrainExtension {
     pub shadow_settings: Vec4,
 }
 
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
+pub struct GrassWindExtension {
+    #[uniform(100)]
+    pub wind: Vec4,
+}
+
+impl GrassWindExtension {
+    pub const fn new() -> Self {
+        Self {
+            wind: Vec4::new(0.0, 0.055, 1.0, 0.0),
+        }
+    }
+}
+
+impl MaterialExtension for GrassWindExtension {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/grass_wind.wgsl".into()
+    }
+}
+
+pub fn animate_grass_gpu_wind(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<GrassWindMaterial>>,
+    grass: Query<&MeshMaterial3d<GrassWindMaterial>>,
+) {
+    let mut updated = std::collections::HashSet::new();
+    for handle in &grass {
+        if updated.insert(handle.0.id()) {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
+                material.extension.wind.x = time.elapsed_secs();
+            }
+        }
+    }
+}
+
 impl StylizedTerrainExtension {
     pub const fn new(shadow_floor: f32, shadow_lift: f32) -> Self {
+        Self::with_cel_steps(shadow_floor, shadow_lift, 4.0)
+    }
+
+    pub const fn with_cel_steps(shadow_floor: f32, shadow_lift: f32, cel_steps: f32) -> Self {
         Self {
-            shadow_settings: Vec4::new(shadow_floor, shadow_lift, 0.0, 0.0),
+            shadow_settings: Vec4::new(shadow_floor, shadow_lift, cel_steps, 0.0),
         }
     }
 }
@@ -57,15 +97,19 @@ impl MaterialExtension for StylizedTerrainExtension {
     }
 }
 
-/// Converts loaded tree GLTF materials to the same stylized PBR path as the
+/// Converts loaded GLTF materials to the same stylized PBR path as the
 /// procedural terrain while preserving their textures and base colors.
-pub fn stylize_tree_materials(
+///
+/// Every asset spawned through `spawn_asset` uses this path. Keeping imported
+/// props and ecology assets on the same shadow floor prevents small objects
+/// from disappearing into black PBR shadows while retaining their authored
+/// material colors.
+pub fn stylize_asset_materials(
     mut commands: Commands,
     roots: Query<
         (Entity, &Children, &Transform, Option<&StylizedTreeAsset>),
         (
             With<StylizedAssetRoot>,
-            Or<(With<StylizedTreeAsset>, With<StylizedReadableAsset>)>,
             Without<StylizedAssetMaterialsApplied>,
         ),
     >,

@@ -21,8 +21,14 @@ kill-build:
 server:
     cargo run -p lk2-server
 
+server-fast:
+    $env:CARGO_BUILD_JOBS="12"; cargo run -p lk2-server
+
 client *ARGS:
     $env:CARGO_BUILD_JOBS="4"; just play {{ARGS}}
+
+client-fast *ARGS:
+    $env:CARGO_BUILD_JOBS="12"; just play {{ARGS}}
 
 clint *ARGS:
     just client {{ARGS}}

@@ -7,7 +7,7 @@ use crate::ecology::EcoCycle;
 use crate::ecology::threats::MonsterEcosystem;
 use crate::resource::{GlobalResourcePool, ResourceKind};
 
-use super::{TickReport, WorldInput, step_world};
+use super::{TickReport, WorldInput, step_world_elapsed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimRole {
@@ -45,11 +45,16 @@ pub fn advance_demo_tick(
         return false;
     }
 
-    clock.last_tick_wall = now;
-    clock.tick += 1;
-    obs.begin_tick();
-    monsters.tick(pool);
-    let _ = step_world(WorldInput { tick: clock.tick }, eco, pool);
+    let elapsed_ticks = ((now - clock.last_tick_wall) / constant::SLOW_TICK_SECS)
+        .floor()
+        .min(constant::MAX_CATCH_UP_TICKS as f32) as u32;
+    clock.last_tick_wall += elapsed_ticks as f32 * constant::SLOW_TICK_SECS;
+    clock.tick += u64::from(elapsed_ticks);
+    for _ in 0..elapsed_ticks {
+        obs.begin_tick();
+        monsters.tick(pool);
+    }
+    let _ = step_world_elapsed(WorldInput { tick: clock.tick }, elapsed_ticks, eco, pool);
 
     if clock.tick % 10 == 0 {
         info!(
@@ -93,12 +98,17 @@ pub fn advance_fixed_authority_tick_report(
         return None;
     }
 
-    clock.slow_tick_accum -= constant::SLOW_TICK_SECS;
-    clock.tick += 1;
+    let elapsed_ticks = (clock.slow_tick_accum / constant::SLOW_TICK_SECS)
+        .floor()
+        .min(constant::MAX_CATCH_UP_TICKS as f32) as u32;
+    clock.slow_tick_accum -= elapsed_ticks as f32 * constant::SLOW_TICK_SECS;
+    clock.tick += u64::from(elapsed_ticks);
     clock.last_sim_step_ran = true;
-    obs.begin_tick();
-    monsters.tick(pool);
-    let report = step_world(WorldInput { tick: clock.tick }, eco, pool);
+    for _ in 0..elapsed_ticks {
+        obs.begin_tick();
+        monsters.tick(pool);
+    }
+    let report = step_world_elapsed(WorldInput { tick: clock.tick }, elapsed_ticks, eco, pool);
 
     if clock.tick % 10 == 0 {
         info!(
@@ -204,5 +214,54 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, NatureEvent::RainFell { .. }))
         );
+    }
+
+    #[test]
+    fn fixed_authority_catches_up_multiple_elapsed_ticks() {
+        let mut clock = SimClock::default();
+        let mut pool = GlobalResourcePool::default();
+        let mut monsters = MonsterEcosystem::default();
+        let mut eco = EcoCycle::seeded_weather_at(Vec2::new(8.0, 8.0));
+        let mut obs = TickObserver::default();
+
+        let report = advance_fixed_authority_tick_report(
+            constant::SLOW_TICK_SECS * 2.5,
+            &mut clock,
+            &mut pool,
+            &mut monsters,
+            &mut eco,
+            &mut obs,
+            SimRole::ServerAuthority,
+        )
+        .expect("large frame advances all completed fixed ticks");
+
+        assert_eq!(clock.tick, 2);
+        assert_eq!(report.tick, 2);
+        assert!((clock.slow_tick_accum - constant::SLOW_TICK_SECS * 0.5).abs() < 0.001);
+        assert!(report.snapshot.is_finite());
+    }
+
+    #[test]
+    fn fixed_authority_limits_catch_up_and_retains_backlog() {
+        let mut clock = SimClock::default();
+        let mut pool = GlobalResourcePool::default();
+        let mut monsters = MonsterEcosystem::default();
+        let mut eco = EcoCycle::default();
+        let mut obs = TickObserver::default();
+
+        let report = advance_fixed_authority_tick_report(
+            constant::SLOW_TICK_SECS * (constant::MAX_CATCH_UP_TICKS as f32 + 3.0),
+            &mut clock,
+            &mut pool,
+            &mut monsters,
+            &mut eco,
+            &mut obs,
+            SimRole::ServerAuthority,
+        )
+        .expect("large frame still advances a bounded batch");
+
+        assert_eq!(clock.tick, u64::from(constant::MAX_CATCH_UP_TICKS));
+        assert_eq!(report.tick, clock.tick);
+        assert!(clock.slow_tick_accum >= 2.9);
     }
 }

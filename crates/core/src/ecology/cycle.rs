@@ -7,6 +7,7 @@ use crate::protocol::components::{
     EcoRabbitNet, EcoSnapshot, EcoWildlifeNet,
 };
 use crate::resource::{GlobalResourcePool, ResourceKind};
+use crate::simulation::cadence::elapsed_scale;
 
 pub const RABBIT_CAP: usize = 5;
 pub const BERRY_BUSH_CAP: usize = 10;
@@ -28,6 +29,15 @@ const RAIN_PER_PLANT: f32 = 1.0;
 const RAIN_PER_BERRY_BUSH: f32 = 1.4;
 const BERRY_BUSHES_PER_RABBIT: usize = 1;
 const RABBITS_PER_WILDLIFE: usize = 3;
+const WILDLIFE_SPEED_CELLS_PER_TICK: f32 = 0.9;
+const WILDLIFE_EAT_DISTANCE: f32 = 0.9;
+const WILDLIFE_ENERGY_DRAIN_PER_TICK: f32 = 0.08;
+const WILDLIFE_ENERGY_FROM_FOOD: f32 = 2.5;
+const RAIN_PER_EDIBLE_PLANT_REGROWTH: f32 = 0.5;
+const WILDLIFE_TICK_SKIP: u64 = 3;
+const PLANT_TICK_SKIP: u64 = 3;
+const BERRY_TICK_SKIP: u64 = 3;
+const RABBIT_TICK_SKIP: u64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EcoRabbit {
@@ -362,13 +372,21 @@ impl EcoCycle {
     }
 
     pub fn tick(&mut self, pool: &mut GlobalResourcePool) -> EcoTickReport {
+        self.tick_at(u64::MAX, pool)
+    }
+
+    /// Advances the ecology at a stable world tick. Wildlife is deliberately
+    /// updated in deterministic shards, mirroring Veloren's distant-NPC
+    /// scheduling: each animal runs once per its cadence window and receives
+    /// the elapsed-time scale for movement and energy drain.
+    pub fn tick_at(&mut self, tick: u64, pool: &mut GlobalResourcePool) -> EcoTickReport {
         self.keep_caps();
         let mut report = EcoTickReport::default();
         self.advance_clouds(&mut report);
-        self.grow_plants_from_rain(&mut report);
+        self.grow_plants_from_rain(&mut report, tick);
         self.spawn_rabbits_from_berries(&mut report);
         self.spawn_wildlife_from_rabbits(&mut report);
-        self.wander_wildlife();
+        self.wander_wildlife(tick);
         let berry_targets: Vec<(usize, Vec2)> = self
             .berries
             .iter()
@@ -378,6 +396,10 @@ impl EcoCycle {
             .collect();
 
         for rabbit in &mut self.rabbits {
+            let movement_scale = elapsed_scale(rabbit.id, tick, RABBIT_TICK_SKIP);
+            if movement_scale == 0.0 {
+                continue;
+            }
             let Some((target_idx, target_pos)) = nearest_target(rabbit.pos, &berry_targets) else {
                 continue;
             };
@@ -385,7 +407,7 @@ impl EcoCycle {
             let delta = target_pos - rabbit.pos;
             let distance = delta.length();
             if distance > f32::EPSILON {
-                let step = distance.min(RABBIT_SPEED_CELLS_PER_TICK);
+                let step = distance.min(RABBIT_SPEED_CELLS_PER_TICK * movement_scale);
                 rabbit.pos += delta / distance * step;
                 rabbit.energy = (rabbit.energy - step * 0.08).max(0.0);
                 self.co2 += step * CO2_PER_CELL_MOVED;
@@ -403,7 +425,12 @@ impl EcoCycle {
             }
         }
 
+        self.forage_wildlife(&mut report, pool, tick);
+
         for berry in &mut self.berries {
+            if elapsed_scale(berry.id, tick, BERRY_TICK_SKIP) == 0.0 {
+                continue;
+            }
             while berry.fruit < BERRY_MAX_FRUIT && self.co2 + f32::EPSILON >= BERRY_CO2_PER_FRUIT {
                 if pool.try_sub(ResourceKind::Apple, 1).is_err() {
                     break;
@@ -615,7 +642,22 @@ impl EcoCycle {
         }
     }
 
-    fn grow_plants_from_rain(&mut self, report: &mut EcoTickReport) {
+    fn grow_plants_from_rain(&mut self, report: &mut EcoTickReport, tick: u64) {
+        for plant in &mut self.plants {
+            if elapsed_scale(plant.id, tick, PLANT_TICK_SKIP) == 0.0 {
+                continue;
+            }
+            if plant.stock == 0
+                && is_edible_wildlife_plant(plant.kind)
+                && self.rain + f32::EPSILON >= RAIN_PER_EDIBLE_PLANT_REGROWTH
+            {
+                plant.stock = 1;
+                self.rain -= RAIN_PER_EDIBLE_PLANT_REGROWTH;
+                self.plants_grown += 1;
+                report.plants_grown += 1;
+            }
+        }
+
         // Establish the first two plant nodes before allocating rain to the
         // berry stage. Once berries are full, remaining rain can grow plants.
         while self.plants.len() < PLANT_NODE_CAP
@@ -706,15 +748,151 @@ impl EcoCycle {
         }
     }
 
-    fn wander_wildlife(&mut self) {
+    fn wander_wildlife(&mut self, tick: u64) {
         for animal in &mut self.wildlife {
+            let movement_scale = elapsed_scale(animal.id, tick, WILDLIFE_TICK_SKIP);
+            if movement_scale == 0.0 {
+                continue;
+            }
             let phase = animal.id as f32 * 1.37 + animal.energy * 0.19;
             let dir = Vec2::new(phase.cos(), phase.sin());
-            animal.pos += dir * 0.08;
-            animal.energy = (animal.energy - 0.01).max(0.0);
-            self.co2 += 0.02;
+            animal.pos += dir * 0.08 * movement_scale;
+            animal.energy =
+                (animal.energy - WILDLIFE_ENERGY_DRAIN_PER_TICK * movement_scale).max(0.0);
+            self.co2 += 0.02 * movement_scale;
         }
     }
+
+    fn forage_wildlife(
+        &mut self,
+        report: &mut EcoTickReport,
+        pool: &mut GlobalResourcePool,
+        tick: u64,
+    ) {
+        // Predators use the same authoritative rabbit population as the
+        // small-animal cycle. Herbivores and omnivores consume berry fruit or
+        // edible plant stock and turn it into the shared Food resource.
+        for wildlife_index in 0..self.wildlife.len() {
+            let movement_scale =
+                elapsed_scale(self.wildlife[wildlife_index].id, tick, WILDLIFE_TICK_SKIP);
+            if movement_scale == 0.0 {
+                continue;
+            }
+            let kind = self.wildlife[wildlife_index].kind;
+            let position = self.wildlife[wildlife_index].pos;
+
+            if matches!(kind, WildlifeKind::Fox | WildlifeKind::Wolf) {
+                let rabbit_targets = self
+                    .rabbits
+                    .iter()
+                    .enumerate()
+                    .map(|(index, rabbit)| (index, rabbit.pos))
+                    .collect::<Vec<_>>();
+                let Some((rabbit_index, target)) =
+                    nearest_indexed_target(position, &rabbit_targets)
+                else {
+                    continue;
+                };
+
+                let distance = position.distance(target);
+                if distance > WILDLIFE_EAT_DISTANCE {
+                    self.move_wildlife_towards(wildlife_index, target, movement_scale);
+                    continue;
+                }
+
+                if pool.try_add(ResourceKind::Food, 1).is_ok() && rabbit_index < self.rabbits.len()
+                {
+                    self.rabbits.remove(rabbit_index);
+                    self.wildlife[wildlife_index].energy = (self.wildlife[wildlife_index].energy
+                        + WILDLIFE_ENERGY_FROM_FOOD)
+                        .min(12.0);
+                    report.food_produced += 1;
+                }
+                continue;
+            }
+
+            let mut food_targets = self
+                .berries
+                .iter()
+                .enumerate()
+                .filter(|(_, berry)| berry.fruit > 0)
+                .map(|(index, berry)| (true, index, berry.pos))
+                .collect::<Vec<_>>();
+            food_targets.extend(
+                self.plants
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, plant)| plant.stock > 0 && is_edible_wildlife_plant(plant.kind))
+                    .map(|(index, plant)| (false, index, plant.pos)),
+            );
+            let Some((is_berry, target_index, target)) =
+                nearest_food_target(position, &food_targets)
+            else {
+                continue;
+            };
+
+            if position.distance(target) > WILDLIFE_EAT_DISTANCE {
+                self.move_wildlife_towards(wildlife_index, target, movement_scale);
+                continue;
+            }
+
+            let available = if is_berry {
+                self.berries
+                    .get(target_index)
+                    .is_some_and(|berry| berry.fruit > 0)
+            } else {
+                self.plants
+                    .get(target_index)
+                    .is_some_and(|plant| plant.stock > 0)
+            };
+            if !available || pool.try_add(ResourceKind::Food, 1).is_err() {
+                continue;
+            }
+            if is_berry {
+                self.berries[target_index].fruit -= 1;
+                self.fruit_eaten += 1;
+                report.fruit_eaten += 1;
+            } else {
+                self.plants[target_index].stock -= 1;
+            }
+            self.wildlife[wildlife_index].energy =
+                (self.wildlife[wildlife_index].energy + WILDLIFE_ENERGY_FROM_FOOD).min(12.0);
+            report.food_produced += 1;
+        }
+    }
+
+    fn move_wildlife_towards(&mut self, wildlife_index: usize, target: Vec2, cadence_scale: f32) {
+        let animal = &mut self.wildlife[wildlife_index];
+        let delta = target - animal.pos;
+        let distance = delta.length();
+        if distance <= f32::EPSILON {
+            return;
+        }
+        let step = distance.min(WILDLIFE_SPEED_CELLS_PER_TICK * cadence_scale);
+        animal.pos += delta / distance * step;
+        self.co2 += step * CO2_PER_CELL_MOVED;
+    }
+}
+
+fn is_edible_wildlife_plant(kind: ResourceNodeKind) -> bool {
+    matches!(
+        kind,
+        ResourceNodeKind::MushroomRed | ResourceNodeKind::MushroomBrown | ResourceNodeKind::Flower
+    )
+}
+
+fn nearest_indexed_target(from: Vec2, targets: &[(usize, Vec2)]) -> Option<(usize, Vec2)> {
+    targets.iter().copied().min_by(|(_, a), (_, b)| {
+        from.distance_squared(*a)
+            .total_cmp(&from.distance_squared(*b))
+    })
+}
+
+fn nearest_food_target(from: Vec2, targets: &[(bool, usize, Vec2)]) -> Option<(bool, usize, Vec2)> {
+    targets.iter().copied().min_by(|(_, _, a), (_, _, b)| {
+        from.distance_squared(*a)
+            .total_cmp(&from.distance_squared(*b))
+    })
 }
 
 fn nearest_target(from: Vec2, targets: &[(usize, Vec2)]) -> Option<(usize, Vec2)> {
@@ -952,6 +1130,148 @@ mod tests {
         assert_eq!(report.food_produced, 1);
         assert_eq!(pool.get(ResourceKind::Food), 1);
         assert!(eco.co2 > 0.0 || eco.fruit_grown > 0);
+    }
+
+    #[test]
+    fn wildlife_forages_and_returns_food_to_the_resource_pool() {
+        let mut eco = EcoCycle {
+            rabbits: vec![EcoRabbit {
+                id: 99,
+                pos: Vec2::new(100.0, 100.0),
+                energy: 6.0,
+            }],
+            berries: vec![EcoBerryBush {
+                id: 0,
+                pos: Vec2::new(0.5, 0.0),
+                fruit: 1,
+            }],
+            wildlife: vec![EcoWildlife {
+                id: 0,
+                kind: WildlifeKind::Deer,
+                pos: Vec2::ZERO,
+                energy: 6.0,
+            }],
+            plants: Vec::new(),
+            co2: 0.0,
+            rain: 0.0,
+            rainfall: 0.0,
+            fruit_eaten: 0,
+            fruit_grown: 0,
+            plants_grown: 0,
+            rabbits_born: 0,
+            wildlife_born: 0,
+            clouds: Vec::new(),
+        };
+        let mut pool = GlobalResourcePool::new();
+
+        let report = eco.tick(&mut pool);
+
+        assert_eq!(eco.berries[0].fruit, 0);
+        assert_eq!(eco.fruit_eaten, 1);
+        assert_eq!(report.food_produced, 1);
+        assert_eq!(pool.get(ResourceKind::Food), 1);
+        assert!(eco.wildlife[0].energy > 6.0);
+    }
+
+    #[test]
+    fn wildlife_forages_edible_plants_and_depletes_the_node() {
+        let mut eco = EcoCycle {
+            rabbits: Vec::new(),
+            berries: Vec::new(),
+            wildlife: vec![EcoWildlife {
+                id: 0,
+                kind: WildlifeKind::Bear,
+                pos: Vec2::ZERO,
+                energy: 4.0,
+            }],
+            plants: vec![EcoPlantNode {
+                id: 0,
+                kind: ResourceNodeKind::MushroomRed,
+                pos: Vec2::new(0.5, 0.0),
+                stock: 1,
+            }],
+            co2: 0.0,
+            rain: 0.0,
+            rainfall: 0.0,
+            fruit_eaten: 0,
+            fruit_grown: 0,
+            plants_grown: 0,
+            rabbits_born: 0,
+            wildlife_born: 0,
+            clouds: Vec::new(),
+        };
+        let mut pool = GlobalResourcePool::new();
+
+        let report = eco.tick(&mut pool);
+
+        assert_eq!(eco.plants[0].stock, 0);
+        assert_eq!(report.food_produced, 1);
+        assert_eq!(pool.get(ResourceKind::Food), 1);
+        assert!(eco.wildlife[0].energy > 4.0);
+    }
+
+    #[test]
+    fn predators_hunt_rabbits_and_feed_the_shared_resource_pool() {
+        let mut eco = EcoCycle {
+            rabbits: vec![EcoRabbit {
+                id: 0,
+                pos: Vec2::new(0.5, 0.0),
+                energy: 5.0,
+            }],
+            berries: Vec::new(),
+            wildlife: vec![EcoWildlife {
+                id: 0,
+                kind: WildlifeKind::Wolf,
+                pos: Vec2::ZERO,
+                energy: 6.0,
+            }],
+            plants: Vec::new(),
+            co2: 0.0,
+            rain: 0.0,
+            rainfall: 0.0,
+            fruit_eaten: 0,
+            fruit_grown: 0,
+            plants_grown: 0,
+            rabbits_born: 0,
+            wildlife_born: 0,
+            clouds: Vec::new(),
+        };
+        let mut pool = GlobalResourcePool::new();
+
+        let report = eco.tick(&mut pool);
+
+        assert!(eco.rabbits.is_empty());
+        assert_eq!(report.food_produced, 1);
+        assert_eq!(pool.get(ResourceKind::Food), 1);
+        assert!(eco.wildlife[0].energy > 6.0);
+    }
+
+    #[test]
+    fn rain_regrows_depleted_edible_plant_stock() {
+        let mut eco = EcoCycle {
+            rabbits: Vec::new(),
+            berries: Vec::new(),
+            wildlife: Vec::new(),
+            plants: vec![EcoPlantNode {
+                id: 0,
+                kind: ResourceNodeKind::Flower,
+                pos: Vec2::ZERO,
+                stock: 0,
+            }],
+            co2: 0.0,
+            rain: RAIN_PER_EDIBLE_PLANT_REGROWTH,
+            rainfall: 0.0,
+            fruit_eaten: 0,
+            fruit_grown: 0,
+            plants_grown: 0,
+            rabbits_born: 0,
+            wildlife_born: 0,
+            clouds: Vec::new(),
+        };
+
+        eco.tick(&mut GlobalResourcePool::new());
+
+        assert_eq!(eco.plants[0].stock, 1);
     }
 
     #[test]

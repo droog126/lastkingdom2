@@ -2,6 +2,7 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::world::content::{
     ContentId, GAME_CONTENT_CAVERN, GAME_CONTENT_DUNGEON, GAME_CONTENT_EMPTY,
@@ -18,6 +19,7 @@ use super::offline::OfflineNature;
 use super::state::{
     BerryBush, BossActor, Cloud, GrassTuft, LivingSceneState, PlayerActor, Rabbit, RainDrop, Wolf,
 };
+use super::ui_drag::{UiDragHandle, UiDragPanel};
 
 #[derive(Resource, Default)]
 pub struct WorldDebugUiState {
@@ -76,6 +78,9 @@ pub fn setup_world_debug_ui(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.035, 0.05, 0.075, 0.92)),
             BorderColor::all(Color::srgba(0.72, 0.64, 0.28, 0.85)),
+            UiTransform::from_translation(Val2::px(0.0, 0.0)),
+            UiDragPanel,
+            ZIndex(0),
             Visibility::Hidden,
             WorldDebugUiRoot,
         ))
@@ -91,6 +96,9 @@ pub fn setup_world_debug_ui(mut commands: Commands) {
                 ..default()
             },
             TextColor(Color::srgb(0.96, 0.93, 0.72)),
+            Interaction::None,
+            FocusPolicy::Block,
+            UiDragHandle(root),
         ));
         parent
             .spawn((Node {

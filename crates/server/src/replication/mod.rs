@@ -45,6 +45,18 @@ impl ReplicationBatch<NatureSnapshot, NatureEvent> {
     pub fn from_tick_report(report: TickReport) -> Self {
         Self::new(report.tick, report.snapshot, report.events)
     }
+
+    pub fn from_tick_report_in_region(report: TickReport, center: [f32; 2], radius: f32) -> Self {
+        Self::new(
+            report.tick,
+            report.snapshot.for_region(center, radius),
+            report
+                .events
+                .iter()
+                .filter_map(|event| event.for_region(center, radius))
+                .collect(),
+        )
+    }
 }
 
 #[derive(Resource, Default)]
@@ -54,10 +66,11 @@ pub struct NatureReplicationPlugin;
 
 impl Plugin for NatureReplicationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LatestNatureReplication>().add_systems(
-            FixedUpdate,
-            build_replication_batch.in_set(NatureAuthoritySet::PublishReport),
-        );
+        app.init_resource::<LatestNatureReplication>()
+            .add_systems(
+                FixedUpdate,
+                build_replication_batch.in_set(NatureAuthoritySet::PublishReport),
+            );
     }
 }
 

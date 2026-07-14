@@ -12,7 +12,7 @@ Audit before proposing changes. Do not edit code, assets, scenarios, or configur
 ## Workflow
 
 1. Define the audit boundary: targeted subsystem or repository-wide logic review.
-2. Inspect `git status --short` and exclude unrelated user changes from conclusions.
+2. Inspect both `git diff HEAD` and `git diff`/`git diff --cached`; `git diff` alone misses staged changes. Classify staged, unstaged, untracked, deleted generated outputs, and unrelated user changes before drawing conclusions.
 3. Read `docs/architecture/engineering-baseline.md` and the relevant entry points.
 4. Trace behavior end to end rather than reviewing isolated functions:
    - input or scenario trigger
@@ -22,13 +22,17 @@ Audit before proposing changes. Do not edit code, assets, scenarios, or configur
    - replication, HUD, observer, or runtime evidence
 5. Compare implementation with tests, scenario fixtures, assertions, and current runtime artifacts when available.
 6. Run focused read-only checks only when they materially increase confidence.
-7. Report findings by severity with exact file/line evidence, impact, and the missing or contradictory path.
+7. For every changed authority or resource API, enumerate all callers and verify preconditions, identity/ownership, transaction ordering, caps, empty-input behavior, and failure semantics at each call site.
+8. Report findings by severity with exact file/line evidence, impact, and the missing or contradictory path. Separate static evidence from compile, test, and runtime evidence; never call an audit fully verified when a selected validation tier was not run.
 
 ## Audit Questions
 
 - Can the system be reached from a registered startup, schedule, scenario, command, or network message?
 - Is authority implemented once, or forked between offline client and server?
 - Are state transitions complete at caps, empty inputs, phase boundaries, death, disconnect, and retry paths?
+- Can remote numeric inputs overflow before bounds, reachability, or ownership checks?
+- Does a new player/entity component path coexist with an older global resource path, creating two authorities?
+- Do generated files, manifests, registries, and documented export contracts agree after deletions or moves?
 - Do resource and combat paths conserve values and share rule tables?
 - Does replication expose authoritative state without clients inventing it locally?
 - Do tests prove behavior, or only construct unused helpers?

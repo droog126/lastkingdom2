@@ -2,13 +2,15 @@
 
 use std::path::PathBuf;
 
+use avian3d::prelude::LinearVelocity;
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::animation::{
     RabbitFoodTarget, animate_boss, animate_clouds_and_rain, animate_rabbits, animate_sun,
-    animate_tree_sway, animate_wolves, living_sun_transform, rabbit_ai_decision,
+    animate_tree_sway, animate_wolves, dragon_flight_target, living_sun_transform,
+    rabbit_ai_decision,
 };
 use super::content_visuals::{
     DEFAULT_LIVING_CONTENT_SEED, LIVING_CONTENT_DIMENSIONS, MONSTER_ANCHOR_PILLAR_SCALE,
@@ -20,19 +22,22 @@ use super::inventory::InventoryUiState;
 use super::keybindings::{Binding, GameAction, KeyBindings};
 use super::offline::OfflineNature;
 use super::player::{
-    PlayerControlScheme, camera_look_input, pickup_dragon_katana, player_combat_controls,
+    PlayerControlScheme, camera_look_input, pickup_legendary_weapon, player_combat_controls,
     player_controls, update_cursor_capture,
 };
-use super::procedural_motion::{ProceduralTreeSway, heading_yaw, hop_height, smooth_follow_alpha};
+use super::procedural_motion::{
+    ProceduralTreeSway, alternating_step_lift, alternating_step_offset, heading_yaw, hop_height,
+    smooth_follow_alpha,
+};
 use super::procedural_rig::{
     DragonRig, DragonTargets, HumanoidRig, HumanoidTargets, QuadrupedRig, QuadrupedTargets,
     TwoBoneLimb, TwoBoneLimbSpec, TwoBoneSolution, apply_segment_between,
 };
 use super::state::{
     BossActor, Cloud, DragonKatanaPickup, GrassTuft, HitReaction, LivingCameraRig,
-    LivingSceneState, LivingSun, PlayerActor, PlayerIkPart, PlayerIkPartKind, PlayerJump,
-    PlayerMotion, PlayerSkillState, ProceduralTerrainSurface, Rabbit, RabbitAi, RabbitMood,
-    RainDrop, SceneMaterials, SlashFx, Wolf, WolfAi,
+    LivingSceneCamera, LivingSceneState, LivingSun, PlayerActor, PlayerIkPart, PlayerIkPartKind,
+    PlayerJump, PlayerMotion, PlayerSkillState, ProceduralTerrainSurface, Rabbit, RabbitAi,
+    RabbitMood, RainDrop, ReaperScythePickup, SceneMaterials, SlashFx, Wolf, WolfAi,
 };
 use super::util::hash01;
 use super::world_debug::{WorldDebugUiState, content_debug_text, toggle_world_debug_ui};
@@ -210,7 +215,8 @@ fn cloud_and_rain_schedule_runs_without_query_conflicts() {
 #[test]
 fn boss_and_slash_animation_queries_are_disjoint() {
     let mut app = App::new();
-    app.insert_resource(test_scene_state())
+    app.init_resource::<Time>()
+        .insert_resource(test_scene_state())
         .add_systems(Update, animate_boss);
     app.world_mut().spawn((
         BossActor { base: Vec3::ZERO },
@@ -288,6 +294,74 @@ fn procedural_motion_helpers_keep_expected_bounds() {
             .abs()
             < 0.001
     );
+}
+
+#[test]
+fn alternating_quadruped_step_is_continuous_at_cycle_boundary() {
+    let stride = 0.4;
+    let before = alternating_step_offset(std::f32::consts::TAU - 0.0001, stride, false);
+    let after = alternating_step_offset(0.0001, stride, false);
+    assert!((before - after).abs() < 0.001);
+    assert_eq!(alternating_step_lift(0.0, 0.2, false), 0.0);
+    assert_eq!(alternating_step_lift(std::f32::consts::TAU, 0.2, false), 0.0);
+}
+
+#[test]
+fn player_falling_below_void_threshold_respawns_at_start() {
+    let mut app = App::new();
+    app.insert_resource(ProceduralTerrainSurface::default_world())
+        .add_systems(Update, super::player::recover_players_from_void);
+    app.world_mut().spawn((
+        PlayerActor,
+        Transform::from_xyz(4.0, -20.0, 4.0),
+        LinearVelocity(Vec3::new(2.0, -8.0, 1.0)),
+    ));
+
+    app.update();
+
+    let (transform, velocity) = app
+        .world_mut()
+        .query::<(&Transform, &LinearVelocity)>()
+        .single(app.world())
+        .expect("player should remain spawned");
+    let terrain = app.world().resource::<ProceduralTerrainSurface>();
+    let expected_y = terrain.ground_height(Vec3::new(-2.0, 0.0, 11.0))
+        + super::util::PLAYER_PHYSICS_CENTER_HEIGHT;
+    assert_eq!(transform.translation, Vec3::new(-2.0, expected_y, 11.0));
+    assert_eq!(velocity.0, Vec3::ZERO);
+}
+
+#[test]
+fn player_embedded_below_terrain_is_lifted_to_surface() {
+    let mut app = App::new();
+    app.insert_resource(ProceduralTerrainSurface::default_world())
+        .add_systems(Update, super::player::recover_players_from_void);
+
+    let terrain = ProceduralTerrainSurface::default_world();
+    let xz = Vec3::new(4.0, 0.0, 4.0);
+    let ground_y = terrain.ground_height(xz);
+    app.world_mut().spawn((
+        PlayerActor,
+        Transform::from_xyz(
+            xz.x,
+            ground_y + super::util::PLAYER_PHYSICS_CENTER_HEIGHT - 1.0,
+            xz.z,
+        ),
+        LinearVelocity(Vec3::new(2.0, -8.0, 1.0)),
+    ));
+
+    app.update();
+
+    let (transform, velocity) = app
+        .world_mut()
+        .query::<(&Transform, &LinearVelocity)>()
+        .single(app.world())
+        .expect("embedded player should remain spawned");
+    assert_eq!(
+        transform.translation.y,
+        ground_y + super::util::PLAYER_PHYSICS_CENTER_HEIGHT + 0.08
+    );
+    assert_eq!(velocity.0, Vec3::ZERO);
 }
 
 #[test]
@@ -422,6 +496,7 @@ fn successful_melee_hit_triggers_player_and_target_feedback() {
             ground: Handle::default(),
             hit_effect: Handle::default(),
         })
+        .insert_resource(ProceduralTerrainSurface::default_world())
         .insert_resource(InventoryUiState::default())
         .insert_resource(KeyBindings::default())
         .insert_resource(ButtonInput::<KeyCode>::default())
@@ -472,6 +547,152 @@ fn successful_melee_hit_triggers_player_and_target_feedback() {
             .count()
     };
     assert_eq!(impact_count, 1);
+}
+
+#[test]
+fn dragon_skill_blinks_to_camera_aim_and_slashes_at_destination() {
+    let mut app = App::new();
+    let terrain = ProceduralTerrainSurface::default_world();
+    let target = (0..360)
+        .map(|degrees| {
+            let angle = (degrees as f32).to_radians();
+            Vec3::new(angle.sin() * 12.0, 0.0, angle.cos() * 12.0)
+        })
+        .find(|target| {
+            let x = 48 + target.x.floor() as i32;
+            let z = 48 + target.z.floor() as i32;
+            let surface = terrain.pipeline.surface_f32(x, z).unwrap_or(13.0);
+            !terrain.is_water_at(x, z, surface)
+        })
+        .expect("default terrain should contain a land target at skill range");
+    let direction = target.normalize_or_zero();
+    let boss_position = target + direction * 2.0;
+    app.init_resource::<Time>()
+        .insert_resource(test_scene_state())
+        .insert_resource(SceneMaterials {
+            ground: Handle::default(),
+            hit_effect: Handle::default(),
+        })
+        .insert_resource(terrain)
+        .insert_resource(InventoryUiState::default())
+        .insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .insert_resource(LegendaryLoadout {
+            owned: vec![LegendaryWeapon::DragonKatana],
+            equipped: Some(LegendaryWeapon::DragonKatana),
+        })
+        .add_systems(Update, player_combat_controls);
+    app.world_mut().spawn((
+        PlayerActor,
+        PlayerSkillState::default(),
+        PvpCombatant::default(),
+        SimpleWeapon::default(),
+        Transform::default(),
+    ));
+    app.world_mut().spawn((
+        LivingSceneCamera,
+        Transform::from_translation(Vec3::ZERO).looking_at(direction, Vec3::Y),
+    ));
+    app.world_mut().spawn((
+        BossActor {
+            base: boss_position,
+        },
+        HitReaction::default(),
+        Health {
+            current: 24.0,
+            max: 24.0,
+            invuln_until_tick: 0,
+        },
+        Transform::from_translation(boss_position),
+    ));
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Right);
+    app.update();
+
+    let player = app
+        .world_mut()
+        .query_filtered::<&Transform, With<PlayerActor>>()
+        .single(app.world())
+        .expect("player should remain spawned");
+    assert!((player.translation.x - target.x).abs() < 0.01);
+    assert!((player.translation.z - target.z).abs() < 0.01);
+    let health = app
+        .world_mut()
+        .query_filtered::<&Health, With<BossActor>>()
+        .single(app.world())
+        .expect("boss should remain spawned");
+    assert!(health.current < health.max);
+}
+
+#[test]
+fn reaper_skill_drains_boss_and_heals_player() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(test_scene_state())
+        .insert_resource(SceneMaterials {
+            ground: Handle::default(),
+            hit_effect: Handle::default(),
+        })
+        .insert_resource(ProceduralTerrainSurface::default_world())
+        .insert_resource(InventoryUiState::default())
+        .insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .insert_resource(LegendaryLoadout {
+            owned: vec![LegendaryWeapon::ReaperScythe],
+            equipped: Some(LegendaryWeapon::ReaperScythe),
+        })
+        .add_systems(Update, player_combat_controls);
+    app.world_mut().spawn((
+        PlayerActor,
+        PlayerSkillState::default(),
+        PvpCombatant::default(),
+        SimpleWeapon::default(),
+        Health {
+            current: 50.0,
+            max: 100.0,
+            invuln_until_tick: 0,
+        },
+        Transform::default(),
+    ));
+    app.world_mut().spawn((
+        BossActor {
+            base: Vec3::Z * 2.0,
+        },
+        HitReaction::default(),
+        Health {
+            current: 80.0,
+            max: 80.0,
+            invuln_until_tick: 0,
+        },
+        Transform::from_translation(Vec3::Z * 2.0),
+    ));
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Right);
+    app.update();
+
+    let (player_health, boss_health) = {
+        let world = app.world_mut();
+        let mut players = world.query_filtered::<&Health, With<PlayerActor>>();
+        let mut bosses = world.query_filtered::<&Health, With<BossActor>>();
+        (
+            players
+                .single(world)
+                .expect("player should remain spawned")
+                .current,
+            bosses
+                .single(world)
+                .expect("boss should remain spawned")
+                .current,
+        )
+    };
+    assert_eq!(player_health, 70.0);
+    assert_eq!(boss_health, 60.0);
 }
 
 #[test]
@@ -718,7 +939,7 @@ fn interact_near_dragon_katana_equips_it() {
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(ButtonInput::<MouseButton>::default())
         .insert_resource(LegendaryLoadout::default())
-        .add_systems(Update, pickup_dragon_katana);
+        .add_systems(Update, pickup_legendary_weapon);
     app.world_mut()
         .spawn((PlayerActor, Transform::default(), SimpleWeapon::default()));
     app.world_mut()
@@ -745,6 +966,29 @@ fn interact_near_dragon_katana_equips_it() {
     };
     assert_eq!(damage, 10.0);
     assert_eq!(pickup_count, 0);
+}
+
+#[test]
+fn interact_near_reaper_scythe_equips_it() {
+    let mut app = App::new();
+    app.insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .insert_resource(LegendaryLoadout::default())
+        .add_systems(Update, pickup_legendary_weapon);
+    app.world_mut()
+        .spawn((PlayerActor, Transform::default(), SimpleWeapon::default()));
+    app.world_mut()
+        .spawn((ReaperScythePickup, Transform::from_xyz(1.0, 0.0, 0.0)));
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyF);
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<LegendaryLoadout>().equipped,
+        Some(LegendaryWeapon::ReaperScythe)
+    );
 }
 
 #[test]
@@ -948,6 +1192,37 @@ fn held_stick_tracks_visual_right_side() {
 }
 
 #[test]
+fn held_dragon_katana_follows_hand_and_attack_pose() {
+    let motion = PlayerMotion {
+        grounded: true,
+        ..default()
+    };
+    let player = Transform::from_rotation(Quat::from_rotation_y(0.7));
+    let idle = super::player::procedural_player_pose(
+        1.0,
+        0.0,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+    );
+    let attacking = super::player::procedural_player_pose(
+        1.0,
+        0.32,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+    );
+    let (idle_position, idle_rotation) = super::player::held_dragon_katana_pose(&player, &idle);
+    let (attack_position, attack_rotation) =
+        super::player::held_dragon_katana_pose(&player, &attacking);
+
+    assert!(attack_position.distance(idle_position) > 0.25);
+    assert!(idle_rotation * Vec3::Y != attack_rotation * Vec3::Y);
+}
+
+#[test]
 fn rabbit_ai_flees_when_player_is_close() {
     let decision = rabbit_ai_decision(
         Vec3::ZERO,
@@ -1074,6 +1349,41 @@ fn shared_ai_dragon_attacks_prey_inside_attack_range() {
 }
 
 #[test]
+fn dragon_flight_target_stays_airborne_and_orbits_player() {
+    let first = dragon_flight_target(
+        Vec3::new(20.0, 0.0, 20.0),
+        Some(Vec3::ZERO),
+        AiMood::Chase,
+        0.0,
+    );
+    let later = dragon_flight_target(
+        Vec3::new(20.0, 0.0, 20.0),
+        Some(Vec3::ZERO),
+        AiMood::Chase,
+        2.0,
+    );
+
+    assert!(first.y > 5.0);
+    assert!(later.y > 5.0);
+    assert!(first.distance(later) > 1.0);
+    assert!(first.x.abs() < 6.0 && first.z.abs() < 6.0);
+}
+
+#[test]
+fn dragon_attack_flight_dips_but_remains_above_ground() {
+    let target = dragon_flight_target(
+        Vec3::ZERO,
+        Some(Vec3::new(4.0, 0.0, -3.0)),
+        AiMood::Attack,
+        0.0,
+    );
+
+    assert!(target.y > 3.0);
+    assert!(target.x > 0.0);
+    assert!(target.z < 3.0);
+}
+
+#[test]
 fn shared_ai_wolf_chases_rabbit_prey() {
     let prey = [AiTarget {
         position: Vec3::new(4.0, 0.0, 0.0),
@@ -1111,6 +1421,26 @@ fn shared_ai_wolf_pounces_inside_attack_range() {
 
     assert_eq!(intent.mood, AiMood::Attack);
     assert_eq!(intent.target, prey[0].position);
+}
+
+#[test]
+fn shared_ai_bear_seeks_food_instead_of_being_idle() {
+    let food = [AiTarget {
+        position: Vec3::new(3.0, 0.0, 0.0),
+        value: 1.0,
+    }];
+    let intent = decide_creature_intent(
+        CreatureAiProfile::bear(),
+        AiContext {
+            self_pos: Vec3::ZERO,
+            threat: None,
+            food: &food,
+            prey: &[],
+        },
+    );
+
+    assert_eq!(intent.mood, AiMood::Forage);
+    assert_eq!(intent.target, food[0].position);
 }
 
 #[test]

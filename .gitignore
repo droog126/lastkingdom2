@@ -1,9 +1,9 @@
 # Cargo build output
 /target/
 **/target/
-/target-codex/
-/target-codex-hanabi/
-/target-codex-water/
+target-codex/
+target-codex-hanabi/
+target-codex-water/
 
 
 

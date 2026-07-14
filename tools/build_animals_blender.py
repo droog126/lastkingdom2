@@ -1,13 +1,16 @@
-
-
 from __future__ import annotations
 
-import math
+"""Build the small farm and woodland animals used by the game.
+
+The animals are intentionally low-poly, but their primary forms use rounded
+volumes and explicit contact geometry so they remain readable in the game
+camera.  Keep this file deterministic: asset names and scale contracts are
+part of the runtime content API.
+"""
+
+import os
 import sys
 from pathlib import Path
-
-import bmesh
-import bpy
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -15,531 +18,271 @@ sys.path.insert(0, str(HERE))
 import models_lib
 
 
-_MATERIAL_CACHE = {}
+def body_volume(name, loc, scale, material):
+    return models_lib.ico_sphere(name, loc, scale, material, subdivisions=2)
 
 
-def new_object(name):
-    
-    me = bpy.data.meshes.new(name)
-    ob = bpy.data.objects.new(name, me)
-    bpy.context.collection.objects.link(ob)
-    return ob
+def soft_volume(name, loc, scale, material):
+    return models_lib.uv_sphere(name, loc, scale, material, segments=12, rings=6)
 
-def add_box_bmesh(ob, loc, size):
-    
-    x, y, z = loc
-    sx, sy, sz = size
-    bm = bmesh.new()
-    verts = [
-        bm.verts.new((x,       y,       z)),
-        bm.verts.new((x + sx,  y,       z)),
-        bm.verts.new((x + sx,  y + sy,  z)),
-        bm.verts.new((x,       y + sy,  z)),
-        bm.verts.new((x,       y,       z + sz)),
-        bm.verts.new((x + sx,  y,       z + sz)),
-        bm.verts.new((x + sx,  y + sy,  z + sz)),
-        bm.verts.new((x,       y + sy,  z + sz)),
+
+def leg(name, start, end, radius, material):
+    models_lib.cylinder_between(name, start, end, radius, material, vertices=8)
+    models_lib.ico_sphere(f"{name}_hoof", end, (radius * 1.35, radius * 1.15, radius * 0.55), material, 1)
+
+
+def articulated_leg(name, start, joint, end, radius, material):
+    models_lib.cylinder_between(f"{name}_upper", start, joint, radius, material, vertices=8)
+    models_lib.cylinder_between(f"{name}_lower", joint, end, radius * 0.92, material, vertices=8)
+    models_lib.ico_sphere(
+        f"{name}_hoof", end, (radius * 1.35, radius * 1.15, radius * 0.55), material, 1
+    )
+
+
+def ear(name, side, base_x, base_z, width, height, material, inner=None):
+    sign = float(side)
+    points = [
+        (base_x - width * 0.5, base_z),
+        (base_x + width * 0.42, base_z),
+        (base_x + width * 0.08, base_z + height),
     ]
-    faces = [
-        (0, 1, 2, 3),
-        (5, 4, 7, 6),
-        (0, 4, 5, 1),
-        (2, 6, 7, 3),
-        (0, 3, 7, 4),
-        (1, 5, 6, 2),
-    ]
-    for face_verts in faces:
-        bm.faces.new([verts[i] for i in face_verts])
-    bm.to_mesh(ob.data)
-    bm.free()
-
-def set_color(ob, r, g, b, a=1.0):
-    key = (r, g, b, a)
-    material = _MATERIAL_CACHE.get(key)
-    if material is None:
-        suffix = "_".join(f"{round(component * 255):02x}" for component in key)
-        material = models_lib.mat(f"animal_{suffix}", (r, g, b), roughness=0.9, alpha=a)
-        _MATERIAL_CACHE[key] = material
-    ob.data.materials.append(material)
-
-def parent_to(parent, child, offset=(0, 0, 0)):
-    
-    child.parent = parent
-    child.location = offset
-
-def export_glb(name):
-    
-
-    roots = [o for o in bpy.data.objects if o.parent is None and o.name == name.title()]
-    if not roots:
-        print(f"  ✗ 未找到根对象 {name}")
-        return
-    root = roots[0]
-
-    bpy.ops.object.select_all(action='DESELECT')
-    for child in root.children_recursive:
-        child.select_set(True)
-    root.select_set(True)
-    bpy.context.view_layer.objects.active = root
-
-    bpy.ops.object.join()
-
-    path = models_lib.export_glb(name, collection="animals")
-    print(f"  ✓ {name}.glb  ({len(root.data.vertices)} vertices)")
-    return path
+    models_lib.prism(name, points, width * 0.42, material, y=sign * width * 0.22, bevel=0.018)
+    if inner is not None:
+        inner_points = [
+            (base_x - width * 0.18, base_z + height * 0.10),
+            (base_x + width * 0.18, base_z + height * 0.10),
+            (base_x + width * 0.07, base_z + height * 0.72),
+        ]
+        models_lib.prism(
+            f"{name}_inner",
+            inner_points,
+            width * 0.12,
+            inner,
+            y=sign * width * 0.46,
+            bevel=0.008,
+        )
 
 
-def child_named(root, name):
-    if root.name == name:
-        return root
-    return next((child for child in root.children_recursive if child.name == name), None)
+def eye_pair(prefix, x, y, z, material, radius=0.045):
+    for side in (-1.0, 1.0):
+        soft_volume(f"{prefix}_eye_{'l' if side < 0 else 'r'}", (x, y + side * 0.27, z), (radius, radius * 0.55, radius), material)
 
 
-def recolor_named(root, prefixes, color):
-    for obj in [root, *root.children_recursive]:
-        if obj.name.startswith(prefixes) and getattr(obj, "data", None) is not None:
-            obj.data.materials.clear()
-            set_color(obj, *color)
+def tail_tip(name, start, end, radius, material, tip_material=None):
+    models_lib.cylinder_between(name, start, end, radius, material, vertices=8)
+    if tip_material is not None:
+        soft_volume(f"{name}_tip", end, (radius * 1.45, radius * 1.25, radius * 1.45), tip_material)
 
 
 def build_pig():
-    root = new_object("Pig")
-    b = root
+    pink = models_lib.mat("pig_pink", (0.83, 0.39, 0.43), roughness=0.92)
+    light = models_lib.mat("pig_light", (0.98, 0.66, 0.68), roughness=0.92)
+    dark = models_lib.mat("pig_dark", (0.26, 0.08, 0.09), roughness=0.9)
+    body_volume("pig_body", (0.0, 0.0, 0.55), (0.72, 0.50, 0.43), pink)
+    body_volume("pig_chest", (0.42, 0.0, 0.60), (0.40, 0.44, 0.46), light)
+    body_volume("pig_head", (0.78, 0.0, 0.78), (0.39, 0.38, 0.36), pink)
+    soft_volume("pig_snout", (1.08, 0.0, 0.68), (0.22, 0.29, 0.17), light)
+    for side in (-1, 1):
+        ear("pig_ear", side, 0.70, 1.02, 0.24, 0.22, pink)
+    eye_pair("pig", 0.98, 0.0, 0.87, dark, 0.045)
+    for side in (-1, 1):
+        leg(f"pig_leg_{side}_front", (0.37, side * 0.30, 0.50), (0.37, side * 0.30, 0.09), 0.095, pink)
+        leg(f"pig_leg_{side}_back", (-0.40, side * 0.30, 0.48), (-0.40, side * 0.30, 0.09), 0.095, pink)
+    tail_tip("pig_tail", (-0.68, 0.03, 0.70), (-0.88, 0.03, 0.88), 0.045, pink, light)
+    models_lib.uv_sphere("pig_nostril_l", (1.20, -0.12, 0.70), (0.028, 0.018, 0.028), dark, 8, 4)
+    models_lib.uv_sphere("pig_nostril_r", (1.20, 0.12, 0.70), (0.028, 0.018, 0.028), dark, 8, 4)
 
-    body = new_object("Pig_Body")
-    parent_to(b, body)
-    add_box_bmesh(body, (-0.50, -0.30, 0.0), (1.00, 0.70, 0.60))
-    add_box_bmesh(body, (-0.35, -0.20, 0.50), (0.70, 0.50, 0.20))
-    set_color(body, 0.95, 0.70, 0.75)
-
-    head = new_object("Pig_Head")
-    parent_to(b, head, (0.40, 0.0, 0.15))
-    add_box_bmesh(head, (0.0, -0.22, 0.0), (0.35, 0.45, 0.38))
-    set_color(head, 0.95, 0.70, 0.75)
-
-    nose = new_object("Pig_Nose")
-    parent_to(head, nose, (0.32, -0.08, 0.08))
-    add_box_bmesh(nose, (0.0, 0.0, 0.0), (0.10, 0.18, 0.18))
-    set_color(nose, 0.85, 0.55, 0.60)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        ear = new_object(f"Pig_Ear_{side}")
-        parent_to(head, ear, (0.05, sign * 0.17, 0.32))
-        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.12, 0.10, 0.08))
-        set_color(ear, 0.90, 0.65, 0.70)
-
-    for i, (lx, lz) in enumerate([(-0.35,-0.22),(0.25,-0.22),(-0.35,0.12),(0.25,0.12)]):
-        leg = new_object(f"Pig_Leg_{i}")
-        parent_to(body, leg, (lx+0.05, lz, -0.35))
-        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.18, 0.16, 0.35))
-        set_color(leg, 0.90, 0.65, 0.70)
-
-    tail = new_object("Pig_Tail")
-    parent_to(body, tail, (-0.52, 0.05, 0.22))
-    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.10, 0.08, 0.08))
-    set_color(tail, 0.90, 0.65, 0.70)
-    return root
 
 def build_sheep():
-    root = new_object("Sheep")
+    wool = models_lib.mat("sheep_wool", (0.90, 0.88, 0.80), roughness=1.0)
+    wool_light = models_lib.mat("sheep_wool_light", (1.0, 0.98, 0.88), roughness=1.0)
+    face = models_lib.mat("sheep_face", (0.18, 0.13, 0.12), roughness=0.94)
+    horn = models_lib.mat("sheep_horn", (0.66, 0.48, 0.28), roughness=0.96)
+    body_volume("sheep_body", (-0.02, 0.0, 0.62), (0.72, 0.50, 0.47), wool)
+    body_volume("sheep_wool_front", (0.38, 0.0, 0.68), (0.42, 0.45, 0.48), wool_light)
+    body_volume("sheep_head", (0.82, 0.0, 0.85), (0.34, 0.32, 0.34), face)
+    soft_volume("sheep_muzzle", (1.08, 0.0, 0.78), (0.15, 0.22, 0.16), face)
+    eye_pair("sheep", 0.98, 0.0, 0.95, horn, 0.034)
+    for side in (-1, 1):
+        ear("sheep_ear", side, 0.78, 1.10, 0.22, 0.16, face)
+        models_lib.cone_between(
+            f"sheep_horn_{side}",
+            (0.72, side * 0.22, 1.05),
+            (0.57, side * 0.30, 1.27),
+            0.075,
+            horn,
+            vertices=7,
+        )
+        leg(f"sheep_leg_{side}_front", (0.38, side * 0.29, 0.55), (0.38, side * 0.29, 0.08), 0.10, face)
+        leg(f"sheep_leg_{side}_back", (-0.42, side * 0.29, 0.52), (-0.42, side * 0.29, 0.08), 0.10, face)
+    soft_volume("sheep_tail", (-0.69, 0.0, 0.76), (0.16, 0.14, 0.16), wool_light)
 
-    body = new_object("Sheep_Body")
-    parent_to(root, body)
-    add_box_bmesh(body, (-0.50, -0.35, 0.05), (1.00, 0.70, 0.55))
-    add_box_bmesh(body, (-0.45, -0.30, 0.00), (0.90, 0.60, 0.40))
-    add_box_bmesh(body, (-0.30, -0.25, 0.55), (0.60, 0.50, 0.20))
-    set_color(body, 0.95, 0.95, 0.92)
-
-    head = new_object("Sheep_Head")
-    parent_to(root, head, (0.45, 0.0, 0.22))
-    add_box_bmesh(head, (0.0, -0.18, 0.0), (0.35, 0.36, 0.34))
-    set_color(head, 0.15, 0.12, 0.10)
-
-    nose = new_object("Sheep_Nose")
-    parent_to(head, nose, (0.30, -0.05, 0.10))
-    add_box_bmesh(nose, (0.0, 0.0, 0.0), (0.08, 0.12, 0.10))
-    set_color(nose, 0.20, 0.15, 0.12)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        ear = new_object(f"Sheep_Ear_{side}")
-        parent_to(head, ear, (0.05, sign*0.14, 0.28))
-        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.12, 0.12, 0.06))
-        set_color(ear, 0.15, 0.12, 0.10)
-
-        horn = new_object(f"Sheep_Horn_{side}")
-        parent_to(head, horn, (0.0, sign*0.12, 0.30))
-        add_box_bmesh(horn, (0.0, 0.0, 0.0), (0.08, 0.08, 0.20))
-        set_color(horn, 0.85, 0.80, 0.65)
-
-    for i, (lx, lz) in enumerate([(-0.35,-0.25),(0.25,-0.25),(-0.35,0.15),(0.25,0.15)]):
-        leg = new_object(f"Sheep_Leg_{i}")
-        parent_to(body, leg, (lx+0.05, lz, -0.40))
-        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.16, 0.16, 0.40))
-        set_color(leg, 0.15, 0.12, 0.10)
-
-    tail = new_object("Sheep_Tail")
-    parent_to(body, tail, (-0.55, 0.05, 0.25))
-    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.12, 0.14, 0.14))
-    set_color(tail, 0.95, 0.95, 0.92)
-    return root
 
 def build_cow():
-    root = new_object("Cow")
+    white = models_lib.mat("cow_cream", (0.92, 0.89, 0.80), roughness=0.96)
+    brown = models_lib.mat("cow_patch", (0.22, 0.10, 0.06), roughness=0.96)
+    muzzle = models_lib.mat("cow_muzzle", (0.82, 0.45, 0.40), roughness=0.94)
+    horn = models_lib.mat("cow_horn", (0.74, 0.58, 0.34), roughness=0.96)
+    body_volume("cow_body", (0.0, 0.0, 0.82), (0.86, 0.56, 0.55), white)
+    body_volume("cow_chest", (0.48, 0.0, 0.86), (0.46, 0.52, 0.58), white)
+    for index, (x, y, z, sx, sy, sz) in enumerate(
+        ((-0.34, -0.50, 0.88, 0.22, 0.07, 0.24), (0.10, 0.47, 0.98, 0.27, 0.08, 0.18), (-0.18, -0.45, 0.54, 0.18, 0.07, 0.16))
+    ):
+        soft_volume(f"cow_spot_{index}", (x, y, z), (sx, sy, sz), brown)
+    body_volume("cow_head", (0.98, 0.0, 1.04), (0.42, 0.40, 0.42), white)
+    soft_volume("cow_muzzle", (1.30, 0.0, 0.90), (0.24, 0.30, 0.18), muzzle)
+    eye_pair("cow", 1.18, 0.0, 1.15, brown, 0.043)
+    for side in (-1, 1):
+        ear("cow_ear", side, 0.88, 1.38, 0.26, 0.18, brown)
+        models_lib.cone_between(
+            f"cow_horn_{side}",
+            (0.82, side * 0.24, 1.35),
+            (0.72, side * 0.30, 1.62),
+            0.07,
+            horn,
+            vertices=7,
+        )
+        leg(f"cow_leg_{side}_front", (0.48, side * 0.36, 0.68), (0.48, side * 0.36, 0.08), 0.115, brown)
+        leg(f"cow_leg_{side}_back", (-0.50, side * 0.36, 0.66), (-0.50, side * 0.36, 0.08), 0.115, brown)
+    tail_tip("cow_tail", (-0.82, 0.0, 1.02), (-1.02, 0.02, 1.34), 0.045, brown, brown)
 
-    body = new_object("Cow_Body")
-    parent_to(root, body)
-    add_box_bmesh(body, (-0.60, -0.38, 0.05), (1.20, 0.75, 0.65))
-    set_color(body, 0.95, 0.95, 0.95)
-
-    for i, (loc, sz) in enumerate([
-        ((-0.30, -0.10, 0.65), (0.30, 0.25, 0.06)),
-        (( 0.10, -0.30, 0.65), (0.20, 0.18, 0.06)),
-        ((-0.50,  0.10, 0.65), (0.20, 0.20, 0.06)),
-        (( 0.20,  0.05, 0.65), (0.15, 0.15, 0.06)),
-    ]):
-        spot = new_object(f"Cow_Spot_{i}")
-        parent_to(body, spot, loc)
-        add_box_bmesh(spot, (0.0, 0.0, 0.0), sz)
-        set_color(spot, 0.12, 0.10, 0.08)
-
-    head = new_object("Cow_Head")
-    parent_to(root, head, (0.55, 0.0, 0.28))
-    add_box_bmesh(head, (0.0, -0.22, 0.0), (0.40, 0.44, 0.40))
-    set_color(head, 0.95, 0.95, 0.95)
-
-    snout = new_object("Cow_Snout")
-    parent_to(head, snout, (0.36, -0.10, 0.10))
-    add_box_bmesh(snout, (0.0, 0.0, 0.0), (0.10, 0.22, 0.20))
-    set_color(snout, 0.90, 0.70, 0.72)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        eye = new_object(f"Cow_Eye_{side}")
-        parent_to(head, eye, (0.32, sign*0.14, 0.35))
-        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.06, 0.06, 0.06))
-        set_color(eye, 0.08, 0.06, 0.05)
-
-        ear = new_object(f"Cow_Ear_{side}")
-        parent_to(head, ear, (0.05, sign*0.16, 0.35))
-        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.14, 0.12, 0.08))
-        set_color(ear, 0.95, 0.95, 0.95)
-
-        horn = new_object(f"Cow_Horn_{side}")
-        parent_to(head, horn, (0.0, sign*0.20, 0.38))
-        add_box_bmesh(horn, (0.0, 0.0, 0.0), (0.08, 0.08, 0.20))
-        set_color(horn, 0.82, 0.78, 0.60)
-
-    for i, (lx, lz) in enumerate([(-0.42,-0.28),(0.30,-0.28),(-0.42,0.18),(0.30,0.18)]):
-        leg = new_object(f"Cow_Leg_{i}")
-        parent_to(body, leg, (lx+0.05, lz, -0.50))
-        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.18, 0.18, 0.50))
-        set_color(leg, 0.95, 0.95, 0.95)
-
-    udder = new_object("Cow_Udder")
-    parent_to(body, udder, (-0.15, -0.08, -0.05))
-    add_box_bmesh(udder, (0.0, 0.0, 0.0), (0.30, 0.20, 0.15))
-    set_color(udder, 0.88, 0.65, 0.68)
-
-    tail = new_object("Cow_Tail")
-    parent_to(body, tail, (-0.65, 0.0, 0.30))
-    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.08, 0.08, 0.40))
-    set_color(tail, 0.95, 0.95, 0.95)
-    return root
 
 def build_chicken():
-    root = new_object("Chicken")
+    feather = models_lib.mat("chicken_feather", (0.88, 0.68, 0.38), roughness=0.94)
+    feather_light = models_lib.mat("chicken_feather_light", (1.0, 0.86, 0.53), roughness=0.94)
+    wing = models_lib.mat("chicken_wing", (0.67, 0.38, 0.16), roughness=0.95)
+    red = models_lib.mat("chicken_comb", (0.74, 0.08, 0.07), roughness=0.92)
+    beak = models_lib.mat("chicken_beak", (0.94, 0.57, 0.08), roughness=0.92)
+    dark = models_lib.mat("chicken_eye", (0.04, 0.025, 0.02), roughness=0.9)
 
-    body = new_object("Chicken_Body")
-    parent_to(root, body)
-    add_box_bmesh(body, (-0.28, -0.22, 0.0), (0.56, 0.44, 0.42))
-    set_color(body, 0.95, 0.90, 0.78)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        wing = new_object(f"Chicken_Wing_{side}")
-        parent_to(body, wing, (-0.05, sign*0.22, 0.05))
-        add_box_bmesh(wing, (0.0, 0.0, 0.0), (0.35, 0.08, 0.32))
-        set_color(wing, 0.85, 0.78, 0.60)
-
-    head = new_object("Chicken_Head")
-    parent_to(root, head, (0.22, 0.0, 0.18))
-    add_box_bmesh(head, (0.0, -0.16, 0.0), (0.28, 0.32, 0.32))
-    set_color(head, 0.95, 0.88, 0.70)
-
-    for i, pos in enumerate([(0.0,0.14,0.28),(0.10,0.14,0.28),(0.05,0.14,0.36)]):
-        comb = new_object(f"Chicken_Comb_{i}")
-        parent_to(head, comb, pos)
-        add_box_bmesh(comb, (0.0, 0.0, 0.0), (0.12, 0.08, 0.12))
-        set_color(comb, 0.85, 0.10, 0.10)
-
-    wattle = new_object("Chicken_Wattle")
-    parent_to(head, wattle, (0.22, -0.02, 0.08))
-    add_box_bmesh(wattle, (0.0, 0.0, 0.0), (0.10, 0.12, 0.10))
-    set_color(wattle, 0.80, 0.10, 0.10)
-
-    beak = new_object("Chicken_Beak")
-    parent_to(head, beak, (0.24, -0.04, 0.12))
-    add_box_bmesh(beak, (0.0, 0.0, 0.0), (0.14, 0.14, 0.12))
-    set_color(beak, 0.95, 0.82, 0.10)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        eye = new_object(f"Chicken_Eye_{side}")
-        parent_to(head, eye, (0.20, sign*0.10, 0.24))
-        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.05, 0.05, 0.05))
-        set_color(eye, 0.05, 0.05, 0.05)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        leg = new_object(f"Chicken_Leg_{side}")
-        parent_to(body, leg, (sign*0.12, -0.06, -0.28))
-        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.10, 0.12, 0.28))
-        set_color(leg, 0.88, 0.72, 0.20)
-        for j in range(3):
-            toe = new_object(f"Chicken_Toe_{side}_{j}")
-            parent_to(leg, toe, (j*0.04-0.04, 0.02, -0.22))
-            add_box_bmesh(toe, (0.0, 0.0, 0.0), (0.04, 0.08, 0.10))
-            set_color(toe, 0.85, 0.68, 0.15)
-
-    return root
-
-def build_rabbit():
-    root = new_object("Rabbit")
-
-    body = new_object("Rabbit_Body")
-    parent_to(root, body)
-    add_box_bmesh(body, (-0.38, -0.28, 0.0), (0.76, 0.56, 0.52))
-    set_color(body, 0.88, 0.86, 0.84)
-
-    head = new_object("Rabbit_Head")
-    parent_to(root, head, (0.32, 0.0, 0.18))
-    add_box_bmesh(head, (0.0, -0.20, 0.0), (0.36, 0.40, 0.38))
-    set_color(head, 0.88, 0.86, 0.84)
-
-    nose = new_object("Rabbit_Nose")
-    parent_to(head, nose, (0.32, -0.04, 0.12))
-    add_box_bmesh(nose, (0.0, 0.0, 0.0), (0.08, 0.10, 0.10))
-    set_color(nose, 0.95, 0.72, 0.75)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        eye = new_object(f"Rabbit_Eye_{side}")
-        parent_to(head, eye, (0.26, sign*0.10, 0.30))
-        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.06, 0.06, 0.06))
-        set_color(eye, 0.55, 0.25, 0.25)
-
-        ear = new_object(f"Rabbit_Ear_{side}")
-        parent_to(head, ear, (0.05, sign*0.16, 0.34))
-        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.12, 0.08, 0.55))
-        set_color(ear, 0.88, 0.86, 0.84)
-
-        inner = new_object(f"Rabbit_EarInner_{side}")
-        parent_to(ear, inner, (0.02, 0.02, 0.08))
-        add_box_bmesh(inner, (0.0, 0.0, 0.0), (0.08, 0.04, 0.42))
-        set_color(inner, 0.92, 0.68, 0.72)
-
-    for side, sign in [("L", -1), ("R", 1)]:
-        fl = new_object(f"Rabbit_FrontLeg_{side}")
-        parent_to(body, fl, (sign*0.22, -0.08, -0.25))
-        add_box_bmesh(fl, (0.0, 0.0, 0.0), (0.16, 0.16, 0.25))
-        set_color(fl, 0.85, 0.82, 0.80)
-
-        hl = new_object(f"Rabbit_HindLeg_{side}")
-        parent_to(body, hl, (sign*0.28, -0.08, -0.42))
-        add_box_bmesh(hl, (0.0, 0.0, 0.0), (0.18, 0.18, 0.42))
-        set_color(hl, 0.85, 0.82, 0.80)
-
-    tail = new_object("Rabbit_Tail")
-    parent_to(body, tail, (-0.42, 0.02, 0.18))
-    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.16, 0.14, 0.14))
-    set_color(tail, 0.95, 0.95, 0.95)
-    return root
-
-def build_deer():
-    root = new_object("Deer")
-
-    body = new_object("Deer_Body")
-    parent_to(root, body)
-    add_box_bmesh(body, (-0.62, -0.34, 0.10), (1.24, 0.68, 0.72))
-    set_color(body, 0.58, 0.32, 0.14)
-
-    chest = new_object("Deer_Chest")
-    parent_to(body, chest, (0.34, 0.0, 0.34))
-    add_box_bmesh(chest, (0.0, -0.25, 0.0), (0.34, 0.50, 0.56))
-    set_color(chest, 0.70, 0.42, 0.20)
-
-    head = new_object("Deer_Head")
-    parent_to(root, head, (0.62, 0.0, 0.52))
-    add_box_bmesh(head, (0.0, -0.22, 0.0), (0.40, 0.44, 0.42))
-    set_color(head, 0.62, 0.35, 0.15)
-
-    snout = new_object("Deer_Snout")
-    parent_to(head, snout, (0.34, -0.08, 0.06))
-    add_box_bmesh(snout, (0.0, 0.0, 0.0), (0.16, 0.24, 0.18))
-    set_color(snout, 0.32, 0.16, 0.08)
-
-    for side, sign in (("L", -1), ("R", 1)):
-        eye = new_object(f"Deer_Eye_{side}")
-        parent_to(head, eye, (0.28, sign * 0.18, 0.30))
-        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.06, 0.06, 0.06))
-        set_color(eye, 0.04, 0.03, 0.02)
-
-        ear = new_object(f"Deer_Ear_{side}")
-        parent_to(head, ear, (0.02, sign * 0.19, 0.38))
-        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.18, 0.10, 0.10))
-        set_color(ear, 0.48, 0.23, 0.10)
-
-        antler = new_object(f"Deer_Antler_{side}")
-        parent_to(head, antler, (-0.02, sign * 0.14, 0.46))
-        add_box_bmesh(antler, (0.0, 0.0, 0.0), (0.07, 0.07, 0.42))
-        set_color(antler, 0.78, 0.64, 0.42)
-        for branch, offset in enumerate((0.12, 0.25)):
-            tine = new_object(f"Deer_Antler_{side}_{branch}")
-            parent_to(antler, tine, (0.05, sign * 0.02, offset))
-            add_box_bmesh(tine, (0.0, 0.0, 0.0), (0.16, 0.06, 0.06))
-            set_color(tine, 0.78, 0.64, 0.42)
-
-    for index, (lx, ly) in enumerate(((-0.42, -0.24), (0.34, -0.24), (-0.42, 0.18), (0.34, 0.18))):
-        leg = new_object(f"Deer_Leg_{index}")
-        parent_to(body, leg, (lx, ly, -0.42))
-        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.16, 0.16, 0.54))
-        set_color(leg, 0.48, 0.24, 0.10)
-        hoof = new_object(f"Deer_Hoof_{index}")
-        parent_to(leg, hoof, (0.03, -0.02, -0.08))
-        add_box_bmesh(hoof, (0.0, 0.0, 0.0), (0.18, 0.18, 0.08))
-        set_color(hoof, 0.10, 0.07, 0.04)
-
-    tail = new_object("Deer_Tail")
-    parent_to(body, tail, (-0.66, 0.0, 0.48))
-    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.12, 0.14, 0.22))
-    set_color(tail, 0.92, 0.84, 0.64)
-    return root
-
-def build_fox():
-    root = new_object("Fox")
-
-    body = new_object("Fox_Body")
-    parent_to(root, body)
-    add_box_bmesh(body, (-0.48, -0.30, 0.10), (0.96, 0.60, 0.58))
-    set_color(body, 0.82, 0.28, 0.08)
-
-    belly = new_object("Fox_Belly")
-    parent_to(body, belly, (0.08, -0.31, 0.16))
-    add_box_bmesh(belly, (0.0, 0.0, 0.0), (0.58, 0.05, 0.34))
-    set_color(belly, 0.98, 0.78, 0.48)
-
-    head = new_object("Fox_Head")
-    parent_to(root, head, (0.44, 0.0, 0.40))
-    add_box_bmesh(head, (0.0, -0.20, 0.0), (0.38, 0.40, 0.38))
-    set_color(head, 0.82, 0.28, 0.08)
-
-    muzzle = new_object("Fox_Muzzle")
-    parent_to(head, muzzle, (0.32, -0.06, 0.04))
-    add_box_bmesh(muzzle, (0.0, 0.0, 0.0), (0.16, 0.22, 0.16))
-    set_color(muzzle, 0.98, 0.78, 0.50)
-
-    nose = new_object("Fox_Nose")
-    parent_to(muzzle, nose, (0.14, -0.02, 0.08))
-    add_box_bmesh(nose, (0.0, 0.0, 0.0), (0.06, 0.10, 0.08))
-    set_color(nose, 0.08, 0.04, 0.03)
-
-    for side, sign in (("L", -1), ("R", 1)):
-        eye = new_object(f"Fox_Eye_{side}")
-        parent_to(head, eye, (0.26, sign * 0.15, 0.28))
-        add_box_bmesh(eye, (0.0, 0.0, 0.0), (0.06, 0.06, 0.06))
-        set_color(eye, 0.04, 0.03, 0.02)
-
-        ear = new_object(f"Fox_Ear_{side}")
-        parent_to(head, ear, (-0.02, sign * 0.15, 0.40))
-        add_box_bmesh(ear, (0.0, 0.0, 0.0), (0.16, 0.12, 0.30))
-        set_color(ear, 0.72, 0.18, 0.06)
-
-        ear_tip = new_object(f"Fox_EarTip_{side}")
-        parent_to(ear, ear_tip, (0.02, 0.0, 0.28))
-        add_box_bmesh(ear_tip, (0.0, 0.0, 0.0), (0.12, 0.10, 0.12))
-        set_color(ear_tip, 0.12, 0.05, 0.03)
-
-    for index, (lx, ly) in enumerate(((-0.30, -0.20), (0.24, -0.20), (-0.30, 0.16), (0.24, 0.16))):
-        leg = new_object(f"Fox_Leg_{index}")
-        parent_to(body, leg, (lx, ly, -0.36))
-        add_box_bmesh(leg, (0.0, 0.0, 0.0), (0.14, 0.14, 0.40))
-        set_color(leg, 0.82, 0.28, 0.08)
-
-    tail = new_object("Fox_Tail")
-    parent_to(body, tail, (-0.56, 0.02, 0.34))
-    add_box_bmesh(tail, (0.0, 0.0, 0.0), (0.52, 0.20, 0.24))
-    set_color(tail, 0.78, 0.24, 0.07)
-    tail_tip = new_object("Fox_TailTip")
-    parent_to(tail, tail_tip, (-0.20, 0.0, 0.02))
-    add_box_bmesh(tail_tip, (0.0, 0.0, 0.0), (0.20, 0.22, 0.26))
-    set_color(tail_tip, 0.98, 0.88, 0.68)
-    return root
+    body_volume("chicken_body", (0.0, 0.0, 0.42), (0.40, 0.32, 0.38), feather)
+    body_volume("chicken_breast", (0.24, -0.02, 0.48), (0.28, 0.30, 0.34), feather_light)
+    for side in (-1, 1):
+        models_lib.ico_sphere(f"chicken_wing_{side}", (-0.02, side * 0.30, 0.44), (0.28, 0.10, 0.28), wing, 1)
+        leg(f"chicken_leg_{side}", (0.06, side * 0.14, 0.24), (0.06, side * 0.14, 0.06), 0.035, beak)
+        for toe in (-1, 0, 1):
+            models_lib.cylinder_between(
+                f"chicken_toe_{side}_{toe}",
+                (0.10, side * 0.14, 0.07),
+                (0.20, side * 0.14 + toe * 0.08, 0.045),
+                0.018,
+                beak,
+                vertices=6,
+            )
+    body_volume("chicken_head", (0.40, 0.0, 0.72), (0.25, 0.24, 0.26), feather_light)
+    for index, (x, z) in enumerate(((0.32, 0.97), (0.43, 1.02), (0.54, 0.97))):
+        models_lib.ico_sphere(f"chicken_comb_{index}", (x, 0.0, z), (0.08, 0.08, 0.10), red, 1)
+    models_lib.cone_between("chicken_beak", (0.60, 0.0, 0.72), (0.78, 0.0, 0.70), 0.09, beak, vertices=6)
+    eye_pair("chicken", 0.53, 0.0, 0.80, dark, 0.035)
+    soft_volume("chicken_wattle", (0.56, 0.0, 0.57), (0.08, 0.07, 0.10), red)
 
 
-def build_deer_fawn():
-    root = build_deer()
-    root.name = "Deer_Fawn"
-    for obj in list(root.children_recursive):
-        if obj.name.startswith("Deer_Antler"):
-            bpy.data.objects.remove(obj, do_unlink=True)
-    recolor_named(root, ("Deer_Body", "Deer_Chest", "Deer_Head"), (0.76, 0.48, 0.24))
-    recolor_named(root, ("Deer_Snout",), (0.42, 0.23, 0.12))
-    recolor_named(root, ("Deer_Leg",), (0.58, 0.30, 0.14))
+def build_rabbit(brown=False):
+    fur = models_lib.mat("rabbit_brown_fur" if brown else "rabbit_fur", (0.54, 0.31, 0.16) if brown else (0.76, 0.73, 0.68), roughness=0.97)
+    fur_light = models_lib.mat("rabbit_brown_light" if brown else "rabbit_light", (0.72, 0.48, 0.27) if brown else (0.92, 0.87, 0.82), roughness=0.97)
+    inner = models_lib.mat("rabbit_brown_inner" if brown else "rabbit_inner", (0.70, 0.35, 0.30) if brown else (0.88, 0.52, 0.55), roughness=0.94)
+    eye = models_lib.mat("rabbit_eye", (0.16, 0.045, 0.04), roughness=0.9)
 
-    body = child_named(root, "Deer_Body")
-    if body is not None:
-        for index, (x, y, z) in enumerate(((-0.30, -0.35, 0.62), (-0.02, -0.35, 0.68), (0.26, -0.35, 0.54), (-0.18, 0.34, 0.50))):
-            spot = new_object(f"Deer_FawnSpot_{index}")
-            parent_to(body, spot, (x, y, z))
-            add_box_bmesh(spot, (0.0, 0.0, 0.0), (0.12, 0.035, 0.10))
-            set_color(spot, 0.92, 0.76, 0.48)
-    return root
+    stem = "rabbit_brown" if brown else "rabbit"
+    body_volume(f"{stem}_body", (-0.04, 0.0, 0.52), (0.62, 0.44, 0.48), fur)
+    body_volume(f"{stem}_hind_quarter", (-0.38, 0.0, 0.62), (0.38, 0.42, 0.45), fur_light)
+    body_volume(f"{stem}_head", (0.47, 0.0, 0.82), (0.34, 0.34, 0.35), fur)
+    soft_volume(f"{stem}_muzzle", (0.72, 0.0, 0.73), (0.16, 0.22, 0.14), fur_light)
+    eye_pair(stem, 0.65, 0.0, 0.91, eye, 0.038)
+    for side in (-1, 1):
+        ear(f"{stem}_ear", side, 0.38, 1.06, 0.22, 0.62, fur, inner)
+        articulated_leg(
+            f"{stem}_front_leg_{side}",
+            (0.30, side * 0.24, 0.38),
+            (0.30, side * 0.24, 0.21),
+            (0.30, side * 0.24, 0.08),
+            0.075,
+            fur,
+        )
+        articulated_leg(
+            f"{stem}_hind_leg_{side}",
+            (-0.40, side * 0.28, 0.46),
+            (-0.40, side * 0.28, 0.25),
+            (-0.40, side * 0.28, 0.08),
+            0.105,
+            fur_light,
+        )
+    soft_volume(f"{stem}_tail", (-0.72, 0.0, 0.72), (0.18, 0.18, 0.18), fur_light)
 
 
-def build_fox_silver():
-    root = build_fox()
-    root.name = "Fox_Silver"
-    recolor_named(root, ("Fox_Body", "Fox_Head", "Fox_Ear", "Fox_Tail"), (0.42, 0.47, 0.52))
-    recolor_named(root, ("Fox_Belly", "Fox_Muzzle", "Fox_TailTip"), (0.86, 0.88, 0.84))
-    recolor_named(root, ("Fox_EarTip",), (0.18, 0.20, 0.23))
-    return root
+def build_deer(fawn=False):
+    coat = models_lib.mat("deer_fawn_coat" if fawn else "deer_coat", (0.70, 0.42, 0.20) if fawn else (0.48, 0.24, 0.10), roughness=0.96)
+    chest = models_lib.mat("deer_fawn_chest" if fawn else "deer_chest", (0.84, 0.62, 0.34) if fawn else (0.62, 0.34, 0.14), roughness=0.96)
+    dark = models_lib.mat("deer_dark", (0.18, 0.09, 0.045), roughness=0.96)
+    antler = models_lib.mat("deer_antler", (0.68, 0.50, 0.28), roughness=0.98)
+    spot = models_lib.mat("deer_spot", (0.92, 0.75, 0.45), roughness=0.96)
+
+    stem = "deer_fawn" if fawn else "deer"
+    body_volume(f"{stem}_body", (-0.06, 0.0, 0.90), (0.82, 0.48, 0.58), coat)
+    body_volume(f"{stem}_chest", (0.46, 0.0, 1.02), (0.42, 0.46, 0.70), chest)
+    models_lib.cylinder_between(f"{stem}_neck", (0.50, 0.0, 1.12), (0.72, 0.0, 1.53), 0.22, coat, vertices=8)
+    body_volume(f"{stem}_head", (0.84, 0.0, 1.66), (0.36, 0.34, 0.34), coat)
+    soft_volume(f"{stem}_snout", (1.13, 0.0, 1.56), (0.22, 0.25, 0.17), dark)
+    eye_pair(stem, 1.02, 0.0, 1.76, dark, 0.038)
+    for side in (-1, 1):
+        ear(f"{stem}_ear", side, 0.76, 1.87, 0.24, 0.24, coat)
+        if not fawn:
+            models_lib.cylinder_between(f"{stem}_antler_{side}_main", (0.74, side * 0.20, 1.87), (0.61, side * 0.28, 2.30), 0.055, antler, vertices=7)
+            models_lib.cylinder_between(f"{stem}_antler_{side}_branch", (0.66, side * 0.25, 2.10), (0.46, side * 0.32, 2.22), 0.042, antler, vertices=7)
+        leg(f"{stem}_front_leg_{side}", (0.40, side * 0.31, 0.70), (0.40, side * 0.31, 0.08), 0.085, dark)
+        leg(f"{stem}_back_leg_{side}", (-0.46, side * 0.31, 0.67), (-0.46, side * 0.31, 0.08), 0.09, dark)
+    tail_tip(f"{stem}_tail", (-0.80, 0.0, 1.05), (-1.02, 0.0, 1.32), 0.05, coat, chest)
+    if fawn:
+        for index, (x, y, z) in enumerate(((-0.32, -0.45, 1.10), (0.0, -0.45, 1.18), (0.28, -0.43, 1.06), (-0.18, 0.43, 1.02))):
+            soft_volume(f"{stem}_spot_{index}", (x, y, z), (0.10, 0.035, 0.09), spot)
 
 
-def build_rabbit_brown():
-    root = build_rabbit()
-    root.name = "Rabbit_Brown"
-    recolor_named(root, ("Rabbit_Body", "Rabbit_Head", "Rabbit_FrontLeg", "Rabbit_HindLeg"), (0.58, 0.36, 0.20))
-    recolor_named(root, ("Rabbit_Tail",), (0.82, 0.70, 0.56))
-    recolor_named(root, ("Rabbit_EarInner",), (0.78, 0.46, 0.42))
-    return root
+def build_fox(silver=False):
+    orange = models_lib.mat("fox_silver_coat" if silver else "fox_coat", (0.38, 0.43, 0.49) if silver else (0.78, 0.22, 0.045), roughness=0.95)
+    cream = models_lib.mat("fox_silver_cream" if silver else "fox_cream", (0.88, 0.90, 0.88) if silver else (0.98, 0.73, 0.38), roughness=0.95)
+    black = models_lib.mat("fox_black", (0.07, 0.035, 0.025), roughness=0.92)
+    ear_dark = models_lib.mat("fox_silver_ear" if silver else "fox_ear", (0.16, 0.18, 0.22) if silver else (0.44, 0.08, 0.025), roughness=0.95)
+
+    stem = "fox_silver" if silver else "fox"
+    body_volume(f"{stem}_body", (-0.04, 0.0, 0.62), (0.75, 0.44, 0.48), orange)
+    body_volume(f"{stem}_chest", (0.42, 0.0, 0.68), (0.40, 0.42, 0.50), cream)
+    body_volume(f"{stem}_head", (0.78, 0.0, 0.86), (0.35, 0.34, 0.36), orange)
+    soft_volume(f"{stem}_muzzle", (1.08, 0.0, 0.76), (0.26, 0.25, 0.17), cream)
+    soft_volume(f"{stem}_nose", (1.28, 0.0, 0.77), (0.07, 0.10, 0.07), black)
+    eye_pair(stem, 1.00, 0.0, 0.96, black, 0.042)
+    for side in (-1, 1):
+        ear(f"{stem}_ear", side, 0.70, 1.08, 0.26, 0.48, orange, ear_dark)
+        leg(f"{stem}_front_leg_{side}", (0.34, side * 0.27, 0.46), (0.34, side * 0.27, 0.08), 0.075, orange)
+        leg(f"{stem}_back_leg_{side}", (-0.42, side * 0.27, 0.44), (-0.42, side * 0.27, 0.08), 0.08, orange)
+    models_lib.cylinder_between(f"{stem}_tail_base", (-0.64, 0.0, 0.78), (-0.98, 0.02, 0.98), 0.16, orange, vertices=8)
+    tail_tip(f"{stem}_tail_tip", (-0.93, 0.02, 0.96), (-1.20, 0.04, 0.92), 0.13, orange, cream)
+
+
+BUILDERS = {
+    "pig": build_pig,
+    "sheep": build_sheep,
+    "cow": build_cow,
+    "chicken": build_chicken,
+    "rabbit": lambda: build_rabbit(False),
+    "rabbit_brown": lambda: build_rabbit(True),
+    "deer": lambda: build_deer(False),
+    "deer_fawn": lambda: build_deer(True),
+    "fox": lambda: build_fox(False),
+    "fox_silver": lambda: build_fox(True),
+}
+
+
+def main() -> int:
+    selected = os.environ.get("LK2_MODEL_ONLY")
+    names = [selected] if selected else list(BUILDERS)
+    for name in names:
+        if name not in BUILDERS:
+            raise SystemExit(f"unknown animal asset: {name}")
+        models_lib.clear_scene()
+        BUILDERS[name]()
+        models_lib.export_glb(name, collection="animals")
+    return 0
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("开始生成动物模型...")
-    print(f"output: {models_lib.output_dir('animals')}")
-
-    animals = [
-        ("pig",     build_pig),
-        ("sheep",   build_sheep),
-        ("cow",     build_cow),
-        ("chicken", build_chicken),
-        ("rabbit",  build_rabbit),
-        ("rabbit_brown", build_rabbit_brown),
-        ("deer",    build_deer),
-        ("deer_fawn", build_deer_fawn),
-        ("fox",     build_fox),
-        ("fox_silver", build_fox_silver),
-    ]
-
-    for name, builder in animals:
-        print(f"\n[生成] {name} ...")
-        try:
-            models_lib.clear_scene()
-            _MATERIAL_CACHE.clear()
-            root = builder()
-            bpy.ops.object.select_all(action='DESELECT')
-            root.select_set(True)
-            bpy.context.view_layer.objects.active = root
-            export_glb(name)
-        except Exception as e:
-            import traceback
-            print(f"  ✗ 错误: {e}")
-            traceback.print_exc()
-
-    print("\n✅ 全部完成！")
+    raise SystemExit(main())

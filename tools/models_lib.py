@@ -413,7 +413,17 @@ def _mesh_objects() -> list[bpy.types.Object]:
     return [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
 
 
+def _keeps_runtime_parts(name: str) -> bool:
+    return name in {"rabbit", "rabbit_brown", "wolf", "bear", "hoplite_ender_dragon"}
+
+
 def _consolidate_static_meshes(name: str, objects: list[bpy.types.Object]) -> list[bpy.types.Object]:
+    if _keeps_runtime_parts(name) and len(objects) > 1:
+        root = bpy.data.objects.new(f"{name}_root", None)
+        bpy.context.collection.objects.link(root)
+        for obj in objects:
+            obj.parent = root
+        return [root, *objects]
     if len(objects) <= 1:
         if objects:
             objects[0].name = f"{name}_root"
@@ -431,7 +441,8 @@ def _consolidate_static_meshes(name: str, objects: list[bpy.types.Object]) -> li
     if root is None:
         return []
     root.name = f"{name}_root"
-    root.data.name = f"{name}_mesh"
+    if root.data is not None:
+        root.data.name = f"{name}_mesh"
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
     return [root]
 
@@ -451,12 +462,18 @@ def _world_bounds(objects: Iterable[bpy.types.Object]) -> tuple[Vector, Vector]:
     return minimum, maximum
 
 
-def _normalize_asset_scale(name: str, collection: str, root: bpy.types.Object) -> None:
+def _normalize_asset_scale(
+    name: str,
+    collection: str,
+    root: bpy.types.Object,
+    bounds_objects: list[bpy.types.Object] | None = None,
+) -> None:
     contract = scale_contract_for(collection, name)
     if contract is None:
         raise RuntimeError(f"missing scale contract for {collection}/{name}")
     bpy.context.view_layer.update()
-    minimum, maximum = _world_bounds([root])
+    measured_objects = bounds_objects or [root]
+    minimum, maximum = _world_bounds(measured_objects)
     dimensions = maximum - minimum
     measured = (
         dimensions.z
@@ -469,29 +486,39 @@ def _normalize_asset_scale(name: str, collection: str, root: bpy.types.Object) -
         raise RuntimeError(f"cannot normalize invalid bounds for {collection}/{name}: {dimensions}")
     factor = contract.target_meters / measured
     root.scale = tuple(component * factor for component in root.scale)
-    bpy.context.view_layer.objects.active = root
-    root.select_set(True)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    if root.type != "EMPTY":
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = root
+        root.select_set(True)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     bpy.context.view_layer.update()
 
     if contract.target_height_meters is not None:
-        minimum, maximum = _world_bounds([root])
+        minimum, maximum = _world_bounds(measured_objects)
         current_height = maximum.z - minimum.z
         if current_height <= 1e-6:
             raise RuntimeError(f"cannot normalize zero height for {collection}/{name}")
         root.scale.z *= contract.target_height_meters / current_height
-        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        if root.type != "EMPTY":
+            bpy.ops.object.select_all(action="DESELECT")
+            bpy.context.view_layer.objects.active = root
+            root.select_set(True)
+            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         bpy.context.view_layer.update()
 
-    minimum, maximum = _world_bounds([root])
+    minimum, maximum = _world_bounds(measured_objects)
     center = (minimum + maximum) * 0.5
     root.location.x -= center.x
     root.location.y -= center.y
     root.location.z -= minimum.z if contract.grounded else center.z
-    bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+    if root.type != "EMPTY":
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = root
+        root.select_set(True)
+        bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
     bpy.context.view_layer.update()
 
-    normalized_min, normalized_max = _world_bounds([root])
+    normalized_min, normalized_max = _world_bounds(measured_objects)
     normalized_dimensions = normalized_max - normalized_min
     normalized = (
         normalized_dimensions.z
@@ -540,8 +567,10 @@ def export_glb(name: str, *, collection: str = "pretty") -> Path | None:
         return None
 
     objects = _consolidate_static_meshes(name, _mesh_objects())
-    _assert_scene_contract(objects)
-    _normalize_asset_scale(name, collection, objects[0])
+    root = objects[0]
+    mesh_objects = [obj for obj in objects if obj.type == "MESH"]
+    _assert_scene_contract(mesh_objects)
+    _normalize_asset_scale(name, collection, root, mesh_objects)
     for obj in objects:
         obj["lk2_style"] = STYLE_NAME
         obj["lk2_style_version"] = STYLE_VERSION

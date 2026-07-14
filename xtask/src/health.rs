@@ -91,6 +91,18 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         .and_then(|dir| fs::read_to_string(dir.join("final_state.json")).ok())
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
     let (sim, state) = analyze_sim(&iter_dir.join("final_state.json"), prev_state.as_ref());
+    let client_tick = state
+        .as_ref()
+        .and_then(|value| path_value(value, "tick"))
+        .and_then(Value::as_u64);
+    let server_state = latest_server_state(root, client_tick);
+    if let Some(server_state) = &server_state {
+        fs::write(
+            iter_dir.join("server_state.json"),
+            serde_json::to_string_pretty(server_state).map_err(|error| error.to_string())? + "\n",
+        )
+        .map_err(|error| format!("write server_state.json: {error}"))?;
+    }
     let stderr = scan_stderr_logs(root);
     let error_logs = archive_error_logs(root, iter_dir)?;
     let mut assertions = built_in_assertions(
@@ -101,6 +113,7 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         prev_state.as_ref(),
         &stderr,
         iter_dir,
+        server_state.as_ref(),
     );
     let nature = state
         .as_ref()
@@ -164,6 +177,7 @@ pub fn evaluate_iter(root: &Path, iter_dir: &Path, prev_dir: Option<&Path>) -> R
         "verdict": combo["verdict"],
         "reasons": combo["reasons"],
         "nature": nature.as_ref().map(NatureArtifact::health_extension),
+        "server_state": server_state_summary(server_state.as_ref(), state.as_ref()),
     });
     fs::write(
         iter_dir.join("assertions.json"),
@@ -672,6 +686,7 @@ fn built_in_assertions(
     prev_state: Option<&Value>,
     stderr: &StderrScan,
     iter_dir: &Path,
+    server_state: Option<&Value>,
 ) -> Vec<Assertion> {
     let role = state
         .and_then(|s| s.get("role"))
@@ -916,7 +931,168 @@ fn built_in_assertions(
         ));
         a.extend(render_telemetry_assertions(state));
     }
+    a.extend(server_state_assertions(state, server_state));
     a
+}
+
+fn latest_server_state(root: &Path, maximum_tick: Option<u64>) -> Option<Value> {
+    let dir = root.join("screenshots");
+    let mut paths = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(OsStr::to_str)
+                .map(|name| name.starts_with("server_state_t") && name.ends_with(".json"))
+                .unwrap_or(false)
+        })
+        .filter(|path| {
+            let Some(maximum_tick) = maximum_tick else {
+                return true;
+            };
+            path.file_name()
+                .and_then(OsStr::to_str)
+                .and_then(|name| name.strip_prefix("server_state_t"))
+                .and_then(|name| name.strip_suffix(".json"))
+                .and_then(|tick| tick.parse::<u64>().ok())
+                .is_some_and(|tick| tick <= maximum_tick)
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by_key(|path| {
+        path.file_name()
+            .and_then(OsStr::to_str)
+            .and_then(|name| name.strip_prefix("server_state_t"))
+            .and_then(|name| name.strip_suffix(".json"))
+            .and_then(|tick| tick.parse::<u64>().ok())
+            .unwrap_or(0)
+    });
+    paths.pop().and_then(|path| {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+    })
+}
+
+fn server_state_summary(server: Option<&Value>, client: Option<&Value>) -> Value {
+    let Some(server) = server else {
+        return json!({"present": false});
+    };
+    let server_tick = path_value(server, "tick").and_then(Value::as_u64);
+    let client_tick = client
+        .and_then(|state| path_value(state, "tick"))
+        .and_then(Value::as_u64);
+    json!({
+        "present": true,
+        "tick": server_tick,
+        "client_tick": client_tick,
+        "authority_role": path_value(server, "role"),
+        "tick_matches_client": tick_alignment(server_tick, client_tick),
+        "world_present": server.get("world").is_some(),
+        "persistence_present": server.get("persistence").is_some(),
+        "persistence_valid": path_value(server, "persistence.valid"),
+        "voxel_chunk": path_value(server, "voxel_chunk"),
+    })
+}
+
+fn server_state_assertions(client: Option<&Value>, server: Option<&Value>) -> Vec<Assertion> {
+    let Some(server) = server else {
+        return if client
+            .and_then(|state| state.get("role"))
+            .and_then(Value::as_str)
+            == Some("client_online")
+        {
+            vec![assertion(
+                "server.snapshot_present",
+                &json!(false),
+                "==",
+                json!(true),
+                "fail",
+                "online loop did not produce a server_state snapshot",
+                Some("server_state"),
+            )]
+        } else {
+            Vec::new()
+        };
+    };
+    let server_tick = path_value(server, "tick").and_then(Value::as_u64);
+    let client_tick = client
+        .and_then(|state| path_value(state, "tick"))
+        .and_then(Value::as_u64);
+    let tick_ok = tick_alignment(server_tick, client_tick);
+    let world_ok = server.get("world").is_some();
+    let persistence = server.get("persistence");
+    let chunk = server.get("voxel_chunk");
+    vec![
+        assertion(
+            "server.snapshot_tick_matches_client",
+            &json!(tick_ok),
+            "==",
+            json!(true),
+            "fail",
+            "server and client snapshots do not describe the same tick",
+            Some("server_state.tick"),
+        ),
+        assertion(
+            "server.world_snapshot_present",
+            &json!(world_ok),
+            "==",
+            json!(true),
+            "fail",
+            "server snapshot is missing authoritative world data",
+            Some("server_state.world"),
+        ),
+        assertion(
+            "server.persistence_valid",
+            &json!(
+                persistence
+                    .and_then(|value| value.get("valid"))
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            ),
+            "==",
+            json!(true),
+            "fail",
+            "server persistence snapshot is missing or invalid",
+            Some("server_state.persistence.valid"),
+        ),
+        assertion(
+            "server.persistence_tick_matches",
+            &json!(
+                persistence
+                    .and_then(|value| value.get("tick"))
+                    .and_then(Value::as_u64)
+                    .zip(server_tick)
+                    .is_some_and(|(save_tick, tick)| save_tick == tick)
+            ),
+            "==",
+            json!(true),
+            "fail",
+            "persistence snapshot does not describe the current authoritative tick",
+            Some("server_state.persistence.tick"),
+        ),
+        assertion(
+            "server.voxel_chunk_valid",
+            &json!(chunk.is_some_and(|value| {
+                let block_count = value.get("block_count").and_then(Value::as_u64);
+                let valid_count = value.get("valid_block_count").and_then(Value::as_u64);
+                block_count.is_some()
+                    && block_count == valid_count
+                    && value.get("revision").and_then(Value::as_u64).is_some()
+            })),
+            "==",
+            json!(true),
+            "fail",
+            "server voxel chunk snapshot is missing, malformed, or contains invalid block codes",
+            Some("server_state.voxel_chunk"),
+        ),
+    ]
+}
+
+fn tick_alignment(server: Option<u64>, client: Option<u64>) -> bool {
+    match (server, client) {
+        (Some(server), Some(client)) => server <= client && client - server <= 10,
+        _ => false,
+    }
 }
 
 fn visual_luma_flicker_assertions(
@@ -2126,6 +2302,7 @@ mod tests {
                 ..Default::default()
             },
             &dir,
+            None,
         );
         let started = assertions.iter().find(|a| a.id == "sim.started").unwrap();
         let complete = assertions.iter().find(|a| a.id == "sim.complete").unwrap();
@@ -2536,6 +2713,16 @@ mod tests {
 
         assert!(artifact.after.errors.is_empty());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn server_tick_alignment_allows_sampling_lag_but_not_lead_or_stale_data() {
+        assert!(tick_alignment(Some(100), Some(100)));
+        assert!(tick_alignment(Some(95), Some(100)));
+        assert!(tick_alignment(Some(90), Some(100)));
+        assert!(!tick_alignment(Some(89), Some(100)));
+        assert!(!tick_alignment(Some(101), Some(100)));
+        assert!(!tick_alignment(None, Some(100)));
     }
 
     fn temp_root(name: &str) -> std::path::PathBuf {

@@ -8,7 +8,9 @@ use bevy::prelude::*;
 use lk2_core::ecology::{ResourceNodeKind, WildlifeKind};
 
 use super::offline::OfflineNature;
-use super::state::{BerryBush, PlantNode, Rabbit, RabbitAi, WildlifeAnimal, Wolf, WolfAi};
+use super::state::{
+    BerryBush, PlantNode, Rabbit, RabbitAi, WildlifeAi, WildlifeAnimal, Wolf, WolfAi,
+};
 use super::util::{
     BEAR_PATH, BERRY_PATH, CRYSTAL_BLUE_PATH, CRYSTAL_PINK_PATH, DEER_FAWN_PATH, DEER_PATH,
     FLOWER_PATH, FOX_PATH, FOX_SILVER_PATH, MUSHROOM_BROWN_PATH, MUSHROOM_RED_PATH,
@@ -214,7 +216,14 @@ pub fn reconcile_nature_entities(
             "ecology_wildlife",
         )
         .insert(wildlife_physics_components())
-        .insert(WildlifeAnimal { id: animal.id });
+        .insert((
+            WildlifeAnimal { id: animal.id },
+            WildlifeAi {
+                target: Vec3::new(animal.x, 0.0, animal.z),
+                phase: animal.id as f32 * 1.41,
+                ..default()
+            },
+        ));
     }
 
     let plant_ids = nature

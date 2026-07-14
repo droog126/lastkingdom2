@@ -61,6 +61,7 @@ fn receive_attack_inputs(
         &lightyear::prelude::ControlledBy,
         &mut PvpCombatant,
         &SimpleWeapon,
+        &Health,
     )>,
     mut pending: ResMut<PendingAttacks>,
 ) {
@@ -70,12 +71,15 @@ fn receive_attack_inputs(
                 warn!("[pvp] dropping non-finite attack input");
                 continue;
             }
-            let Some((attacker, _, mut combatant, weapon)) = combatants
+            let Some((attacker, _, mut combatant, weapon, health)) = combatants
                 .iter_mut()
-                .find(|(_, owner, _, _)| owner.owner == connection_entity)
+                .find(|(_, owner, _, _, _)| owner.owner == connection_entity)
             else {
                 continue;
             };
+            if health.is_dead() {
+                continue;
+            }
             if combatant.begin_attack(*weapon) {
                 pending.0.push_back((attacker, input));
             }

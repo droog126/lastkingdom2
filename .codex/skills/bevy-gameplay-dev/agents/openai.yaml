@@ -1,4 +1,4 @@
 interface:
   display_name: "LK2 Bevy Gameplay"
-  short_description: "Implement Bevy runtime changes with milestone validation"
-  default_prompt: "Use $bevy-gameplay-dev to implement a Bevy runtime or gameplay integration change, batching related edits before the narrowest meaningful validation."
+  short_description: "Bevy runtime authority and validation workflow"
+  default_prompt: "Use $bevy-gameplay-dev to implement or review a Bevy runtime/gameplay integration; trace consumer context, regional authority ownership and persistence when applicable, explicit schedule edges, network authority/replication/physics chains, terrain snapshot/delta revision continuity and neighbor sampling, offline/online behavior, cleanup, and validation evidence separately from implementation status."

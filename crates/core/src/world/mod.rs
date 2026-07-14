@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::constant::*;
 use crate::resource::{ResourceKind, Transfer, TransferDst, TransferSrc, apply_transfer};
@@ -105,6 +105,46 @@ pub enum BlockType {
 }
 
 impl BlockType {
+    pub const fn to_wire_u8(self) -> u8 {
+        use BlockType::*;
+        match self {
+            Air => 0,
+            Dirt => 1,
+            Stone => 2,
+            Sand => 3,
+            Snow => 4,
+            Leaves => 5,
+            Water => 6,
+            Wood => 7,
+            IronOre => 8,
+            SunstoneOre => 9,
+            FrostcoreOre => 10,
+            LivingRoot => 11,
+            BerryThicket => 12,
+            Grass => 13,
+        }
+    }
+
+    pub const fn from_wire_u8(value: u8) -> Option<Self> {
+        Some(match value {
+            0 => Self::Air,
+            1 => Self::Dirt,
+            2 => Self::Stone,
+            3 => Self::Sand,
+            4 => Self::Snow,
+            5 => Self::Leaves,
+            6 => Self::Water,
+            7 => Self::Wood,
+            8 => Self::IronOre,
+            9 => Self::SunstoneOre,
+            10 => Self::FrostcoreOre,
+            11 => Self::LivingRoot,
+            12 => Self::BerryThicket,
+            13 => Self::Grass,
+            _ => return None,
+        })
+    }
+
     pub const fn is_solid(self) -> bool {
         !matches!(self, BlockType::Air | BlockType::Water)
     }
@@ -131,7 +171,10 @@ impl BlockType {
             Air | Dirt | Grass | Sand | Snow | Leaves | Water => None,
             Stone => Some((R::Stone, 1)),
             Wood => Some((R::Wood, 5)),
-            IronOre => Some((R::Wood, 0)),
+            // Iron has no standalone inventory kind yet; keep the ore
+            // mineable and conserved as stone until the item catalog adds
+            // ResourceKind::Iron.
+            IronOre => Some((R::Stone, 1)),
             SunstoneOre => Some((R::Sunstone, 1)),
             FrostcoreOre => Some((R::Frostcore, 1)),
             LivingRoot => Some((R::LivingRoot, 1)),
@@ -164,10 +207,19 @@ impl BlockType {
 pub struct World {
     pub blocks: Vec<BlockType>,
     pub size: i32,
+    /// Explicitly loaded chunks override the legacy finite backing array.
+    /// Unloaded cells continue to resolve through the existing generator.
+    pub loaded_chunks: TerrainChunkStore,
 
     pub procedural: bool,
 
     pub edited: HashSet<(i32, i32, i32)>,
+    /// Sparse edits outside the legacy finite backing array. Procedural
+    /// terrain can stream horizontally, so unloading a chunk must not erase
+    /// a mined block that sits beyond the original 96x96 footprint.
+    pub external_blocks: HashMap<(i32, i32, i32), BlockType>,
+    pub terrain_revision: u64,
+    pub edit_log: Vec<TerrainEdit>,
 
     pub seed: u64,
 
@@ -181,8 +233,14 @@ pub struct World {
 }
 
 pub mod content;
+pub mod chunk;
 pub mod generation;
 pub mod terrain;
+pub mod voxel_mesh;
+
+pub use chunk::{
+    TERRAIN_CHUNK_SIZE, TerrainChunk, TerrainChunkCoord, TerrainChunkStore, TerrainEdit,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldConfig {
@@ -227,8 +285,12 @@ impl World {
         Self {
             blocks: vec![BlockType::Air; n],
             size,
+            loaded_chunks: TerrainChunkStore::default(),
             procedural: false,
             edited: HashSet::new(),
+            external_blocks: HashMap::new(),
+            terrain_revision: 0,
+            edit_log: Vec::new(),
             seed: 0xDEADBEEF,
             pipeline: std::sync::Arc::new(terrain::presets::default_preset()),
             geo_overlay: Vec::new(),
@@ -274,6 +336,12 @@ impl World {
         if y < 0 || y >= s {
             return BlockType::Air;
         }
+        if let Some(block) = self.external_blocks.get(&(x, y, z)) {
+            return *block;
+        }
+        if let Some(block) = self.loaded_chunks.get_block([x, y, z]) {
+            return block;
+        }
         if x >= 0 && x < s && z >= 0 && z < s {
             let cached = self.blocks[self.idx(x, y, z)];
             if cached != BlockType::Air || self.edited.contains(&(x, y, z)) || !self.procedural {
@@ -314,12 +382,103 @@ impl World {
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, b: BlockType) {
         let s = self.size;
-        if x < 0 || x >= s || y < 0 || y >= s || z < 0 || z >= s {
+        if y < 0 || y >= s || (!self.procedural && (x < 0 || x >= s || z < 0 || z >= s)) {
             return;
         }
-        let i = self.idx(x, y, z);
-        self.blocks[i] = b;
+        let previous = self.get(x, y, z);
+        if x >= 0 && x < s && z >= 0 && z < s {
+            let i = self.idx(x, y, z);
+            self.blocks[i] = b;
+            if self
+                .loaded_chunks
+                .get(TerrainChunkCoord::from_block([x, y, z]))
+                .is_some()
+            {
+                let _ = self.loaded_chunks.set_block([x, y, z], b);
+            }
+        } else {
+            // Procedural terrain is horizontally unbounded. Materialize only
+            // the edited chunk so the legacy finite array is not a world edge.
+            let coord = TerrainChunkCoord::from_block([x, y, z]);
+            self.external_blocks.insert((x, y, z), b);
+            self.materialize_chunk(coord);
+            let _ = self.loaded_chunks.set_block([x, y, z], b);
+        }
         self.edited.insert((x, y, z));
+        if self.procedural && previous != b {
+            self.terrain_revision = self.terrain_revision.saturating_add(1);
+            self.edit_log.push(TerrainEdit {
+                position: [x, y, z],
+                from: previous,
+                to: b,
+                revision: self.terrain_revision,
+            });
+        }
+    }
+
+    pub fn terrain_revision(&self) -> u64 {
+        self.terrain_revision
+    }
+
+    pub fn terrain_edits_since(&self, revision: u64) -> impl Iterator<Item = &TerrainEdit> {
+        self.edit_log
+            .iter()
+            .filter(move |edit| edit.revision > revision)
+    }
+
+    pub fn apply_terrain_edit(&mut self, edit: TerrainEdit) -> Result<(), String> {
+        let [x, y, z] = edit.position;
+        let editable = y >= 0
+            && y < self.size
+            && (self.procedural || (0..self.size).contains(&x) && (0..self.size).contains(&z));
+        if !editable {
+            return Err(format!("terrain edit out of bounds: {:?}", edit.position));
+        }
+        let current = self.get(x, y, z);
+        if current == edit.to {
+            return Ok(());
+        }
+        if current != edit.from {
+            return Err(format!(
+                "terrain edit conflict at {:?}: expected {:?}, found {:?}",
+                edit.position, edit.from, current
+            ));
+        }
+        self.set(x, y, z, edit.to);
+        Ok(())
+    }
+
+    pub fn materialize_chunk(&mut self, coord: TerrainChunkCoord) {
+        if self.loaded_chunks.get(coord).is_some() {
+            return;
+        }
+
+        let origin = coord.origin();
+        let mut chunk = TerrainChunk::empty(coord);
+        for y in 0..TERRAIN_CHUNK_SIZE {
+            for z in 0..TERRAIN_CHUNK_SIZE {
+                for x in 0..TERRAIN_CHUNK_SIZE {
+                    let position = [origin[0] + x, origin[1] + y, origin[2] + z];
+                    let block = if position[1] >= 0
+                        && position[1] < self.size
+                        && (self.procedural
+                            || (0..self.size).contains(&position[0])
+                                && (0..self.size).contains(&position[2]))
+                    {
+                        self.get(position[0], position[1], position[2])
+                    } else {
+                        BlockType::Air
+                    };
+                    let _ = chunk.set([x, y, z], block);
+                }
+            }
+        }
+        chunk.revision = 0;
+        let _ = self.loaded_chunks.insert(coord, chunk);
+    }
+
+    pub fn unload_chunk(&mut self, coord: TerrainChunkCoord) -> Option<TerrainChunk> {
+        self.loaded_chunks.unload(coord)
     }
 
     pub fn in_bounds(&self, x: i32, y: i32, z: i32) -> bool {
@@ -698,6 +857,40 @@ pub fn gather_block(
     Ok(Some((kind, amount)))
 }
 
+/// Removes a mineable block and applies its resource drop to the shared pool.
+///
+/// Mining deliberately reuses the existing gather transaction in the first
+/// terrain slice so offline and online callers share the same conservation
+/// behavior. Presentation-specific targeting belongs outside the core.
+pub fn mine_block(
+    world: &mut World,
+    pool: &mut crate::resource::GlobalResourcePool,
+    x: i32,
+    y: i32,
+    z: i32,
+    player_id: u32,
+) -> Result<Option<(BlockType, Option<(ResourceKind, i64)>)>, String> {
+    let block = world.get(x, y, z);
+    if !block.is_solid() {
+        return Ok(None);
+    }
+
+    let drop = block.yields().filter(|(_, amount)| *amount > 0);
+    if let Some((kind, amount)) = drop {
+        let transfer = Transfer {
+            kind,
+            amount,
+            src: TransferSrc::PlayerGather(player_id),
+            dst: TransferDst::PlayerUse(player_id),
+        };
+        apply_transfer(pool, transfer)
+            .map_err(|error| format!("mine transfer failed: {}", error))?;
+    }
+
+    world.set(x, y, z, BlockType::Air);
+    Ok(Some((block, drop)))
+}
+
 pub fn visible_blocks(
     world: &World,
     px: i32,
@@ -727,11 +920,12 @@ pub fn visible_blocks(
 pub const PLAYER_BODY_CLEARANCE_BLOCKS: i32 = 2;
 pub const MAX_SMOOTH_DROP: f32 = 6.0;
 
+fn horizontal_in_bounds(world: &World, x: i32, z: i32) -> bool {
+    world.procedural || ((0..world.size).contains(&x) && (0..world.size).contains(&z))
+}
+
 pub fn player_body_clear(world: &World, x: i32, foot_y: i32, z: i32) -> bool {
-    if x < 0
-        || x >= world.size
-        || z < 0
-        || z >= world.size
+    if !horizontal_in_bounds(world, x, z)
         || foot_y < 0
         || foot_y + PLAYER_BODY_CLEARANCE_BLOCKS > world.size
     {
@@ -746,7 +940,7 @@ pub fn player_body_clear(world: &World, x: i32, foot_y: i32, z: i32) -> bool {
 }
 
 fn standable_foot_y(world: &World, x: i32, z: i32, near_y: f32, max_step_up: f32) -> Option<i32> {
-    if x < 0 || x >= world.size || z < 0 || z >= world.size {
+    if !horizontal_in_bounds(world, x, z) {
         return None;
     }
     let min_y = ((near_y - MAX_SMOOTH_DROP).floor() as i32).max(1);
@@ -763,7 +957,7 @@ fn standable_foot_y(world: &World, x: i32, z: i32, near_y: f32, max_step_up: f32
 }
 
 fn standable_foot_y_any_height(world: &World, x: i32, z: i32) -> Option<i32> {
-    if x < 0 || x >= world.size || z < 0 || z >= world.size {
+    if !horizontal_in_bounds(world, x, z) {
         return None;
     }
     (1..(world.size - 2)).rev().find(|foot_y| {
@@ -867,7 +1061,8 @@ pub fn player_position_is_safe(world: &World, pos: Vec3) -> bool {
     let x = pos.x.floor() as i32;
     let z = pos.z.floor() as i32;
     let foot_y = pos.y.floor() as i32;
-    world.in_bounds(x, foot_y, z)
+    horizontal_in_bounds(world, x, z)
+        && (0..world.size).contains(&foot_y)
         && foot_y > 0
         && world.get(x, foot_y - 1, z).is_solid()
         && player_body_clear(world, x, foot_y, z)
@@ -1058,6 +1253,43 @@ mod tests {
     }
 
     #[test]
+    fn materialized_chunk_overrides_generation_and_unloads_cleanly() {
+        let mut world = World::with_pipeline(WORLD_SIZE, terrain::presets::default_preset());
+        let coord = TerrainChunkCoord::new(1, 0, 1);
+        let position = [coord.origin()[0] + 2, 4, coord.origin()[2] + 3];
+        let generated = world.get(position[0], position[1], position[2]);
+
+        world.materialize_chunk(coord);
+        assert_eq!(world.get(position[0], position[1], position[2]), generated);
+        world.set(position[0], position[1], position[2], BlockType::IronOre);
+        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::IronOre);
+        assert_eq!(world.terrain_revision(), 1);
+        let edits: Vec<_> = world.terrain_edits_since(0).copied().collect();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].to, BlockType::IronOre);
+
+        let unloaded = world.unload_chunk(coord).expect("chunk should be loaded");
+        assert!(unloaded.revision > 0);
+        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::IronOre);
+    }
+
+    #[test]
+    fn procedural_horizontal_edits_survive_chunk_unload() {
+        let mut world = World::with_pipeline(16, terrain::presets::default_preset());
+        let position = [-1, 6, 16];
+
+        world.set(position[0], position[1], position[2], BlockType::Stone);
+        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::Stone);
+        let coord = TerrainChunkCoord::from_block(position);
+        assert!(world.loaded_chunks.get(coord).is_some());
+
+        let unloaded = world.unload_chunk(coord).expect("edited chunk should be loaded");
+        assert_eq!(unloaded.get(TerrainChunkCoord::local_position(position)), Some(BlockType::Stone));
+        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::Stone);
+        assert_eq!(world.terrain_edits_since(0).count(), 1);
+    }
+
+    #[test]
     fn gather_wood_adds_to_pool() {
         let mut w = World::new(8);
         w.set(1, 1, 1, BlockType::Wood);
@@ -1097,6 +1329,7 @@ mod tests {
     #[test]
     fn block_yields_match() {
         assert_eq!(BlockType::Stone.yields(), Some((ResourceKind::Stone, 1)));
+        assert_eq!(BlockType::IronOre.yields(), Some((ResourceKind::Stone, 1)));
         assert_eq!(
             BlockType::SunstoneOre.yields(),
             Some((ResourceKind::Sunstone, 1))
@@ -1106,6 +1339,30 @@ mod tests {
             BlockType::BerryThicket.yields(),
             Some((ResourceKind::Apple, 1))
         );
+    }
+
+    #[test]
+    fn block_wire_ids_round_trip() {
+        let blocks = [
+            BlockType::Air,
+            BlockType::Dirt,
+            BlockType::Stone,
+            BlockType::Sand,
+            BlockType::Snow,
+            BlockType::Leaves,
+            BlockType::Water,
+            BlockType::Wood,
+            BlockType::IronOre,
+            BlockType::SunstoneOre,
+            BlockType::FrostcoreOre,
+            BlockType::LivingRoot,
+            BlockType::BerryThicket,
+            BlockType::Grass,
+        ];
+        for block in blocks {
+            assert_eq!(BlockType::from_wire_u8(block.to_wire_u8()), Some(block));
+        }
+        assert_eq!(BlockType::from_wire_u8(u8::MAX), None);
     }
 
     #[test]
@@ -1119,6 +1376,45 @@ mod tests {
         assert_eq!(result, Some((ResourceKind::Stone, 1)));
         assert_eq!(pool.get(ResourceKind::Stone), 1);
         assert_eq!(world.get(1, 1, 1), BlockType::Air);
+    }
+
+    #[test]
+    fn mine_block_removes_solid_and_returns_drop() {
+        let mut world = World::new(8);
+        world.set(2, 2, 2, BlockType::Stone);
+        let mut pool = GlobalResourcePool::new();
+
+        let result = mine_block(&mut world, &mut pool, 2, 2, 2, 7).unwrap();
+
+        assert_eq!(
+            result,
+            Some((BlockType::Stone, Some((ResourceKind::Stone, 1))))
+        );
+        assert_eq!(world.get(2, 2, 2), BlockType::Air);
+        assert_eq!(pool.get(ResourceKind::Stone), 1);
+    }
+
+    #[test]
+    fn mining_air_is_idempotently_rejected() {
+        let mut world = World::new(8);
+        let mut pool = GlobalResourcePool::new();
+
+        assert_eq!(mine_block(&mut world, &mut pool, 2, 2, 2, 7).unwrap(), None);
+        assert_eq!(world.get(2, 2, 2), BlockType::Air);
+        assert_eq!(pool.get(ResourceKind::Stone), 0);
+    }
+
+    #[test]
+    fn mining_surface_material_removes_it_without_a_drop() {
+        let mut world = World::new(8);
+        world.set(2, 2, 2, BlockType::Dirt);
+        let mut pool = GlobalResourcePool::new();
+
+        let result = mine_block(&mut world, &mut pool, 2, 2, 2, 7).unwrap();
+
+        assert_eq!(result, Some((BlockType::Dirt, None)));
+        assert_eq!(world.get(2, 2, 2), BlockType::Air);
+        assert_eq!(pool.get(ResourceKind::Stone), 0);
     }
 
     #[test]

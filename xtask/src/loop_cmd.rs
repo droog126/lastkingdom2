@@ -33,10 +33,7 @@ struct LoopArgs {
     offline: bool,
     no_server: bool,
     server_addr: String,
-    first_person: bool,
     audit_pretty_models: bool,
-    legacy_voxel: bool,
-    hold_forward_test: bool,
     refresh_after_fail: bool,
 }
 
@@ -79,10 +76,7 @@ impl Default for LoopArgs {
             offline: false,
             no_server: false,
             server_addr: "127.0.0.1:5000".to_string(),
-            first_person: false,
             audit_pretty_models: false,
-            legacy_voxel: false,
-            hold_forward_test: false,
             refresh_after_fail: false,
         }
     }
@@ -122,7 +116,7 @@ impl Default for FlickerProbeArgs {
 pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
         println!(
-            "xtask loop --offline --seconds 12 --skip-build --no-dynamic --first-person --refresh-after-fail --gpu-backend vulkan"
+            "xtask loop --offline --seconds 12 --skip-build --no-dynamic --refresh-after-fail --gpu-backend vulkan"
         );
         return Ok(());
     }
@@ -155,10 +149,10 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
     let client_exe = exe_path(&target_dir, "lk2-client");
     let server_exe = exe_path(&target_dir, "lk2-server");
     if !parsed.skip_build || !client_exe.exists() {
-        cargo_build_with_fallback(root, "lk2-client", &features, &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", &features, &envs, false)?;
     }
     if !use_offline && !parsed.no_server && (!parsed.skip_build || !server_exe.exists()) {
-        cargo_build_with_fallback(root, "lk2-server", &features, &envs)?;
+        cargo_build_with_fallback(root, "lk2-server", &features, &envs, false)?;
     }
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
@@ -218,15 +212,6 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             ],
         )
     };
-    if parsed.first_person {
-        client_args.push("--first-person".to_string());
-    }
-    if parsed.legacy_voxel {
-        client_args.push("--legacy-voxel".to_string());
-    }
-    if parsed.hold_forward_test {
-        client_args.push("--hold-forward-test".to_string());
-    }
 
     let mut server_proc = None;
     if mode == "online" {
@@ -353,7 +338,7 @@ pub fn flicker_probe(root: &Path, raw: &[String]) -> Result<()> {
 
     let client_exe = exe_path(&target_dir, "lk2-client");
     if !parsed.skip_build || !client_exe.exists() {
-        cargo_build_with_fallback(root, "lk2-client", &[], &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", &[], &envs, false)?;
     }
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
@@ -479,10 +464,10 @@ pub fn play(root: &Path, raw: &[String]) -> Result<()> {
     let client_exe = exe_path(&target_dir, "lk2-client");
     let server_exe = exe_path(&target_dir, "lk2-server");
     if !parsed.skip_build || !client_exe.exists() {
-        cargo_build_with_fallback(root, "lk2-client", &[], &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", &[], &envs, true)?;
     }
     if parsed.online && (!parsed.skip_build || !server_exe.exists()) {
-        cargo_build_with_fallback(root, "lk2-server", &[], &envs)?;
+        cargo_build_with_fallback(root, "lk2-server", &[], &envs, true)?;
     }
     if !client_exe.exists() {
         return Err(format!("binary not found: {}", client_exe.display()));
@@ -572,7 +557,7 @@ pub fn scenario(root: &Path, raw: &[String]) -> Result<()> {
     )?;
     let client_exe = exe_path(&target_dir, "lk2-client");
     if !skip_build || !client_exe.exists() {
-        cargo_build_with_fallback(root, "lk2-client", &[], &envs)?;
+        cargo_build_with_fallback(root, "lk2-client", &[], &envs, false)?;
     }
     stage_windows_runtime_files(root, &target_dir)?;
     let files = expand_pattern(root, &json)?;
@@ -637,12 +622,9 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
                     parsed.server_addr = value;
                 }
             }
-            Some("firstperson") | Some("first-person") => parsed.first_person = true,
             Some("auditprettymodels") | Some("audit-pretty-models") => {
                 parsed.audit_pretty_models = true
             }
-            Some("legacyvoxel") | Some("legacy-voxel") => parsed.legacy_voxel = true,
-            Some("holdforwardtest") | Some("hold-forward-test") => parsed.hold_forward_test = true,
             Some("refreshafterfail") | Some("refresh-after-fail") => {
                 parsed.refresh_after_fail = true
             }
@@ -896,15 +878,16 @@ fn cargo_build_with_fallback(
     package: &str,
     features: &[&str],
     envs: &[(String, String)],
+    incremental: bool,
 ) -> Result<()> {
-    match cargo_build_once(root, package, features, envs) {
+    match cargo_build_once(root, package, features, envs, incremental) {
         Ok(()) => Ok(()),
         Err(first) if !features.is_empty() && is_dynamic_link_failure(&first.text) => {
             println!(
                 ">>> dynamic-link build failed for {package}; retrying static build without dynamic features"
             );
             write_loop_diagnosis(root, &build_diagnosis(&first, "retry_static_build"))?;
-            match cargo_build_once(root, package, &[], envs) {
+            match cargo_build_once(root, package, &[], envs, incremental) {
                 Ok(()) => Ok(()),
                 Err(second) => {
                     write_loop_diagnosis(
@@ -925,7 +908,7 @@ fn cargo_build_with_fallback(
                 &build_diagnosis(&first, "clean_package_and_retry_build"),
             )?;
             cargo_clean_package(root, package, envs)?;
-            match cargo_build_once(root, package, features, envs) {
+            match cargo_build_once(root, package, features, envs, incremental) {
                 Ok(()) => Ok(()),
                 Err(second) => {
                     write_loop_diagnosis(
@@ -948,7 +931,7 @@ fn cargo_build_with_fallback(
                 &build_diagnosis(&first, "clear_loop_target_and_retry_build"),
             )?;
             clear_loop_target(root, envs)?;
-            match cargo_build_once(root, package, features, envs) {
+            match cargo_build_once(root, package, features, envs, incremental) {
                 Ok(()) => Ok(()),
                 Err(second) => {
                     write_loop_diagnosis(
@@ -977,6 +960,7 @@ fn cargo_build_once(
     package: &str,
     features: &[&str],
     envs: &[(String, String)],
+    incremental: bool,
 ) -> std::result::Result<(), BuildFailure> {
     let mut cmd = Command::new("cargo");
     let build_jobs = env::var("CARGO_BUILD_JOBS").unwrap_or_else(|_| "1".to_string());
@@ -990,7 +974,12 @@ fn cargo_build_once(
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    cmd.env("CARGO_INCREMENTAL", "0");
+    if incremental {
+        cmd.env("CARGO_BUILD_RUSTC_WRAPPER", "");
+        cmd.env_remove("RUSTC_WRAPPER");
+        cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
+    }
+    cmd.env("CARGO_INCREMENTAL", if incremental { "1" } else { "0" });
     println!(">>> {:?}", cmd);
     let log_path = root.join("run-logs/build_loop.log");
     let _ = fs::create_dir_all(root.join("run-logs"));
@@ -2237,20 +2226,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_legacy_dash_flags() {
+    fn parses_powershell_style_dash_flags() {
         let parsed = parse_loop(&[
             "-Offline".into(),
             "-Seconds".into(),
             "12".into(),
             "-Dynamic:$false".into(),
-            "-FirstPerson".into(),
-            "--legacy-voxel".into(),
         ]);
         assert!(parsed.offline);
         assert_eq!(parsed.seconds, 12);
         assert!(!parsed.dynamic);
-        assert!(parsed.first_person);
-        assert!(parsed.legacy_voxel);
     }
 
     #[test]
@@ -2279,21 +2264,12 @@ mod tests {
 
     #[test]
     fn play_args_keep_extra_client_flags_and_skip_build() {
-        let parsed = parse_play(&[
-            "--skip-build".into(),
-            "--first-person".into(),
-            "--legacy-voxel".into(),
-        ]);
+        let parsed = parse_play(&["--skip-build".into(), "--first-person".into()]);
 
         assert!(parsed.skip_build);
         assert_eq!(
             parsed.client_args,
-            vec![
-                "--offline",
-                "--no-scenario",
-                "--first-person",
-                "--legacy-voxel"
-            ]
+            vec!["--offline", "--no-scenario", "--first-person",]
         );
     }
 

@@ -18,12 +18,23 @@ dev-dynamic-linking = ["bevy/dynamic_linking"]
 bevy = { workspace = true, features = ["system_font_discovery"] }
 bevy_hanabi = { workspace = true }
 bevy_world_serialization = { workspace = true }
-avian3d = { workspace = true }
+avian3d = { workspace = true, features = [
+    "3d",
+    "f32",
+    "parry-f32",
+    "parallel",
+    "debug-plugin",
+    "xpbd_joints",
+    "collider-from-mesh",
+    "bevy_scene",
+    "bevy_picking",
+] }
 bevy-tnua = { workspace = true }
 bevy-tnua-avian3d = { workspace = true }
-lk2-core = { workspace = true }
+lk2-core = { workspace = true, features = ["client-network"] }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["std", "client", "udp", "replication", "netcode"] }
+lightyear_avian3d = { workspace = true }
 lightyear_netcode = { workspace = true, features = ["std", "client"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

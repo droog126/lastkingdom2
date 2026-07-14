@@ -2,6 +2,10 @@
 
 pub const SLOW_TICK_SECS: f32 = 1.0;
 
+/// Maximum number of slow simulation ticks processed in one authority call.
+/// Remaining elapsed time stays in the accumulator for a later call.
+pub const MAX_CATCH_UP_TICKS: u32 = 8;
+
 pub const FAST_TICK_SECS: f32 = 0.2;
 
 pub const VERTICAL_SIZE: i32 = 96;

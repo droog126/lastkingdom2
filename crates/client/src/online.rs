@@ -1,8 +1,11 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
 
+use bevy::asset::RenderAssetUsages;
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::render::{
@@ -11,12 +14,16 @@ use bevy::render::{
 };
 use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, WindowResolution};
+use bevy_world_serialization::WorldAssetRoot;
 use leafwing_input_manager::prelude::{ActionState, InputMap};
 use lightyear::prelude::{Connect, LocalAddr, PeerAddr, UdpIo, client::ClientPlugins};
 use lightyear::prelude::{MessageReceiver, MessageSender};
 use lightyear_netcode::prelude::Authentication;
 use lightyear_netcode::prelude::client::{NetcodeClient, NetcodeConfig};
-use lk2_core::protocol::components::{EcoSnapshot, GameplayHudState, PlayerPos};
+use lk2_core::protocol::components::{
+    CartMounted, CartState, EcoSnapshot, GameplayHudState, PlayerPos, VoxelChunkSnapshot,
+    VoxelDelta, VOXEL_CHUNK_SIZE_XZ,
+};
 use lk2_core::protocol::messages::{
     AttackInput, BuildRecipe, ChatBroadcast, ChatMessage, GameplayCommand, GameplayCommandKind,
 };
@@ -28,23 +35,46 @@ use lk2_core::transport::{
 use serde_json::json;
 
 use crate::nature::{NatureSnapshotBuffer, nature_snapshot_from_protocol};
+use lk2_core::world::BlockType;
+use lk2_core::world::voxel_mesh::{SurfaceNetsMesh, build_surface_nets_rect};
 
 #[derive(Resource, Clone, Copy)]
 struct OnlineConnection {
     server_addr: SocketAddr,
+    client_id: u64,
 }
 
 #[derive(Resource)]
 struct OnlineVisualAssets {
     player_mesh: Handle<Mesh>,
     player_material: Handle<StandardMaterial>,
+    terrain_material: Handle<StandardMaterial>,
+    ore_materials: [Handle<StandardMaterial>; 4],
 }
+
+#[derive(Component)]
+struct OnlinePlayerVisualRoot;
 
 #[derive(Component)]
 struct OnlinePlayerVisual;
 
 #[derive(Component)]
+struct OnlineCartVisual {
+    cart: Entity,
+    last_position: Vec3,
+    animation_phase: f32,
+}
+
+#[derive(Component)]
 struct OnlineCamera;
+
+#[derive(Component)]
+struct OnlineTerrainSurface;
+
+#[derive(Component)]
+struct OnlineOreSurface {
+    block: BlockType,
+}
 
 #[derive(Component)]
 struct OnlineHudText;
@@ -59,6 +89,32 @@ struct OnlineChatState {
     log: Vec<String>,
 }
 
+#[derive(Resource, Default)]
+struct OnlineReconnectState {
+    cooldown_secs: f32,
+    attempts: u8,
+}
+
+const ONLINE_RECONNECT_MAX_ATTEMPTS: u8 = 40;
+const ONLINE_RECONNECT_COOLDOWN_SECS: f32 = 2.0;
+
+#[derive(Resource, Default)]
+struct OnlineCommandSequence(u64);
+
+#[derive(Resource, Default)]
+struct OnlineTerrainEdits {
+    latest_revision: u64,
+    snapshot_revision: u64,
+    snapshot_chunk: Option<(i32, i32)>,
+    snapshot_border: i32,
+    y_min: i32,
+    y_size: i32,
+    has_snapshot: bool,
+    dirty: bool,
+    awaiting_snapshot: bool,
+    blocks: HashMap<[i32; 3], BlockType>,
+}
+
 #[derive(Resource)]
 struct OnlineAutoDemo {
     enabled: bool,
@@ -68,6 +124,8 @@ struct OnlineAutoDemo {
     frame: u64,
     frame_dt_over_50ms: u64,
     frame_dt_max_ms: f32,
+    first_player_pos: Option<Vec3>,
+    move_world_sent: u64,
     shot_requested: bool,
     exit_deadline: Option<Instant>,
 }
@@ -90,6 +148,8 @@ impl OnlineAutoDemo {
             frame: 0,
             frame_dt_over_50ms: 0,
             frame_dt_max_ms: 0.0,
+            first_player_pos: None,
+            move_world_sent: 0,
             shot_requested: false,
             exit_deadline: None,
         }
@@ -103,6 +163,11 @@ pub fn run_online_scene() {
             .parse()
             .expect("default local server address must parse")
     });
+    let client_id = args
+        .iter()
+        .find_map(|arg| arg.strip_prefix("--client-id=")?.parse().ok())
+        .filter(|client_id| *client_id != 0)
+        .unwrap_or_else(generate_client_id);
 
     let mut app = App::new();
     app.add_plugins(
@@ -135,21 +200,31 @@ pub fn run_online_scene() {
     // so the Leafwing input plugin can attach its client systems in `finish`.
     .add_plugins(ClientPlugins::default())
     .add_plugins(ProtocolPlugin)
-    .insert_resource(OnlineConnection { server_addr })
+    .insert_resource(OnlineConnection {
+        server_addr,
+        client_id,
+    })
     .insert_resource(OnlineAutoDemo::from_args(&args))
     .init_resource::<OnlineChatState>()
+    .init_resource::<OnlineReconnectState>()
+    .init_resource::<OnlineCommandSequence>()
+    .init_resource::<OnlineTerrainEdits>()
     .init_resource::<NatureSnapshotBuffer>()
     .add_systems(Startup, (setup_online_scene, spawn_netcode_client).chain())
     .add_systems(
         Update,
         (
             connect_netcode_client,
+            reconnect_online_client,
             install_player_input_maps,
             handle_online_chat_input,
             suppress_online_actions_while_chatting,
             send_online_action_messages,
             receive_online_chat_messages,
             sync_replicated_players,
+            sync_online_terrain_mesh,
+            cleanup_replicated_player_visuals,
+            sync_replicated_carts,
             update_online_overlay,
             update_online_chat_ui,
             follow_online_camera,
@@ -181,17 +256,69 @@ fn setup_online_scene(
 ) {
     let player_mesh = meshes.add(Cuboid::new(0.8, 1.8, 0.8));
     let player_material = materials.add(Color::srgb(0.22, 0.78, 0.42));
+    let terrain_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.30, 0.34, 0.31),
+        perceptual_roughness: 0.92,
+        ..default()
+    });
+    let ore_materials = [
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.72, 0.45, 0.28),
+            emissive: Color::srgb(0.08, 0.025, 0.01).into(),
+            perceptual_roughness: 0.72,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.42, 0.08),
+            emissive: Color::srgb(0.25, 0.035, 0.005).into(),
+            perceptual_roughness: 0.58,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.34, 0.78, 1.0),
+            emissive: Color::srgb(0.02, 0.12, 0.28).into(),
+            perceptual_roughness: 0.42,
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.20, 0.82, 0.32),
+            emissive: Color::srgb(0.01, 0.10, 0.02).into(),
+            perceptual_roughness: 0.70,
+            ..default()
+        }),
+    ];
     let floor_mesh = meshes.add(Cuboid::new(80.0, 0.2, 80.0));
     let floor_material = materials.add(Color::srgb(0.24, 0.32, 0.28));
     commands.insert_resource(OnlineVisualAssets {
         player_mesh,
         player_material,
+        terrain_material: terrain_material.clone(),
+        ore_materials: ore_materials.clone(),
     });
     commands.spawn((
         Mesh3d(floor_mesh),
         MeshMaterial3d(floor_material),
         Transform::from_xyz(0.0, -0.1, 0.0),
     ));
+    commands.spawn((
+        Mesh3d(meshes.add(empty_online_mesh())),
+        MeshMaterial3d(terrain_material),
+        OnlineTerrainSurface,
+        Name::new("online_smooth_terrain"),
+    ));
+    for (block, material) in [
+        (BlockType::IronOre, ore_materials[0].clone()),
+        (BlockType::SunstoneOre, ore_materials[1].clone()),
+        (BlockType::FrostcoreOre, ore_materials[2].clone()),
+        (BlockType::LivingRoot, ore_materials[3].clone()),
+    ] {
+        commands.spawn((
+            Mesh3d(meshes.add(empty_online_mesh())),
+            MeshMaterial3d(material),
+            OnlineOreSurface { block },
+            Name::new(format!("online_{block:?}_vein")),
+        ));
+    }
     commands.spawn((
         Camera3d::default(),
         OnlineCamera,
@@ -201,10 +328,16 @@ fn setup_online_scene(
         DirectionalLight {
             illuminance: 18_000.0,
             shadow_maps_enabled: true,
+            color: Color::srgb(1.0, 0.91, 0.76),
             ..default()
         },
         Transform::from_xyz(-8.0, 16.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+    commands.insert_resource(GlobalAmbientLight {
+        color: Color::srgb(0.78, 0.86, 0.82),
+        brightness: 140.0,
+        affects_lightmapped_meshes: true,
+    });
     commands.insert_resource(ClearColor(Color::srgb(0.45, 0.62, 0.78)));
     commands.spawn((
         Node {
@@ -258,9 +391,13 @@ fn setup_online_scene(
 }
 
 fn spawn_netcode_client(mut commands: Commands, connection: Res<OnlineConnection>) {
+    spawn_netcode_client_entity(&mut commands, &connection);
+}
+
+fn spawn_netcode_client_entity(commands: &mut Commands, connection: &OnlineConnection) {
     let auth = Authentication::Manual {
         server_addr: connection.server_addr,
-        client_id: generate_client_id(),
+        client_id: connection.client_id,
         private_key: PRIVATE_KEY,
         protocol_id: PROTOCOL_ID,
     };
@@ -297,21 +434,48 @@ fn connect_netcode_client(
     }
 }
 
+fn reconnect_online_client(
+    mut commands: Commands,
+    time: Res<Time>,
+    connection: Res<OnlineConnection>,
+    mut reconnect: ResMut<OnlineReconnectState>,
+    clients: Query<Entity, With<NetcodeClient>>,
+    disconnected: Query<Entity, Added<lightyear::prelude::Disconnected>>,
+) {
+    reconnect.cooldown_secs = (reconnect.cooldown_secs - time.delta_secs()).max(0.0);
+    for entity in &disconnected {
+        reconnect.attempts = reconnect.attempts.saturating_add(1);
+        reconnect.cooldown_secs = ONLINE_RECONNECT_COOLDOWN_SECS;
+        commands.entity(entity).despawn();
+        warn!(
+            "[net] connection lost; reconnect attempt {}/{} will reuse client_id={} after server timeout backoff",
+            reconnect.attempts,
+            ONLINE_RECONNECT_MAX_ATTEMPTS,
+            connection.client_id
+        );
+    }
+    if reconnect.attempts == 0
+        || reconnect.attempts > ONLINE_RECONNECT_MAX_ATTEMPTS
+        || reconnect.cooldown_secs > 0.0
+        || !clients.is_empty()
+    {
+        return;
+    }
+    spawn_netcode_client_entity(&mut commands, &connection);
+}
+
 fn install_player_input_maps(
     mut commands: Commands,
     clients: Query<Entity, With<NetcodeClient>>,
     players: Query<
-        (Entity, &lightyear::prelude::ControlledBy),
+        (Entity, &lightyear::prelude::Controlled),
         (With<PlayerPos>, Without<InputMap<PlayerAction>>),
     >,
 ) {
-    let Ok(client_entity) = clients.single() else {
+    if clients.single().is_err() {
         return;
-    };
-    for (entity, controlled_by) in players.iter() {
-        if controlled_by.owner != client_entity {
-            continue;
-        }
+    }
+    for (entity, _) in players.iter() {
         let mut input_map = InputMap::default();
         input_map.insert(PlayerAction::MoveForward, KeyCode::KeyW);
         input_map.insert(PlayerAction::MoveBackward, KeyCode::KeyS);
@@ -320,19 +484,30 @@ fn install_player_input_maps(
         input_map.insert(PlayerAction::Jump, KeyCode::Space);
         input_map.insert(PlayerAction::Sprint, KeyCode::ShiftLeft);
         input_map.insert(PlayerAction::Attack, KeyCode::KeyF);
+        input_map.insert(PlayerAction::Mine, KeyCode::KeyM);
         input_map.insert(PlayerAction::Gather, KeyCode::KeyG);
         input_map.insert(PlayerAction::Place, KeyCode::KeyP);
         input_map.insert(PlayerAction::Craft, KeyCode::KeyH);
         input_map.insert(PlayerAction::FoundNation, KeyCode::KeyJ);
         input_map.insert(PlayerAction::KillCreature, KeyCode::KeyK);
+        input_map.insert(PlayerAction::Interact, KeyCode::KeyR);
         commands.entity(entity).insert(input_map);
     }
 }
 
 fn send_online_action_messages(
-    players: Query<(&ActionState<PlayerAction>, Option<&GameplayHudState>), With<PlayerPos>>,
+    players: Query<
+        (
+            &ActionState<PlayerAction>,
+            Option<&GameplayHudState>,
+            &lightyear::prelude::Controlled,
+        ),
+        With<PlayerPos>,
+    >,
     cameras: Query<&Transform, With<OnlineCamera>>,
     chat: Res<OnlineChatState>,
+    mut demo: ResMut<OnlineAutoDemo>,
+    mut command_sequence: ResMut<OnlineCommandSequence>,
     mut clients: Query<
         (
             &mut MessageSender<GameplayCommand>,
@@ -344,17 +519,31 @@ fn send_online_action_messages(
     if chat.composing {
         return;
     }
-    let Ok((actions, hud)) = players.single() else {
+    let Ok((mut gameplay_sender, mut attack_sender)) = clients.single_mut() else {
         return;
     };
-    let Ok((mut gameplay_sender, mut attack_sender)) = clients.single_mut() else {
+    let Some((actions, hud, _)) = players.iter().next() else {
         return;
     };
     let tick = hud.map_or(0, |state| state.tick.min(u32::MAX as u64) as u32);
     let player_block = hud.map_or([0, 0, 0], |state| state.player_block_pos);
 
+    if demo.enabled && demo.elapsed < 3.5 {
+        gameplay_sender.send::<ControlChannel>(GameplayCommand {
+            sequence: next_online_command_sequence(&mut command_sequence),
+            tick: tick as u64,
+            player_block,
+            kind: GameplayCommandKind::MoveWorld {
+                dx_milli: 0,
+                dz_milli: -1000,
+            },
+        });
+        demo.move_world_sent = demo.move_world_sent.saturating_add(1);
+    }
+
     let mut send_command = |kind: GameplayCommandKind| {
         gameplay_sender.send::<ControlChannel>(GameplayCommand {
+            sequence: next_online_command_sequence(&mut command_sequence),
             tick: tick as u64,
             player_block,
             kind,
@@ -376,6 +565,9 @@ fn send_online_action_messages(
     if actions.just_pressed(&PlayerAction::KillCreature) {
         send_command(GameplayCommandKind::KillNearestCreature);
     }
+    if actions.just_pressed(&PlayerAction::Interact) {
+        send_command(GameplayCommandKind::MountCart);
+    }
     if actions.just_pressed(&PlayerAction::Attack) {
         let input_dir = cameras
             .single()
@@ -383,12 +575,24 @@ fn send_online_action_messages(
             .unwrap_or(-Vec3::Z);
         attack_sender.send::<ControlChannel>(AttackInput { tick, input_dir });
     }
+    if actions.just_pressed(&PlayerAction::Mine) {
+        let target = [player_block[0], player_block[1] - 1, player_block[2]];
+        send_command(GameplayCommandKind::MineTarget { target });
+    }
+}
+
+fn next_online_command_sequence(sequence: &mut OnlineCommandSequence) -> u64 {
+    sequence.0 = sequence.0.wrapping_add(1);
+    if sequence.0 == 0 {
+        sequence.0 = 1;
+    }
+    sequence.0
 }
 
 fn handle_online_chat_input(
     mut keyboard_inputs: MessageReader<KeyboardInput>,
     mut chat: ResMut<OnlineChatState>,
-    players: Query<Option<&GameplayHudState>, With<PlayerPos>>,
+    players: Query<(Option<&GameplayHudState>, &lightyear::prelude::Controlled), With<PlayerPos>>,
     mut clients: Query<&mut MessageSender<ChatMessage>, With<NetcodeClient>>,
 ) {
     for event in keyboard_inputs.read() {
@@ -402,12 +606,15 @@ fn handle_online_chat_input(
                     chat.draft.clear();
                     chat.composing = false;
                     if !text.is_empty() {
+                        let Ok(mut sender) = clients.single_mut() else {
+                            continue;
+                        };
                         let tick = players
                             .iter()
                             .next()
-                            .and_then(|hud| hud.map(|state| state.tick))
+                            .and_then(|(hud, _)| hud.map(|state| state.tick))
                             .unwrap_or(0);
-                        if let Ok(mut sender) = clients.single_mut() {
+                        {
                             sender.send::<ControlChannel>(ChatMessage {
                                 client_tick: tick,
                                 text,
@@ -517,56 +724,405 @@ fn sync_replicated_players(
     mut players: Query<(
         Entity,
         &PlayerPos,
+        Option<&CartMounted>,
         Option<&EcoSnapshot>,
+        Option<&VoxelDelta>,
+        Option<&VoxelChunkSnapshot>,
+        Option<&lightyear::prelude::Controlled>,
+        Option<&Children>,
+        Option<&OnlinePlayerVisualRoot>,
         Option<&mut Transform>,
-        Option<&mut OnlinePlayerVisual>,
-    )>,
+    ),
+        Without<OnlinePlayerVisual>,
+    >,
     mut nature: ResMut<NatureSnapshotBuffer>,
+    mut terrain: ResMut<OnlineTerrainEdits>,
+    mut visuals: Query<&mut Transform, With<OnlinePlayerVisual>>,
 ) {
-    for (entity, position, eco_snapshot, transform, visual) in players.iter_mut() {
-        if let Some(snapshot) = eco_snapshot {
-            let _ = nature.push(nature_snapshot_from_protocol(snapshot));
+    for (
+        entity,
+        legacy_position,
+        mounted,
+        eco_snapshot,
+        voxel_delta,
+        voxel_snapshot,
+        controlled_by,
+        children,
+        visual_root,
+        transform,
+    ) in players.iter_mut()
+    {
+        let is_locally_controlled = controlled_by.is_some();
+        if is_locally_controlled {
+            if let Some(snapshot) = voxel_snapshot {
+                apply_online_snapshot(&mut terrain, snapshot);
+            }
+            if let Some(delta) = voxel_delta {
+                if terrain.awaiting_snapshot {
+                    // A full snapshot is the only safe recovery path after
+                    // an ordered terrain update gap.
+                } else if delta.revision > terrain.latest_revision.saturating_add(1) {
+                    warn!(
+                        "[net] terrain revision gap: have {}, received {}; awaiting snapshot",
+                        terrain.latest_revision, delta.revision
+                    );
+                    terrain.awaiting_snapshot = true;
+                } else if terrain_delta_is_contiguous(terrain.latest_revision, delta.revision) {
+                    terrain.latest_revision = delta.revision;
+                    terrain.blocks.insert(
+                        [delta.x, delta.y, delta.z],
+                        BlockType::from_wire_u8(delta.block).unwrap_or(BlockType::Air),
+                    );
+                    terrain.dirty = true;
+                }
+            }
+            if let Some(snapshot) = eco_snapshot {
+                let _ = nature.push(nature_snapshot_from_protocol(snapshot));
+            }
         }
-        // Lightyear applies replicated components in PreUpdate. This system
-        // runs afterward and is the sole writer of online player visual
-        // transforms, so the server's PlayerPos remains authoritative for
-        // both the locally controlled player and remote players.
-        if !position.is_finite() {
+        // Lightyear owns the replicated entity's Transform. The mesh lives on
+        // a child entity so Avian correction cannot overwrite visual offsets.
+        if !legacy_position.is_finite() {
             warn!(
                 "[net] ignored non-finite authoritative PlayerPos on {:?}",
                 entity
             );
             continue;
         }
-        if visual.is_none() {
-            commands.entity(entity).insert((
-                OnlinePlayerVisual,
-                Mesh3d(assets.player_mesh.clone()),
-                MeshMaterial3d(assets.player_material.clone()),
-                Transform::from_translation(position.0),
-            ));
+        let seated = mounted.is_some_and(|mounted| mounted.0);
+        let visual_translation = if seated { -Vec3::Y * 0.18 } else { Vec3::ZERO };
+        let visual_scale = if seated {
+            Vec3::new(1.0, 0.78, 1.0)
+        } else {
+            Vec3::ONE
+        };
+        if transform.is_none() {
+            commands
+                .entity(entity)
+                .insert(Transform::from_translation(legacy_position.0));
         } else if let Some(mut transform) = transform {
-            transform.translation = position.0;
+            transform.translation = legacy_position.0;
+        }
+        let visual_child = children.and_then(|children| {
+            children
+                .iter()
+                .find(|child| visuals.get(*child).is_ok())
+        });
+        if visual_root.is_none() {
+            commands.entity(entity).insert(OnlinePlayerVisualRoot);
+            commands.entity(entity).with_children(|parent| {
+                parent.spawn((
+                    OnlinePlayerVisual,
+                    Mesh3d(assets.player_mesh.clone()),
+                    MeshMaterial3d(assets.player_material.clone()),
+                    Transform::from_translation(visual_translation).with_scale(visual_scale),
+                ));
+            });
+        } else if let Some(child) = visual_child {
+            if let Ok(mut transform) = visuals.get_mut(child) {
+                transform.translation = visual_translation;
+                transform.scale = visual_scale;
+            }
+        }
+    }
+}
+
+fn apply_online_snapshot(terrain: &mut OnlineTerrainEdits, snapshot: &VoxelChunkSnapshot) {
+    let snapshot_size = VOXEL_CHUNK_SIZE_XZ + snapshot.border.saturating_mul(2);
+    if snapshot.border < 0
+        || snapshot.border > 4
+        || snapshot_size <= 0
+        || snapshot.y_size <= 0
+        || snapshot.blocks.len()
+            < (snapshot.y_size * snapshot_size * snapshot_size) as usize
+    {
+        warn!(
+            "[net] ignored malformed terrain snapshot: border={}, y_size={}, blocks={}",
+            snapshot.border,
+            snapshot.y_size,
+            snapshot.blocks.len()
+        );
+        return;
+    }
+
+    let chunk = (snapshot.chunk_x, snapshot.chunk_z);
+    let region_changed = !terrain.has_snapshot
+        || terrain.snapshot_chunk != Some(chunk)
+        || terrain.snapshot_border != snapshot.border
+        || terrain.y_min != snapshot.y_min
+        || terrain.y_size != snapshot.y_size;
+    if !region_changed && !terrain.awaiting_snapshot && snapshot.revision <= terrain.snapshot_revision {
+        return;
+    }
+
+    terrain.blocks.clear();
+    let origin_x = snapshot.chunk_x * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
+    let origin_z = snapshot.chunk_z * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
+    for y in 0..snapshot.y_size {
+        for z in 0..snapshot_size {
+            for x in 0..snapshot_size {
+                let index = ((y * snapshot_size + z) * snapshot_size + x) as usize;
+                let block = BlockType::from_wire_u8(snapshot.blocks[index])
+                    .unwrap_or(BlockType::Air);
+                terrain.blocks.insert(
+                    [origin_x + x, snapshot.y_min + y, origin_z + z],
+                    block,
+                );
+            }
+        }
+    }
+    terrain.snapshot_revision = snapshot.revision;
+    terrain.latest_revision = terrain.latest_revision.max(snapshot.revision);
+    terrain.snapshot_chunk = Some(chunk);
+    terrain.snapshot_border = snapshot.border;
+    terrain.y_min = snapshot.y_min;
+    terrain.y_size = snapshot.y_size;
+    terrain.has_snapshot = true;
+    terrain.awaiting_snapshot = false;
+    terrain.dirty = true;
+}
+
+fn terrain_delta_is_contiguous(latest_revision: u64, incoming_revision: u64) -> bool {
+    incoming_revision == latest_revision.saturating_add(1)
+}
+
+fn sync_online_terrain_mesh(
+    mut terrain: ResMut<OnlineTerrainEdits>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut surface: Query<&mut Mesh3d, With<OnlineTerrainSurface>>,
+    mut ores: Query<(&OnlineOreSurface, &mut Mesh3d)>,
+) {
+    if !terrain.dirty || !terrain.has_snapshot {
+        return;
+    }
+
+    let terrain_handle = meshes.add(build_online_terrain_mesh(&terrain, None));
+    let ore_handles = [
+        BlockType::IronOre,
+        BlockType::SunstoneOre,
+        BlockType::FrostcoreOre,
+        BlockType::LivingRoot,
+    ]
+    .map(|block| meshes.add(build_online_terrain_mesh(&terrain, Some(block))));
+
+    for mut mesh in &mut surface {
+        let old_handle = mesh.0.clone();
+        mesh.0 = terrain_handle.clone();
+        let _ = meshes.remove(&old_handle);
+    }
+    for (ore, mut mesh) in &mut ores {
+        let old_handle = mesh.0.clone();
+        if let Some(handle) = ore_handles
+            .iter()
+            .zip([
+                BlockType::IronOre,
+                BlockType::SunstoneOre,
+                BlockType::FrostcoreOre,
+                BlockType::LivingRoot,
+            ])
+            .find_map(|(handle, block)| (block == ore.block).then_some(handle))
+        {
+            mesh.0 = handle.clone();
+            let _ = meshes.remove(&old_handle);
+        }
+    }
+    terrain.dirty = false;
+}
+
+fn build_online_terrain_mesh(
+    terrain: &OnlineTerrainEdits,
+    only_block: Option<BlockType>,
+) -> Mesh {
+    let snapshot_size = VOXEL_CHUNK_SIZE_XZ + terrain.snapshot_border * 2;
+    let cells_xz = (snapshot_size - 1).max(1);
+    let cells_y = (terrain.y_size - 1).max(1);
+    let origin = [
+        terrain
+            .snapshot_chunk
+            .map_or(0, |(x, _)| x * VOXEL_CHUNK_SIZE_XZ)
+            - terrain.snapshot_border,
+        terrain.y_min,
+        terrain
+            .snapshot_chunk
+            .map_or(0, |(_, z)| z * VOXEL_CHUNK_SIZE_XZ)
+            - terrain.snapshot_border,
+    ];
+    let nets = build_surface_nets_rect([cells_xz, cells_y, cells_xz], |x, y, z| {
+        let block = terrain
+            .blocks
+            .get(&[origin[0] + x, origin[1] + y, origin[2] + z])
+            .copied()
+            .unwrap_or(BlockType::Air);
+        let solid = block.is_solid() && only_block.is_none_or(|kind| kind == block);
+        if solid { 1.0 } else { -1.0 }
+    });
+    surface_nets_to_online_mesh(nets, origin, only_block.is_some())
+}
+
+fn empty_online_mesh() -> Mesh {
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32; 2]>::new())
+    .with_inserted_indices(Indices::U32(Vec::new()))
+}
+
+fn surface_nets_to_online_mesh(
+    nets: SurfaceNetsMesh,
+    origin: [i32; 3],
+    ore_offset: bool,
+) -> Mesh {
+    let mut positions = nets
+        .positions
+        .iter()
+        .map(|[x, y, z]| {
+            [
+                origin[0] as f32 + *x,
+                origin[1] as f32 + *y,
+                origin[2] as f32 + *z,
+            ]
+        })
+        .collect::<Vec<_>>();
+    let mut normals = vec![Vec3::ZERO; positions.len()];
+    for triangle in nets.indices.chunks_exact(3) {
+        let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
+        let normal = (Vec3::from_array(positions[b]) - Vec3::from_array(positions[a]))
+            .cross(Vec3::from_array(positions[c]) - Vec3::from_array(positions[a]));
+        normals[a] += normal;
+        normals[b] += normal;
+        normals[c] += normal;
+    }
+    let normals = normals
+        .into_iter()
+        .map(|normal| normal.normalize_or_zero().to_array())
+        .collect::<Vec<_>>();
+    if ore_offset {
+        for (position, normal) in positions.iter_mut().zip(&normals) {
+            position[0] += normal[0] * 0.018;
+            position[1] += normal[1] * 0.018;
+            position[2] += normal[2] * 0.018;
+        }
+    }
+    let uvs = positions
+        .iter()
+        .map(|position| [position[0] * 0.08, position[2] * 0.08])
+        .collect::<Vec<_>>();
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(nets.indices))
+}
+
+fn cleanup_replicated_player_visuals(
+    mut commands: Commands,
+    players: Query<Entity, With<PlayerPos>>,
+    visuals: Query<(Entity, &ChildOf), With<OnlinePlayerVisual>>,
+) {
+    for (visual, parent) in &visuals {
+        if players.get(parent.parent()).is_err() {
+            commands.entity(visual).despawn();
+        }
+    }
+}
+
+fn sync_replicated_carts(
+    mut commands: Commands,
+    time: Res<Time>,
+    asset_server: Res<AssetServer>,
+    carts: Query<(Entity, &CartState)>,
+    mut visuals: Query<(Entity, &mut OnlineCartVisual, &mut Transform)>,
+) {
+    for (entity, state) in &carts {
+        if !state.position.is_finite() || !state.yaw.is_finite() {
+            continue;
+        }
+        if let Some((_, mut visual, mut transform)) = visuals
+            .iter_mut()
+            .find(|(_, visual, _)| visual.cart == entity)
+        {
+            let speed = visual.last_position.distance(state.position)
+                / time.delta_secs().max(0.001);
+            visual.animation_phase = (visual.animation_phase
+                + time.delta_secs() * (3.0 + speed * 1.5))
+                .rem_euclid(std::f32::consts::TAU);
+            visual.last_position = state.position;
+            let moving = state.occupied && speed > 0.05;
+            let bob = if moving {
+                visual.animation_phase.sin().abs() * 0.025
+            } else {
+                0.0
+            };
+            let roll = if moving {
+                visual.animation_phase.sin() * 0.025
+            } else {
+                0.0
+            };
+            transform.translation = state.position;
+            transform.translation.y += bob;
+            transform.rotation =
+                Quat::from_rotation_y(state.yaw) * Quat::from_rotation_z(roll);
+        } else {
+            commands.spawn((
+                WorldAssetRoot(asset_server.load(
+                    GltfAssetLabel::Scene(0).from_asset("procedural/pretty/cart.glb".to_string()),
+                )),
+                Transform::from_translation(state.position)
+                    .with_rotation(Quat::from_rotation_y(state.yaw)),
+                OnlineCartVisual {
+                    cart: entity,
+                    last_position: state.position,
+                    animation_phase: 0.0,
+                },
+                Name::new("online_cart"),
+            ));
+        }
+    }
+
+    for (visual_entity, visual, _) in &mut visuals {
+        if !carts.iter().any(|(entity, _)| entity == visual.cart) {
+            commands
+                .entity(visual_entity)
+                .despawn_related::<Children>()
+                .despawn();
         }
     }
 }
 
 fn update_online_overlay(
-    players: Query<(&PlayerPos, Option<&GameplayHudState>, Option<&EcoSnapshot>)>,
+    clients: Query<Entity, With<NetcodeClient>>,
+    players: Query<(
+        &PlayerPos,
+        Option<&CartMounted>,
+        Option<&GameplayHudState>,
+        Option<&EcoSnapshot>,
+        &lightyear::prelude::Controlled,
+    )>,
     mut text: Query<&mut Text, With<OnlineHudText>>,
 ) {
     let Ok(mut text) = text.single_mut() else {
         return;
     };
-    let Some((pos, hud, eco)) = players.iter().next() else {
+    let Some(_client_entity) = clients.iter().next() else {
         text.0 = "在线\n等待服务器快照".to_string();
         return;
     };
-    text.0 = online_overlay_text(pos, hud, eco);
+    let Some((pos, mounted, hud, eco, _)) = players.iter().next() else {
+        text.0 = "在线\n等待服务器快照".to_string();
+        return;
+    };
+    text.0 = online_overlay_text(pos, mounted, hud, eco);
 }
 
 fn online_overlay_text(
     pos: &PlayerPos,
+    mounted: Option<&CartMounted>,
     hud: Option<&GameplayHudState>,
     eco: Option<&EcoSnapshot>,
 ) -> String {
@@ -588,20 +1144,31 @@ fn online_overlay_text(
             snapshot.rainfall,
         )
     });
-    format!(
+    let ride_status = if mounted.is_some_and(|mounted| mounted.0) {
+        "骑乘中"
+    } else {
+        "未骑乘"
+    };
+    let mut text = format!(
         "在线\nTick {tick}  区块 [{}, {}, {}]  国家 {nation}\n木头 {wood}  食物 {food}  旗帜 {flags}  国家数 {nations}  怪物 {monsters}\n云朵 {clouds}  植物 {plants}  动物 {animals}  降雨 {:.1}",
         block[0], block[1], block[2], rainfall
-    )
+    );
+    text.push_str(&format!("\n载具状态：{ride_status}（R 上车/下车）"));
+    text
 }
 
 fn follow_online_camera(
-    players: Query<&PlayerPos>,
+    clients: Query<Entity, With<NetcodeClient>>,
+    players: Query<(&PlayerPos, &lightyear::prelude::Controlled)>,
     mut cameras: Query<&mut Transform, With<OnlineCamera>>,
 ) {
     let Ok(mut camera) = cameras.single_mut() else {
         return;
     };
-    let Some(player) = players.iter().next() else {
+    let Some(_client_entity) = clients.iter().next() else {
+        return;
+    };
+    let Some((player, _)) = players.iter().next() else {
         return;
     };
     let desired = player.0 + Vec3::new(10.0, 8.0, 12.0);
@@ -610,6 +1177,7 @@ fn follow_online_camera(
 }
 
 fn log_connection_state(
+    mut reconnect: ResMut<OnlineReconnectState>,
     connected: Query<Entity, Added<lightyear::prelude::Connected>>,
     disconnected: Query<
         (Entity, &lightyear::prelude::Disconnected),
@@ -617,6 +1185,8 @@ fn log_connection_state(
     >,
 ) {
     for entity in connected.iter() {
+        reconnect.attempts = 0;
+        reconnect.cooldown_secs = 0.0;
         info!("[net] Lightyear client connected: {:?}", entity);
     }
     for (entity, state) in disconnected.iter() {
@@ -632,7 +1202,13 @@ fn online_auto_demo_capture(
     mut commands: Commands,
     time: Res<Time>,
     mut demo: ResMut<OnlineAutoDemo>,
-    players: Query<(&PlayerPos, Option<&GameplayHudState>, Option<&EcoSnapshot>)>,
+    clients: Query<Entity, With<NetcodeClient>>,
+    players: Query<(
+        &PlayerPos,
+        Option<&GameplayHudState>,
+        Option<&EcoSnapshot>,
+        &lightyear::prelude::Controlled,
+    )>,
 ) {
     if !demo.enabled {
         return;
@@ -648,14 +1224,20 @@ fn online_auto_demo_capture(
         return;
     }
 
-    if let Some(iter_dir) = &demo.iter_dir {
-        let _ = std::fs::create_dir_all(iter_dir);
-        let (pos, hud, eco) = players
+    if let Some(iter_dir) = demo.iter_dir.clone() {
+        let _ = std::fs::create_dir_all(&iter_dir);
+        let (pos, hud, eco) = clients
             .iter()
             .next()
+            .and_then(|_| players.iter().next())
+            .map(|(position, hud, eco, _)| (position, hud, eco))
             .map_or((Vec3::ZERO, None, None), |(position, hud, eco)| {
                 (position.0, hud, eco)
             });
+        if demo.first_player_pos.is_none() {
+            demo.first_player_pos = Some(pos);
+        }
+        let first_player_pos = demo.first_player_pos.unwrap_or(pos);
         let player_block = hud.map_or(scene_pos_to_block(pos), |state| state.player_block_pos);
         let tick = hud.map_or(0, |state| state.tick);
         let final_state = json!({
@@ -677,14 +1259,14 @@ fn online_auto_demo_capture(
             "camera": {"mode": "ThirdPerson", "first_person_eye": [pos.x, pos.y + 1.6, pos.z]},
             "visual": {
                 "movement_probe": {
-                    "first_player_pos": [pos.x, pos.y, pos.z],
+                    "first_player_pos": [first_player_pos.x, first_player_pos.y, first_player_pos.z],
                     "current_player_pos": [pos.x, pos.y, pos.z],
                     "first_static_world": {"floor": [0.0, -0.1, 0.0]},
                     "current_static_world": {"floor": [0.0, -0.1, 0.0]}
                 },
                 "player_readability": {"marker_count": 1, "marker_max_distance": 0.0}
             },
-            "network_command": {"move_world_sent": 0},
+            "network_command": {"move_world_sent": demo.move_world_sent},
             "render": {
                 "frame": {"dt_over_50ms": demo.frame_dt_over_50ms, "max_ms": demo.frame_dt_max_ms},
                 "terrain": {"smooth_mesh_builds": 0, "smooth_mesh_max_ms": 0.0, "terrain_despawns": 0},
@@ -768,5 +1350,13 @@ mod tests {
             screenshot_path(&PathBuf::from("screenshots/online"), None),
             PathBuf::from("screenshots/online/online_scene.png")
         );
+    }
+
+    #[test]
+    fn terrain_delta_requires_the_next_revision() {
+        assert!(terrain_delta_is_contiguous(0, 1));
+        assert!(terrain_delta_is_contiguous(9, 10));
+        assert!(!terrain_delta_is_contiguous(9, 9));
+        assert!(!terrain_delta_is_contiguous(9, 11));
     }
 }

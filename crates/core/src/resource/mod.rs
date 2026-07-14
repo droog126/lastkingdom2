@@ -183,7 +183,7 @@ impl ResourceKind {
     ];
 }
 
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GlobalResourcePool {
     pub current: HashMap<ResourceKind, i64>,
 
@@ -498,8 +498,8 @@ mod tests {
     }
 
     #[test]
-    fn all_25_resources_present() {
-        assert_eq!(ResourceKind::ALL.len(), 34);
+    fn all_resources_present() {
+        assert_eq!(ResourceKind::ALL.len(), 35);
     }
 
     #[test]

@@ -14,9 +14,14 @@ Use this as the primary fallback, not as a mandatory companion. If another proje
 1. Define the requested outcome and likely files before editing.
 2. Run `git status --short`. Treat existing changes as user work.
 3. Read the nearest implementation, tests, and active documentation.
-4. Make the smallest coherent change without unrelated cleanup.
-5. Run the narrowest validation that covers the changed surface.
-6. Report the change, validation result, and remaining risk.
+4. Classify cleanup scope before deleting anything: source/config cleanup, generated artifacts,
+   or both. Do not remove ignored caches or runtime outputs when the user asks for code cleanup.
+5. For dependency cleanup, distinguish workspace-level candidates from crate dependencies. Confirm
+   actual manifest consumers, feature use, `Cargo.lock`/`cargo tree` impact, and active-document
+   intent before deleting a declaration; a missing source import alone is not proof of garbage.
+6. Make the smallest coherent change without unrelated cleanup.
+7. Run the narrowest validation that covers the changed surface.
+8. Report the change, validation result, and remaining risk.
 
 ## Tooling
 

@@ -393,6 +393,11 @@ def make_house_small() -> None:
     roof_dark = glow_mat("house_roof_dark", (0.55, 0.15, 0.15), glow_strength=0.3, roughness=0.7)
     door = glow_mat("house_door", (0.45, 0.25, 0.12), glow_strength=0.3, roughness=0.85)
     timber = glow_mat("house_timber", (0.30, 0.16, 0.08), glow_strength=0.2, roughness=0.9)
+    interior_fabric = glow_mat("house_interior_fabric", (0.65, 0.28, 0.30), glow_strength=0.12, roughness=0.88)
+    interior_green = glow_mat("house_interior_green", (0.24, 0.44, 0.26), glow_strength=0.12, roughness=0.90)
+    interior_lamp = glow_mat("house_interior_lamp", (1.0, 0.68, 0.22), glow_strength=1.5, roughness=0.35)
+    interior_floor = wall_shadow
+    interior_wall = wall
     window_glow = glow_mat("house_window", (1.0, 0.85, 0.40), glow_strength=1.2, roughness=0.4)
     window_cross = mat("house_window_x", (0.30, 0.18, 0.10), roughness=0.85)
     flower_red = glow_mat("house_flower_red", (0.95, 0.25, 0.30), glow_strength=0.5, roughness=0.7)
@@ -400,10 +405,17 @@ def make_house_small() -> None:
     chimney = glow_mat("house_chimney", (0.45, 0.40, 0.40), glow_strength=0.2, roughness=0.95)
     smoke = mat("house_smoke", (0.85, 0.85, 0.90), roughness=0.95, alpha=0.55)
 
-    cube("body", (0.0, 0.85, 0.0), (1.60, 1.70, 1.30), wall)
-    cube("body_shadow", (0.0, 0.85, -0.35), (1.60, 1.70, 0.30), wall_shadow)
+    # Split the shell into wall segments so the front door is a real opening.
+    cube("wall_back", (0.0, 0.85, -0.54), (1.60, 1.70, 0.24), wall)
+    cube("wall_left", (-0.68, 0.85, 0.0), (0.24, 1.70, 1.32), wall)
+    cube("wall_right", (0.68, 0.85, 0.0), (0.24, 1.70, 1.32), wall)
+    cube("wall_front_left", (-0.55, 0.85, 0.54), (0.50, 1.70, 0.24), wall)
+    cube("wall_front_right", (0.55, 0.85, 0.54), (0.50, 1.70, 0.24), wall)
+    cube("interior_floor", (0.0, 0.13, 0.0), (1.30, 0.12, 1.06), interior_floor)
+    cube("interior_back_finish", (0.0, 0.92, -0.40), (1.28, 1.35, 0.04), interior_wall)
 
-    cube("door", (0.0, 0.45, 0.66), (0.30, 0.85, 0.04), door)
+    # The panel is offset beside the opening to read as an open door.
+    cube("door_open", (0.34, 0.45, 0.38), (0.30, 0.85, 0.04), door)
     cube("door_canopy", (0.0, 0.96, 0.72), (0.48, 0.08, 0.22), roof_dark)
     uv_sphere("door_handle", (0.10, 0.50, 0.69), (0.04, 0.04, 0.04),
               glow_mat("door_handle", (0.95, 0.80, 0.30), glow_strength=0.7), 8, 5)
@@ -429,6 +441,16 @@ def make_house_small() -> None:
                 8,
                 5,
             )
+
+    # Interior landmarks make the doorway read as a room when the player looks through it.
+    cube("interior_bed", (-0.48, 0.32, -0.22), (0.48, 0.34, 0.78), interior_fabric)
+    cube("interior_bed_head", (-0.48, 0.62, -0.55), (0.50, 0.28, 0.12), timber)
+    cube("interior_table", (0.48, 0.58, -0.18), (0.58, 0.10, 0.34), interior_green)
+    for x in (0.18, 0.78):
+        for z in (-0.34, -0.02):
+            cube(f"interior_table_leg_{x}_{z}", (x, 0.34, z), (0.08, 0.56, 0.08), timber)
+    cube("interior_chest", (0.46, 0.30, 0.42), (0.52, 0.42, 0.38), interior_green)
+    uv_sphere("interior_lamp", (0.0, 1.55, 0.05), (0.12, 0.12, 0.12), interior_lamp, 8, 5)
 
     cone("roof_main", (0.0, 2.20, 0.0), 1.10, 0.0, 1.00, roof, vertices=4)
     cube("roof_skirting", (0.0, 1.78, 0.0), (1.70, 0.10, 1.40), roof_dark)

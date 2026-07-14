@@ -35,6 +35,8 @@ precedence when a current document drifts.
 
 - [Architecture evolution plan](architecture/architecture_plan_v2.md)
 - [Four-agent natural-world refactor plan](plans/natural-world-parallel-refactor.md)
+- [Veloren lessons implementation plan](plans/veloren-lessons-action-plan.md)
+- [Destructible terrain and mining proposal](proposals/destructible-terrain-and-mining.md)
 
 ## Maintenance
 

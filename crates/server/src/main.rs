@@ -1,20 +1,24 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use avian3d::prelude::{Collider, PhysicsPlugins, Position, RigidBody, Rotation};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use lightyear::prelude::LocalAddr;
 use lightyear::prelude::server::ServerUdpIo;
+use lightyear_avian3d::prelude::LightyearAvianPlugin;
 
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::components::{
-    EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
+    CartMounted, CartState, EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ,
+    VoxelChunkSnapshot, VoxelDelta,
 };
 use lk2_core::protocol::messages::{
     BuildRecipe, ChatBroadcast, ChatMessage, GameplayCommand, GameplayCommandKind,
     GameplayFeedback, PingMessage, PongMessage,
 };
 use lk2_core::protocol::{ControlChannel, PlayerAction, StateChannel};
+use std::collections::{HashMap, HashSet};
 
 use lightyear::prelude::PeerMetadata;
 
@@ -37,28 +41,39 @@ use lk2_core::ecology::animals::{
 };
 use lk2_core::ecology::threats::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
-use lk2_core::player::{PlayerState, PlayerTag};
-use lk2_core::pvp::{Health, Hitbox, PvpCombatant, SimpleWeapon};
+use lk2_core::player::{PlayerState, PlayerStateComponent, PlayerTag};
+use lk2_core::pvp::{FixedTick, Health, Hitbox, PvpCombatant, SimpleWeapon};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::simulation::app_sets::SimSet;
 use lk2_core::simulation::{SimRole, advance_fixed_authority_tick_report};
+use lk2_core::simulation::regions::{NatureRegionId, NatureRegionState, NatureRegionWorld};
 use lk2_core::transport::{
     DEFAULT_PORT, NETCODE_CLIENT_TIMEOUT_SECS, PRIVATE_KEY, PROTOCOL_ID,
     SERVER_POS_UPDATE_INTERVAL_TICKS,
 };
 use lk2_core::world::{
-    World as GameWorld, WorldConfig, WorldGenerator, fallback_spawn_ring_offsets, generate_world,
-    player_body_clear, player_position_is_safe, player_spawn_position_at,
-    player_spawn_position_near, player_stand_position_at, resolve_player_stuck_near,
+    TERRAIN_CHUNK_SIZE, TerrainChunkCoord, World as GameWorld, WorldConfig, WorldGenerator,
+    fallback_spawn_ring_offsets, generate_world, player_body_clear, player_position_is_safe,
+    player_spawn_position_at, player_spawn_position_near, player_stand_position_at,
+    resolve_player_stuck_near,
 };
 
 use crate::app::NatureServerProjectionPlugin;
 use crate::authority::pvp::SimplePvpAuthorityPlugin;
-use crate::authority::{LatestNatureReport, NatureAuthoritySet};
+use crate::authority::{
+    LatestNatureRegionReports, LatestNatureReport, NatureAuthoritySet,
+};
+use crate::persistence::LatestNatureRegionSaves;
+use crate::persistence::LatestNatureSave;
 
 const PLACE_WOOD_COST: i64 = 1;
+const PLANK_PACK_WOOD_COST: i64 = 5;
+const PLANK_PACK_OUTPUT: i64 = 1;
 const ONLINE_MOVE_SPEED: f32 = 4.5;
+const CART_MOVE_MULTIPLIER: f32 = 2.0;
+const ONLINE_INPUT_MAX_MAGNITUDE: f32 = 1.5;
+const RESPAWN_DELAY_TICKS: u32 = 90;
 const ONLINE_STEP_THRESHOLD: f32 = 0.85;
 const PLAYER_COLLISION_RADIUS: f32 = 0.34;
 const JUMP_TAKEOFF_SPEED: f32 = 7.2;
@@ -66,11 +81,17 @@ const JUMP_GRAVITY: f32 = 28.0;
 const JUMP_TERMINAL_SPEED: f32 = -18.0;
 const ANTI_STUCK_SEARCH_RADIUS: i32 = 6;
 const ANTI_STUCK_FAILED_MOVE_LIMIT: u8 = 12;
+const TERRAIN_STREAM_RADIUS_CHUNKS: i32 = 3;
 
-#[derive(Resource, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy)]
 struct ServerJumpState {
     velocity_y: f32,
     grounded: bool,
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+struct RespawnState {
+    ticks_remaining: u32,
 }
 
 impl Default for ServerJumpState {
@@ -82,7 +103,7 @@ impl Default for ServerJumpState {
     }
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Component, Debug, Clone)]
 struct AntiStuckState {
     last_safe_pos: Vec3,
     last_safe_block: [i32; 3],
@@ -101,6 +122,39 @@ impl Default for AntiStuckState {
 
 #[derive(Resource, Default)]
 struct WorldRevision(u64);
+
+#[derive(Resource, Default)]
+struct NextPlayerId(u32);
+
+/// Commands issued by connection observers are deferred. Reserve a player
+/// immediately so two ClientOf observers in the same command flush cannot
+/// claim the same unowned startup player.
+#[derive(Resource, Default)]
+struct ReservedPlayerEntities(HashSet<Entity>);
+
+#[derive(Resource, Default)]
+struct DisconnectedPlayerSessions(HashMap<u64, DisconnectedPlayerSession>);
+
+#[derive(Clone, Debug)]
+struct DisconnectedPlayerSession {
+    state: PlayerState,
+    mounted: bool,
+    cart: Option<CartState>,
+}
+
+/// Highest client command sequence accepted for one connection. The tick is
+/// simulation metadata and is not unique: several legitimate actions can
+/// share one tick. Sequence is the replay/deduplication identity.
+#[derive(Component, Default, Debug, Clone, Copy)]
+struct LastClientCommandSequence(u64);
+
+fn accept_client_command_sequence(last: &mut u64, sequence: u64) -> bool {
+    if sequence == 0 || sequence <= *last {
+        return false;
+    }
+    *last = sequence;
+    true
+}
 
 #[derive(Resource, Default)]
 pub struct ServerCommandDiagnostics {
@@ -147,6 +201,12 @@ struct LastVoxelDeltaState {
     block: lk2_core::world::BlockType,
 }
 
+#[derive(Resource, Default)]
+struct VoxelChunkSnapshotCache {
+    revision: u64,
+    snapshots: HashMap<(i32, i32), VoxelChunkSnapshot>,
+}
+
 impl Default for LastVoxelDeltaState {
     fn default() -> Self {
         Self {
@@ -160,23 +220,7 @@ impl Default for LastVoxelDeltaState {
 }
 
 fn block_type_to_u8(block: lk2_core::world::BlockType) -> u8 {
-    use lk2_core::world::BlockType;
-    match block {
-        BlockType::Air => 0,
-        BlockType::Dirt => 1,
-        BlockType::Stone => 2,
-        BlockType::Sand => 3,
-        BlockType::Snow => 4,
-        BlockType::Leaves => 5,
-        BlockType::Water => 6,
-        BlockType::Wood => 7,
-        BlockType::IronOre => 8,
-        BlockType::SunstoneOre => 9,
-        BlockType::FrostcoreOre => 10,
-        BlockType::LivingRoot => 11,
-        BlockType::BerryThicket => 12,
-        BlockType::Grass => 13,
-    }
+    block.to_wire_u8()
 }
 
 fn build_gameplay_hud_state(
@@ -272,6 +316,7 @@ fn empty_voxel_chunk_snapshot() -> VoxelChunkSnapshot {
         revision: 0,
         chunk_x: 0,
         chunk_z: 0,
+        border: 0,
         y_min: 0,
         y_size: 0,
         blocks: Vec::new(),
@@ -283,18 +328,19 @@ fn build_voxel_chunk_snapshot(
     revision: u64,
     player_block_pos: [i32; 3],
 ) -> VoxelChunkSnapshot {
+    const BORDER: i32 = 1;
+    const SNAPSHOT_SIZE_XZ: i32 = VOXEL_CHUNK_SIZE_XZ + BORDER * 2;
     let chunk_x = player_block_pos[0].div_euclid(VOXEL_CHUNK_SIZE_XZ);
     let chunk_z = player_block_pos[2].div_euclid(VOXEL_CHUNK_SIZE_XZ);
-    let x_min = chunk_x * VOXEL_CHUNK_SIZE_XZ;
-    let z_min = chunk_z * VOXEL_CHUNK_SIZE_XZ;
+    let x_min = chunk_x * VOXEL_CHUNK_SIZE_XZ - BORDER;
+    let z_min = chunk_z * VOXEL_CHUNK_SIZE_XZ - BORDER;
     let y_min = 0;
     let y_size = world.size;
-    let mut blocks =
-        Vec::with_capacity((VOXEL_CHUNK_SIZE_XZ * VOXEL_CHUNK_SIZE_XZ * y_size) as usize);
+    let mut blocks = Vec::with_capacity((SNAPSHOT_SIZE_XZ * SNAPSHOT_SIZE_XZ * y_size) as usize);
 
     for y in y_min..(y_min + y_size) {
-        for z in z_min..(z_min + VOXEL_CHUNK_SIZE_XZ) {
-            for x in x_min..(x_min + VOXEL_CHUNK_SIZE_XZ) {
+        for z in z_min..(z_min + SNAPSHOT_SIZE_XZ) {
+            for x in x_min..(x_min + SNAPSHOT_SIZE_XZ) {
                 blocks.push(block_type_to_u8(world.get(x, y, z)));
             }
         }
@@ -304,10 +350,31 @@ fn build_voxel_chunk_snapshot(
         revision,
         chunk_x,
         chunk_z,
+        border: BORDER,
         y_min,
         y_size,
         blocks,
     }
+}
+
+fn cached_voxel_chunk_snapshot<'a>(
+    world: &GameWorld,
+    revision: u64,
+    player_block_pos: [i32; 3],
+    cache: &'a mut VoxelChunkSnapshotCache,
+) -> &'a VoxelChunkSnapshot {
+    if cache.revision != revision {
+        cache.revision = revision;
+        cache.snapshots.clear();
+    }
+    let chunk = (
+        player_block_pos[0].div_euclid(VOXEL_CHUNK_SIZE_XZ),
+        player_block_pos[2].div_euclid(VOXEL_CHUNK_SIZE_XZ),
+    );
+    cache
+        .snapshots
+        .entry(chunk)
+        .or_insert_with(|| build_voxel_chunk_snapshot(world, revision, player_block_pos))
 }
 
 fn record_voxel_delta(
@@ -328,7 +395,27 @@ fn record_voxel_delta(
     };
 }
 
+fn sanitize_online_move_direction(dx_milli: i16, dz_milli: i16) -> Option<Vec2> {
+    let direction = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
+    if direction.length_squared() <= 0.0001 {
+        return None;
+    }
+    Some(direction.clamp_length_max(ONLINE_INPUT_MAX_MAGNITUDE))
+}
+
+fn player_inventory_can_receive(player: &PlayerState, kind: ResourceKind, amount: i64) -> bool {
+    let current = player.inventory.get(&kind).copied().unwrap_or(0);
+    amount >= 0 && amount <= kind.max() && current >= 0 && current <= kind.max() - amount
+}
+
+fn terrain_editable(world: &GameWorld, x: i32, y: i32, z: i32) -> bool {
+    y >= 0
+        && y < world.size
+        && (world.procedural || (0..world.size).contains(&x) && (0..world.size).contains(&z))
+}
+
 fn apply_gameplay_command(
+    player_id: u32,
     cmd: &GameplayCommand,
     world: &mut GameWorld,
     pool: &mut GlobalResourcePool,
@@ -348,33 +435,95 @@ fn apply_gameplay_command(
             ok = false;
             "jump command was not routed to entity transform".to_string()
         }
+        GameplayCommandKind::MineTarget { target } => {
+            let [x, y, z] = target;
+            let [px, py, pz] = player.block_pos;
+            // Keep client-supplied coordinates in a wide type before doing
+            // reachability arithmetic. An i32 subtraction/multiplication here
+            // would let a malformed remote command panic the server before
+            // the bounds check runs.
+            let dx = i64::from(x) - i64::from(px);
+            let dy = i64::from(y) - i64::from(py);
+            let dz = i64::from(z) - i64::from(pz);
+            let reachable = dx * dx + dy * dy + dz * dz <= 25;
+            if !terrain_editable(world, x, y, z) {
+                ok = false;
+                "mine target out of bounds".to_string()
+            } else if !reachable {
+                ok = false;
+                "mine target is out of reach".to_string()
+            } else if let Some((kind, amount)) = world.get(x, y, z).yields()
+                && !player_inventory_can_receive(player, kind, amount)
+            {
+                ok = false;
+                format!("inventory full for {:?}", kind)
+            } else {
+                match lk2_core::world::mine_block(world, pool, x, y, z, player_id) {
+                    Ok(Some((block, drop))) => {
+                        if let Some((kind, amount)) = drop {
+                            *player.inventory.entry(kind).or_insert(0) += amount;
+                        }
+                        player.blocks_gathered += 1;
+                        record_voxel_delta(
+                            revision,
+                            last_delta,
+                            x,
+                            y,
+                            z,
+                            lk2_core::world::BlockType::Air,
+                        );
+                        format!("mined {:?}", block)
+                    }
+                    Ok(None) => {
+                        ok = false;
+                        "target is not mineable".to_string()
+                    }
+                    Err(err) => {
+                        ok = false;
+                        err
+                    }
+                }
+            }
+        }
+        GameplayCommandKind::MountCart => {
+            ok = false;
+            "cart mounting is handled by the authoritative player system".to_string()
+        }
         GameplayCommandKind::GatherFootBlock => {
             let [x, y, z] = [
                 player.block_pos[0],
                 player.block_pos[1] - 1,
                 player.block_pos[2],
             ];
-            match lk2_core::world::gather_block(world, pool, x, y, z, 0) {
-                Ok(Some((kind, amount))) => {
-                    *player.inventory.entry(kind).or_insert(0) += amount;
-                    player.blocks_gathered += 1;
-                    record_voxel_delta(
-                        revision,
-                        last_delta,
-                        x,
-                        y,
-                        z,
-                        lk2_core::world::BlockType::Air,
-                    );
-                    format!("gathered {:?} x{}", kind, amount)
-                }
-                Ok(None) => {
-                    ok = false;
-                    "nothing to gather".to_string()
-                }
-                Err(err) => {
-                    ok = false;
-                    err
+            let gather_kind = world.get(x, y, z).yields();
+            if let Some((kind, amount)) = gather_kind
+                && !player_inventory_can_receive(player, kind, amount)
+            {
+                ok = false;
+                "inventory full for gathered resource".to_string()
+            } else {
+                match lk2_core::world::gather_block(world, pool, x, y, z, player_id) {
+                    Ok(Some((kind, amount))) => {
+                        *player.inventory.entry(kind).or_insert(0) += amount;
+                        player.blocks_gathered += 1;
+                        record_voxel_delta(
+                            revision,
+                            last_delta,
+                            x,
+                            y,
+                            z,
+                            lk2_core::world::BlockType::Air,
+                        );
+                        format!("gathered {:?} x{}", kind, amount)
+                    }
+                    Ok(None) => {
+                        ok = false;
+                        "nothing to gather".to_string()
+                    }
+                    Err(err) => {
+                        ok = false;
+                        err
+                    }
                 }
             }
         }
@@ -390,30 +539,61 @@ fn apply_gameplay_command(
             } else if world.get(x, y, z) != lk2_core::world::BlockType::Air {
                 ok = false;
                 "place target is occupied".to_string()
+            } else if player
+                .inventory
+                .get(&ResourceKind::Wood)
+                .copied()
+                .unwrap_or(0)
+                < PLACE_WOOD_COST
+            {
+                ok = false;
+                "not enough wood in player inventory".to_string()
             } else {
-                match pool.try_sub(ResourceKind::Wood, PLACE_WOOD_COST) {
-                    Ok(_) => {
-                        world.set(x, y, z, lk2_core::world::BlockType::Wood);
-                        record_voxel_delta(
-                            revision,
-                            last_delta,
-                            x,
-                            y,
-                            z,
-                            lk2_core::world::BlockType::Wood,
-                        );
-                        "placed wood".to_string()
-                    }
-                    Err(err) => {
-                        ok = false;
-                        format!("not enough wood: {}", err)
-                    }
-                }
+                *player.inventory.entry(ResourceKind::Wood).or_insert(0) -= PLACE_WOOD_COST;
+                world.set(x, y, z, lk2_core::world::BlockType::Wood);
+                record_voxel_delta(
+                    revision,
+                    last_delta,
+                    x,
+                    y,
+                    z,
+                    lk2_core::world::BlockType::Wood,
+                );
+                "placed wood".to_string()
             }
         }
-        GameplayCommandKind::Craft(recipe) => {
+        GameplayCommandKind::Craft(BuildRecipe::PlankPack) => {
+            let wood = player
+                .inventory
+                .get(&ResourceKind::Wood)
+                .copied()
+                .unwrap_or(0);
+            let hardened_wood = player
+                .inventory
+                .get(&ResourceKind::HardenedWood)
+                .copied()
+                .unwrap_or(0);
+            if wood < PLANK_PACK_WOOD_COST {
+                ok = false;
+                format!(
+                    "not enough wood for plank pack: need {}, have {}",
+                    PLANK_PACK_WOOD_COST, wood
+                )
+            } else if hardened_wood + PLANK_PACK_OUTPUT > ResourceKind::HardenedWood.max() {
+                ok = false;
+                "player inventory cannot hold another plank pack".to_string()
+            } else {
+                *player.inventory.entry(ResourceKind::Wood).or_insert(0) -= PLANK_PACK_WOOD_COST;
+                *player
+                    .inventory
+                    .entry(ResourceKind::HardenedWood)
+                    .or_insert(0) += PLANK_PACK_OUTPUT;
+                "crafted plank pack".to_string()
+            }
+        }
+        GameplayCommandKind::Craft(BuildRecipe::Campfire) => {
             ok = false;
-            format!("craft {:?} is not implemented on server", recipe)
+            "campfire placement is not implemented on the online server".to_string()
         }
         GameplayCommandKind::FoundNation => {
             if player.nation_id.is_some() {
@@ -422,7 +602,7 @@ fn apply_gameplay_command(
             } else {
                 match nations.found(
                     pool,
-                    0,
+                    player_id,
                     format!("PlayerNation#{}", nations.flag_count + 1),
                     player.block_pos,
                     cmd.tick,
@@ -462,22 +642,38 @@ fn apply_gameplay_commands(
     mut world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut nations: ResMut<NationRegistry>,
-    mut player: ResMut<PlayerState>,
     mut revision: ResMut<WorldRevision>,
     mut last_delta: ResMut<LastVoxelDeltaState>,
     mut feedback: MessageWriter<GameplayFeedback>,
     mut commands: Commands,
     creatures: Query<(Entity, &Creature, &CreatureAI)>,
+    mut carts: Query<&mut CartState>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
-    mut jump: ResMut<ServerJumpState>,
-    mut player_q: Query<(&mut Transform, &mut PlayerPos), With<PlayerPos>>,
+    mut player_q: Query<
+        (
+            &mut Transform,
+            &mut PlayerPos,
+            &mut PlayerStateComponent,
+            &mut ServerJumpState,
+            &mut RespawnState,
+            &mut CartMounted,
+            &lightyear::prelude::ControlledBy,
+            &PlayerTag,
+        ),
+        With<PlayerPos>,
+    >,
     mut receivers: Query<
-        &mut lightyear::prelude::MessageReceiver<GameplayCommand>,
+        (
+            Entity,
+            &mut lightyear::prelude::MessageReceiver<GameplayCommand>,
+            &mut LastClientCommandSequence,
+        ),
         With<lightyear_connection::client_of::ClientOf>,
     >,
 ) {
     diagnostics.receiver_entities = receivers.iter().len();
-    for mut receiver in receivers.iter_mut() {
+    let mut consumed_creatures = HashSet::new();
+    for (connection_entity, mut receiver, mut last_command_sequence) in receivers.iter_mut() {
         // Drain the receiver once. We deliberately keep ONLY the latest MoveWorld
         // per tick — clients send at their frame rate (often 144Hz) while we
         // tick at 60Hz, so a backlog of 2-3 MoveWorld commands per tick is
@@ -488,6 +684,15 @@ fn apply_gameplay_commands(
         let mut jump_requested = false;
         let mut other_cmds: Vec<GameplayCommand> = Vec::new();
         for cmd in receiver.receive() {
+            if !accept_client_command_sequence(&mut last_command_sequence.0, cmd.sequence) {
+                debug!(
+                    connection = ?connection_entity,
+                    command_sequence = cmd.sequence,
+                    last_accepted_sequence = last_command_sequence.0,
+                    "dropping replayed gameplay command"
+                );
+                continue;
+            }
             match cmd.kind {
                 GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
                     latest_move = Some((dx_milli, dz_milli));
@@ -499,7 +704,27 @@ fn apply_gameplay_commands(
             }
         }
 
-        if jump_requested && jump.grounded {
+        let Some((
+            mut transform,
+            mut player_pos,
+            mut player_state,
+            mut jump,
+            respawn,
+            mut cart_mounted,
+            _,
+            player_tag,
+        )) = player_q
+            .iter_mut()
+            .find(|(_, _, _, _, _, _, owner, _)| owner.owner == connection_entity)
+        else {
+            continue;
+        };
+
+        if respawn.ticks_remaining > 0 {
+            continue;
+        }
+
+        if jump_requested && jump.grounded && !cart_mounted.0 {
             jump.velocity_y = JUMP_TAKEOFF_SPEED;
             jump.grounded = false;
         }
@@ -510,29 +735,35 @@ fn apply_gameplay_commands(
             diagnostics.last_dz_milli = dz_milli;
             // Magnitude is encoded by the client (1.0 walk / 1.5 sprint), so we
             // pass the raw vector to apply_world_move without re-normalizing.
-            let dir = Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0);
-            let moved = if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-                if jump.grounded {
-                    apply_world_move(
-                        &mut transform,
-                        &mut player_pos,
-                        &mut player,
-                        &world,
-                        dir,
-                        1.0 / 60.0,
-                    )
-                } else {
-                    apply_air_world_move(
-                        &mut transform,
-                        &mut player_pos,
-                        &mut player,
-                        &world,
-                        dir,
-                        1.0 / 60.0,
-                    )
+            let Some(mut dir) = sanitize_online_move_direction(dx_milli, dz_milli) else {
+                continue;
+            };
+            if cart_mounted.0 {
+                dir *= CART_MOVE_MULTIPLIER;
+                if dir.length_squared() > 0.0001 {
+                    transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.y));
                 }
+            }
+            let moved = if jump.grounded {
+                apply_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player_state.0,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                    cart_mounted.0,
+                )
             } else {
-                false
+                apply_air_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player_state.0,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                    cart_mounted.0,
+                )
             };
             diagnostics.last_move_applied = moved;
             if moved {
@@ -543,23 +774,58 @@ fn apply_gameplay_commands(
             }
         }
 
-        if let Ok((mut transform, mut player_pos)) = player_q.single_mut() {
-            let _ = step_authoritative_jump(
-                &mut transform,
-                &mut player_pos,
-                &mut player,
-                &world,
-                &mut jump,
-                1.0 / 60.0,
-            );
-        }
+        let _ = step_authoritative_jump(
+            &mut transform,
+            &mut player_pos,
+            &mut player_state.0,
+            &world,
+            &mut jump,
+            1.0 / 60.0,
+        );
 
         for cmd in other_cmds {
+            if matches!(cmd.kind, GameplayCommandKind::MountCart) {
+                let Some(mut cart) = carts
+                    .iter_mut()
+                    .find(|cart| cart.player_id == player_tag.id())
+                else {
+                    feedback.write(GameplayFeedback {
+                        ok: false,
+                        summary: "cart is unavailable".into(),
+                    });
+                    continue;
+                };
+                if !cart_mounted.0 && transform.translation.distance(cart.position) > 3.5 {
+                    feedback.write(GameplayFeedback {
+                        ok: false,
+                        summary: "move closer to your cart".into(),
+                    });
+                    continue;
+                }
+                cart_mounted.0 = !cart_mounted.0;
+                cart.occupied = cart_mounted.0;
+                feedback.write(GameplayFeedback {
+                    ok: true,
+                    summary: if cart_mounted.0 {
+                        "mounted cart"
+                    } else {
+                        "dismounted cart"
+                    }
+                    .into(),
+                });
+                continue;
+            }
             let nearest_creature = if matches!(cmd.kind, GameplayCommandKind::KillNearestCreature) {
                 creatures
                     .iter()
                     .filter_map(|(entity, creature, _)| {
-                        let d2 = creature_attack_distance_sq(player.block_pos, creature.block_pos);
+                        if consumed_creatures.contains(&entity) {
+                            return None;
+                        }
+                        let d2 = creature_attack_distance_sq(
+                            player_state.0.block_pos,
+                            creature.block_pos,
+                        );
                         (d2 <= CREATURE_TRAINING_ATTACK_RANGE_SQ).then_some((
                             entity,
                             d2,
@@ -572,17 +838,19 @@ fn apply_gameplay_commands(
             };
             let nearest_kind = nearest_creature.map(|(_, _, kind)| kind);
             let result = apply_gameplay_command(
+                player_tag.id(),
                 &cmd,
                 &mut world,
                 &mut pool,
                 &mut nations,
-                &mut player,
+                &mut player_state.0,
                 &mut revision,
                 &mut last_delta,
                 nearest_kind,
             );
             if result.ok {
                 if let Some((entity, _, _)) = nearest_creature {
+                    consumed_creatures.insert(entity);
                     commands.entity(entity).despawn();
                 }
             }
@@ -593,88 +861,222 @@ fn apply_gameplay_commands(
             }
             feedback.write(result);
         }
+
+        if let Some(mut cart) = carts
+            .iter_mut()
+            .find(|cart| cart.player_id == player_tag.id())
+        {
+            cart.occupied = cart_mounted.0;
+            if cart_mounted.0 {
+                cart.position = transform.translation - Vec3::Y * 0.55;
+                cart.yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+            }
+        }
     }
 }
 
 fn apply_leafwing_input(
-    mut player: ResMut<PlayerState>,
     world: Res<GameWorld>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
-    mut jump: ResMut<ServerJumpState>,
-    mut anti_stuck: ResMut<AntiStuckState>,
+    mut carts: Query<&mut CartState>,
     mut player_q: Query<
-        (&mut Transform, &mut PlayerPos, &ActionState<PlayerAction>),
+        (
+            &mut Transform,
+            &mut PlayerPos,
+            &mut PlayerStateComponent,
+            &ActionState<PlayerAction>,
+            &mut ServerJumpState,
+            &RespawnState,
+            &mut AntiStuckState,
+            &CartMounted,
+            &PlayerTag,
+            &lightyear::prelude::ControlledBy,
+        ),
         With<PlayerPos>,
     >,
 ) {
-    let Ok((mut transform, mut player_pos, actions)) = player_q.single_mut() else {
-        return;
-    };
-    if actions.just_pressed(&PlayerAction::Jump) && jump.grounded {
-        jump.velocity_y = JUMP_TAKEOFF_SPEED;
-        jump.grounded = false;
-    }
-
-    let mut dir = Vec2::ZERO;
-    if actions.pressed(&PlayerAction::MoveForward) {
-        dir.y -= 1.0;
-    }
-    if actions.pressed(&PlayerAction::MoveBackward) {
-        dir.y += 1.0;
-    }
-    if actions.pressed(&PlayerAction::MoveLeft) {
-        dir.x -= 1.0;
-    }
-    if actions.pressed(&PlayerAction::MoveRight) {
-        dir.x += 1.0;
-    }
-    if dir.length_squared() > 0.0001 {
-        if actions.pressed(&PlayerAction::Sprint) {
-            dir *= 1.5;
+    for (
+        mut transform,
+        mut player_pos,
+        mut player_state,
+        actions,
+        mut jump,
+        respawn,
+        mut anti_stuck,
+        cart_mounted,
+        player_tag,
+        _owner,
+    ) in &mut player_q
+    {
+        if respawn.ticks_remaining > 0 {
+            continue;
         }
-        let dx_milli = (dir.x * 1000.0).round() as i16;
-        let dz_milli = (dir.y * 1000.0).round() as i16;
-        diagnostics.move_world_received = diagnostics.move_world_received.saturating_add(1);
-        diagnostics.last_dx_milli = dx_milli;
-        diagnostics.last_dz_milli = dz_milli;
-        let moved = if jump.grounded {
-            apply_world_move(
+        if actions.just_pressed(&PlayerAction::Jump) && jump.grounded && !cart_mounted.0 {
+            jump.velocity_y = JUMP_TAKEOFF_SPEED;
+            jump.grounded = false;
+        }
+
+        let mut dir = Vec2::ZERO;
+        if actions.pressed(&PlayerAction::MoveForward) {
+            dir.y -= 1.0;
+        }
+        if actions.pressed(&PlayerAction::MoveBackward) {
+            dir.y += 1.0;
+        }
+        if actions.pressed(&PlayerAction::MoveLeft) {
+            dir.x -= 1.0;
+        }
+        if actions.pressed(&PlayerAction::MoveRight) {
+            dir.x += 1.0;
+        }
+        if dir.length_squared() > 0.0001 {
+            if actions.pressed(&PlayerAction::Sprint) {
+                dir *= 1.5;
+            }
+            dir = dir.clamp_length_max(ONLINE_INPUT_MAX_MAGNITUDE);
+            if cart_mounted.0 {
+                dir *= CART_MOVE_MULTIPLIER;
+                if dir.length_squared() > 0.0001 {
+                    transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.y));
+                }
+            }
+            let dx_milli = (dir.x * 1000.0).round() as i16;
+            let dz_milli = (dir.y * 1000.0).round() as i16;
+            diagnostics.move_world_received = diagnostics.move_world_received.saturating_add(1);
+            diagnostics.last_dx_milli = dx_milli;
+            diagnostics.last_dz_milli = dz_milli;
+            let moved = if jump.grounded {
+                apply_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player_state.0,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                    cart_mounted.0,
+                )
+            } else {
+                apply_air_world_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player_state.0,
+                    &world,
+                    dir,
+                    1.0 / 60.0,
+                    cart_mounted.0,
+                )
+            };
+            diagnostics.last_move_applied = moved;
+            maintain_anti_stuck(
+                &world,
+                &mut player_state.0,
                 &mut transform,
                 &mut player_pos,
-                &mut player,
-                &world,
-                dir,
-                1.0 / 60.0,
-            )
-        } else {
-            apply_air_world_move(
-                &mut transform,
-                &mut player_pos,
-                &mut player,
-                &world,
-                dir,
-                1.0 / 60.0,
-            )
-        };
-        diagnostics.last_move_applied = moved;
-        maintain_anti_stuck(
-            &world,
-            &mut player,
+                &mut anti_stuck,
+                moved,
+            );
+        }
+
+        let _ = step_authoritative_jump(
             &mut transform,
             &mut player_pos,
-            &mut anti_stuck,
-            moved,
+            &mut player_state.0,
+            &world,
+            &mut jump,
+            1.0 / 60.0,
+        );
+
+        if cart_mounted.0 {
+            if let Some(mut cart) = carts
+                .iter_mut()
+                .find(|cart| cart.player_id == player_tag.id())
+            {
+                cart.position = transform.translation - Vec3::Y * 0.55;
+                cart.yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+                cart.occupied = true;
+            }
+        }
+    }
+}
+
+fn recover_dead_players(
+    world: Res<GameWorld>,
+    tick: Res<FixedTick>,
+    mut carts: Query<&mut CartState>,
+    mut players: Query<(
+        &PlayerTag,
+        &mut Health,
+        &mut PvpCombatant,
+        &mut Transform,
+        &mut PlayerPos,
+        &mut PlayerStateComponent,
+        &mut ServerJumpState,
+        &mut RespawnState,
+        &mut AntiStuckState,
+        &mut CartMounted,
+    )>,
+) {
+    for (
+        player_tag,
+        mut health,
+        mut combatant,
+        mut transform,
+        mut player_pos,
+        mut player_state,
+        mut jump,
+        mut respawn,
+        mut anti_stuck,
+        mut cart_mounted,
+    ) in &mut players
+    {
+        if !health.is_dead() && respawn.ticks_remaining == 0 {
+            continue;
+        }
+
+        if respawn.ticks_remaining == 0 {
+            respawn.ticks_remaining = RESPAWN_DELAY_TICKS;
+            combatant.cooldown_remaining = 0.0;
+            continue;
+        }
+
+        respawn.ticks_remaining -= 1;
+        if respawn.ticks_remaining > 0 {
+            continue;
+        }
+
+        let center = [world.size / 2, 0, world.size / 2];
+        let (position, block_pos) = connected_player_spawn(
+            &world,
+            center,
+            Vec3::new(center[0] as f32 + 0.5, 1.0, center[2] as f32 + 0.5),
+            player_tag.id(),
+        );
+        transform.translation = position;
+        player_pos.0 = position;
+        player_state.0.pos = position;
+        player_state.0.block_pos = block_pos;
+        *jump = ServerJumpState::default();
+        cart_mounted.0 = false;
+        if let Some(mut cart) = carts
+            .iter_mut()
+            .find(|cart| cart.player_id == player_tag.id())
+        {
+            cart.position = position - Vec3::Y * 0.55;
+            cart.yaw = 0.0;
+            cart.occupied = false;
+        }
+        anti_stuck.last_safe_pos = position;
+        anti_stuck.last_safe_block = block_pos;
+        anti_stuck.failed_move_ticks = 0;
+        health.current = health.max.max(1.0);
+        health.invuln_until_tick = tick.0.saturating_add(RESPAWN_DELAY_TICKS);
+        combatant.cooldown_remaining = 0.0;
+        info!(
+            "[pvp] respawned player {} at {:?}",
+            player_tag.id(),
+            block_pos
         );
     }
-
-    let _ = step_authoritative_jump(
-        &mut transform,
-        &mut player_pos,
-        &mut player,
-        &world,
-        &mut jump,
-        1.0 / 60.0,
-    );
 }
 
 fn echo_ping_messages(
@@ -820,6 +1222,7 @@ fn apply_world_move(
     world: &GameWorld,
     dir: Vec2,
     dt: f32,
+    cart_mounted: bool,
 ) -> bool {
     if dir.length_squared() <= 0.0001 {
         return false;
@@ -842,7 +1245,7 @@ fn apply_world_move(
     }
 
     let next_pos = Vec3::new(next.x, stand_pos.y, next.z);
-    if !player_volume_clear_at(world, next_pos) {
+    if !vehicle_volume_clear_at(world, next_pos, cart_mounted) {
         return false;
     }
 
@@ -860,13 +1263,14 @@ fn apply_air_world_move(
     world: &GameWorld,
     dir: Vec2,
     dt: f32,
+    cart_mounted: bool,
 ) -> bool {
     if dir.length_squared() <= 0.0001 {
         return false;
     }
     let step = Vec3::new(dir.x, 0.0, dir.y) * ONLINE_MOVE_SPEED * dt;
     let next_pos = player.pos + step;
-    if !player_volume_clear_at(world, next_pos) {
+    if !vehicle_volume_clear_at(world, next_pos, cart_mounted) {
         return false;
     }
 
@@ -879,6 +1283,26 @@ fn apply_air_world_move(
         next_pos.z.floor() as i32,
     ];
     true
+}
+
+fn vehicle_volume_clear_at(world: &GameWorld, position: Vec3, cart_mounted: bool) -> bool {
+    if !player_volume_clear_at(world, position) {
+        return false;
+    }
+    if !cart_mounted {
+        return true;
+    }
+
+    const CART_HALF_WIDTH: f32 = 0.82;
+    const CART_HALF_LENGTH: f32 = 0.62;
+    [
+        Vec3::new(CART_HALF_WIDTH, 0.0, 0.0),
+        Vec3::new(-CART_HALF_WIDTH, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, CART_HALF_LENGTH),
+        Vec3::new(0.0, 0.0, -CART_HALF_LENGTH),
+    ]
+    .into_iter()
+    .all(|offset| player_volume_clear_at(world, position + offset))
 }
 
 fn step_authoritative_jump(
@@ -964,7 +1388,10 @@ fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
             for oz in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
                 let x = (pos.x + ox).floor() as i32;
                 let z = (pos.z + oz).floor() as i32;
-                if x < 0 || x >= world.size || y < 0 || y >= world.size || z < 0 || z >= world.size
+                if (!world.procedural
+                    && (x < 0 || x >= world.size || z < 0 || z >= world.size))
+                    || y < 0
+                    || y >= world.size
                 {
                     return false;
                 }
@@ -980,31 +1407,62 @@ fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
 fn sync_authoritative_snapshot_components(
     clock: Res<SimClock>,
     world: Res<GameWorld>,
-    player: Res<PlayerState>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
-    eco: Res<EcoCycle>,
+    regions: Res<NatureRegionWorld>,
     obs: Res<TickObserver>,
     revision: Res<WorldRevision>,
     last_delta: Res<LastVoxelDeltaState>,
+    mut snapshot_cache: ResMut<VoxelChunkSnapshotCache>,
     mut q: Query<
         (
             &mut GameplayHudState,
             &mut EcoSnapshot,
             &mut VoxelDelta,
             &mut VoxelChunkSnapshot,
+            &PlayerStateComponent,
         ),
         With<PlayerPos>,
     >,
 ) {
-    let hud = build_gameplay_hud_state(&clock, &player, &pool, &nations, &monsters, &obs);
-    let eco_snapshot = eco.to_snapshot(clock.tick);
-    let chunk_snapshot = build_voxel_chunk_snapshot(&world, revision.0, player.block_pos);
-    for (mut hud_state, mut eco_state, mut delta, mut chunk) in q.iter_mut() {
+    let Some(primary) = regions.primary() else {
+        return;
+    };
+    let primary_snapshot = primary.latest_snapshot();
+    if !primary_snapshot.is_finite() {
+        warn!(
+            "[nature] retaining previous replicated snapshot after non-finite state at tick {}",
+            clock.tick
+        );
+        return;
+    }
+    for (mut hud_state, mut eco_state, mut delta, mut chunk, player) in q.iter_mut() {
+        let region_id = NatureRegionId::from_position(
+            [player.0.block_pos[0] as f32, player.0.block_pos[2] as f32],
+            lk2_core::simulation::regions::DEFAULT_REGION_SIZE,
+        );
+        let nature_snapshot = regions
+            .get(region_id)
+            .map_or_else(|| primary_snapshot.clone(), NatureRegionState::latest_snapshot);
+        let eco_snapshot = nature_snapshot
+            .for_region(
+                [player.0.block_pos[0] as f32, player.0.block_pos[2] as f32],
+                (constant::PLAYER_VISION_RADIUS * 2) as f32,
+            )
+            .detailed_ecology;
+        let hud = build_gameplay_hud_state(&clock, &player.0, &pool, &nations, &monsters, &obs);
+        let chunk_snapshot = cached_voxel_chunk_snapshot(
+            &world,
+            revision.0,
+            player.0.block_pos,
+            &mut snapshot_cache,
+        );
         *hud_state = hud.clone();
         *eco_state = eco_snapshot.clone();
-        *chunk = chunk_snapshot.clone();
+        if *chunk != *chunk_snapshot {
+            *chunk = chunk_snapshot.clone();
+        }
         if last_delta.revision > 0 {
             *delta = VoxelDelta {
                 revision: last_delta.revision,
@@ -1049,6 +1507,10 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     let auto_demo_mode = args.iter().any(|a| a == "--auto-demo");
+    let scenario_file_requested = args
+        .iter()
+        .skip(1)
+        .any(|arg| !arg.starts_with("--") && arg.ends_with(".json"));
     let scenario = if auto_demo_mode {
         Scenario {
             name: "idle".into(),
@@ -1065,15 +1527,22 @@ fn main() {
     } else {
         lk2_core::scenario::load_scenario_from_args_or_default(&args)
     };
-    let scenario_state = ScenarioState::from_scenario(scenario.clone());
+    let scenario_state = if auto_demo_mode || scenario_file_requested {
+        ScenarioState::from_scenario(scenario.clone())
+    } else {
+        ScenarioState::default()
+    };
 
     let _ = std::fs::create_dir_all("screenshots");
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
+        .add_plugins(PhysicsPlugins::default())
         .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins(lightyear::prelude::server::ServerPlugins::default())
+        .add_plugins(LightyearAvianPlugin::default())
         .add_plugins(lk2_core::protocol::ProtocolPlugin)
         .add_plugins(lk2_core::match_state::MatchStatePlugin)
+        .add_plugins(lk2_core::objectives::ObjectivesPlugin)
         .add_plugins(lk2_core::protection::ProtectionPlugin)
         .add_plugins(lk2_core::combat::CombatPlugin)
         .add_plugins(SimplePvpAuthorityPlugin)
@@ -1091,26 +1560,31 @@ fn main() {
         .init_resource::<GlobalResourcePool>()
         .init_resource::<NationRegistry>()
         .init_resource::<MonsterEcosystem>()
-        .init_resource::<EcoCycle>()
+        .init_resource::<NatureRegionWorld>()
+        .init_resource::<LatestNatureRegionReports>()
         .init_resource::<TickObserver>()
         .init_resource::<TickRecorder>()
         .init_resource::<CreatureSpawnerDone>()
         .init_resource::<PlayerState>()
+        .init_resource::<NextPlayerId>()
+        .init_resource::<ReservedPlayerEntities>()
+        .init_resource::<DisconnectedPlayerSessions>()
         .init_resource::<ServerTickCounter>()
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
+        .init_resource::<VoxelChunkSnapshotCache>()
         .init_resource::<ServerCommandDiagnostics>()
         .init_resource::<ServerConnectionDiagnostics>()
-        .init_resource::<ServerJumpState>()
-        .init_resource::<AntiStuckState>()
         .insert_resource(scenario_state)
         .add_systems(
             Startup,
             (
-                setup_world,
+                setup_world.after(persistence::load_nature_region_saves),
+                spawn_server_creatures,
                 dump_world_resources,
                 spawn_server,
                 spawn_player,
+                lk2_core::objectives::setup_default_objectives,
                 // self_check was here previously; it ran 100 sim ticks inside
                 // Startup, blocking the App::run loop and starving UDP packet
                 // processing for ~9s — which exactly matched the default
@@ -1133,12 +1607,18 @@ fn main() {
             // early "100 ticks all green" diagnostic.
             run_startup_self_check_once,
         )
+        .add_systems(Update, lk2_core::ecology::animals::update_creatures)
         .add_systems(
             FixedUpdate,
             (
+                sync_nature_regions.in_set(SimSet::Interaction),
                 simulation_tick
+                    .after(sync_nature_regions)
                     .in_set(SimSet::Interaction)
                     .in_set(NatureAuthoritySet::StepWorld),
+                lk2_core::scenario::scenario_runner
+                    .after(simulation_tick)
+                    .in_set(SimSet::Interaction),
                 // iter_199 Phase A: nation 自动 upkeep — 每个 nation 周期消耗
                 // Wood/Food 维持 flag，缺资源时扣 flag_hp 并可能 dissolve。
                 // 放在 simulation_tick 之后才能看到 sim tick 加的 Apple/Food。
@@ -1146,18 +1626,27 @@ fn main() {
                     .after(simulation_tick)
                     .in_set(SimSet::Interaction),
                 end_tick_system.in_set(SimSet::ScoreAndAudit),
-                tick_recorder.in_set(SimSet::Snapshot),
+                tick_recorder
+                    .after(NatureAuthoritySet::PublishReport)
+                    .after(sync_authoritative_snapshot_components)
+                    .in_set(SimSet::Snapshot),
+                lk2_core::scenario::scenario_tick_recorder
+                    .after(lk2_core::scenario::scenario_runner)
+                    .in_set(SimSet::Snapshot),
             ),
         )
         .add_systems(
             FixedUpdate,
             (
-                apply_gameplay_commands,
-                apply_leafwing_input,
+                stream_terrain_chunks,
+                apply_gameplay_commands.before(sync_nature_regions),
+                recover_dead_players.before(sync_nature_regions),
+                apply_leafwing_input.before(sync_nature_regions),
+                sync_authoritative_avian_transforms,
                 echo_ping_messages,
                 broadcast_gameplay_feedback,
                 relay_chat_messages,
-                sync_authoritative_snapshot_components,
+                sync_authoritative_snapshot_components.after(simulation_tick),
                 broadcast_player_pos,
             )
                 .chain(),
@@ -1167,6 +1656,20 @@ fn main() {
 
 fn server_ports_available(port: u16) -> bool {
     std::net::UdpSocket::bind(std::net::SocketAddr::from(([0, 0, 0, 0], port))).is_ok()
+}
+
+/// Keep Avian's networked state aligned with the existing authoritative
+/// movement system. The server remains the sole writer; Lightyear Avian then
+/// projects these components to online clients.
+fn sync_authoritative_avian_transforms(
+    mut players: Query<(&Transform, &mut Position, &mut Rotation), With<PlayerPos>>,
+) {
+    for (transform, mut position, mut rotation) in &mut players {
+        if transform.translation.is_finite() {
+            position.0 = transform.translation;
+            rotation.0 = transform.rotation;
+        }
+    }
 }
 
 fn dump_world_resources(world: &World) {
@@ -1209,10 +1712,117 @@ fn spawn_server(mut commands: Commands) {
     commands.trigger(Start { entity: server_id });
 }
 
+fn spawn_server_player(
+    commands: &mut Commands,
+    name: String,
+    player_id: u32,
+    state: PlayerState,
+    mounted: bool,
+    saved_cart: Option<CartState>,
+    jump: ServerJumpState,
+    anti_stuck: AntiStuckState,
+) -> Entity {
+    let position = state.pos;
+    let mut entity = commands.spawn_empty();
+    entity
+        .insert(Name::new(name.clone()))
+        .insert(PlayerTag(player_id))
+        .insert(Transform::from_translation(position))
+        .insert(Position(position))
+        .insert(Rotation::default())
+        // The world-grid movement rules remain the authority for terrain
+        // clearance. This kinematic body gives Lightyear Avian a concrete
+        // networked player body without letting the local solver own motion.
+        .insert(RigidBody::Kinematic)
+        .insert(Collider::capsule(0.38, 1.0))
+        .insert(PlayerPos(position))
+        .insert(CartMounted(mounted))
+        .insert(PlayerStateComponent(state))
+        .insert(jump)
+        .insert(RespawnState::default())
+        .insert(anti_stuck)
+        .insert(PvpCombatant::default())
+        .insert(SimpleWeapon::default())
+        .insert(Hitbox::default())
+        .insert(Health::default())
+        .insert(ActionState::<PlayerAction>::default())
+        .insert(empty_gameplay_hud_state())
+        .insert(EcoCycle::default().to_snapshot(0))
+        .insert(empty_voxel_delta())
+        .insert(empty_voxel_chunk_snapshot());
+    let entity_id = entity.id();
+    drop(entity);
+    let mut cart = saved_cart.unwrap_or(CartState {
+        player_id,
+        position: position - Vec3::Y * 0.55,
+        yaw: 0.0,
+        occupied: mounted,
+    });
+    // Player ids are server-local and can change after a reconnect. The
+    // session restores cart pose/state, but ownership must follow the new id.
+    cart.player_id = player_id;
+    cart.occupied = mounted;
+    commands.spawn((
+        Name::new(format!("{name}-Cart")),
+        cart,
+        Transform::from_translation(cart.position)
+            .with_rotation(Quat::from_rotation_y(cart.yaw)),
+        lightyear::prelude::Replicate::to_clients(lightyear::prelude::NetworkTarget::All),
+    ));
+    entity_id
+}
+
+fn spawn_server_creatures(
+    mut commands: Commands,
+    world: Res<GameWorld>,
+    mut done: ResMut<CreatureSpawnerDone>,
+) {
+    if done.0 {
+        return;
+    }
+    done.0 = true;
+
+    let center_x = world.size / 2;
+    let center_z = world.size / 2;
+    let placements = [
+        (3, -3, CreatureKind::Cow),
+        (3, 3, CreatureKind::Pig),
+        (-3, 3, CreatureKind::Sheep),
+        (-3, -3, CreatureKind::Chicken),
+        (5, 0, CreatureKind::Cow),
+        (0, 5, CreatureKind::Pig),
+        (-5, 0, CreatureKind::Sheep),
+        (0, -5, CreatureKind::Chicken),
+    ];
+
+    let mut spawned = 0;
+    for (dx, dz, kind) in placements {
+        let x = center_x + dx;
+        let z = center_z + dz;
+        let Some((position, block_pos)) = player_spawn_position_at(&world, x, z) else {
+            continue;
+        };
+        commands.spawn((
+            Creature { kind, block_pos },
+            CreatureAI {
+                wander_timer: 0.0,
+                next_wander_secs: 9999.0,
+                bob_phase: 0.0,
+            },
+            Transform::from_translation(position),
+        ));
+        spawned += 1;
+    }
+    info!(
+        "[creature] spawned {} authoritative online creatures",
+        spawned
+    );
+}
+
 fn spawn_player(
     mut commands: Commands,
     mut player: ResMut<PlayerState>,
-    mut anti_stuck: ResMut<AntiStuckState>,
+    mut next_player_id: ResMut<NextPlayerId>,
     game_world: Res<GameWorld>,
     scenario_state: Res<ScenarioState>,
 ) {
@@ -1262,83 +1872,193 @@ fn spawn_player(
     });
     player.pos = spawn;
     player.block_pos = spawn_block;
-    anti_stuck.last_safe_pos = spawn;
-    anti_stuck.last_safe_block = spawn_block;
-    anti_stuck.failed_move_ticks = 0;
+    next_player_id.0 = 1;
     info!(
         "[player] spawning authoritative player entity at {:?}, block={:?}",
         spawn, spawn_block
     );
-    commands.spawn((
-        Name::new("Player"),
-        PlayerTag(0),
-        Transform::from_translation(spawn),
-        PlayerPos(spawn),
-        PvpCombatant::default(),
-        SimpleWeapon::default(),
-        Hitbox::default(),
-        Health::default(),
-        ActionState::<PlayerAction>::default(),
-        empty_gameplay_hud_state(),
-        EcoCycle::default().to_snapshot(0),
-        empty_voxel_delta(),
-        empty_voxel_chunk_snapshot(),
-    ));
+    spawn_server_player(
+        &mut commands,
+        "Player".to_string(),
+        0,
+        PlayerState {
+            pos: spawn,
+            block_pos: spawn_block,
+            ..default()
+        },
+        false,
+        None,
+        ServerJumpState::default(),
+        AntiStuckState {
+            last_safe_pos: spawn,
+            last_safe_block: spawn_block,
+            failed_move_ticks: 0,
+        },
+    );
+}
+
+fn connected_player_spawn(
+    world: &GameWorld,
+    base_block: [i32; 3],
+    base_pos: Vec3,
+    player_id: u32,
+) -> (Vec3, [i32; 3]) {
+    for [dx, dz] in fallback_spawn_ring_offsets((player_id % 8) as u8) {
+        let x = base_block[0] + dx;
+        let z = base_block[2] + dz;
+        let Some((position, block_pos)) = player_spawn_position_at(world, x, z) else {
+            continue;
+        };
+        if player_volume_clear_at(world, position) {
+            return (position, block_pos);
+        }
+    }
+
+    player_spawn_position_near(world, base_block[0], base_block[2], 14, 2)
+        .unwrap_or((base_pos, base_block))
 }
 
 fn replicate_player_for_connected(
     trigger: On<Add, lightyear_connection::client_of::ClientOf>,
     mut commands: Commands,
-    player_q: Query<Entity, With<PlayerPos>>,
+    players: Query<(Entity, Option<&lightyear::prelude::ControlledBy>), With<PlayerPos>>,
+    game_world: Res<GameWorld>,
+    player_resource: Res<PlayerState>,
+    mut next_player_id: ResMut<NextPlayerId>,
     remote_ids: Query<&lightyear::prelude::RemoteId>,
     mut diagnostics: ResMut<ServerConnectionDiagnostics>,
+    mut sessions: ResMut<DisconnectedPlayerSessions>,
+    mut reserved_players: ResMut<ReservedPlayerEntities>,
 ) {
     let client_of_entity = trigger.entity;
     diagnostics.record_connected();
-    let remote_id = remote_ids
-        .get(client_of_entity)
-        .map_or_else(|_| "unknown".to_string(), |id| format!("{:?}", id.0));
+    let remote_id = remote_ids.get(client_of_entity).ok().map(|id| id.0.to_bits());
     info!(
-        "[net] client {} connected on {:?}; active={}, connected_total={}",
+        "[net] client {:?} connected on {:?}; active={}, connected_total={}",
         remote_id, client_of_entity, diagnostics.active_connections, diagnostics.connected_total,
     );
 
     commands.entity(client_of_entity).insert((
         lightyear::prelude::ReplicationSender::default(),
         lightyear::prelude::MessageReceiver::<PingMessage>::default(),
+        LastClientCommandSequence::default(),
     ));
     info!(
         "[net] ReplicationSender attached to ClientOf entity {:?} — now this client can receive replicated entities",
         client_of_entity
     );
 
-    if let Some(entity) = player_q.iter().next() {
-        commands.entity(entity).insert((
-            lightyear::prelude::Replicate::manual(vec![client_of_entity]),
-            lightyear::prelude::ControlledBy {
-                owner: client_of_entity,
-                lifetime: lightyear::prelude::Lifetime::Persistent,
-            },
-        ));
-        info!(
-            "[net] Replicate + ControlledBy attached to Player entity {:?} — owner={:?}, senders=[{:?}]",
-            entity, client_of_entity, client_of_entity
+    let entity = if let Some((entity, _)) = players
+        .iter()
+        .find(|(entity, owner)| owner.is_none() && !reserved_players.0.contains(entity))
+    {
+        entity
+    } else {
+        let player_id = next_player_id.0;
+        next_player_id.0 = next_player_id.0.saturating_add(1);
+        let (spawn, spawn_block) = connected_player_spawn(
+            &game_world,
+            player_resource.block_pos,
+            player_resource.pos,
+            player_id,
         );
-    }
+        let session = remote_id.and_then(|key| sessions.0.remove(&key));
+        let (state, mounted, saved_cart) = session.map_or_else(
+            || (
+                PlayerState {
+                    pos: spawn,
+                    block_pos: spawn_block,
+                    ..default()
+                },
+                false,
+                None,
+            ),
+            |session| (session.state, session.mounted, session.cart),
+        );
+        let restored_pos = state.pos;
+        let restored_block = state.block_pos;
+        spawn_server_player(
+            &mut commands,
+            format!("Player-{player_id}"),
+            player_id,
+            state,
+            mounted,
+            saved_cart,
+            ServerJumpState::default(),
+            AntiStuckState {
+                last_safe_pos: restored_pos,
+                last_safe_block: restored_block,
+                failed_move_ticks: 0,
+            },
+        )
+    };
+    reserved_players.0.insert(entity);
+    commands.entity(entity).insert((
+        lightyear::prelude::Replicate::to_clients(lightyear::prelude::NetworkTarget::All),
+        lightyear::prelude::ControlledBy {
+            owner: client_of_entity,
+            lifetime: lightyear::prelude::Lifetime::Persistent,
+        },
+    ));
+    info!(
+        "[net] Replicate + ControlledBy attached to Player entity {:?} — owner={:?}, target=all",
+        entity, client_of_entity
+    );
 }
 
 fn record_disconnected_client(
     trigger: On<Add, lightyear_connection::client::Disconnected>,
+    mut commands: Commands,
     connections: Query<(
         &lightyear_connection::client::Disconnected,
         Option<&lightyear::prelude::RemoteId>,
     )>,
     mut diagnostics: ResMut<ServerConnectionDiagnostics>,
+    mut sessions: ResMut<DisconnectedPlayerSessions>,
+    mut reserved_players: ResMut<ReservedPlayerEntities>,
+    players: Query<(
+        Entity,
+        &lightyear::prelude::ControlledBy,
+        &PlayerTag,
+        &PlayerStateComponent,
+        &CartMounted,
+    ), With<PlayerPos>>,
+    carts: Query<(Entity, &CartState)>,
 ) {
     let Ok((disconnected, remote_id)) = connections.get(trigger.entity) else {
         return;
     };
     diagnostics.record_disconnected(disconnected.reason.as_deref());
+    let session_key = remote_id.map(|id| id.0.to_bits());
+    for (player, owner, player_tag, player_state, mounted) in &players {
+        if owner.owner == trigger.entity {
+            reserved_players.0.remove(&player);
+            if let Some(key) = session_key.as_ref() {
+                let cart = carts
+                    .iter()
+                    .find(|(_, cart)| cart.player_id == player_tag.id())
+                    .map(|(_, cart)| *cart);
+                sessions.0.insert(
+                    *key,
+                    DisconnectedPlayerSession {
+                        state: player_state.0.clone(),
+                        mounted: mounted.0,
+                        cart,
+                    },
+                );
+            }
+            commands
+                .entity(player)
+                .despawn_related::<Children>()
+                .despawn();
+            if let Some((cart, _)) = carts
+                .iter()
+                .find(|(_, cart)| cart.player_id == player_tag.id())
+            {
+                commands.entity(cart).despawn();
+            }
+        }
+    }
     info!(
         "[net] client {:?} disconnected from {:?}: {}; active={}, disconnected_total={}",
         remote_id.map(|id| id.0),
@@ -1396,7 +2116,8 @@ fn setup_world(
     scenario_state: Res<ScenarioState>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
-    mut eco: ResMut<EcoCycle>,
+    mut regions: ResMut<NatureRegionWorld>,
+    saves: Res<LatestNatureRegionSaves>,
 ) {
     let world_config = scenario_state
         .scenario
@@ -1404,6 +2125,15 @@ fn setup_world(
         .map(|scenario| scenario.world_config("default"))
         .unwrap_or_default();
     *game_world = generate_world(&world_config);
+    if let Some(path) = persistence::TerrainSavePath::from_env().0 {
+        match persistence::read_terrain_save(&path) {
+            Ok(save) => match save.apply_to_world(&mut game_world) {
+                Ok(()) => info!("[terrain] restored edits from {:?}", path),
+                Err(error) => error!("[terrain] rejected save {:?}: {}", path, error),
+            },
+            Err(error) => warn!("[terrain] no usable save {:?}: {}", path, error),
+        }
+    }
     info!("[terrain] using preset '{}'", game_world.pipeline.name);
     if let Some(content) = game_world.content.as_ref() {
         info!(
@@ -1431,12 +2161,178 @@ fn setup_world(
         |content| content.monster_position,
     );
     monsters.demo_init_at(monster_anchor);
-    *eco = EcoCycle::demo_at(Vec2::new(
+    let ecology = EcoCycle::demo_at(Vec2::new(
         constant::WORLD_SIZE as f32 * 0.5,
         constant::WORLD_SIZE as f32 * 0.5,
     ));
+    let primary_id = NatureRegionId::from_position(
+        [
+            constant::WORLD_SIZE as f32 * 0.5,
+            constant::WORLD_SIZE as f32 * 0.5,
+        ],
+        lk2_core::simulation::regions::DEFAULT_REGION_SIZE,
+    );
+    let primary_region = if saves
+        .0
+        .get(&primary_id)
+        .is_some_and(|save| save.validate_persisted().is_ok())
+    {
+        restored_or_generated_region(
+            primary_id,
+            lk2_core::simulation::cadence::RegionLod::Active,
+            &saves,
+        )
+    } else {
+        NatureRegionState::new(
+            primary_id,
+            ecology,
+            pool.clone(),
+            lk2_core::simulation::cadence::RegionLod::Active,
+        )
+    };
+    (*pool).clone_from(&primary_region.resources);
+    regions.insert(primary_region);
 
     info!("🌍 世界已生成: {}³ (server)", constant::WORLD_SIZE);
+}
+
+fn stream_terrain_chunks(
+    mut world: ResMut<GameWorld>,
+    players: Query<&PlayerStateComponent, With<PlayerTag>>,
+) {
+    let mut wanted = HashSet::new();
+    let vertical_chunks = (world.size + TERRAIN_CHUNK_SIZE - 1) / TERRAIN_CHUNK_SIZE;
+
+    for player in &players {
+        let [px, _, pz] = player.0.block_pos;
+        let center = TerrainChunkCoord::from_block([px, 0, pz]);
+        for z in
+            (center.z - TERRAIN_STREAM_RADIUS_CHUNKS)..=(center.z + TERRAIN_STREAM_RADIUS_CHUNKS)
+        {
+            for x in (center.x - TERRAIN_STREAM_RADIUS_CHUNKS)
+                ..=(center.x + TERRAIN_STREAM_RADIUS_CHUNKS)
+            {
+                for y in 0..vertical_chunks {
+                    let coord = TerrainChunkCoord::new(x, y, z);
+                    let origin = coord.origin();
+                    if !world.procedural
+                        && (origin[0] < 0
+                            || origin[2] < 0
+                            || origin[0] >= world.size
+                            || origin[2] >= world.size)
+                    {
+                        continue;
+                    }
+                    wanted.insert(coord);
+                }
+            }
+        }
+    }
+
+    for coord in wanted.iter().copied() {
+        world.materialize_chunk(coord);
+    }
+
+    let loaded = world.loaded_chunks.loaded_coords().collect::<Vec<_>>();
+    for coord in loaded {
+        if !wanted.contains(&coord) {
+            let _ = world.unload_chunk(coord);
+        }
+    }
+}
+
+fn sync_nature_regions(
+    mut regions: ResMut<NatureRegionWorld>,
+    saves: Res<LatestNatureRegionSaves>,
+    players: Query<&PlayerStateComponent, With<PlayerTag>>,
+) {
+    let mut wanted = Vec::new();
+    let mut region_lods: HashMap<
+        NatureRegionId,
+        lk2_core::simulation::cadence::RegionLod,
+    > = HashMap::new();
+    let active_radius = constant::PLAYER_VISION_RADIUS as f32;
+    let nearby_radius = active_radius * 3.0;
+
+    for player in &players {
+        let [px, _, pz] = player.0.block_pos;
+        let player_position = [px as f32, pz as f32];
+        let base = NatureRegionId::from_position(
+            player_position,
+            lk2_core::simulation::regions::DEFAULT_REGION_SIZE,
+        );
+        if regions.get(base).is_none() {
+            regions.insert(restored_or_generated_region(
+                base,
+                lk2_core::simulation::cadence::RegionLod::Active,
+                &saves,
+            ));
+        }
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let id = NatureRegionId {
+                    x: base.x + dx,
+                    z: base.z + dz,
+                };
+                let center = id.center(lk2_core::simulation::regions::DEFAULT_REGION_SIZE);
+                let distance = Vec2::new(
+                    center[0] - player_position[0],
+                    center[1] - player_position[1],
+                )
+                .length();
+                let lod = lk2_core::simulation::cadence::RegionLod::for_distance(
+                    distance,
+                    active_radius,
+                    nearby_radius,
+                );
+                region_lods
+                    .entry(id)
+                    .and_modify(|current| *current = current.max(lod))
+                    .or_insert(lod);
+                if regions.get(id).is_none() {
+                    regions.insert(restored_or_generated_region(id, lod, &saves));
+                }
+                wanted.push(id);
+            }
+        }
+    }
+
+    for (id, lod) in region_lods {
+        if let Some(region) = regions.get_mut(id) {
+            region.scheduler.set_lod(lod);
+        }
+    }
+    regions.retain_except_primary(&wanted);
+}
+
+fn restored_or_generated_region(
+    id: NatureRegionId,
+    lod: lk2_core::simulation::cadence::RegionLod,
+    saves: &LatestNatureRegionSaves,
+) -> NatureRegionState {
+    if let Some(save) = saves
+        .0
+        .get(&id)
+        .filter(|save| save.validate_persisted().is_ok())
+    {
+        let mut ecology = EcoCycle::default();
+        ecology.apply_snapshot(&save.state.snapshot.detailed_ecology);
+        let mut region = NatureRegionState::new(
+            id,
+            ecology,
+            save.state.resources.clone(),
+            lod,
+        );
+        region.scheduler.sync_to_tick(save.tick);
+        return region;
+    }
+    let center = id.center(lk2_core::simulation::regions::DEFAULT_REGION_SIZE);
+    NatureRegionState::new(
+        id,
+        EcoCycle::demo_at(Vec2::new(center[0], center[1])),
+        GlobalResourcePool::new(),
+        lod,
+    )
 }
 
 fn self_check(
@@ -1444,9 +2340,12 @@ fn self_check(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
-    eco: Res<EcoCycle>,
+    regions: Res<NatureRegionWorld>,
     mut obs: ResMut<TickObserver>,
 ) {
+    let Some(eco) = regions.primary().map(|region| &region.ecology) else {
+        return;
+    };
     info!(">>> 服务端启动自检 100 tick ...");
     let report = lk2_core::diagnostics::run_self_check(
         &game_world,
@@ -1481,13 +2380,16 @@ fn run_startup_self_check_once(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
-    eco: Res<EcoCycle>,
+    regions: Res<NatureRegionWorld>,
     mut obs: ResMut<TickObserver>,
 ) {
     if *fired {
         return;
     }
     *fired = true;
+    let Some(eco) = regions.primary().map(|region| &region.ecology) else {
+        return;
+    };
     // Run the same body as `self_check` but lazily on first Update tick — that
     // way Startup completes immediately and the UDP loop can drain packets from
     // the moment we accept connections.
@@ -1526,21 +2428,60 @@ fn simulation_tick(
     mut clock: ResMut<SimClock>,
     mut pool: ResMut<GlobalResourcePool>,
     mut monsters: ResMut<MonsterEcosystem>,
-    mut eco: ResMut<EcoCycle>,
+    mut regions: ResMut<NatureRegionWorld>,
     mut obs: ResMut<TickObserver>,
     mut latest_nature: ResMut<LatestNatureReport>,
+    mut latest_regions: ResMut<LatestNatureRegionReports>,
 ) {
-    if let Some(report) = advance_fixed_authority_tick_report(
-        fixed_time.delta_secs(),
-        &mut clock,
-        &mut pool,
-        &mut monsters,
-        &mut eco,
-        &mut obs,
-        SimRole::ServerAuthority,
-    ) {
-        latest_nature.0 = Some(report);
+    let (primary_id, report) = {
+        let Some(primary) = regions.primary_mut() else {
+            return;
+        };
+        let id = primary.id;
+        // The regional pool is authoritative. The legacy global resource is
+        // a compatibility mirror because gameplay systems still query it.
+        // Copy gameplay mutations into the region before stepping and publish
+        // the resulting authoritative state back to the mirror afterwards.
+        primary.resources.clone_from(&*pool);
+        let report = advance_fixed_authority_tick_report(
+            fixed_time.delta_secs(),
+            &mut clock,
+            &mut primary.resources,
+            &mut monsters,
+            &mut primary.ecology,
+            &mut obs,
+            SimRole::ServerAuthority,
+        );
+        (*pool).clone_from(&primary.resources);
+        if let Some(report) = report.as_ref() {
+            primary.scheduler.sync_to_tick(report.tick);
+        }
+        (id, report)
+    };
+    if let Some(report) = report {
+        if report.snapshot.is_finite() {
+            latest_regions.0.insert(primary_id, report.clone());
+            latest_nature.0 = Some(report);
+        } else {
+            warn!(
+                "[nature] dropping non-finite authoritative snapshot at tick {}",
+                report.tick
+            );
+        }
     }
+    for (id, report) in regions.advance_all(clock.tick) {
+        if report.snapshot.is_finite() {
+            latest_regions.0.insert(id, report);
+        } else {
+            warn!(
+                "[nature] dropping non-finite background region snapshot at tick {}",
+                report.tick
+            );
+        }
+    }
+    latest_regions
+        .0
+        .retain(|id, _| regions.get(*id).is_some());
 }
 
 fn end_tick_system(
@@ -1550,12 +2491,15 @@ fn end_tick_system(
     monsters: Res<MonsterEcosystem>,
     clock: Res<SimClock>,
     mut obs: ResMut<TickObserver>,
-    player: Res<PlayerState>,
+    players: Query<&PlayerStateComponent, With<PlayerTag>>,
 ) {
     if !clock.last_sim_step_ran {
         return;
     }
 
+    let Some(player) = players.iter().next().map(|state| &state.0) else {
+        return;
+    };
     if let Err(e) = obs.end_tick(
         clock.tick,
         &game_world,
@@ -1580,13 +2524,14 @@ fn tick_recorder(
     time: Res<Time>,
     mut rec: ResMut<TickRecorder>,
     clock: Res<SimClock>,
-    player: Res<PlayerState>,
+    players: Query<(&PlayerStateComponent, &VoxelChunkSnapshot), With<PlayerTag>>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
-    eco: Res<EcoCycle>,
+    regions: Res<NatureRegionWorld>,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
+    save: Res<LatestNatureSave>,
     diagnostics: Res<ServerCommandDiagnostics>,
     server_q: Query<Entity, With<lightyear::prelude::Server>>,
     started_q: Query<Entity, With<lightyear_connection::server::Started>>,
@@ -1598,6 +2543,13 @@ fn tick_recorder(
     if clock.tick == 0 || clock.tick % 5 != 0 || clock.tick == rec.last_dump_tick {
         return;
     }
+    let Some((player_state, chunk)) = players.iter().next() else {
+        return;
+    };
+    let Some(eco) = regions.primary().map(|region| &region.ecology) else {
+        return;
+    };
+    let player = &player_state.0;
     rec.last_dump_tick = clock.tick;
     rec.current_iter = clock.tick as u32;
     let path = format!("screenshots/server_state_t{}.json", clock.tick);
@@ -1627,6 +2579,27 @@ fn tick_recorder(
                 "last_move_applied": diagnostics.last_move_applied,
             }),
         );
+        obj.insert(
+            "persistence".to_string(),
+            serde_json::json!({
+                "schema_version": save.0.as_ref().map(|value| value.schema_version),
+                "tick": save.0.as_ref().map(|value| value.tick),
+                "valid": save.0.as_ref().is_some_and(|value| value.validate().is_ok()),
+            }),
+        );
+        obj.insert(
+            "voxel_chunk".to_string(),
+            serde_json::json!({
+                "revision": chunk.revision,
+                "chunk_x": chunk.chunk_x,
+                "chunk_z": chunk.chunk_z,
+                "border": chunk.border,
+                "y_min": chunk.y_min,
+                "y_size": chunk.y_size,
+                "block_count": chunk.blocks.len(),
+                "valid_block_count": chunk.blocks.iter().filter(|block| **block <= 13).count(),
+            }),
+        );
     }
     if let Ok(s) = serde_json::to_string_pretty(&state) {
         let _ = std::fs::write(&path, s);
@@ -1653,17 +2626,36 @@ mod tests {
         let content = world.content.as_ref().expect("default content");
         let snapshot = build_voxel_chunk_snapshot(&world, 0, content.settlement_position);
         let treasure = content.treasure_position;
-        let x_min = snapshot.chunk_x * VOXEL_CHUNK_SIZE_XZ;
-        let z_min = snapshot.chunk_z * VOXEL_CHUNK_SIZE_XZ;
-        let index = (((treasure[1] - 1 - snapshot.y_min) * VOXEL_CHUNK_SIZE_XZ
+        let snapshot_size = VOXEL_CHUNK_SIZE_XZ + snapshot.border * 2;
+        let x_min = snapshot.chunk_x * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
+        let z_min = snapshot.chunk_z * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
+        let index = (((treasure[1] - 1 - snapshot.y_min) * snapshot_size
             + (treasure[2] - z_min))
-            * VOXEL_CHUNK_SIZE_XZ
+            * snapshot_size
             + (treasure[0] - x_min)) as usize;
 
         assert_eq!(
             snapshot.blocks.get(index).copied(),
             Some(block_type_to_u8(BlockType::SunstoneOre))
         );
+        assert_eq!(snapshot.border, 1);
+        assert_eq!(snapshot.blocks.len(), (18 * 18 * snapshot.y_size) as usize);
+    }
+
+    #[test]
+    fn chunk_snapshot_cache_reuses_revision_and_chunk() {
+        let world = generate_world(&WorldConfig::default());
+        let position = [48, 20, 48];
+        let mut cache = VoxelChunkSnapshotCache::default();
+
+        let first = cached_voxel_chunk_snapshot(&world, 7, position, &mut cache).clone();
+        let second = cached_voxel_chunk_snapshot(&world, 7, [49, 20, 49], &mut cache);
+        assert_eq!(first, *second);
+        assert_eq!(cache.snapshots.len(), 1);
+
+        let _ = cached_voxel_chunk_snapshot(&world, 8, position, &mut cache);
+        assert_eq!(cache.revision, 8);
+        assert_eq!(cache.snapshots.len(), 1);
     }
 
     #[test]
@@ -1693,6 +2685,185 @@ mod tests {
         assert_eq!(
             diagnostics.last_disconnect_reason.as_deref(),
             Some("timeout")
+        );
+    }
+
+    #[test]
+    fn gameplay_command_sequences_accept_only_new_nonzero_values() {
+        let mut last = 0;
+        assert!(!accept_client_command_sequence(&mut last, 0));
+        assert!(accept_client_command_sequence(&mut last, 1));
+        assert_eq!(last, 1);
+        assert!(!accept_client_command_sequence(&mut last, 1));
+        assert!(!accept_client_command_sequence(&mut last, 0));
+        assert!(!accept_client_command_sequence(&mut last, 0));
+        assert!(accept_client_command_sequence(&mut last, 2));
+        assert!(!accept_client_command_sequence(&mut last, 1));
+        assert_eq!(last, 2);
+    }
+
+    #[test]
+    fn online_move_input_is_bounded_to_walk_or_sprint_magnitude() {
+        let direction = sanitize_online_move_direction(i16::MAX, i16::MAX)
+            .expect("non-zero movement should be accepted");
+
+        assert!((direction.length() - ONLINE_INPUT_MAX_MAGNITUDE).abs() < 0.001);
+        assert!(sanitize_online_move_direction(0, 0).is_none());
+    }
+
+    #[test]
+    fn mine_command_requires_reach_and_updates_authoritative_world() {
+        let mut world = GameWorld::new(8);
+        world.set(4, 1, 4, BlockType::Stone);
+        let mut pool = GlobalResourcePool::new();
+        let mut nations = NationRegistry::default();
+        let mut player = PlayerState {
+            block_pos: [4, 2, 4],
+            ..default()
+        };
+        let mut revision = WorldRevision::default();
+        let mut delta = LastVoxelDeltaState::default();
+
+        let result = apply_gameplay_command(
+            11,
+            &GameplayCommand {
+                sequence: 1,
+                tick: 1,
+                player_block: [4, 2, 4],
+                kind: GameplayCommandKind::MineTarget { target: [4, 1, 4] },
+            },
+            &mut world,
+            &mut pool,
+            &mut nations,
+            &mut player,
+            &mut revision,
+            &mut delta,
+            None,
+        );
+
+        assert!(result.ok);
+        assert_eq!(world.get(4, 1, 4), BlockType::Air);
+        assert_eq!(player.inventory.get(&ResourceKind::Stone), Some(&1));
+        assert!(revision.0 > 0);
+
+        let rejected = apply_gameplay_command(
+            11,
+            &GameplayCommand {
+                sequence: 2,
+                tick: 2,
+                player_block: [4, 2, 4],
+                kind: GameplayCommandKind::MineTarget { target: [0, 0, 0] },
+            },
+            &mut world,
+            &mut pool,
+            &mut nations,
+            &mut player,
+            &mut revision,
+            &mut delta,
+            None,
+        );
+
+        assert!(!rejected.ok);
+    }
+
+    #[test]
+    fn online_nation_founder_id_is_connection_specific() {
+        let mut pool = GlobalResourcePool::new();
+        pool.force_add(ResourceKind::Soul, 100);
+        let mut nations = NationRegistry::default();
+        let mut first = PlayerState::default();
+        let mut second = PlayerState::default();
+        let mut world = GameWorld::new(8);
+        let mut revision = WorldRevision::default();
+        let mut delta = LastVoxelDeltaState::default();
+
+        let first_result = apply_gameplay_command(
+            11,
+            &GameplayCommand {
+                sequence: 3,
+                tick: 1,
+                player_block: [0, 0, 0],
+                kind: GameplayCommandKind::FoundNation,
+            },
+            &mut world,
+            &mut pool,
+            &mut nations,
+            &mut first,
+            &mut revision,
+            &mut delta,
+            None,
+        );
+        let second_result = apply_gameplay_command(
+            22,
+            &GameplayCommand {
+                sequence: 4,
+                tick: 2,
+                player_block: [1, 0, 1],
+                kind: GameplayCommandKind::FoundNation,
+            },
+            &mut world,
+            &mut pool,
+            &mut nations,
+            &mut second,
+            &mut revision,
+            &mut delta,
+            None,
+        );
+
+        assert!(first_result.ok);
+        assert!(second_result.ok);
+        assert_ne!(first.nation_id, second.nation_id);
+    }
+
+    #[test]
+    fn connected_players_do_not_share_the_initial_spawn_tile() {
+        let world = generate_world(&WorldConfig::default());
+        let base = [world.size / 2, 0, world.size / 2];
+        let first = connected_player_spawn(
+            &world,
+            base,
+            Vec3::new(base[0] as f32 + 0.5, 1.0, base[2] as f32 + 0.5),
+            1,
+        );
+        let second = connected_player_spawn(
+            &world,
+            base,
+            Vec3::new(base[0] as f32 + 0.5, 1.0, base[2] as f32 + 0.5),
+            2,
+        );
+
+        assert_ne!(first.1, second.1);
+    }
+
+    #[test]
+    fn plank_pack_craft_uses_player_inventory_atomically() {
+        let mut player = PlayerState::default();
+        player
+            .inventory
+            .insert(ResourceKind::Wood, PLANK_PACK_WOOD_COST);
+
+        let result = apply_gameplay_command(
+            0,
+            &GameplayCommand {
+                sequence: 5,
+                tick: 1,
+                player_block: [0, 0, 0],
+                kind: GameplayCommandKind::Craft(BuildRecipe::PlankPack),
+            },
+            &mut GameWorld::new(8),
+            &mut GlobalResourcePool::new(),
+            &mut NationRegistry::default(),
+            &mut player,
+            &mut WorldRevision::default(),
+            &mut LastVoxelDeltaState::default(),
+            None,
+        );
+
+        assert!(result.ok);
+        assert_eq!(player.inventory.get(&ResourceKind::Wood), Some(&0));
+        assert_eq!(
+            player.inventory.get(&ResourceKind::HardenedWood),
+            Some(&PLANK_PACK_OUTPUT)
         );
     }
 }

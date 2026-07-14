@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use leafwing_input_manager::Actionlike;
+use lightyear_avian3d as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Reflect, Actionlike, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12,11 +13,13 @@ pub enum PlayerAction {
     Sprint,
     Attack,
     Block,
+    Mine,
     Gather,
     Place,
     Craft,
     FoundNation,
     KillCreature,
+    Interact,
 }
 
 pub mod messages {
@@ -50,15 +53,21 @@ pub mod messages {
     pub enum GameplayCommandKind {
         MoveWorld { dx_milli: i16, dz_milli: i16 },
         Jump,
+        MineTarget { target: [i32; 3] },
         GatherFootBlock,
         PlaceWoodFootBlock,
         Craft(BuildRecipe),
         FoundNation,
         KillNearestCreature,
+        MountCart,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
     pub struct GameplayCommand {
+        /// Monotonic command identity within one client session. The server
+        /// uses this to reject replayed reliable messages without conflating
+        /// multiple legitimate actions sent during the same simulation tick.
+        pub sequence: u64,
         pub tick: u64,
         pub player_block: [i32; 3],
         pub kind: GameplayCommandKind,
@@ -116,6 +125,19 @@ pub mod components {
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct PlayerRot(pub f32);
+
+    #[derive(
+        Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect, Default,
+    )]
+    pub struct CartMounted(pub bool);
+
+    #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct CartState {
+        pub player_id: u32,
+        pub position: Vec3,
+        pub yaw: f32,
+        pub occupied: bool,
+    }
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
     pub struct MonsterKind(pub u8);
@@ -231,6 +253,9 @@ pub mod components {
         pub revision: u64,
         pub chunk_x: i32,
         pub chunk_z: i32,
+        /// Number of neighboring voxel columns included on each horizontal
+        /// side of the central 16x16 chunk.
+        pub border: i32,
         pub y_min: i32,
         pub y_size: i32,
         pub blocks: Vec<u8>,
@@ -305,6 +330,8 @@ impl Plugin for ProtocolPlugin {
         app.component::<components::Health>().replicate();
         app.component::<components::PlayerPos>().replicate();
         app.component::<components::PlayerRot>().replicate();
+        app.component::<components::CartMounted>().replicate();
+        app.component::<components::CartState>().replicate();
         app.component::<components::MonsterKind>().replicate();
         app.component::<components::MonsterHealth>().replicate();
         app.component::<components::GameplayHudState>().replicate();
@@ -468,14 +495,19 @@ pub mod wire_format {
     }
 
     impl EcoSnapshot {
-        /// True iff every per-tick float (co2, rain, rainfall) is finite.
-        /// Counter fields are integers and cannot misbehave. Cloud/berry/
-        /// plant/inner lists are validated by their own `is_finite()` and
-        /// are not re-checked here — the call site can iterate `clouds`,
-        /// `rabbits`, etc. independently.
+        /// True iff every float in the aggregate and nested ecology data is
+        /// finite. This is the wire boundary, so callers must not need to
+        /// remember a second validation pass for nested lists.
         #[must_use]
         pub fn is_finite(&self) -> bool {
-            is_finite_f32(self.co2) && is_finite_f32(self.rain) && is_finite_f32(self.rainfall)
+            is_finite_f32(self.co2)
+                && is_finite_f32(self.rain)
+                && is_finite_f32(self.rainfall)
+                && self.clouds.iter().all(EcoCloudNet::is_finite)
+                && self.rabbits.iter().all(EcoRabbitNet::is_finite)
+                && self.wildlife.iter().all(EcoWildlifeNet::is_finite)
+                && self.berries.iter().all(EcoBerryNet::is_finite)
+                && self.plants.iter().all(EcoPlantNet::is_finite)
         }
     }
 
@@ -787,10 +819,7 @@ pub mod wire_format {
                 clouds: vec![cloud_with_nan],
                 ..ok
             };
-            assert!(
-                snapshot_with_nan_cloud.is_finite(),
-                "aggregate check ignores inner lists"
-            );
+            assert!(!snapshot_with_nan_cloud.is_finite());
             assert!(!snapshot_with_nan_cloud.clouds.iter().all(|c| c.is_finite()));
         }
     }
@@ -812,6 +841,7 @@ mod tests {
             PlayerAction::Sprint,
             PlayerAction::Attack,
             PlayerAction::Block,
+            PlayerAction::Mine,
             PlayerAction::Gather,
             PlayerAction::Place,
             PlayerAction::Craft,
@@ -819,7 +849,7 @@ mod tests {
             PlayerAction::KillCreature,
         ]
         .len();
-        assert_eq!(count, 13);
+        assert_eq!(count, 14);
     }
 
     #[test]
@@ -846,6 +876,10 @@ mod tests {
         assert!(matches!(
             GameplayCommandKind::Jump,
             GameplayCommandKind::Jump
+        ));
+        assert!(matches!(
+            GameplayCommandKind::MineTarget { target: [1, 2, 3] },
+            GameplayCommandKind::MineTarget { target: [1, 2, 3] }
         ));
         assert!(matches!(
             GameplayCommandKind::GatherFootBlock,
@@ -886,12 +920,14 @@ mod tests {
     fn gameplay_command_json_roundtrip() {
         use messages::{GameplayCommand, GameplayCommandKind};
         let cmd = GameplayCommand {
+            sequence: 7,
             tick: 1000,
             player_block: [16, 8, 32],
             kind: GameplayCommandKind::FoundNation,
         };
         let json = serde_json::to_string(&cmd).unwrap();
         let decoded: GameplayCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.sequence, 7);
         assert_eq!(decoded.tick, 1000);
         assert_eq!(decoded.player_block, [16, 8, 32]);
         assert!(matches!(decoded.kind, GameplayCommandKind::FoundNation));

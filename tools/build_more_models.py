@@ -656,16 +656,28 @@ def make_wolf() -> None:
     cylinder("tail_base", (-0.50, 0.65, 0.0), 0.10, 0.40, fur, vertices=8)
     cone("tail_tip", (-0.70, 0.90, 0.0), 0.08, 0.0, 0.18, fur_dark, vertices=6)
 
-    for px in [0.30, -0.20]:
-        cube(f"leg_fl_{px}", (px, 0.20, 0.18), (0.10, 0.40, 0.10), fur)
-        cube(f"leg_bl_{px}", (px, 0.20, -0.18), (0.10, 0.40, 0.10), fur)
-        uv_sphere(f"paw_fl_{px}", (px, 0.02, 0.18), (0.07, 0.04, 0.10), fur_dark, 8, 5)
-        uv_sphere(f"paw_bl_{px}", (px, 0.02, -0.18), (0.07, 0.04, 0.10), fur_dark, 8, 5)
-
-    cube("leg_fr", (0.30, 0.20, 0.0), (0.10, 0.40, 0.10), fur)
-    cube("leg_br", (-0.20, 0.20, 0.0), (0.10, 0.40, 0.10), fur)
-    cube("paw_fr", (0.30, 0.02, 0.0), (0.12, 0.04, 0.10), fur_dark)
-    cube("paw_br", (-0.20, 0.02, 0.0), (0.12, 0.04, 0.10), fur_dark)
+    for position, prefix in ((0.30, "front"), (-0.20, "hind")):
+        for side, side_name in ((0.18, "left"), (-0.18, "right")):
+            cube(
+                f"leg_{prefix}_{side_name}_upper",
+                (position, 0.30, side),
+                (0.10, 0.20, 0.10),
+                fur,
+            )
+            cube(
+                f"leg_{prefix}_{side_name}_lower",
+                (position, 0.10, side),
+                (0.09, 0.20, 0.09),
+                fur,
+            )
+            uv_sphere(
+                f"paw_{prefix}_{side_name}",
+                (position, 0.02, side),
+                (0.08, 0.04, 0.10),
+                fur_dark,
+                8,
+                5,
+            )
 
     for ang in [-0.15, 0.15]:
         cube("stripe", (0.55, 0.78, ang), (0.16, 0.02, 0.04), fur_dark)

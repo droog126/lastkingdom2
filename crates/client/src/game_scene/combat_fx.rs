@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::prelude::{Vec3, Vec4};
 use bevy_hanabi::prelude::*;
 
 pub fn create_hit_effect() -> EffectAsset {
@@ -19,12 +19,12 @@ pub fn create_hit_effect() -> EffectAsset {
     );
     let gravity = AccelModifier::new(writer.lit(Vec3::new(0.0, -5.5, 0.0)).expr());
 
-    let mut color_gradient = bevy_hanabi::prelude::Gradient::new();
+    let mut color_gradient = Gradient::new();
     color_gradient.add_key(0.0, Vec4::new(3.5, 1.05, 0.10, 1.0));
     color_gradient.add_key(0.45, Vec4::new(2.2, 0.35, 0.025, 0.95));
     color_gradient.add_key(1.0, Vec4::new(0.15, 0.015, 0.0, 0.0));
 
-    let mut size_gradient = bevy_hanabi::prelude::Gradient::new();
+    let mut size_gradient = Gradient::new();
     size_gradient.add_key(0.0, Vec3::new(0.12, 0.038, 0.038));
     size_gradient.add_key(0.65, Vec3::new(0.07, 0.022, 0.022));
     size_gradient.add_key(1.0, Vec3::ZERO);

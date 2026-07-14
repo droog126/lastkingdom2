@@ -3,6 +3,9 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
+
+use super::ui_drag::{UiDragHandle, UiDragPanel};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GameAction {
@@ -12,8 +15,10 @@ pub enum GameAction {
     MoveRight,
     Jump,
     Attack,
+    Mine,
     WeaponSkill,
     Interact,
+    RideCart,
     ToggleCamera,
     CameraTurnLeft,
     CameraTurnRight,
@@ -27,15 +32,17 @@ pub enum GameAction {
 }
 
 impl GameAction {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 20] = [
         Self::MoveForward,
         Self::MoveBackward,
         Self::MoveLeft,
         Self::MoveRight,
         Self::Jump,
         Self::Attack,
+        Self::Mine,
         Self::WeaponSkill,
         Self::Interact,
+        Self::RideCart,
         Self::ToggleCamera,
         Self::CameraTurnLeft,
         Self::CameraTurnRight,
@@ -66,9 +73,10 @@ impl GameAction {
             Self::PlantCrop => "种植作物",
             Self::HarvestCrop => "收获作物",
             Self::OpenFarming => "打开农田",
+            Self::Mine => "\u{91c7}\u{77ff}",
             Self::WeaponSkill => "\u{6b66}\u{5668}\u{6280}\u{80fd}",
             Self::Interact => "\u{4ea4}\u{4e92}",
-            _ => "\u{6280}\u{80fd}/\u{4ea4}\u{4e92}",
+            Self::RideCart => "\u{9a91}\u{4e58}\u{8f7d}\u{5177}",
         }
     }
 }
@@ -159,8 +167,10 @@ impl Default for KeyBindings {
         bindings.insert(GameAction::MoveRight, Binding::Key(KeyCode::KeyD));
         bindings.insert(GameAction::Jump, Binding::Key(KeyCode::Space));
         bindings.insert(GameAction::Attack, Binding::Mouse(MouseButton::Left));
+        bindings.insert(GameAction::Mine, Binding::Key(KeyCode::KeyM));
         bindings.insert(GameAction::WeaponSkill, Binding::Mouse(MouseButton::Right));
         bindings.insert(GameAction::Interact, Binding::Key(KeyCode::KeyF));
+        bindings.insert(GameAction::RideCart, Binding::Key(KeyCode::KeyR));
         bindings.insert(GameAction::ToggleCamera, Binding::Key(KeyCode::KeyC));
         bindings.insert(GameAction::CameraTurnLeft, Binding::Key(KeyCode::KeyQ));
         bindings.insert(GameAction::CameraTurnRight, Binding::Key(KeyCode::KeyE));
@@ -290,6 +300,9 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.035, 0.05, 0.075, 0.96)),
             BorderColor::all(Color::srgba(0.34, 0.72, 0.76, 0.8)),
+            UiTransform::from_translation(Val2::px(0.0, 0.0)),
+            UiDragPanel,
+            ZIndex(0),
             Visibility::Hidden,
             KeybindingUiRoot,
         ))
@@ -305,6 +318,9 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
                 ..default()
             },
             TextColor(Color::srgb(0.86, 0.96, 0.95)),
+            Interaction::None,
+            FocusPolicy::Block,
+            UiDragHandle(root),
         ));
         parent.spawn((
             Text::new("点击要修改的按键，然后按下键盘或鼠标按钮"),

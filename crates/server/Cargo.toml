@@ -17,14 +17,18 @@ path = "examples/simulate_authoritative_forward.rs"
 
 [dependencies]
 bevy = { version = "0.19", default-features = false, features = ["default_app", "serialize"] }
+# Headless authority only needs the 3D solver and parallel broadphase. Keep
+# Avian's debug/picking/render defaults out of the server dependency graph.
+avian3d = { workspace = true, features = ["3d", "f32", "parry-f32", "parallel"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }
 lk2-core = { workspace = true }
-lightyear = { workspace = true, features = ["std", "leafwing", "server", "udp", "client", "replication", "netcode"] }
+lightyear = { workspace = true, features = ["std", "leafwing", "server", "udp", "replication", "netcode"] }
+lightyear_avian3d = { workspace = true }
 leafwing-input-manager = { version = "0.21.0", default-features = false, features = ["keyboard"] }
-lightyear_connection = { workspace = true, features = ["server", "client"] }
-lightyear_netcode = { workspace = true, features = ["std", "server", "client"] }
+lightyear_connection = { workspace = true, features = ["server"] }
+lightyear_netcode = { workspace = true, features = ["std", "server"] }
 
 [lints]
 workspace = true

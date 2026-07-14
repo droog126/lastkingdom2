@@ -102,10 +102,7 @@ pub fn maybe_take_screenshot(
     state.exit_deadline = Some(Instant::now() + Duration::from_secs(8));
 }
 
-pub fn exit_preview(keys: Res<ButtonInput<KeyCode>>, state: Res<LivingSceneState>) {
-    if keys.just_pressed(KeyCode::Escape) {
-        std::process::exit(0);
-    }
+pub fn exit_preview(state: Res<LivingSceneState>) {
     if let Some(deadline) = state.exit_deadline {
         if state.png_path.exists() || Instant::now() >= deadline {
             std::process::exit(0);

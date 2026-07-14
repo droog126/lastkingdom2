@@ -5,10 +5,12 @@ use avian3d::prelude::{Collider, GravityScale, LockedAxes, RigidBody, TransformI
 use bevy::prelude::*;
 use bevy_world_serialization::WorldAssetRoot;
 
+use super::state::ExplorableBuilding;
 use super::stylized_material::{StylizedAssetRoot, StylizedReadableAsset, StylizedTreeAsset};
 
 pub const BOSS_PATH: &str = "procedural/pretty/hoplite_ender_dragon.glb";
 pub const DRAGON_KATANA_PATH: &str = "procedural/pretty/hoplite_dragon_katana.glb";
+pub const REAPER_SCYTHE_PATH: &str = "procedural/pretty/hoplite_reaper_scythe.glb";
 pub const TREE_PATH: &str = "procedural/pretty/sokpop_tree.glb";
 pub const ROUND_TREE_PATH: &str = "procedural/pretty/granular_round_tree.glb";
 pub const PINE_TREE_PATH: &str = "procedural/pretty/granular_pine_tree.glb";
@@ -40,6 +42,7 @@ pub const DEER_FAWN_PATH: &str = "animals/deer_fawn.glb";
 pub const FOX_PATH: &str = "animals/fox.glb";
 pub const FOX_SILVER_PATH: &str = "animals/fox_silver.glb";
 pub const BEAR_PATH: &str = "procedural/pretty/bear.glb";
+pub const CART_PATH: &str = "procedural/pretty/cart.glb";
 
 pub const PLAYER_SPEED: f32 = 5.2;
 pub const PLAYER_PHYSICS_CENTER_HEIGHT: f32 = 0.88;
@@ -81,7 +84,10 @@ pub fn spawn_asset<'a>(
             | WILLOW_TREE_PATH
     ) {
         entity.insert(StylizedTreeAsset);
-    } else if matches!(path, BOSS_PATH | HOUSE_PATH | FOREST_STONE_SPIRE_PATH) {
+    } else if path == HOUSE_PATH {
+        entity.insert(ExplorableBuilding { interior: None });
+        entity.insert(StylizedReadableAsset);
+    } else if matches!(path, BOSS_PATH | FOREST_STONE_SPIRE_PATH) {
         entity.insert(StylizedReadableAsset);
     }
     entity
@@ -117,11 +123,34 @@ fn static_collider_for_asset(path: &str) -> Option<Collider> {
             Collider::cylinder(0.32, 2.1),
         )])
     } else if path == HOUSE_PATH {
-        Collider::compound(vec![(
-            Vec3::new(0.0, 1.15, 0.0),
-            Quat::IDENTITY,
-            Collider::cuboid(2.8, 2.3, 2.8),
-        )])
+        // Leave the front doorway open so the player can reach the interaction point.
+        Collider::compound(vec![
+            (
+                Vec3::new(0.0, 0.90, -0.58),
+                Quat::IDENTITY,
+                Collider::cuboid(1.60, 1.70, 0.16),
+            ),
+            (
+                Vec3::new(-0.71, 0.90, 0.0),
+                Quat::IDENTITY,
+                Collider::cuboid(0.18, 1.70, 1.16),
+            ),
+            (
+                Vec3::new(0.71, 0.90, 0.0),
+                Quat::IDENTITY,
+                Collider::cuboid(0.18, 1.70, 1.16),
+            ),
+            (
+                Vec3::new(-0.55, 0.90, 0.58),
+                Quat::IDENTITY,
+                Collider::cuboid(0.50, 1.70, 0.16),
+            ),
+            (
+                Vec3::new(0.55, 0.90, 0.58),
+                Quat::IDENTITY,
+                Collider::cuboid(0.50, 1.70, 0.16),
+            ),
+        ])
     } else if path == FOREST_STONE_SPIRE_PATH {
         Collider::compound(vec![(
             Vec3::new(0.0, 0.55, 0.0),

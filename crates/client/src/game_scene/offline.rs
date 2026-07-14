@@ -8,6 +8,7 @@ use lk2_core::ecology::EcoCycle;
 use lk2_core::farming::FarmingState;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::simulation::{NatureSnapshot, WorldInput, step_world};
+use lk2_core::world::{World as GameWorld, terrain};
 
 use crate::nature::NatureSnapshotBuffer;
 
@@ -23,6 +24,11 @@ pub struct OfflineNature {
     pub snapshot: NatureSnapshot,
     pub initial_snapshot: NatureSnapshot,
     pub buffer: NatureSnapshotBuffer,
+    pub terrain_world: GameWorld,
+}
+
+fn initial_terrain_world() -> GameWorld {
+    GameWorld::with_pipeline(constant::WORLD_SIZE, terrain::presets::default_preset())
 }
 
 impl Default for OfflineNature {
@@ -38,6 +44,7 @@ impl Default for OfflineNature {
             initial_snapshot: snapshot.clone(),
             snapshot,
             buffer: NatureSnapshotBuffer::default(),
+            terrain_world: initial_terrain_world(),
         }
     }
 }
@@ -60,6 +67,7 @@ impl OfflineNature {
             initial_snapshot: snapshot.clone(),
             snapshot,
             buffer: NatureSnapshotBuffer::default(),
+            terrain_world: initial_terrain_world(),
         }
     }
 

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::ecology::threats::MonsterEcosystem;
 use crate::match_state::MatchClock;
 use crate::nation::NationRegistry;
-use crate::player::PlayerState;
+use crate::player::{PlayerStateComponent, PlayerTag};
 use crate::resource::{GlobalResourcePool, ResourceKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -236,13 +236,16 @@ pub struct ObjectiveCompleted {
 
 pub fn auto_advance_objectives(
     mut objectives: ResMut<Objectives>,
-    player: Res<PlayerState>,
+    players: Query<&PlayerStateComponent, With<PlayerTag>>,
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     _monsters: Res<MonsterEcosystem>,
     match_clock: Res<MatchClock>,
     mut completed_events: MessageWriter<ObjectiveCompleted>,
 ) {
+    let Some(player) = players.iter().next().map(|state| &state.0) else {
+        return;
+    };
     let mut safety = 16;
     while safety > 0 {
         safety -= 1;
@@ -383,6 +386,7 @@ pub fn on_phase_change_emit_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player::PlayerState;
 
     fn fresh_pool() -> GlobalResourcePool {
         GlobalResourcePool::new()

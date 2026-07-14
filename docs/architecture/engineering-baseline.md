@@ -14,8 +14,8 @@ The runtime workspace has three crates:
 - `lk2-server`: headless authority loop, networking, replication, and server-side PvP.
 
 Engine-family dependencies are defined in the workspace `Cargo.toml`: Bevy 0.19, Avian3D 0.7,
-Lightyear 0.28, Leafwing Input Manager 0.21, bevy-inspector-egui 0.37, bevy-tnua 0.32, and
-bevy_panorbit_camera 0.35. Do not duplicate dependency constraints in another current document.
+Lightyear 0.28 with its Avian3D integration, Leafwing Input Manager 0.21, and bevy-tnua 0.32.
+Do not duplicate dependency constraints in another current document.
 
 ## Ownership boundaries
 
@@ -37,8 +37,10 @@ Offline play is client-offline authority: the client owns the window and invokes
 simulation and combat APIs in-process. Online play now uses the focused client's Lightyear adapter
 and keeps the server authoritative for movement and gameplay messages. The current online scene
 covers connection, input, basic replicated player presentation, and a compact HUD/ecology overlay;
-robust multiplayer player state remains architecture debt. A shared rule needed by both modes
-belongs in `lk2-core`.
+the online player path also carries Avian `Position`/`Rotation` through the Lightyear Avian
+integration; the server player has a kinematic Avian body while the shared world-grid rules remain
+the terrain authority. Robust multiplayer player state remains architecture debt. A shared rule
+needed by both modes belongs in `lk2-core`.
 
 ## Known architecture debt
 

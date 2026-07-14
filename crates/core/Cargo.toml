@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [features]
 dev-dynamic-linking = ["bevy/dynamic_linking"]
 client-render = ["bevy/bevy_pbr", "bevy/bevy_render"]
+client-network = ["lightyear_inputs_leafwing/client"]
 # Prototypes without a complete runtime producer/consumer path.
 experimental-gameplay = []
 
@@ -22,7 +23,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
 lightyear = { workspace = true, features = ["std", "leafwing", "replication"] }
-lightyear_inputs_leafwing = { workspace = true, features = ["std", "client", "server"] }
+lightyear_avian3d = { workspace = true }
+lightyear_inputs_leafwing = { workspace = true, features = ["std", "server"] }
 leafwing-input-manager = { version = "0.21.0", default-features = false, features = ["keyboard"] }
 
 [lints]

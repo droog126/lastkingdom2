@@ -24,7 +24,7 @@ pub fn sanitize_player_name(input: &str) -> String {
         .to_string()
 }
 
-#[derive(Resource, Default)]
+#[derive(Debug, Clone, Resource, Default)]
 pub struct PlayerState {
     pub pos: Vec3,
     pub block_pos: [i32; 3],
@@ -34,6 +34,9 @@ pub struct PlayerState {
     pub blocks_gathered: u32,
     pub nations_founded: u32,
 }
+
+#[derive(Component, Debug, Default)]
+pub struct PlayerStateComponent(pub PlayerState);
 
 #[derive(Component, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PlayerTag(pub u32);

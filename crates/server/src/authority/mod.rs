@@ -2,16 +2,74 @@
 
 pub mod pvp;
 
+use std::collections::BTreeMap;
+
 use bevy::prelude::*;
 use lk2_core::ecology::EcoCycle;
 use lk2_core::resource::GlobalResourcePool;
-use lk2_core::simulation::{TickReport, WorldInput, step_world};
+use lk2_core::simulation::regions::{NatureRegionId, NatureRegionState, NatureRegionWorld};
+use lk2_core::simulation::{
+    TickReport, WorldInput, cadence::RegionLod, cadence::RegionScheduler, step_world,
+    step_world_elapsed,
+};
 
 #[derive(Resource)]
 pub struct NatureAuthority {
     ecology: EcoCycle,
     resources: GlobalResourcePool,
     last_tick: Option<u64>,
+    scheduler: RegionScheduler,
+}
+
+/// Server adapter for multiple independently scheduled natural regions.
+/// Each region owns its simulation state in `lk2_core`; this adapter only
+/// coordinates insertion, removal, and report publication.
+#[derive(Default)]
+pub struct RegionalNatureAuthority {
+    regions: NatureRegionWorld,
+}
+
+#[derive(Resource, Default)]
+pub struct LatestNatureRegionReports(pub BTreeMap<NatureRegionId, TickReport>);
+
+impl RegionalNatureAuthority {
+    #[must_use]
+    pub fn single(
+        id: NatureRegionId,
+        ecology: EcoCycle,
+        resources: GlobalResourcePool,
+        lod: RegionLod,
+    ) -> Self {
+        Self {
+            regions: NatureRegionWorld::single(id, ecology, resources, lod),
+        }
+    }
+
+    pub fn insert_region(&mut self, region: NatureRegionState) -> Option<NatureRegionState> {
+        self.regions.insert(region)
+    }
+
+    pub fn remove_region(&mut self, id: NatureRegionId) -> Option<NatureRegionState> {
+        self.regions.remove(id)
+    }
+
+    pub fn advance(&mut self, world_tick: u64) -> Vec<(NatureRegionId, TickReport)> {
+        self.regions.advance_all(world_tick)
+    }
+
+    pub fn advance_primary(&mut self, world_tick: u64) -> Option<(NatureRegionId, TickReport)> {
+        self.regions.advance_primary(world_tick)
+    }
+
+    #[must_use]
+    pub fn region(&self, id: NatureRegionId) -> Option<&NatureRegionState> {
+        self.regions.get(id)
+    }
+
+    #[must_use]
+    pub fn region_count(&self) -> usize {
+        self.regions.len()
+    }
 }
 
 impl NatureAuthority {
@@ -20,6 +78,16 @@ impl NatureAuthority {
             ecology,
             resources,
             last_tick: None,
+            scheduler: RegionScheduler::new(RegionLod::Active),
+        }
+    }
+
+    pub fn with_lod(ecology: EcoCycle, resources: GlobalResourcePool, lod: RegionLod) -> Self {
+        Self {
+            ecology,
+            resources,
+            last_tick: None,
+            scheduler: RegionScheduler::new(lod),
         }
     }
 
@@ -33,6 +101,64 @@ impl NatureAuthority {
         }
         self.last_tick = Some(report.tick);
         Ok(report)
+    }
+
+    /// Advances a region only when its LOD interval is complete. The returned
+    /// report still comes from the shared world step and covers the complete
+    /// elapsed world time since the previous region update.
+    pub fn advance_scheduled(
+        &mut self,
+        input: WorldInput,
+    ) -> Result<Option<TickReport>, &'static str> {
+        if self.last_tick.is_some_and(|last| input.tick <= last) {
+            return Err("authority tick must increase monotonically");
+        }
+        let previous_scheduler = self.scheduler;
+        let elapsed_ticks = self.scheduler.due_ticks(input.tick);
+        if elapsed_ticks == 0 {
+            self.last_tick = Some(input.tick);
+            return Ok(None);
+        }
+        let report = step_world_elapsed(
+            WorldInput {
+                tick: self.scheduler.simulated_tick(),
+            },
+            elapsed_ticks,
+            &mut self.ecology,
+            &mut self.resources,
+        );
+        if !report.snapshot.is_finite() {
+            self.scheduler = previous_scheduler;
+            return Err("shared world step produced a non-finite snapshot");
+        }
+        self.last_tick = Some(input.tick);
+        Ok(Some(report))
+    }
+
+    pub fn lod(&self) -> RegionLod {
+        self.scheduler.lod()
+    }
+
+    pub fn update_lod_for_distance(
+        &mut self,
+        distance: f32,
+        active_radius: f32,
+        nearby_radius: f32,
+    ) -> RegionLod {
+        let lod = RegionLod::for_distance(distance, active_radius, nearby_radius);
+        self.scheduler.set_lod(lod);
+        lod
+    }
+
+    pub fn advance_scheduled_for_distance(
+        &mut self,
+        input: WorldInput,
+        distance: f32,
+        active_radius: f32,
+        nearby_radius: f32,
+    ) -> Result<Option<TickReport>, &'static str> {
+        self.update_lod_for_distance(distance, active_radius, nearby_radius);
+        self.advance_scheduled(input)
     }
 
     pub fn ecology(&self) -> &EcoCycle {

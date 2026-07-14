@@ -12,11 +12,18 @@ mod persistence;
 mod replication;
 
 use app::{NatureServerPlugin, NatureServerProjectionPlugin};
-use authority::{LatestNatureReport, NatureAuthority, NatureAuthorityFault, NatureAuthorityPlugin};
+use authority::{
+    LatestNatureReport, NatureAuthority, NatureAuthorityFault, NatureAuthorityPlugin,
+    RegionalNatureAuthority,
+};
 use bevy::prelude::*;
 use lk2_core::ecology::EcoCycle;
 use lk2_core::resource::GlobalResourcePool;
-use lk2_core::simulation::WorldInput;
+use lk2_core::simulation::{
+    WorldInput,
+    cadence::RegionLod,
+    regions::{NatureRegionId, NatureRegionState},
+};
 
 #[test]
 fn concrete_authority_calls_shared_step_and_rejects_duplicate_tick() {
@@ -38,6 +45,78 @@ fn concrete_authority_calls_shared_step_and_rejects_duplicate_tick() {
             .all(|amount| *amount >= 0)
     );
     assert!(authority.advance(WorldInput { tick: 1 }).is_err());
+}
+
+#[test]
+fn scheduled_authority_only_publishes_when_region_interval_is_complete() {
+    let mut authority = NatureAuthority::with_lod(
+        EcoCycle::default(),
+        GlobalResourcePool::new(),
+        RegionLod::Nearby,
+    );
+
+    assert!(
+        authority
+            .advance_scheduled(WorldInput { tick: 1 })
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        authority
+            .advance_scheduled(WorldInput { tick: 2 })
+            .unwrap()
+            .is_none()
+    );
+    let report = authority
+        .advance_scheduled(WorldInput { tick: 3 })
+        .unwrap()
+        .expect("nearby region is due every three world ticks");
+    assert_eq!(report.tick, 3);
+    assert!(report.snapshot.is_finite());
+}
+
+#[test]
+fn scheduled_authority_switches_lod_before_deciding_due_work() {
+    let mut authority = NatureAuthority::default();
+
+    assert!(
+        authority
+            .advance_scheduled_for_distance(WorldInput { tick: 1 }, 40.0, 8.0, 24.0)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(authority.lod(), RegionLod::Distant);
+    assert!(
+        authority
+            .advance_scheduled_for_distance(WorldInput { tick: 9 }, 40.0, 8.0, 24.0)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn regional_server_authority_advances_and_removes_independent_regions() {
+    let left = NatureRegionId { x: 0, z: 0 };
+    let right = NatureRegionId { x: 1, z: 0 };
+    let mut authority = RegionalNatureAuthority::default();
+    authority.insert_region(NatureRegionState::new(
+        left,
+        EcoCycle::default(),
+        GlobalResourcePool::new(),
+        RegionLod::Active,
+    ));
+    authority.insert_region(NatureRegionState::new(
+        right,
+        EcoCycle::default(),
+        GlobalResourcePool::new(),
+        RegionLod::Nearby,
+    ));
+
+    assert_eq!(authority.advance(1).len(), 1);
+    assert_eq!(authority.advance(3).len(), 2);
+    assert!(authority.remove_region(left).is_some());
+    assert_eq!(authority.region_count(), 1);
+    assert!(authority.region(right).is_some());
 }
 
 #[test]

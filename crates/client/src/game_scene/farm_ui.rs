@@ -1,12 +1,14 @@
 //! Farming interaction, plot presentation, and its configuration panel.
 
 use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
 use lk2_core::farming::{CropKind, FarmingError};
 
 use super::inventory::InventoryUiState;
 use super::keybindings::{GameAction, KeyBindings, UiSettings};
 use super::offline::OfflineNature;
 use super::state::{FARM_PLOT_POSITIONS, FarmVisualMaterials, crop_material_index};
+use super::ui_drag::{UiDragHandle, UiDragPanel};
 use super::util::PLAYER_PHYSICS_CENTER_HEIGHT;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,6 +72,9 @@ pub fn setup_farming_ui(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.035, 0.05, 0.075, 0.96)),
             BorderColor::all(Color::srgba(0.76, 0.58, 0.28, 0.9)),
+            UiTransform::from_translation(Val2::px(0.0, 0.0)),
+            UiDragPanel,
+            ZIndex(0),
             Visibility::Hidden,
             FarmingUiRoot,
         ))
@@ -85,6 +90,9 @@ pub fn setup_farming_ui(mut commands: Commands) {
                 ..default()
             },
             TextColor(Color::srgb(0.96, 0.90, 0.72)),
+            Interaction::None,
+            FocusPolicy::Block,
+            UiDragHandle(root),
         ));
         parent
             .spawn((Node {

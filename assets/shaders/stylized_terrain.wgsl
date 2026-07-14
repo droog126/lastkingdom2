@@ -18,7 +18,8 @@
 struct StylizedTerrainExtension {
     shadow_floor: f32,
     shadow_lift: f32,
-    _padding: vec2<f32>,
+    cel_steps: f32,
+    _padding: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100)
@@ -43,6 +44,13 @@ fn fragment(
 
     let floor_strength = clamp(stylized_terrain.shadow_floor, 0.0, 1.0);
     let floor_lift = max(stylized_terrain.shadow_lift, 0.0);
+    let cel_steps = max(stylized_terrain.cel_steps, 1.0);
+    // Quantize lit color before the ambient floor is applied. This keeps the
+    // authored palette readable instead of producing noisy PBR gradients.
+    out.color = vec4<f32>(
+        floor(out.color.rgb * cel_steps + vec3<f32>(0.5)) / cel_steps,
+        out.color.a,
+    );
     let floor_color = pbr_input.material.base_color.rgb * floor_strength
         + vec3<f32>(floor_lift);
     out.color = vec4<f32>(max(out.color.rgb, floor_color), out.color.a);
