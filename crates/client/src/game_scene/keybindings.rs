@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
 
+use super::procedural_motion::ProceduralAnimationConfig;
 use super::ui_drag::{UiDragHandle, UiDragPanel};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -14,12 +15,18 @@ pub enum GameAction {
     MoveLeft,
     MoveRight,
     Jump,
+    Sprint,
+    Crouch,
     Attack,
     Mine,
     WeaponSkill,
     Interact,
+    BuildCamp,
+    RestartSettlement,
     RideCart,
     ToggleCamera,
+    ToggleFreeCamera,
+    ToggleGodView,
     CameraTurnLeft,
     CameraTurnRight,
     OpenInventory,
@@ -32,18 +39,24 @@ pub enum GameAction {
 }
 
 impl GameAction {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 26] = [
         Self::MoveForward,
         Self::MoveBackward,
         Self::MoveLeft,
         Self::MoveRight,
         Self::Jump,
+        Self::Sprint,
+        Self::Crouch,
         Self::Attack,
         Self::Mine,
         Self::WeaponSkill,
         Self::Interact,
+        Self::BuildCamp,
+        Self::RestartSettlement,
         Self::RideCart,
         Self::ToggleCamera,
+        Self::ToggleFreeCamera,
+        Self::ToggleGodView,
         Self::CameraTurnLeft,
         Self::CameraTurnRight,
         Self::OpenInventory,
@@ -62,8 +75,12 @@ impl GameAction {
             Self::MoveLeft => "向左移动",
             Self::MoveRight => "向右移动",
             Self::Jump => "跳跃",
+            Self::Sprint => "疾跑",
+            Self::Crouch => "下蹲",
             Self::Attack => "攻击",
             Self::ToggleCamera => "切换视角",
+            Self::ToggleFreeCamera => "自由镜头",
+            Self::ToggleGodView => "\u{4e0a}\u{5e1d}\u{89c6}\u{89d2}",
             Self::CameraTurnLeft => "向左转视角",
             Self::CameraTurnRight => "向右转视角",
             Self::OpenInventory => "打开背包",
@@ -76,6 +93,8 @@ impl GameAction {
             Self::Mine => "\u{91c7}\u{77ff}",
             Self::WeaponSkill => "\u{6b66}\u{5668}\u{6280}\u{80fd}",
             Self::Interact => "\u{4ea4}\u{4e92}",
+            Self::BuildCamp => "\u{5efa}\u{9020}\u{8425}\u{5730}",
+            Self::RestartSettlement => "\u{91cd}\u{65b0}\u{6311}\u{6218}\u{5b9a}\u{5c45}",
             Self::RideCart => "\u{9a91}\u{4e58}\u{8f7d}\u{5177}",
         }
     }
@@ -166,12 +185,18 @@ impl Default for KeyBindings {
         bindings.insert(GameAction::MoveLeft, Binding::Key(KeyCode::KeyA));
         bindings.insert(GameAction::MoveRight, Binding::Key(KeyCode::KeyD));
         bindings.insert(GameAction::Jump, Binding::Key(KeyCode::Space));
+        bindings.insert(GameAction::Sprint, Binding::Key(KeyCode::ShiftLeft));
+        bindings.insert(GameAction::Crouch, Binding::Key(KeyCode::ControlLeft));
         bindings.insert(GameAction::Attack, Binding::Mouse(MouseButton::Left));
         bindings.insert(GameAction::Mine, Binding::Key(KeyCode::KeyM));
         bindings.insert(GameAction::WeaponSkill, Binding::Mouse(MouseButton::Right));
         bindings.insert(GameAction::Interact, Binding::Key(KeyCode::KeyF));
+        bindings.insert(GameAction::BuildCamp, Binding::Key(KeyCode::KeyB));
+        bindings.insert(GameAction::RestartSettlement, Binding::Key(KeyCode::KeyT));
         bindings.insert(GameAction::RideCart, Binding::Key(KeyCode::KeyR));
         bindings.insert(GameAction::ToggleCamera, Binding::Key(KeyCode::KeyC));
+        bindings.insert(GameAction::ToggleFreeCamera, Binding::Key(KeyCode::KeyV));
+        bindings.insert(GameAction::ToggleGodView, Binding::Key(KeyCode::KeyZ));
         bindings.insert(GameAction::CameraTurnLeft, Binding::Key(KeyCode::KeyQ));
         bindings.insert(GameAction::CameraTurnRight, Binding::Key(KeyCode::KeyE));
         bindings.insert(GameAction::OpenInventory, Binding::Key(KeyCode::KeyI));
@@ -282,6 +307,65 @@ pub(crate) struct UiScaleValueText;
 
 #[derive(Component)]
 pub(crate) struct UiOpacityValueText;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProceduralAnimationControl {
+    StrideLength,
+    FootLift,
+    TorsoLean,
+    BodyBob,
+    ArmSwing,
+    IkLegUpperLength,
+    IkLegLowerLength,
+    CrouchDepth,
+    CrouchLean,
+    CrouchArmDrop,
+    CrouchKneeForward,
+    CrouchTransitionSpeed,
+}
+
+impl ProceduralAnimationControl {
+    const ALL: [Self; 12] = [
+        Self::StrideLength,
+        Self::FootLift,
+        Self::TorsoLean,
+        Self::BodyBob,
+        Self::ArmSwing,
+        Self::IkLegUpperLength,
+        Self::IkLegLowerLength,
+        Self::CrouchDepth,
+        Self::CrouchLean,
+        Self::CrouchArmDrop,
+        Self::CrouchKneeForward,
+        Self::CrouchTransitionSpeed,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::StrideLength => "行走步幅",
+            Self::FootLift => "抬脚高度",
+            Self::TorsoLean => "行走前倾",
+            Self::BodyBob => "身体起伏",
+            Self::ArmSwing => "手臂摆幅",
+            Self::IkLegUpperLength => "IK 大腿长度",
+            Self::IkLegLowerLength => "IK 小腿长度",
+            Self::CrouchDepth => "下蹲深度",
+            Self::CrouchLean => "下蹲前倾",
+            Self::CrouchArmDrop => "下蹲手臂下沉",
+            Self::CrouchKneeForward => "下蹲膝盖前移",
+            Self::CrouchTransitionSpeed => "下蹲过渡速度",
+        }
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct ProceduralAnimationButton {
+    pub(crate) control: ProceduralAnimationControl,
+    pub(crate) direction: f32,
+}
+
+#[derive(Component)]
+pub(crate) struct ProceduralAnimationValueText(pub(crate) ProceduralAnimationControl);
 
 pub fn setup_keybinding_ui(mut commands: Commands) {
     let root = commands
@@ -426,27 +510,30 @@ pub fn setup_keybinding_ui(mut commands: Commands) {
             SettingsPage::Ui,
         );
 
-        parent
-            .spawn((
-                Node {
-                    width: percent(100),
-                    min_height: px(42),
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                SettingsSection(SettingsPage::Algorithm),
-            ))
-            .with_children(|section| {
-                section.spawn((
-                    Text::new("暂无算法设置。"),
-                    TextFont {
-                        font: FontSource::UiSansSerif,
-                        font_size: FontSize::Px(14.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgba(0.70, 0.78, 0.80, 0.95)),
-                ));
-            });
+        parent.spawn((
+            Text::new("程序式 IK 动画"),
+            TextFont {
+                font: FontSource::UiSansSerif,
+                font_size: FontSize::Px(14.0),
+                weight: FontWeight::BOLD,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.84, 0.82)),
+            SettingsSection(SettingsPage::Algorithm),
+        ));
+        parent.spawn((
+            Text::new("运行时调整人物步态和下蹲 IK；按住下蹲键查看效果。"),
+            TextFont {
+                font: FontSource::UiSansSerif,
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::srgba(0.70, 0.78, 0.80, 0.95)),
+            SettingsSection(SettingsPage::Algorithm),
+        ));
+        for control in ProceduralAnimationControl::ALL {
+            spawn_procedural_animation_row(parent, control);
+        }
 
         parent.spawn((
             Text::new(""),
@@ -601,6 +688,87 @@ fn spawn_ui_setting_row<C: Component>(
         });
 }
 
+fn spawn_procedural_animation_row(
+    parent: &mut ChildSpawnerCommands,
+    control: ProceduralAnimationControl,
+) {
+    parent
+        .spawn((
+            Node {
+                width: percent(100),
+                min_height: px(30),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: px(8),
+                ..default()
+            },
+            SettingsSection(SettingsPage::Algorithm),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Text::new(control.label()),
+                TextFont {
+                    font: FontSource::UiSansSerif,
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+            row.spawn((Node {
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                ..default()
+            },))
+                .with_children(|controls| {
+                    spawn_procedural_animation_button(controls, "−", control, -1.0);
+                    controls.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font: FontSource::UiMonospace,
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.90, 0.98, 0.96)),
+                        ProceduralAnimationValueText(control),
+                    ));
+                    spawn_procedural_animation_button(controls, "+", control, 1.0);
+                });
+        });
+}
+
+fn spawn_procedural_animation_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    control: ProceduralAnimationControl,
+    direction: f32,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: px(28),
+                height: px(26),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border_radius: BorderRadius::all(px(4)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.10, 0.19, 0.22, 1.0)),
+            ProceduralAnimationButton { control, direction },
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font: FontSource::UiMonospace,
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
 fn spawn_stepper_button(
     parent: &mut ChildSpawnerCommands,
     label: &'static str,
@@ -650,6 +818,7 @@ pub fn handle_keybinding_buttons(
     mut bindings: ResMut<KeyBindings>,
     mut ui_settings: ResMut<UiSettings>,
     mut ui_scale: ResMut<UiScale>,
+    mut animation_config: ResMut<ProceduralAnimationConfig>,
     mut ui_state: ResMut<SettingsUiState>,
     buttons: Query<
         (
@@ -658,13 +827,21 @@ pub fn handle_keybinding_buttons(
             Option<&ResetBindingsButton>,
             Option<&CloseBindingsButton>,
             Option<&UiSettingButton>,
+            Option<&ProceduralAnimationButton>,
             Option<&SettingsTabButton>,
         ),
         Changed<Interaction>,
     >,
 ) {
-    for (interaction, binding_button, reset_button, close_button, ui_setting_button, tab_button) in
-        &buttons
+    for (
+        interaction,
+        binding_button,
+        reset_button,
+        close_button,
+        ui_setting_button,
+        animation_button,
+        tab_button,
+    ) in &buttons
     {
         if *interaction != Interaction::Pressed {
             continue;
@@ -676,6 +853,7 @@ pub fn handle_keybinding_buttons(
             bindings.reset();
             ui_settings.panel_opacity = UiSettings::default().panel_opacity;
             ui_scale.0 = 1.0;
+            *animation_config = ProceduralAnimationConfig::default();
         } else if let Some(tab_button) = tab_button {
             ui_state.page = tab_button.0;
         } else if let Some(ui_setting_button) = ui_setting_button {
@@ -689,10 +867,93 @@ pub fn handle_keybinding_buttons(
                     ui_settings.panel_opacity = (ui_settings.panel_opacity + 0.1).min(1.0)
                 }
             }
+        } else if let Some(animation_button) = animation_button {
+            adjust_procedural_animation(
+                &mut *animation_config,
+                animation_button.control,
+                animation_button.direction,
+            );
         } else if let Some(binding_button) = binding_button {
             bindings.listening = Some(binding_button.0);
             bindings.capture_blocked = true;
         }
+    }
+}
+
+fn adjust_procedural_animation(
+    config: &mut ProceduralAnimationConfig,
+    control: ProceduralAnimationControl,
+    direction: f32,
+) {
+    fn step(value: &mut f32, direction: f32, amount: f32, min: f32, max: f32) {
+        *value = (*value + direction * amount).clamp(min, max);
+    }
+
+    match control {
+        ProceduralAnimationControl::StrideLength => {
+            step(&mut config.stride_length, direction, 0.02, 0.0, 0.80)
+        }
+        ProceduralAnimationControl::FootLift => {
+            step(&mut config.foot_lift, direction, 0.01, 0.0, 0.50)
+        }
+        ProceduralAnimationControl::TorsoLean => {
+            step(&mut config.torso_lean, direction, 0.01, 0.0, 0.50)
+        }
+        ProceduralAnimationControl::BodyBob => {
+            step(&mut config.body_bob, direction, 0.005, 0.0, 0.20)
+        }
+        ProceduralAnimationControl::ArmSwing => {
+            step(&mut config.arm_swing, direction, 0.01, 0.0, 0.30)
+        }
+        ProceduralAnimationControl::IkLegUpperLength => {
+            step(&mut config.ik_leg_upper_length, direction, 0.01, 0.10, 0.50)
+        }
+        ProceduralAnimationControl::IkLegLowerLength => {
+            step(&mut config.ik_leg_lower_length, direction, 0.01, 0.10, 0.50)
+        }
+        ProceduralAnimationControl::CrouchDepth => {
+            step(&mut config.crouch_depth, direction, 0.02, 0.05, 0.60)
+        }
+        ProceduralAnimationControl::CrouchLean => {
+            step(&mut config.crouch_lean, direction, 0.01, -0.50, 0.50)
+        }
+        ProceduralAnimationControl::CrouchArmDrop => {
+            step(&mut config.crouch_arm_drop, direction, 0.02, 0.0, 0.50)
+        }
+        ProceduralAnimationControl::CrouchKneeForward => step(
+            &mut config.crouch_knee_forward,
+            direction,
+            0.02,
+            -0.30,
+            0.70,
+        ),
+        ProceduralAnimationControl::CrouchTransitionSpeed => step(
+            &mut config.crouch_transition_speed,
+            direction,
+            1.0,
+            1.0,
+            30.0,
+        ),
+    }
+}
+
+fn procedural_animation_value(
+    config: ProceduralAnimationConfig,
+    control: ProceduralAnimationControl,
+) -> f32 {
+    match control {
+        ProceduralAnimationControl::StrideLength => config.stride_length,
+        ProceduralAnimationControl::FootLift => config.foot_lift,
+        ProceduralAnimationControl::TorsoLean => config.torso_lean,
+        ProceduralAnimationControl::BodyBob => config.body_bob,
+        ProceduralAnimationControl::ArmSwing => config.arm_swing,
+        ProceduralAnimationControl::IkLegUpperLength => config.ik_leg_upper_length,
+        ProceduralAnimationControl::IkLegLowerLength => config.ik_leg_lower_length,
+        ProceduralAnimationControl::CrouchDepth => config.crouch_depth,
+        ProceduralAnimationControl::CrouchLean => config.crouch_lean,
+        ProceduralAnimationControl::CrouchArmDrop => config.crouch_arm_drop,
+        ProceduralAnimationControl::CrouchKneeForward => config.crouch_knee_forward,
+        ProceduralAnimationControl::CrouchTransitionSpeed => config.crouch_transition_speed,
     }
 }
 
@@ -719,6 +980,7 @@ pub fn update_keybinding_ui(
     bindings: Res<KeyBindings>,
     ui_settings: Res<UiSettings>,
     ui_scale: Res<UiScale>,
+    animation_config: Res<ProceduralAnimationConfig>,
     ui_state: Res<SettingsUiState>,
     mut root: Query<&mut Visibility, With<KeybindingUiRoot>>,
     mut sections: Query<(&SettingsSection, &mut Node)>,
@@ -728,6 +990,7 @@ pub fn update_keybinding_ui(
             Without<BindingStatusText>,
             Without<UiScaleValueText>,
             Without<UiOpacityValueText>,
+            Without<ProceduralAnimationValueText>,
         ),
     >,
     mut status: Query<
@@ -737,6 +1000,7 @@ pub fn update_keybinding_ui(
             Without<BindingValueText>,
             Without<UiScaleValueText>,
             Without<UiOpacityValueText>,
+            Without<ProceduralAnimationValueText>,
         ),
     >,
     mut scale_value: Query<
@@ -746,6 +1010,7 @@ pub fn update_keybinding_ui(
             Without<BindingValueText>,
             Without<BindingStatusText>,
             Without<UiOpacityValueText>,
+            Without<ProceduralAnimationValueText>,
         ),
     >,
     mut opacity_value: Query<
@@ -755,6 +1020,16 @@ pub fn update_keybinding_ui(
             Without<BindingValueText>,
             Without<BindingStatusText>,
             Without<UiScaleValueText>,
+            Without<ProceduralAnimationValueText>,
+        ),
+    >,
+    mut animation_values: Query<
+        (&ProceduralAnimationValueText, &mut Text),
+        (
+            Without<BindingValueText>,
+            Without<BindingStatusText>,
+            Without<UiScaleValueText>,
+            Without<UiOpacityValueText>,
         ),
     >,
     mut backgrounds: ParamSet<(
@@ -782,7 +1057,7 @@ pub fn update_keybinding_ui(
     }
     for (value, mut text) in &mut values {
         text.0 = if bindings.listening == Some(value.0) {
-            "Press a key...".into()
+            "请按下按键…".into()
         } else {
             bindings.binding(value.0).label()
         };
@@ -798,6 +1073,12 @@ pub fn update_keybinding_ui(
     }
     if let Ok(mut text) = opacity_value.single_mut() {
         text.0 = format!("{:.1}", ui_settings.panel_opacity);
+    }
+    for (value, mut text) in &mut animation_values {
+        text.0 = format!(
+            "{:.2}",
+            procedural_animation_value(*animation_config, value.0)
+        );
     }
     for (interaction, mut background) in &mut backgrounds.p1() {
         background.0 = match interaction {
@@ -851,6 +1132,10 @@ mod tests {
         assert_eq!(
             bindings.binding(GameAction::ToggleCamera),
             Binding::Key(KeyCode::KeyC)
+        );
+        assert_eq!(
+            bindings.binding(GameAction::Sprint),
+            Binding::Key(KeyCode::ShiftLeft)
         );
         assert_eq!(
             bindings.binding(GameAction::OpenWorldStatus),

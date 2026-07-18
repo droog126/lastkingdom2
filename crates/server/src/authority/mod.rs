@@ -9,8 +9,8 @@ use lk2_core::ecology::EcoCycle;
 use lk2_core::resource::GlobalResourcePool;
 use lk2_core::simulation::regions::{NatureRegionId, NatureRegionState, NatureRegionWorld};
 use lk2_core::simulation::{
-    TickReport, WorldInput, cadence::RegionLod, cadence::RegionScheduler, step_world,
-    step_world_elapsed,
+    NatureSnapshot, TickReport, WorldInput, cadence::RegionLod, cadence::RegionScheduler,
+    step_world, step_world_elapsed,
 };
 
 #[derive(Resource)]
@@ -31,6 +31,25 @@ pub struct RegionalNatureAuthority {
 
 #[derive(Resource, Default)]
 pub struct LatestNatureRegionReports(pub BTreeMap<NatureRegionId, TickReport>);
+
+/// Select the last authoritative snapshot published for a region.
+///
+/// Projection consumers must read this report cache instead of rebuilding a
+/// snapshot from mutable region state after the authority step. The primary
+/// report is the compatibility fallback while a player's region is still
+/// waiting for its first scheduled update.
+#[must_use]
+pub fn report_snapshot_for_region<'a>(
+    reports: &'a LatestNatureRegionReports,
+    primary_id: NatureRegionId,
+    region_id: NatureRegionId,
+) -> Option<&'a NatureSnapshot> {
+    reports
+        .0
+        .get(&region_id)
+        .or_else(|| reports.0.get(&primary_id))
+        .map(|report| &report.snapshot)
+}
 
 impl RegionalNatureAuthority {
     #[must_use]

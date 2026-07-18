@@ -1,5 +1,5 @@
 use bevy::prelude::Vec2;
-use lk2_core::ecology::EcoCycle;
+use lk2_core::ecology::{EcoCycle, ResourceNodeKind};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::simulation::{
     NatureEvent, NatureSnapshot, WorldInput, step_world, step_world_elapsed,
@@ -19,9 +19,9 @@ fn shared_step_reuses_existing_ecology_and_reports_the_causal_chain() {
         saw_plant_growth |= report
             .events
             .iter()
-            .any(|event| matches!(event, NatureEvent::PlantsGrown { count } if *count > 0));
+            .any(|event| matches!(event, NatureEvent::PlantsGrown { count, .. } if *count > 0));
         saw_animal_birth |= report.events.iter().any(|event| {
-            matches!(event, NatureEvent::AnimalsBorn { rabbits, wildlife } if *rabbits + *wildlife > 0)
+            matches!(event, NatureEvent::AnimalsBorn { rabbits, wildlife, .. } if *rabbits + *wildlife > 0)
         });
         last_report = Some(report);
     }
@@ -146,6 +146,24 @@ fn elapsed_step_matches_repeated_single_steps_and_keeps_all_events() {
 }
 
 #[test]
+fn elapsed_events_keep_their_source_tick_in_deterministic_order() {
+    let initial = EcoCycle::seeded_weather_at(Vec2::new(24.0, 24.0));
+    let mut ecology = initial;
+    let mut resources = GlobalResourcePool::default();
+
+    let report = step_world_elapsed(WorldInput { tick: 4 }, 4, &mut ecology, &mut resources);
+
+    let ticks = report
+        .events
+        .iter()
+        .map(NatureEvent::tick)
+        .collect::<Vec<_>>();
+    assert!(!ticks.is_empty());
+    assert!(ticks.windows(2).all(|window| window[0] <= window[1]));
+    assert!(ticks.iter().all(|tick| (1..=4).contains(tick)));
+}
+
+#[test]
 fn wildlife_updates_are_spread_across_deterministic_tick_shards() {
     let mut ecology = EcoCycle::default();
     let before = ecology.wildlife.clone();
@@ -160,6 +178,52 @@ fn wildlife_updates_are_spread_across_deterministic_tick_shards() {
         .count();
     assert!(changed > 0);
     assert!(changed < before.len());
+}
+
+#[test]
+fn herbivore_grazing_is_published_into_the_matter_cycle() {
+    let mut ecology = EcoCycle {
+        clouds: Vec::new(),
+        rabbits: Vec::new(),
+        berries: Vec::new(),
+        wildlife: vec![lk2_core::ecology::EcoWildlife {
+            id: 0,
+            kind: lk2_core::ecology::WildlifeKind::Deer,
+            pos: Vec2::ZERO,
+            energy: 4.0,
+        }],
+        plants: vec![lk2_core::ecology::EcoPlantNode {
+            id: 0,
+            kind: ResourceNodeKind::Grass,
+            pos: Vec2::new(0.5, 0.0),
+            stock: 1,
+        }],
+        co2: 0.0,
+        rain: 0.0,
+        rainfall: 0.0,
+        fruit_eaten: 0,
+        fruit_grown: 0,
+        plants_grown: 0,
+        rabbits_born: 0,
+        wildlife_born: 0,
+    };
+    let mut resources = GlobalResourcePool::new();
+
+    let report = step_world(WorldInput { tick: 3 }, &mut ecology, &mut resources);
+
+    assert_eq!(report.ecology.plants_eaten, 1);
+    assert_eq!(ecology.plants[0].stock, 0);
+    assert_eq!(resources.get(ResourceKind::Food), 1);
+    assert!(report.events.iter().any(|event| {
+        matches!(
+            event,
+            NatureEvent::WildlifeForaged {
+                plants: 1,
+                food: 1,
+                ..
+            }
+        )
+    }));
 }
 
 #[test]
@@ -185,6 +249,11 @@ fn plant_regrowth_reaches_every_shard_within_the_cadence_window() {
     for plant in &mut ecology.plants {
         plant.stock = 0;
     }
+    // This test specifies rain-driven regeneration, not wildlife foraging.
+    // Keep the ecological consumers out of the fixture so they cannot eat a
+    // node in the same cadence window that is being measured.
+    ecology.rabbits.clear();
+    ecology.wildlife.clear();
     ecology.rain = 100.0;
     let mut resources = GlobalResourcePool::default();
 
@@ -199,7 +268,16 @@ fn plant_regrowth_reaches_every_shard_within_the_cadence_window() {
 
     ecology.tick_at(2, &mut resources);
     ecology.tick_at(3, &mut resources);
-    assert!(ecology.plants.iter().all(|plant| plant.stock > 0));
+    assert!(
+        ecology
+            .plants
+            .iter()
+            .filter(|plant| matches!(
+                plant.kind,
+                ResourceNodeKind::Grass | ResourceNodeKind::Flower
+            ))
+            .all(|plant| plant.stock > 0)
+    );
 }
 
 #[test]
@@ -220,6 +298,9 @@ fn regional_snapshot_filters_entities_without_mutating_global_facts() {
 
 #[test]
 fn aggregate_nature_events_remain_visible_in_regional_projection() {
-    let event = NatureEvent::RainFell { amount: 1.0 };
+    let event = NatureEvent::RainFell {
+        tick: 1,
+        amount: 1.0,
+    };
     assert_eq!(event.for_region([0.0, 0.0], 1.0), Some(event));
 }

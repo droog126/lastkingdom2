@@ -7,7 +7,9 @@ use lk2_core::farming::{CropKind, FarmingError};
 use super::inventory::InventoryUiState;
 use super::keybindings::{GameAction, KeyBindings, UiSettings};
 use super::offline::OfflineNature;
-use super::state::{FARM_PLOT_POSITIONS, FarmVisualMaterials, crop_material_index};
+use super::state::{
+    FARM_PLOT_POSITIONS, FarmVisualMaterials, ProceduralTerrainSurface, crop_material_index,
+};
 use super::ui_drag::{UiDragHandle, UiDragPanel};
 use super::util::PLAYER_PHYSICS_CENTER_HEIGHT;
 
@@ -353,6 +355,7 @@ pub fn handle_farming_actions(
 
 pub(crate) fn reconcile_farm_visuals(
     nature: Res<OfflineNature>,
+    terrain: Res<ProceduralTerrainSurface>,
     materials: Res<FarmVisualMaterials>,
     mut crops: Query<(
         &super::state::FarmCropVisual,
@@ -378,8 +381,12 @@ pub(crate) fn reconcile_farm_visuals(
         let growth = (crop.age_ticks as f32 / crop.kind.growth_ticks() as f32).clamp(0.0, 1.0);
         let scale = 0.35 + growth * 0.75;
         *visibility = Visibility::Visible;
-        transform.translation =
-            FARM_PLOT_POSITIONS[visual.id as usize] + Vec3::Y * (0.58 + scale * 0.35);
+        let plot_position = FARM_PLOT_POSITIONS[visual.id as usize];
+        transform.translation = Vec3::new(
+            plot_position.x,
+            terrain.ground_height(plot_position) + 0.48 + scale * 0.35,
+            plot_position.z,
+        );
         transform.scale = Vec3::splat(scale);
         material.0 = materials.crop_materials[crop_material_index(crop.kind)].clone();
     }

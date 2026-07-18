@@ -36,6 +36,7 @@ fn main() {
     let command = GameplayCommandKind::MoveWorld {
         dx_milli: 0,
         dz_milli: -1000,
+        dy_milli: 0,
     };
 
     let before = transform.translation;
@@ -43,9 +44,9 @@ fn main() {
     let mut moved_frames = 0;
     for _ in 0..120 {
         let dir = match command {
-            GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
-                Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0)
-            }
+            GameplayCommandKind::MoveWorld {
+                dx_milli, dz_milli, ..
+            } => Vec2::new(dx_milli as f32 / 1000.0, dz_milli as f32 / 1000.0),
             _ => action_dir(&actions),
         };
         if apply_world_move(

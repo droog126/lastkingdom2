@@ -27,16 +27,11 @@ pub struct TwoBoneLimbSpec {
 
 impl TwoBoneLimb {
     pub fn solve(self) -> TwoBoneSolution {
+        let target = clamp_two_bone_target(self.root, self.target, self.upper_len, self.lower_len);
         TwoBoneSolution {
             root: self.root,
-            joint: solve_two_bone(
-                self.root,
-                self.target,
-                self.pole,
-                self.upper_len,
-                self.lower_len,
-            ),
-            target: self.target,
+            joint: solve_two_bone(self.root, target, self.pole, self.upper_len, self.lower_len),
+            target,
         }
     }
 }
@@ -149,22 +144,22 @@ impl HumanoidRig {
     pub fn player_avatar() -> Self {
         Self {
             left_arm: TwoBoneLimbSpec {
-                root: Vec3::new(-0.31, 1.02, -0.02),
+                root: Vec3::new(-0.29, 1.00, -0.02),
                 upper_len: 0.255,
                 lower_len: 0.255,
             },
             right_arm: TwoBoneLimbSpec {
-                root: Vec3::new(0.31, 1.02, -0.02),
+                root: Vec3::new(0.29, 1.00, -0.02),
                 upper_len: 0.255,
                 lower_len: 0.255,
             },
             left_leg: TwoBoneLimbSpec {
-                root: Vec3::new(-0.15, 0.50, 0.03),
+                root: Vec3::new(-0.14, 0.50, 0.03),
                 upper_len: 0.225,
                 lower_len: 0.225,
             },
             right_leg: TwoBoneLimbSpec {
-                root: Vec3::new(0.15, 0.50, 0.03),
+                root: Vec3::new(0.14, 0.50, 0.03),
                 upper_len: 0.225,
                 lower_len: 0.225,
             },
@@ -330,6 +325,22 @@ impl DragonRig {
                 .solve(),
         }
     }
+}
+
+pub fn clamp_two_bone_target(root: Vec3, target: Vec3, upper: f32, lower: f32) -> Vec3 {
+    let delta = target - root;
+    let direction = delta.normalize_or_zero();
+    let direction = if direction.length_squared() > 0.0 {
+        direction
+    } else {
+        Vec3::Y
+    };
+    let max_distance = (upper + lower - 0.001).max(0.001);
+    let min_distance = (upper - lower).abs() + 0.001;
+    let distance = delta
+        .length()
+        .clamp(min_distance.min(max_distance), max_distance);
+    root + direction * distance
 }
 
 pub fn solve_two_bone(root: Vec3, target: Vec3, pole: Vec3, upper: f32, lower: f32) -> Vec3 {

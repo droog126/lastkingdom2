@@ -1,4 +1,4 @@
 interface:
   display_name: "LK2 AI Modeling"
-  short_description: "Generate and preview reproducible Blender assets"
-  default_prompt: "Use $ai-modeling to generate and validate a reproducible 3D asset."
+  short_description: "Generate, wire, and validate reproducible assets"
+  default_prompt: "Use $ai-modeling to generate, trace into the target runtime consumer, and validate a reproducible 3D asset."

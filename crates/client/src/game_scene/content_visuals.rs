@@ -1,13 +1,14 @@
 //! Visual adapter from shared content generation to the living forest scene.
 
-use bevy::prelude::*;
+use std::collections::HashMap;
+
+use bevy::{prelude::*, sprite::Text2dShadow};
 
 use super::procedural_motion::ProceduralTreeSway;
-use super::state::ProceduralTerrainSurface;
+use super::state::{CaveEntrance, ProceduralTerrainSurface};
 use super::util::{
-    CAMPFIRE_PATH, CAVE_PATH, CHEST_PATH, HOUSE_PATH, MUSHROOM_BROWN_PATH, MUSHROOM_RED_PATH,
-    PILLAR_RED_PATH, PINE_TREE_PATH, ROCK_DARK_PATH, ROCK_PATH, ROUND_TREE_PATH, TREE_PATH, hash01,
-    spawn_asset,
+    CAMPFIRE_PATH, CAVE_PATH, CHEST_PATH, HOUSE_PATH, PILLAR_RED_PATH, PINE_TREE_PATH,
+    ROCK_DARK_PATH, ROCK_PATH, ROUND_TREE_PATH, TREE_PATH, hash01, spawn_asset,
 };
 use lk2_core::content::{ContentCategory, ContentRegistry, ContentStatus};
 use lk2_core::world::content::{
@@ -20,7 +21,9 @@ use lk2_core::world::content::{
 
 pub const LIVING_CONTENT_DIMENSIONS: [usize; 3] = [5, 3, 5];
 pub const DEFAULT_LIVING_CONTENT_SEED: u64 = 0x1A57_51CE;
-pub const CONTENT_CELL_SPACING: f32 = 8.4;
+// Keep the authored introduction clear. The generated content volume remains
+// present, but its secondary structures begin beyond the readable hub ring.
+pub const CONTENT_CELL_SPACING: f32 = 18.0;
 pub(crate) const MONSTER_ANCHOR_PILLAR_SCALE: f32 = 0.52;
 pub(crate) const MONSTER_DECORATIVE_MARKER_SCALE: f32 = 0.08;
 
@@ -163,23 +166,34 @@ pub fn spawn_exported_content_visuals(
             .then_with(|| left.key.cmp(&right.key))
     });
 
+    let label_font = asset_server.load("fonts/NotoSansCJKsc-Regular.otf");
+    let mut category_slots = HashMap::<ContentCategory, usize>::new();
     for (index, definition) in definitions.into_iter().enumerate() {
         let Some(visual) = definition.visual.as_ref() else {
             continue;
         };
-        let position = exported_content_position(index, definition.category);
-        let grounded = Vec3::new(
-            position.x,
-            terrain.ground_height(position) + 0.04,
-            position.z,
-        );
+        let slot = category_slots.entry(definition.category).or_default();
+        let position = exported_content_position(*slot, definition.category);
+        *slot += 1;
+        let is_tree = visual.model_path.contains("tree");
+        if is_tree && position.distance_squared(Vec3::new(-2.0, 0.0, 11.0)) < 24.0 * 24.0 {
+            continue;
+        }
+        let Some(grounded) = terrain.grounded_land_position(position, 26, 0.04) else {
+            continue;
+        };
         let yaw = (index as f32 * 0.71).rem_euclid(std::f32::consts::TAU);
+        let visual_scale = if is_tree {
+            visual.scale[0] * 0.55
+        } else {
+            visual.scale[0]
+        };
         spawn_asset(
             commands,
             asset_server,
             &visual.model_path,
             grounded,
-            visual.scale[0],
+            visual_scale,
             yaw,
             format!("content_visual_{}", definition.key.replace('.', "_")),
         )
@@ -187,13 +201,43 @@ pub fn spawn_exported_content_visuals(
             status: definition.status,
             phase: index as f32 * 0.83,
         });
+
+        // The gallery is a content-audit surface, so every ambiguous low-poly
+        // prop gets a small world-space name. This is especially useful for
+        // crystals and flowers that otherwise collapse into one
+        // pale cluster from the gameplay camera.
+        commands.spawn((
+            Text2d::new(content_visual_label(definition.key.as_str())),
+            TextFont {
+                font: label_font.clone().into(),
+                font_size: FontSize::Px(14.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.92, 0.68)),
+            Text2dShadow {
+                offset: Vec2::new(2.0, -2.0),
+                color: Color::srgba(0.04, 0.02, 0.01, 0.92),
+            },
+            Transform::from_translation(
+                grounded + Vec3::Y * (1.15 + visual.scale[1].abs().max(0.35)),
+            ),
+            Name::new(format!(
+                "content_label_{}",
+                definition.key.replace('.', "_")
+            )),
+        ));
     }
 }
 
 fn exported_content_position(index: usize, category: ContentCategory) -> Vec3 {
     let (columns, spacing, origin_x, origin_z) = match category {
-        ContentCategory::Creature | ContentCategory::Item => (5, 3.3, -10.0, -3.0),
-        _ => (6, 5.0, -25.0, -8.0),
+        ContentCategory::Creature => (4, 3.3, -9.0, 12.0),
+        ContentCategory::Item => (2, 4.2, 7.0, 12.0),
+        ContentCategory::Wildlife => (5, 3.6, -9.0, 7.0),
+        ContentCategory::Plant => (3, 4.0, -5.0, 1.0),
+        ContentCategory::ResourceNode => (4, 3.5, -8.0, -7.0),
+        ContentCategory::Drop => (3, 3.5, 5.0, -7.0),
+        ContentCategory::Resource => (4, 3.5, -8.0, -12.0),
     };
     let row = index / columns;
     let column = index % columns;
@@ -204,6 +248,34 @@ fn exported_content_position(index: usize, category: ContentCategory) -> Vec3 {
     )
 }
 
+fn content_visual_label(key: &str) -> &'static str {
+    match key {
+        "wildlife.rabbit" => "兔子",
+        "wildlife.deer" => "鹿",
+        "wildlife.fox" => "狐狸",
+        "wildlife.bear" => "熊",
+        "wildlife.wolf" => "狼",
+        "plant.sokpop_tree" => "树",
+        "plant.fallen_stick" => "枯枝",
+        "plant.palm" => "棕榈树",
+        "resource_node.berry_bush" => "浆果灌木",
+        "resource_node.flower" => "花",
+        "resource_node.rock_mid" => "岩石",
+        "resource_node.rock_moss" => "苔岩",
+        "resource_node.sunstone_crystal" => "太阳晶体",
+        "resource_node.frost_crystal" => "霜晶",
+        "drop.berry_fruit" => "浆果",
+        "drop.stone" => "石头",
+        "item.reaper_scythe" => "收割者镰刀",
+        "item.dragon_katana" => "龙之刀",
+        "creature.pig" => "猪",
+        "creature.sheep" => "羊",
+        "creature.cow" => "牛",
+        "creature.chicken" => "鸡",
+        _ => "内容",
+    }
+}
+
 fn spawn_surface_content(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
@@ -212,19 +284,28 @@ fn spawn_surface_content(
     cell: [usize; 3],
     content: lk2_core::world::content::ContentId,
 ) {
+    if is_initial_view_corridor(base) {
+        return;
+    }
     let index = cell[0] + cell[2] * 11;
     let yaw = hash01(index, 601) * std::f32::consts::TAU;
     match content {
         GAME_CONTENT_SETTLEMENT => {
-            spawn_asset(
-                commands,
-                asset_server,
-                HOUSE_PATH,
-                grounded_content_position(terrain, base + Vec3::new(-1.3, 0.0, -0.9)),
-                0.95,
-                yaw,
-                "spice_settlement_house",
-            );
+            // The central settlement cell sits directly in front of the
+            // player spawn. Its house is large enough to put the first-person
+            // camera under the roof, so keep large structures out of the same
+            // initial-view corridor already reserved from wilderness trees.
+            if !is_initial_view_corridor(base) {
+                spawn_asset(
+                    commands,
+                    asset_server,
+                    HOUSE_PATH,
+                    grounded_content_position(terrain, base + Vec3::new(-1.3, 0.0, -0.9)),
+                    0.95,
+                    yaw,
+                    "spice_settlement_house",
+                );
+            }
             spawn_asset(
                 commands,
                 asset_server,
@@ -272,17 +353,27 @@ fn spawn_surface_content(
             );
         }
         GAME_CONTENT_VERTICAL_PASSAGE => {
+            let to_spawn = Vec2::new(-2.0 - base.x, 11.0 - base.z);
+            let entrance_yaw = if to_spawn.length_squared() > 0.01 {
+                to_spawn.x.atan2(-to_spawn.y)
+            } else {
+                yaw
+            };
             spawn_asset(
                 commands,
                 asset_server,
                 CAVE_PATH,
                 grounded_content_position(terrain, base),
-                0.86,
-                yaw,
+                0.68,
+                entrance_yaw,
                 "spice_vertical_passage",
-            );
+            )
+            .insert(CaveEntrance);
         }
         GAME_CONTENT_WILDERNESS => {
+            if is_initial_view_corridor(base) {
+                return;
+            }
             let path = if index % 3 == 0 {
                 PINE_TREE_PATH
             } else if index % 2 == 0 {
@@ -294,19 +385,20 @@ fn spawn_surface_content(
                 terrain,
                 base + Vec3::new(-0.8 + hash01(index, 607) * 1.6, 0.0, -0.6),
             );
+            let tree_scale = 0.58 + hash01(index, 613) * 0.14;
             spawn_asset(
                 commands,
                 asset_server,
                 path,
                 position,
-                0.72 + hash01(index, 613) * 0.18,
+                tree_scale,
                 yaw,
                 "spice_wilderness_tree",
             )
             .insert(ProceduralTreeSway {
                 base_translation: position,
                 base_yaw: yaw,
-                base_scale: 0.72 + hash01(index, 613) * 0.18,
+                base_scale: tree_scale,
                 phase: index as f32 * 0.41,
                 strength: 0.018,
             });
@@ -324,15 +416,47 @@ fn spawn_underground_hint(
     cell: [usize; 3],
     content: lk2_core::world::content::ContentId,
 ) {
+    if is_initial_view_corridor(base) {
+        return;
+    }
     let index = cell[0] + cell[2] * 13;
-    let yaw = hash01(index, 701) * std::f32::consts::TAU;
+    // The entrance mesh opens toward local -Z. Point it toward the initial
+    // spawn corridor instead of using a random yaw; otherwise the gameplay
+    // camera often sees only the solid back of the rock.
+    let to_spawn = Vec2::new(-2.0 - base.x, 11.0 - base.z);
+    let spawn_facing_yaw = to_spawn.x.atan2(-to_spawn.y);
+    let yaw = if to_spawn.length_squared() > 0.01 {
+        spawn_facing_yaw
+    } else {
+        hash01(index, 701) * std::f32::consts::TAU
+    };
+    let entrance_offset = if cell == [2, 0, 2] {
+        // Keep the authored central mine mouth in the same readable corridor
+        // as the player spawn, rather than hiding it behind the settlement.
+        Vec3::new(-1.0, 0.0, 2.8)
+    } else {
+        Vec3::new(1.7, 0.0, -1.7)
+    };
+    let entrance_position = grounded_content_position(terrain, base + entrance_offset);
     match content {
+        GAME_CONTENT_CAVERN if index % 3 == 0 => {
+            spawn_asset(
+                commands,
+                asset_server,
+                CAVE_PATH,
+                entrance_position,
+                0.58,
+                yaw,
+                "spice_cavern_entrance",
+            )
+            .insert(CaveEntrance);
+        }
         GAME_CONTENT_TREASURE_VAULT => {
             spawn_asset(
                 commands,
                 asset_server,
                 CHEST_PATH,
-                grounded_content_position(terrain, base),
+                entrance_position,
                 0.78,
                 yaw,
                 "spice_treasure_hint",
@@ -343,26 +467,10 @@ fn spawn_underground_hint(
                 commands,
                 asset_server,
                 ROCK_PATH,
-                grounded_content_position(terrain, base),
+                entrance_position,
                 0.58,
                 yaw,
                 "spice_dungeon_hint",
-            );
-        }
-        GAME_CONTENT_CAVERN if index % 3 == 0 => {
-            let path = if index % 2 == 0 {
-                MUSHROOM_RED_PATH
-            } else {
-                MUSHROOM_BROWN_PATH
-            };
-            spawn_asset(
-                commands,
-                asset_server,
-                path,
-                grounded_content_position(terrain, base),
-                0.68,
-                yaw,
-                "spice_cavern_hint",
             );
         }
         GAME_CONTENT_VERTICAL_PASSAGE => {
@@ -370,11 +478,12 @@ fn spawn_underground_hint(
                 commands,
                 asset_server,
                 CAVE_PATH,
-                grounded_content_position(terrain, base),
-                0.52,
-                yaw + 0.8,
+                entrance_position,
+                0.58,
+                yaw,
                 "spice_underpass_hint",
-            );
+            )
+            .insert(CaveEntrance);
         }
         _ => {}
     }
@@ -391,9 +500,28 @@ fn parse_seed_value(value: &str) -> Option<u64> {
 }
 
 fn is_initial_view_corridor(position: Vec3) -> bool {
-    position.z > 0.0 && position.x.abs() < CONTENT_CELL_SPACING * 1.35
+    // The first view is an authored introduction, not a content-registry
+    // gallery. Keep generated caves, houses, rocks, and wilderness props out
+    // of the 20 m around the approach so a player can identify the camp,
+    // farm, and routes before discovering secondary content.
+    position.distance_squared(Vec3::new(0.0, 0.0, 5.0)) <= 28.0 * 28.0
 }
 
 pub(crate) fn is_monster_anchor(cell: [usize; 3]) -> bool {
     cell == [1, 1, 1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_view_corridor_includes_the_central_settlement_cell() {
+        assert!(is_initial_view_corridor(Vec3::ZERO));
+        assert!(is_initial_view_corridor(Vec3::new(-2.0, 0.0, 8.4)));
+        assert!(is_initial_view_corridor(Vec3::new(20.0, 0.0, 0.0)));
+        assert!(!is_initial_view_corridor(Vec3::new(30.0, 0.0, 0.0)));
+        assert!(is_initial_view_corridor(Vec3::new(0.0, 0.0, -20.0)));
+        assert!(!is_initial_view_corridor(Vec3::new(0.0, 0.0, -30.0)));
+    }
 }

@@ -103,6 +103,42 @@ pub fn observe_value(
         presented_clouds: first_count(state, &["/presentation/nature/clouds"]),
         presented_plants: first_count(state, &["/presentation/nature/plants"]),
         presented_animals: first_count(state, &["/presentation/nature/animals"]),
+        event_count: first_count(
+            state,
+            &[
+                "/nature/event_count",
+                "/nature/events_count",
+                "/nature/events",
+                "/nature_snapshot/events",
+            ],
+        ),
+        region_tick: first_u64(
+            state,
+            &[
+                "/nature/region_tick",
+                "/nature_snapshot/region_tick",
+                "/regions/primary/tick",
+                "/region/tick",
+            ],
+        ),
+        catch_up_remaining: first_u64(
+            state,
+            &[
+                "/nature/catch_up_remaining",
+                "/nature_snapshot/catch_up_remaining",
+                "/regions/primary/catch_up_remaining",
+                "/simulation/catch_up_remaining",
+            ],
+        ),
+        save_restored: first_bool(
+            state,
+            &[
+                "/nature/save_restored",
+                "/nature_snapshot/save_restored",
+                "/persistence/restored",
+                "/persistence/restore_success",
+            ],
+        ),
     };
     let mut missing_fields = Vec::new();
     let present = [
@@ -193,6 +229,10 @@ fn first_f64(state: &Value, paths: &[&str]) -> Option<f64> {
     first_value(state, paths).and_then(Value::as_f64)
 }
 
+fn first_bool(state: &Value, paths: &[&str]) -> Option<bool> {
+    first_value(state, paths).and_then(Value::as_bool)
+}
+
 fn first_count(state: &Value, paths: &[&str]) -> Option<u64> {
     first_value(state, paths).and_then(|value| {
         value
@@ -271,5 +311,42 @@ mod tests {
         let observation = observe_value(&state, "nature_initial.json", Vec::new());
         assert!(observation.metrics.required_fields_present());
         assert!(observation.missing_fields.is_empty());
+    }
+
+    #[test]
+    fn captures_optional_runtime_evidence_without_making_old_states_invalid() {
+        let state = json!({
+            "nature": {
+                "tick": 12,
+                "cloud_count": 1,
+                "rainfall": 0.4,
+                "soil_moisture": 0.6,
+                "plant_count": 2,
+                "animal_count": 1,
+                "animal_food_available": 3.5,
+                "events": [{"type": "RainStarted"}, "PlantGrew"],
+                "region_tick": 10,
+                "catch_up_remaining": 2
+            },
+            "persistence": {"restored": true}
+        });
+
+        let observation = observe_value(&state, "runtime", Vec::new());
+
+        assert_eq!(observation.metrics.event_count, Some(2));
+        assert_eq!(observation.metrics.region_tick, Some(10));
+        assert_eq!(observation.metrics.catch_up_remaining, Some(2));
+        assert_eq!(observation.metrics.save_restored, Some(true));
+        assert!(
+            observation
+                .metrics
+                .runtime_evidence_is_valid(observation.events.len())
+        );
+        let legacy = observe_value(&json!({"tick": 1}), "legacy", Vec::new());
+        assert!(
+            legacy
+                .metrics
+                .runtime_evidence_is_valid(legacy.events.len())
+        );
     }
 }

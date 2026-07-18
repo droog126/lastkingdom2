@@ -78,9 +78,8 @@ where
                     }
                     let t = (da / (da - db)).clamp(0.0, 1.0);
                     for axis in 0..3 {
-                        position[axis] +=
-                            corner_positions[a][axis]
-                                + (corner_positions[b][axis] - corner_positions[a][axis]) * t;
+                        position[axis] += corner_positions[a][axis]
+                            + (corner_positions[b][axis] - corner_positions[a][axis]) * t;
                     }
                     intersections += 1.0;
                 }
@@ -164,12 +163,7 @@ fn adjacent_vertices(
 ) -> Option<[u32; 4]> {
     let [cells_x, cells_y, cells_z] = cells;
     let values = coordinates.map(|(x, y, z)| {
-        (x >= 0
-            && y >= 0
-            && z >= 0
-            && x < cells_x
-            && y < cells_y
-            && z < cells_z)
+        (x >= 0 && y >= 0 && z >= 0 && x < cells_x && y < cells_y && z < cells_z)
             .then(|| vertices[cell_index(cells, x, y, z)])
             .flatten()
     });

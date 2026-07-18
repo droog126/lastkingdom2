@@ -41,8 +41,7 @@ pub enum TreeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceNodeKind {
     BerryBush,
-    MushroomRed,
-    MushroomBrown,
+    Grass,
     Flower,
     RockMid,
     RockMoss,
@@ -53,7 +52,6 @@ pub enum ResourceNodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceDropKind {
     BerryFruit,
-    Wood,
     Stone,
 }
 
@@ -209,20 +207,12 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
         source_block: Some(BlockType::BerryThicket),
     },
     EcologyCatalogEntry {
-        kind: EcologyKind::ResourceNode(ResourceNodeKind::MushroomRed),
-        model_path: "procedural/pretty/mushroom_red.glb",
-        visual_scale: Vec3::splat(0.58),
-        produced_resource: Some(ResourceKind::Food),
+        kind: EcologyKind::ResourceNode(ResourceNodeKind::Grass),
+        model_path: "procedural/pretty/granular_wildflowers.glb",
+        visual_scale: Vec3::splat(0.56),
+        produced_resource: None,
         preferred_biome: Some(Biome::Jungle),
-        source_block: None,
-    },
-    EcologyCatalogEntry {
-        kind: EcologyKind::ResourceNode(ResourceNodeKind::MushroomBrown),
-        model_path: "procedural/pretty/mushroom_brown.glb",
-        visual_scale: Vec3::splat(0.58),
-        produced_resource: Some(ResourceKind::Food),
-        preferred_biome: Some(Biome::Jungle),
-        source_block: None,
+        source_block: Some(BlockType::Grass),
     },
     EcologyCatalogEntry {
         kind: EcologyKind::ResourceNode(ResourceNodeKind::Flower),
@@ -273,14 +263,6 @@ pub const ECOLOGY_CATALOG: &[EcologyCatalogEntry] = &[
         source_block: Some(BlockType::BerryThicket),
     },
     EcologyCatalogEntry {
-        kind: EcologyKind::ResourceDrop(ResourceDropKind::Wood),
-        model_path: "procedural/pretty/resource_wood.glb",
-        visual_scale: Vec3::splat(0.8),
-        produced_resource: Some(ResourceKind::Wood),
-        preferred_biome: None,
-        source_block: Some(BlockType::Wood),
-    },
-    EcologyCatalogEntry {
         kind: EcologyKind::ResourceDrop(ResourceDropKind::Stone),
         model_path: "procedural/pretty/resource_stone.glb",
         visual_scale: Vec3::splat(0.8),
@@ -326,7 +308,7 @@ mod smoke_tests {
             EcologyKind::ResourceNode(_)
         ));
         assert!(matches!(
-            EcologyKind::ResourceDrop(ResourceDropKind::Wood),
+            EcologyKind::ResourceDrop(ResourceDropKind::Stone),
             EcologyKind::ResourceDrop(_)
         ));
     }
@@ -412,8 +394,7 @@ mod smoke_tests {
     #[test]
     fn resource_node_kind_variants() {
         let _ = ResourceNodeKind::BerryBush;
-        let _ = ResourceNodeKind::MushroomRed;
-        let _ = ResourceNodeKind::MushroomBrown;
+        let _ = ResourceNodeKind::Grass;
         let _ = ResourceNodeKind::Flower;
         let _ = ResourceNodeKind::RockMid;
         let _ = ResourceNodeKind::RockMoss;
@@ -424,7 +405,6 @@ mod smoke_tests {
     #[test]
     fn resource_drop_kind_variants() {
         let _ = ResourceDropKind::BerryFruit;
-        let _ = ResourceDropKind::Wood;
         let _ = ResourceDropKind::Stone;
     }
 }
@@ -455,8 +435,7 @@ impl ResourceNodeKind {
     pub const fn to_u8(self) -> u8 {
         match self {
             ResourceNodeKind::BerryBush => 0,
-            ResourceNodeKind::MushroomRed => 1,
-            ResourceNodeKind::MushroomBrown => 2,
+            ResourceNodeKind::Grass => 8,
             ResourceNodeKind::Flower => 3,
             ResourceNodeKind::RockMid => 4,
             ResourceNodeKind::RockMoss => 5,
@@ -467,9 +446,11 @@ impl ResourceNodeKind {
 
     pub const fn from_u8(value: u8) -> Self {
         match value {
-            1 => ResourceNodeKind::MushroomRed,
-            2 => ResourceNodeKind::MushroomBrown,
+            // Keep snapshots written before the retired plant variants
+            // readable; those legacy ids now render as flowers.
+            1 | 2 => ResourceNodeKind::Flower,
             3 => ResourceNodeKind::Flower,
+            8 => ResourceNodeKind::Grass,
             4 => ResourceNodeKind::RockMid,
             5 => ResourceNodeKind::RockMoss,
             6 => ResourceNodeKind::SunstoneCrystal,
@@ -517,8 +498,7 @@ mod tests {
 
         for kind in [
             ResourceNodeKind::BerryBush,
-            ResourceNodeKind::MushroomRed,
-            ResourceNodeKind::MushroomBrown,
+            ResourceNodeKind::Grass,
             ResourceNodeKind::Flower,
             ResourceNodeKind::RockMid,
             ResourceNodeKind::RockMoss,
@@ -547,8 +527,7 @@ mod tests {
 
         for kind in [
             ResourceNodeKind::BerryBush,
-            ResourceNodeKind::MushroomRed,
-            ResourceNodeKind::MushroomBrown,
+            ResourceNodeKind::Grass,
             ResourceNodeKind::Flower,
             ResourceNodeKind::RockMid,
             ResourceNodeKind::RockMoss,
@@ -557,6 +536,9 @@ mod tests {
         ] {
             assert_eq!(ResourceNodeKind::from_u8(kind.to_u8()), kind);
         }
+
+        assert_eq!(ResourceNodeKind::from_u8(1), ResourceNodeKind::Flower);
+        assert_eq!(ResourceNodeKind::from_u8(2), ResourceNodeKind::Flower);
     }
 
     #[test]

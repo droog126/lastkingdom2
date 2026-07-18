@@ -21,13 +21,12 @@
 | `creature.pig` | creature pig | 计划中 | `animals/pig.glb`<br>缩放：0.34, 0.34, 0.34<br>生物群系：Jungle；方块：- | resource.food × 1 | - |
 | `creature.sheep` | creature sheep | 计划中 | `animals/sheep.glb`<br>缩放：0.34, 0.34, 0.34<br>生物群系：Tundra；方块：- | resource.food × 1 | - |
 
-### 掉落物 (3)
+### 掉落物 (2)
 
 | Key | 名称 | 状态 | 外观 | 产出 | 堆叠上限 |
 | --- | --- | --- | --- | --- | ---: |
 | `drop.berry_fruit` | drop berry fruit | 生效中 | `procedural/eco/berry_fruit.glb`<br>缩放：0.52, 0.52, 0.52<br>生物群系：Jungle；方块：BerryThicket | resource.apple × 1 | - |
 | `drop.stone` | drop stone | 生效中 | `procedural/pretty/resource_stone.glb`<br>缩放：0.8, 0.8, 0.8<br>生物群系：-；方块：Stone | resource.stone × 1 | - |
-| `drop.wood` | drop wood | 生效中 | `procedural/pretty/resource_wood.glb`<br>缩放：0.8, 0.8, 0.8<br>生物群系：-；方块：Wood | resource.wood × 1 | - |
 
 ### 物品 (2)
 

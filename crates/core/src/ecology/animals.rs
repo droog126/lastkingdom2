@@ -22,6 +22,24 @@ pub enum CreatureKind {
 }
 
 impl CreatureKind {
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            CreatureKind::Pig => 0,
+            CreatureKind::Sheep => 1,
+            CreatureKind::Cow => 2,
+            CreatureKind::Chicken => 3,
+        }
+    }
+
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            1 => CreatureKind::Sheep,
+            2 => CreatureKind::Cow,
+            3 => CreatureKind::Chicken,
+            _ => CreatureKind::Pig,
+        }
+    }
+
     #[cfg(feature = "client-render")]
     pub fn color(self) -> Color {
         match self {
@@ -81,6 +99,10 @@ pub fn award_creature_drop(
 }
 
 pub const CREATURE_TRAINING_ATTACK_RANGE_SQ: f32 = 25.0;
+/// Delay before a server-spawned creature takes its first idle-wander step.
+/// Keep this below the normal 1.5..3.0 second retarget window so online
+/// creatures visibly enter the same lightweight wander loop as local ones.
+pub const CREATURE_INITIAL_WANDER_SECS: f32 = 2.0;
 
 pub fn creature_attack_distance_sq(
     player_block_pos: [i32; 3],
@@ -478,6 +500,18 @@ mod tests {
             creature_drop_kind(CreatureKind::Chicken),
             ResourceKind::Apple
         );
+    }
+
+    #[test]
+    fn creature_kind_wire_codes_round_trip() {
+        for kind in [
+            CreatureKind::Pig,
+            CreatureKind::Sheep,
+            CreatureKind::Cow,
+            CreatureKind::Chicken,
+        ] {
+            assert_eq!(CreatureKind::from_u8(kind.to_u8()), kind);
+        }
     }
 
     #[test]

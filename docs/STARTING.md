@@ -12,6 +12,18 @@
 just build
 ```
 
+## Three-view model optimization
+
+Render front, side, and top views for one GLB and create an AI-readable task bundle:
+
+```powershell
+just model-optimize animals/rabbit
+```
+
+The bundle is written under `screenshots/model_optimize/` and contains `front.png`,
+`side.png`, `top.png`, `task.json`, `task.md`, and the preview manifest. Use an
+assets-relative path when a model stem is ambiguous across collections.
+
 ## Content export
 
 ```powershell
@@ -59,11 +71,50 @@ WASD/方向键移动，鼠标左键或 Space 攻击，Esc 退出。
 `just play --online` 会构建并启动 `lk2-server`，然后连接 focused client 的 Lightyear 在线场景。
 当前在线场景已接入 Leafwing 输入、移动/跳跃、基础 gameplay 消息、基础 HUD 和生态计数表现；更完整的 HUD、生态表现和多玩家状态仍在迁移中。
 
+### Codex 客户端
+
+Codex 客户端是一个进入在线主场景的真实 Lightyear 客户端，不拥有权威状态；它使用同一套窗口、相机、地形、玩家视觉和 HUD，
+只把人的输入替换为本机 `codex exec` 返回的受限结构化行动，再通过现有 `GameplayCommand` 发给服务器。服务器仍负责校验。
+
+```powershell
+# 确定性本地回退客户端（先在另一个终端启动 just server）
+just ai-client --connect=127.0.0.1:5000 --seconds=60
+
+# 使用本机 Codex CLI 作为决策者
+just codex-client --connect=127.0.0.1:5000 --seconds=60
+
+# 同时启动服务器、画面客户端和 Codex 客户端，并生成闭环工件
+just loop
+
+# 显式 Codex 别名，等价于 just loop
+just loop-codex
+```
+
+To keep the latest loop image as a durable milestone, run:
+
+```powershell
+just milestone
+```
+
+This copies the latest `screenshots/iter_NN/iter_NN.png` to a timestamped file under the
+top-level `milestones/` directory. The archive is visible to Git and is preserved by
+`just clean-runs`; it does not rerun the loop, modify `screenshots/`, or archive the JSON evidence.
+
+During normal offline or online play, press `F12` to save the current game window directly as
+`milestones/milestone_<timestamp>_<sequence>.png`. This player shortcut does not run a loop and
+does not write under `screenshots/`.
+
+`loop`（或 `loop-codex`）会在当前 `screenshots/iter_NN/` 写入 `codex_client.json`；其中的连接、观察 tick、Codex 决策、行动和
+服务器反馈计数是 Codex 客户端是否真正入场的机器证据。`loop-ai` 和 `ai_client.json` 保留为确定性本地回退路径。
+
 ## 3. 闭环迭代
 
 原有 artifact schema 和历史迭代仍保留。focused client 现在能生成基础 auto-demo、
 `final_state.json`、`diff.json` 和 `iter_NN.png`；`health.json`、assertions、regression 和
 decision 模板仍由 `xtask` 生成。不要把旧迭代结果当作当前客户端的运行证据。
+
+自然世界观测还会在可用时记录 `event_count`、`region_tick`、`catch_up_remaining` 和
+`save_restored`；这些字段是可选的，缺失只表示生产者仍使用旧状态格式，不替代模拟成功、投影成功和存档成功的独立断言。
 
 阅读顺序：
 
@@ -99,6 +150,8 @@ just clippy
 
 | 文件 | 用途 |
 | --- | --- |
+| `codex_client.json` | Codex client connection, observation, decision, and server-feedback artifact |
+| `ai_client.json` | Deterministic fallback AI client artifact |
 | `iter_NN.png` | 主截图 |
 | `final_state.json` | 最终模拟状态 |
 | `diff.json` | 相对前一轮的关键状态差异 |

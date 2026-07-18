@@ -1,6 +1,6 @@
 {
   "version": 9,
-  "spec": "lk2-sokpop-toy-v1 canonical generated GLBs",
+  "spec": "lk2-sokpop-toy-v2 canonical generated GLBs",
   "format": "glb",
   "assets": {
     "pretty": [
@@ -20,6 +20,8 @@
       "granular_willow_tree",
       "granular_wildflowers",
       "granular_reed_bank",
+      "mushroom_red",
+      "mushroom_brown",
       "fallen_stick",
       "rock_dark",
       "rock_mid",
@@ -30,10 +32,10 @@
       "flower_3",
       "flower_4",
       "hill",
-      "poi_pillar_red",
       "poi_pillar_cyan",
       "poi_pillar_pink",
       "poi_pillar_gold",
+      "poi_pillar_red",
       "ground_disc_outer",
       "ground_disc_inner"
     ],
@@ -73,8 +75,6 @@
       "bench",
       "fountain",
       "statue",
-      "mushroom_red",
-      "mushroom_brown",
       "crystal_blue",
       "crystal_pink",
       "treasure_chest",

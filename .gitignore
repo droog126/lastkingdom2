@@ -4,6 +4,7 @@
 target-codex/
 target-codex-hanabi/
 target-codex-water/
+/target-freecam-test/
 
 
 
@@ -56,7 +57,9 @@ README copy.md
 
 # Screenshots generated during closed-loop iteration
 screenshots/
-!screenshots/_archive/
+
+# Local performance / closed-loop run artifacts
+/performance-audit-run-*/
 
 # Obsidian configurations
 docs/**/*.obsidian/

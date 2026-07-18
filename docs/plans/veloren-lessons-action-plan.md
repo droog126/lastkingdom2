@@ -218,3 +218,17 @@ A 基线
 3. 保持旧行为不变，将它们接入统一事件记录；
 4. 增加确定性测试和 server 投影测试；
 5. 评审结果后再决定是否扩展到迁徙、关系失效和存档迁移。
+
+## 10. 实施记录
+
+以下记录区分已有代码/测试证据与本批次新增、尚待包级验证的切片，不把尚未完成的阶段提前标为完成：
+
+- 阶段 A/B：`step_world`、`NatureEvent`、确定性快照和 server 四路投影已经形成统一入口；相关测试覆盖相同输入、tick 和投影来源唯一性。
+- 阶段 C：区域 `Active / Nearby / Distant`、显式 elapsed、有限 catch-up 和多请求取最高频率已有 core/server 聚焦测试。
+- 阶段 D（区域存档切片）：区域快照、资源池、LOD、恢复 tick 和 schema 已进入 DTO；本批次补充了 schema `0 -> 1` 的显式迁移、逐条坏记录跳过和主文件损坏时的备份回退测试，包级测试仍待工作树清理后验证。
+- 阶段 E：server 的 replication、observation、persistence 都从同一份 authority report 投影，projection-only 插件不会启动第二套自然模拟。
+- 阶段 F（xtask 证据切片）：自然观测支持可选的事件计数、区域 tick、catch-up 余量和存档恢复标记；server capture 已写入主区域证据，健康扩展会保留这些字段，并在字段存在时检查区域 tick 不超前、事件计数不小于观测事件数。
+- 阶段 G（revision/邻居边界切片）：客户端切换 chunk 或从 revision gap 等待全量快照后，会以新快照 revision 重置 delta cursor，避免旧 cursor 造成永久 pending；server fixture 验证 border snapshot 携带相邻 chunk 的修改，core fixture 验证卸载重入后编辑内容和 chunk-local revision 保持连续。
+- 阶段 H（网络容错第一切片，待包级验证）：新增可靠 `TerrainSnapshotRequest` 协议；客户端检测 revision gap 后按单 pending、冷却窗口和最多三次重试发送 resync 请求，耗尽窗口后进入有限退避而不是永久 pending，收到 full snapshot 后清除等待/退避并重置预算；server 按连接合并请求、施加 15 tick 冷却，并仅对受控玩家当前兴趣 chunk 强制重新投影完整 snapshot。新增 client budget、协议 round-trip 和 server budget 聚焦测试；尚未宣称包级编译通过。
+
+下一步是在并行构建资源释放后补跑 client/server 包级验证，并根据结果补充服务端无响应或连接断开时的可观测降级状态；在此之前不宣称自然世界已经具备完整的闭环健康证据。

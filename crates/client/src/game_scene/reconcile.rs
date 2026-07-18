@@ -6,22 +6,24 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 use lk2_core::ecology::{ResourceNodeKind, WildlifeKind};
+use lk2_core::pvp::{Health, Hitbox};
 
 use super::offline::OfflineNature;
 use super::state::{
-    BerryBush, PlantNode, Rabbit, RabbitAi, WildlifeAi, WildlifeAnimal, Wolf, WolfAi,
+    BerryBush, HitReaction, Inspectable, PlantNode, ProceduralTerrainSurface, Rabbit, RabbitAi,
+    WildlifeAi, WildlifeAnimal, Wolf, WolfAi,
 };
 use super::util::{
     BEAR_PATH, BERRY_PATH, CRYSTAL_BLUE_PATH, CRYSTAL_PINK_PATH, DEER_FAWN_PATH, DEER_PATH,
-    FLOWER_PATH, FOX_PATH, FOX_SILVER_PATH, MUSHROOM_BROWN_PATH, MUSHROOM_RED_PATH,
-    RABBIT_BROWN_PATH, RABBIT_PATH, ROCK_MID_PATH, ROCK_PATH, WOLF_PATH, spawn_asset,
-    wildlife_physics_components,
+    FLOWER_PATH, FOX_PATH, FOX_SILVER_PATH, GRASS_FOOD_PATH, RABBIT_BROWN_PATH, RABBIT_PATH,
+    ROCK_MID_PATH, ROCK_PATH, WOLF_PATH, spawn_asset, wildlife_physics_components,
 };
 
 pub fn reconcile_nature_entities(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     nature: Res<OfflineNature>,
+    terrain: Res<ProceduralTerrainSurface>,
     mut last_tick: Local<Option<u64>>,
     berries: Query<(Entity, &BerryBush)>,
     rabbits: Query<(Entity, &Rabbit)>,
@@ -61,7 +63,7 @@ pub fn reconcile_nature_entities(
             &mut commands,
             &asset_server,
             BERRY_PATH,
-            Vec3::new(berry.x, 0.0, berry.z),
+            grounded_nature_position(&terrain, berry.x, berry.z),
             0.0,
             index as f32 * 0.8,
             "grass_spawned_berry",
@@ -104,20 +106,25 @@ pub fn reconcile_nature_entities(
             &mut commands,
             &asset_server,
             rabbit_path,
-            Vec3::new(rabbit.x, 0.0, rabbit.z),
+            grounded_nature_position(&terrain, rabbit.x, rabbit.z),
             0.62,
             -0.6,
             "berry_spawned_rabbit",
         )
         .insert(wildlife_physics_components())
+        .insert(wildlife_combat_components(WildlifeKind::Rabbit))
         .insert((
             Rabbit {
                 id: rabbit.id,
                 phase: index as f32 * 1.17,
             },
             RabbitAi {
-                target: Vec3::new(rabbit.x, 0.0, rabbit.z),
+                target: grounded_nature_position(&terrain, rabbit.x, rabbit.z),
                 ..default()
+            },
+            Inspectable {
+                display_name: "兔子",
+                category: "野生动物",
             },
         ));
     }
@@ -157,20 +164,25 @@ pub fn reconcile_nature_entities(
             &mut commands,
             &asset_server,
             WOLF_PATH,
-            Vec3::new(wolf.x, 0.0, wolf.z),
+            grounded_nature_position(&terrain, wolf.x, wolf.z),
             0.62,
             0.4,
             "rabbit_hunting_wolf",
         )
         .insert(wildlife_physics_components())
+        .insert(wildlife_combat_components(WildlifeKind::Wolf))
         .insert((
             Wolf {
                 id: wolf.id,
                 phase: index as f32 * 1.91,
             },
             WolfAi {
-                target: Vec3::new(wolf.x, 0.0, wolf.z),
+                target: grounded_nature_position(&terrain, wolf.x, wolf.z),
                 ..default()
+            },
+            Inspectable {
+                display_name: "狼",
+                category: "野生动物",
             },
         ));
     }
@@ -210,18 +222,23 @@ pub fn reconcile_nature_entities(
             &mut commands,
             &asset_server,
             wildlife_path(kind, animal.id),
-            Vec3::new(animal.x, 0.0, animal.z),
+            grounded_nature_position(&terrain, animal.x, animal.z),
             0.62,
             0.0,
             "ecology_wildlife",
         )
         .insert(wildlife_physics_components())
+        .insert(wildlife_combat_components(kind))
         .insert((
             WildlifeAnimal { id: animal.id },
             WildlifeAi {
-                target: Vec3::new(animal.x, 0.0, animal.z),
+                target: grounded_nature_position(&terrain, animal.x, animal.z),
                 phase: animal.id as f32 * 1.41,
                 ..default()
+            },
+            Inspectable {
+                display_name: wildlife_display_name(kind),
+                category: "野生动物",
             },
         ));
     }
@@ -254,13 +271,50 @@ pub fn reconcile_nature_entities(
             &mut commands,
             &asset_server,
             plant_path(kind),
-            Vec3::new(plant.x, 0.0, plant.z),
+            grounded_nature_position(&terrain, plant.x, plant.z),
             0.58,
             plant.id as f32 * 0.43,
             "ecology_plant_node",
         )
-        .insert(PlantNode { id: plant.id });
+        .insert((
+            PlantNode { id: plant.id },
+            Inspectable {
+                display_name: plant_display_name(kind),
+                category: "资源",
+            },
+        ));
     }
+}
+
+fn wildlife_combat_components(kind: WildlifeKind) -> (Health, Hitbox, HitReaction) {
+    let (max_health, radius, center_y) = match kind {
+        WildlifeKind::Rabbit => (12.0, 0.32, 0.35),
+        WildlifeKind::Deer => (18.0, 0.52, 0.65),
+        WildlifeKind::Fox => (14.0, 0.38, 0.45),
+        WildlifeKind::Bear => (30.0, 0.68, 0.72),
+        WildlifeKind::Wolf => (20.0, 0.54, 0.56),
+    };
+    (
+        Health {
+            current: max_health,
+            max: max_health,
+            invuln_until_tick: 0,
+        },
+        Hitbox {
+            center_offset: Vec3::new(0.0, center_y, 0.0),
+            radius,
+        },
+        HitReaction::default(),
+    )
+}
+
+fn grounded_nature_position(terrain: &ProceduralTerrainSurface, x: f32, z: f32) -> Vec3 {
+    terrain
+        .grounded_land_position(Vec3::new(x, 0.0, z), 26, 0.04)
+        .unwrap_or_else(|| {
+            let position = Vec3::new(x, 0.0, z);
+            Vec3::new(x, terrain.ground_height(position) + 0.04, z)
+        })
 }
 
 fn wildlife_path(kind: WildlifeKind, id: u32) -> &'static str {
@@ -280,19 +334,40 @@ fn wildlife_path(kind: WildlifeKind, id: u32) -> &'static str {
             }
         }
         WildlifeKind::Bear => BEAR_PATH,
-        WildlifeKind::Wolf | WildlifeKind::Rabbit => WOLF_PATH,
+        WildlifeKind::Wolf => WOLF_PATH,
+        WildlifeKind::Rabbit => RABBIT_PATH,
     }
 }
 
 fn plant_path(kind: ResourceNodeKind) -> &'static str {
     match kind {
-        ResourceNodeKind::MushroomRed => MUSHROOM_RED_PATH,
-        ResourceNodeKind::MushroomBrown => MUSHROOM_BROWN_PATH,
+        ResourceNodeKind::Grass => GRASS_FOOD_PATH,
         ResourceNodeKind::Flower => FLOWER_PATH,
         ResourceNodeKind::RockMid => ROCK_MID_PATH,
         ResourceNodeKind::RockMoss => ROCK_PATH,
         ResourceNodeKind::SunstoneCrystal => CRYSTAL_PINK_PATH,
         ResourceNodeKind::FrostCrystal => CRYSTAL_BLUE_PATH,
         ResourceNodeKind::BerryBush => BERRY_PATH,
+    }
+}
+
+fn wildlife_display_name(kind: WildlifeKind) -> &'static str {
+    match kind {
+        WildlifeKind::Rabbit => "兔子",
+        WildlifeKind::Deer => "鹿",
+        WildlifeKind::Fox => "狐狸",
+        WildlifeKind::Bear => "熊",
+        WildlifeKind::Wolf => "狼",
+    }
+}
+
+fn plant_display_name(kind: ResourceNodeKind) -> &'static str {
+    match kind {
+        ResourceNodeKind::BerryBush => "浆果灌木",
+        ResourceNodeKind::Grass => "野草",
+        ResourceNodeKind::Flower => "花",
+        ResourceNodeKind::RockMid | ResourceNodeKind::RockMoss => "岩石",
+        ResourceNodeKind::SunstoneCrystal => "日耀水晶",
+        ResourceNodeKind::FrostCrystal => "霜蓝水晶",
     }
 }

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use avian3d::prelude::LinearVelocity;
+use avian3d::prelude::{GravityScale, LinearVelocity};
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -17,31 +17,36 @@ use super::content_visuals::{
     MONSTER_DECORATIVE_MARKER_SCALE, content_cell_position, grounded_content_position,
     is_monster_anchor, living_content_layout_from_args, parse_content_profile, parse_content_seed,
 };
-use super::creature_ai::{AiContext, AiMood, AiTarget, CreatureAiProfile, decide_creature_intent};
+use super::creature_ai::{
+    AiContext, AiMood, AiTarget, CreatureAiProfile, WOLF_ATTACK_SEPARATION, decide_creature_intent,
+    separated_target_position,
+};
 use super::inventory::InventoryUiState;
 use super::keybindings::{Binding, GameAction, KeyBindings};
 use super::offline::OfflineNature;
 use super::player::{
-    PlayerControlScheme, camera_look_input, pickup_legendary_weapon, player_combat_controls,
-    player_controls, update_cursor_capture,
+    PlayerControlScheme, PlayerControlSchemeConfig, camera_look_input, mine_surface_input,
+    pickup_legendary_weapon, player_combat_controls, player_controls, update_cursor_capture,
 };
 use super::procedural_motion::{
-    ProceduralTreeSway, alternating_step_lift, alternating_step_offset, heading_yaw, hop_height,
-    smooth_follow_alpha,
+    ProceduralAnimationConfig, ProceduralTreeSway, alternating_step_lift, alternating_step_offset,
+    heading_yaw, hop_height, smooth_follow_alpha,
 };
 use super::procedural_rig::{
     DragonRig, DragonTargets, HumanoidRig, HumanoidTargets, QuadrupedRig, QuadrupedTargets,
     TwoBoneLimb, TwoBoneLimbSpec, TwoBoneSolution, apply_segment_between,
 };
 use super::state::{
-    BossActor, Cloud, DragonKatanaPickup, GrassTuft, HitReaction, LivingCameraRig,
-    LivingSceneCamera, LivingSceneState, LivingSun, PlayerActor, PlayerIkPart, PlayerIkPartKind,
-    PlayerJump, PlayerMotion, PlayerSkillState, ProceduralTerrainSurface, Rabbit, RabbitAi,
-    RabbitMood, RainDrop, ReaperScythePickup, SceneMaterials, SlashFx, Wolf, WolfAi,
+    BossActor, Cloud, CreatureHitSettings, DragonKatanaPickup, GrassTuft, HitReaction,
+    LivingCameraRig, LivingSceneCamera, LivingSceneState, LivingSun, PlayerActor, PlayerIkPart,
+    PlayerIkPartKind, PlayerJump, PlayerMotion, PlayerSkillState, PlayerSwimState,
+    ProceduralTerrainSurface, Rabbit, RabbitAi, RabbitMood, RainDrop, ReaperScythePickup,
+    SceneMaterials, SlashFx, Wolf, WolfAi, PROCEDURAL_TERRAIN_WATER_CLEARANCE,
 };
 use super::util::hash01;
+use super::vehicle::CartRideState;
 use super::world_debug::{WorldDebugUiState, content_debug_text, toggle_world_debug_ui};
-use bevy_tnua::prelude::TnuaController;
+use bevy_tnua::prelude::{TnuaConfig, TnuaController};
 use lk2_core::constant;
 use lk2_core::legendary::{LegendaryLoadout, LegendaryWeapon};
 use lk2_core::pvp::{Health, PvpCombatant, SimpleWeapon};
@@ -133,6 +138,25 @@ fn content_layout_maps_volume_cells_to_scene_space() {
 }
 
 #[test]
+fn nature_visual_projection_moves_water_positions_to_land() {
+    let terrain = ProceduralTerrainSurface::default_world();
+    let water = (-40..=40)
+        .flat_map(|x| (-40..=40).map(move |z| Vec3::new(x as f32, 0.0, z as f32)))
+        .find(|position| terrain.is_water_local(*position))
+        .expect("default terrain should contain a water cell");
+    let land = terrain
+        .nearest_land_position(water, 26)
+        .expect("water near the playable island should project to land");
+
+    assert!(!terrain.is_water_local(land));
+    let grounded = terrain
+        .grounded_land_position(water, 26, 0.04)
+        .expect("water near the playable island should have a grounded projection");
+    assert!((grounded.y - (terrain.ground_height(land) + 0.04)).abs() < 0.001);
+    assert!(grounded.y > terrain.water_surface_height() + PROCEDURAL_TERRAIN_WATER_CLEARANCE);
+}
+
+#[test]
 fn content_visuals_follow_the_procedural_ground() {
     let terrain = ProceduralTerrainSurface::default_world();
     let raw = content_cell_position(LIVING_CONTENT_DIMENSIONS, [2, 1, 2]);
@@ -175,6 +199,67 @@ fn content_debug_text_shows_profile_grid_and_pillar_rule() {
     assert!(text.contains("地下 y=0"));
     assert!(text.contains("大型锚点 [1,1,1]"));
     assert!(text.contains("A "));
+}
+
+#[test]
+fn m_mining_updates_authority_and_requests_surface_rebuild() {
+    let mut app = App::new();
+    app.insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .insert_resource(InventoryUiState::default())
+        .init_resource::<OfflineNature>()
+        .insert_resource(ProceduralTerrainSurface::default_world())
+        .init_resource::<super::state::TerrainRebuildState>()
+        .init_resource::<super::state::TerrainUndergroundState>()
+        .add_systems(Update, mine_surface_input);
+    app.world_mut()
+        .spawn((PlayerActor, Transform::from_translation(Vec3::ZERO)));
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyM);
+
+    app.update();
+
+    let rebuild = app.world().resource::<super::state::TerrainRebuildState>();
+    assert!(rebuild.requested);
+    let target = rebuild.last_mined.expect("M should mine a solid column");
+    let nature = app.world().resource::<OfflineNature>();
+    assert_eq!(
+        nature
+            .terrain_world
+            .get(target[0], target[1], target[2]),
+        lk2_core::world::BlockType::Air
+    );
+    let terrain = app.world().resource::<ProceduralTerrainSurface>();
+    assert_eq!(terrain.deformations.len(), 1);
+    assert_eq!(
+        terrain.deformations[0].center,
+        Vec2::new(target[0] as f32, target[2] as f32)
+    );
+}
+
+#[test]
+fn repeated_mining_projects_only_the_incremental_surface_drop() {
+    let mut terrain = ProceduralTerrainSurface::default_world();
+    let (x, z, base_surface) = (0..96)
+        .flat_map(|z| (0..96).map(move |x| (x, z)))
+        .find_map(|(x, z)| {
+            let surface = terrain.pipeline.surface_f32(x, z)?;
+            (!terrain.is_water_at(x, z, surface)).then_some((x, z, surface))
+        })
+        .expect("default terrain should contain a solid column");
+
+    assert!(terrain.dig_at_world_column_to_surface(x, z, base_surface - 1.0, 1.8));
+    assert!(terrain.dig_at_world_column_to_surface(x, z, base_surface - 2.0, 1.8));
+
+    assert_eq!(terrain.deformations.len(), 2);
+    assert!((terrain.deformations[0].depth - 1.0).abs() < 1e-5);
+    assert!((terrain.deformations[1].depth - 1.0).abs() < 1e-5);
+    assert_eq!(
+        terrain.ground_height_at_world(x, z),
+        terrain.render_height(base_surface - 2.0)
+    );
 }
 
 #[test]
@@ -297,13 +382,25 @@ fn procedural_motion_helpers_keep_expected_bounds() {
 }
 
 #[test]
+fn crouch_reduces_the_player_physics_height() {
+    let standing = super::util::player_physics_half_height(0.0);
+    let crouched = super::util::player_physics_half_height(1.0);
+
+    assert!((standing - super::util::PLAYER_PHYSICS_CENTER_HEIGHT).abs() < 0.001);
+    assert!(crouched < standing - 0.20);
+}
+
+#[test]
 fn alternating_quadruped_step_is_continuous_at_cycle_boundary() {
     let stride = 0.4;
     let before = alternating_step_offset(std::f32::consts::TAU - 0.0001, stride, false);
     let after = alternating_step_offset(0.0001, stride, false);
     assert!((before - after).abs() < 0.001);
     assert_eq!(alternating_step_lift(0.0, 0.2, false), 0.0);
-    assert_eq!(alternating_step_lift(std::f32::consts::TAU, 0.2, false), 0.0);
+    assert_eq!(
+        alternating_step_lift(std::f32::consts::TAU, 0.2, false),
+        0.0
+    );
 }
 
 #[test]
@@ -367,8 +464,10 @@ fn player_embedded_below_terrain_is_lifted_to_surface() {
 #[test]
 fn player_ik_update_runs_without_query_conflicts() {
     let mut app = App::new();
-    app.insert_resource(test_scene_state())
+    app.init_resource::<Time>()
+        .insert_resource(test_scene_state())
         .insert_resource(LivingCameraRig::default())
+        .init_resource::<CartRideState>()
         .insert_resource(ProceduralTerrainSurface::default_world())
         .add_systems(Update, super::player::update_player_ik);
     app.world_mut().spawn((
@@ -441,20 +540,27 @@ fn space_feeds_tnua_without_attacking_and_left_click_attacks() {
         .insert_resource(super::state::SceneMaterials {
             ground: Handle::default(),
             hit_effect: Handle::default(),
+            enemy_hit_effect: Handle::default(),
         })
         .insert_resource(ProceduralTerrainSurface::default_world())
         .insert_resource(LivingCameraRig::default())
         .insert_resource(InventoryUiState::default())
         .insert_resource(KeyBindings::default())
+        .init_resource::<CartRideState>()
+        .init_resource::<Assets<PlayerControlSchemeConfig>>()
         .insert_resource(ButtonInput::<MouseButton>::default())
         .add_systems(Update, (player_controls, player_combat_controls).chain());
     app.world_mut().spawn((
         PlayerActor,
         PlayerJump::default(),
         PlayerMotion::default(),
+        PlayerSwimState::default(),
         PvpCombatant::default(),
         SimpleWeapon::default(),
+        GravityScale(1.0),
+        LinearVelocity(Vec3::ZERO),
         TnuaController::<PlayerControlScheme>::default(),
+        TnuaConfig::<PlayerControlScheme>(Handle::default()),
         Transform::default(),
     ));
 
@@ -495,6 +601,7 @@ fn successful_melee_hit_triggers_player_and_target_feedback() {
         .insert_resource(SceneMaterials {
             ground: Handle::default(),
             hit_effect: Handle::default(),
+            enemy_hit_effect: Handle::default(),
         })
         .insert_resource(ProceduralTerrainSurface::default_world())
         .insert_resource(InventoryUiState::default())
@@ -532,6 +639,10 @@ fn successful_melee_hit_triggers_player_and_target_feedback() {
         .single(app.world())
         .expect("boss should remain spawned");
     assert!(health.current < health.max);
+    assert_eq!(
+        health.invuln_until_tick,
+        CreatureHitSettings::default().invulnerability_ticks
+    );
     let reaction = app
         .world_mut()
         .query_filtered::<&HitReaction, With<BossActor>>()
@@ -547,6 +658,52 @@ fn successful_melee_hit_triggers_player_and_target_feedback() {
             .count()
     };
     assert_eq!(impact_count, 1);
+}
+
+#[test]
+fn successful_melee_hit_damages_rabbit() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(test_scene_state())
+        .insert_resource(SceneMaterials {
+            ground: Handle::default(),
+            hit_effect: Handle::default(),
+            enemy_hit_effect: Handle::default(),
+        })
+        .insert_resource(ProceduralTerrainSurface::default_world())
+        .insert_resource(InventoryUiState::default())
+        .insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .add_systems(Update, player_combat_controls);
+    app.world_mut().spawn((
+        PlayerActor,
+        PvpCombatant::default(),
+        SimpleWeapon::default(),
+        Transform::default(),
+    ));
+    app.world_mut().spawn((
+        Rabbit { id: 1, phase: 0.0 },
+        HitReaction::default(),
+        Health {
+            current: 12.0,
+            max: 12.0,
+            invuln_until_tick: 0,
+        },
+        Transform::from_xyz(0.0, 0.0, 2.0),
+    ));
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+    app.update();
+
+    let health = app
+        .world_mut()
+        .query_filtered::<&Health, With<Rabbit>>()
+        .single(app.world())
+        .expect("rabbit should remain spawned after a non-lethal hit");
+    assert!(health.current < health.max);
 }
 
 #[test]
@@ -572,6 +729,7 @@ fn dragon_skill_blinks_to_camera_aim_and_slashes_at_destination() {
         .insert_resource(SceneMaterials {
             ground: Handle::default(),
             hit_effect: Handle::default(),
+            enemy_hit_effect: Handle::default(),
         })
         .insert_resource(terrain)
         .insert_resource(InventoryUiState::default())
@@ -635,6 +793,7 @@ fn reaper_skill_drains_boss_and_heals_player() {
         .insert_resource(SceneMaterials {
             ground: Handle::default(),
             hit_effect: Handle::default(),
+            enemy_hit_effect: Handle::default(),
         })
         .insert_resource(ProceduralTerrainSurface::default_world())
         .insert_resource(InventoryUiState::default())
@@ -769,6 +928,80 @@ fn c_toggles_camera_mode() {
 }
 
 #[test]
+fn v_toggles_free_camera_and_restores_previous_mode() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(LivingCameraRig::default())
+        .insert_resource(InventoryUiState::default())
+        .insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .add_message::<MouseMotion>()
+        .add_systems(Update, camera_look_input);
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyV);
+    app.update();
+    assert_eq!(
+        app.world().resource::<LivingCameraRig>().mode,
+        super::state::CameraMode::FreeCam
+    );
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .release(KeyCode::KeyV);
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .clear();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyV);
+    app.update();
+    assert_eq!(
+        app.world().resource::<LivingCameraRig>().mode,
+        super::state::CameraMode::FirstPerson
+    );
+}
+
+#[test]
+fn z_toggles_god_view_and_restores_previous_mode() {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .insert_resource(LivingCameraRig::default())
+        .insert_resource(InventoryUiState::default())
+        .insert_resource(KeyBindings::default())
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(ButtonInput::<MouseButton>::default())
+        .add_message::<MouseMotion>()
+        .add_systems(Update, camera_look_input);
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyZ);
+    app.update();
+    assert_eq!(
+        app.world().resource::<LivingCameraRig>().mode,
+        super::state::CameraMode::GodView
+    );
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .release(KeyCode::KeyZ);
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .clear();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyZ);
+    app.update();
+    assert_eq!(
+        app.world().resource::<LivingCameraRig>().mode,
+        super::state::CameraMode::FirstPerson
+    );
+}
+
+#[test]
 fn third_person_camera_pitch_changes_orbit_height() {
     let target = Vec3::new(2.0, 1.0, -3.0);
     let looking_down = super::player::third_person_camera_position(target, 0.4, -0.9);
@@ -877,6 +1110,21 @@ fn humanoid_rig_solves_all_player_avatar_limbs() {
         assert!((solution.joint.distance(solution.root) - spec.upper_len).abs() < 0.001);
         assert!((solution.joint.distance(solution.target) - spec.lower_len).abs() < 0.001);
     }
+}
+
+#[test]
+fn two_bone_limb_clamps_unreachable_target_for_visual_segment() {
+    let rig = HumanoidRig::player_avatar();
+    let limb = rig.left_leg;
+    let target = limb.root + Vec3::new(0.0, -0.12, 1.20);
+    let solution = limb
+        .with_target(target, Vec3::new(-0.27, 0.25, 0.30))
+        .solve();
+    let max_reach = limb.upper_len + limb.lower_len;
+
+    assert!(solution.target.distance(solution.root) <= max_reach);
+    assert!((solution.joint.distance(solution.root) - limb.upper_len).abs() < 0.001);
+    assert!((solution.target.distance(solution.joint) - limb.lower_len).abs() < 0.001);
 }
 
 #[test]
@@ -1024,6 +1272,43 @@ fn humanoid_idle_ik_keeps_a_readable_upright_silhouette() {
     assert!(solved.right_arm.joint.x > solved.right_arm.root.x);
 }
 
+#[test]
+fn humanoid_swim_pose_feeds_alternating_targets_into_ik() {
+    let motion = PlayerMotion {
+        planar_velocity: Vec3::new(0.0, 0.0, 3.8),
+        smoothed_speed: 3.8,
+        grounded: false,
+        ..default()
+    };
+    let pose = super::player::procedural_player_pose_with_swim(
+        std::f32::consts::FRAC_PI_2 / 5.2,
+        0.0,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+        true,
+        &ProceduralAnimationConfig::default(),
+    );
+    let solved = HumanoidRig::player_avatar().solve(HumanoidTargets {
+        left_hand: pose.left_hand,
+        right_hand: pose.right_hand,
+        left_foot: pose.left_foot,
+        right_foot: pose.right_foot,
+        left_elbow_pole: pose.left_elbow_pole,
+        right_elbow_pole: pose.right_elbow_pole,
+        left_knee_pole: pose.left_knee_pole,
+        right_knee_pole: pose.right_knee_pole,
+    });
+
+    assert!(pose.left_hand.y > pose.right_hand.y);
+    assert!(pose.left_foot.y < HumanoidRig::player_avatar().left_leg.root.y);
+    assert_limb_matches_spec(HumanoidRig::player_avatar().left_arm, solved.left_arm);
+    assert_limb_matches_spec(HumanoidRig::player_avatar().right_arm, solved.right_arm);
+    assert_limb_matches_spec(HumanoidRig::player_avatar().left_leg, solved.left_leg);
+    assert_limb_matches_spec(HumanoidRig::player_avatar().right_leg, solved.right_leg);
+}
+
 fn assert_limb_matches_spec(spec: TwoBoneLimbSpec, solution: TwoBoneSolution) {
     assert_eq!(solution.root, spec.root);
     assert!((solution.joint.distance(solution.root) - spec.upper_len).abs() < 0.001);
@@ -1124,6 +1409,27 @@ fn procedural_pose_walks_feet_in_opposition() {
 }
 
 #[test]
+fn procedural_pose_sprint_increases_gait_and_stride() {
+    let motion = PlayerMotion {
+        smoothed_speed: super::util::PLAYER_SPEED * 1.65,
+        stride_phase: std::f32::consts::FRAC_PI_2,
+        grounded: true,
+        ..default()
+    };
+    let pose = super::player::procedural_player_pose(
+        1.0,
+        0.0,
+        &motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+    );
+
+    assert!((pose.gait - 1.35).abs() < 0.001);
+    assert!(pose.left_foot.z - pose.right_foot.z > 0.70);
+}
+
+#[test]
 fn procedural_pose_lifts_swing_foot_during_step() {
     let motion = PlayerMotion {
         smoothed_speed: super::util::PLAYER_SPEED,
@@ -1143,6 +1449,43 @@ fn procedural_pose_lifts_swing_foot_during_step() {
     assert!(pose.left_foot.y > pose.right_foot.y + 0.16);
     assert!((pose.left_foot.z - pose.right_foot.z).abs() < 0.02);
     assert!(pose.left_knee_pole.y > pose.right_knee_pole.y);
+}
+
+#[test]
+fn procedural_pose_crouch_lowers_upper_body_and_advances_knees() {
+    let upright_motion = PlayerMotion {
+        grounded: true,
+        ..default()
+    };
+    let crouched_motion = PlayerMotion {
+        grounded: true,
+        crouch_amount: 1.0,
+        ..default()
+    };
+    let config = ProceduralAnimationConfig::default();
+    let upright = super::player::procedural_player_pose_with_config(
+        0.0,
+        0.0,
+        &upright_motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+        &config,
+    );
+    let crouched = super::player::procedural_player_pose_with_config(
+        0.0,
+        0.0,
+        &crouched_motion,
+        &PlayerJump::default(),
+        false,
+        0.0,
+        &config,
+    );
+
+    assert_eq!(crouched.crouch, 1.0);
+    assert!(crouched.left_hand.y < upright.left_hand.y);
+    assert!(crouched.left_knee_pole.y < upright.left_knee_pole.y);
+    assert!(crouched.left_knee_pole.z > upright.left_knee_pole.z);
 }
 
 #[test]
@@ -1346,6 +1689,42 @@ fn shared_ai_dragon_attacks_prey_inside_attack_range() {
 
     assert_eq!(intent.mood, AiMood::Attack);
     assert_eq!(intent.target, prey[0].position);
+}
+
+#[test]
+fn shared_ai_wolf_enters_attack_before_body_contact() {
+    let prey = [AiTarget {
+        position: Vec3::new(1.0, 0.0, 0.0),
+        value: 1.0,
+    }];
+    let intent = decide_creature_intent(
+        CreatureAiProfile::wolf(),
+        AiContext {
+            self_pos: Vec3::ZERO,
+            threat: None,
+            food: &[],
+            prey: &prey,
+        },
+    );
+
+    assert_eq!(intent.mood, AiMood::Attack);
+}
+
+#[test]
+fn wolf_attack_target_preserves_visual_separation_when_overlapping() {
+    let self_pos = Vec3::new(0.25, 0.0, 0.0);
+    let target = separated_target_position(self_pos, Vec3::ZERO, WOLF_ATTACK_SEPARATION);
+
+    assert!((target.distance(Vec3::ZERO) - WOLF_ATTACK_SEPARATION).abs() < 0.001);
+    assert!(target.x > self_pos.x);
+}
+
+#[test]
+fn wolf_attack_target_is_deterministic_when_centers_match() {
+    let target = separated_target_position(Vec3::ZERO, Vec3::ZERO, WOLF_ATTACK_SEPARATION);
+
+    assert!((target.distance(Vec3::ZERO) - WOLF_ATTACK_SEPARATION).abs() < 0.001);
+    assert_eq!(target.z, 0.0);
 }
 
 #[test]

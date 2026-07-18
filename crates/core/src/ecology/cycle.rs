@@ -33,6 +33,7 @@ const WILDLIFE_SPEED_CELLS_PER_TICK: f32 = 0.9;
 const WILDLIFE_EAT_DISTANCE: f32 = 0.9;
 const WILDLIFE_ENERGY_DRAIN_PER_TICK: f32 = 0.08;
 const WILDLIFE_ENERGY_FROM_FOOD: f32 = 2.5;
+const CO2_PER_FOOD_EATEN: f32 = 0.12;
 const RAIN_PER_EDIBLE_PLANT_REGROWTH: f32 = 0.5;
 const WILDLIFE_TICK_SKIP: u64 = 3;
 const PLANT_TICK_SKIP: u64 = 3;
@@ -101,6 +102,7 @@ pub struct EcoTickReport {
     pub rabbits_born: u32,
     pub wildlife_born: u32,
     pub fruit_eaten: u32,
+    pub plants_eaten: u32,
     pub fruit_grown: u32,
     pub food_produced: i64,
     pub apples_reserved: i64,
@@ -214,6 +216,7 @@ mod smoke_tests {
         assert_eq!(r.rabbits_born, 0);
         assert_eq!(r.wildlife_born, 0);
         assert_eq!(r.fruit_eaten, 0);
+        assert_eq!(r.plants_eaten, 0);
         assert_eq!(r.fruit_grown, 0);
         assert_eq!(r.food_produced, 0);
         assert_eq!(r.apples_reserved, 0);
@@ -227,6 +230,7 @@ mod smoke_tests {
             rabbits_born: 2,
             wildlife_born: 1,
             fruit_eaten: 3,
+            plants_eaten: 4,
             fruit_grown: 5,
             food_produced: 20,
             apples_reserved: 15,
@@ -236,6 +240,7 @@ mod smoke_tests {
         assert_eq!(r.rabbits_born, 2);
         assert_eq!(r.wildlife_born, 1);
         assert_eq!(r.fruit_eaten, 3);
+        assert_eq!(r.plants_eaten, 4);
         assert_eq!(r.fruit_grown, 5);
         assert_eq!(r.food_produced, 20);
         assert_eq!(r.apples_reserved, 15);
@@ -308,8 +313,7 @@ impl EcoCycle {
             .collect();
 
         let plant_kinds = [
-            ResourceNodeKind::MushroomRed,
-            ResourceNodeKind::MushroomBrown,
+            ResourceNodeKind::Grass,
             ResourceNodeKind::Flower,
             ResourceNodeKind::RockMid,
             ResourceNodeKind::RockMoss,
@@ -422,6 +426,7 @@ impl EcoCycle {
                 self.fruit_eaten += 1;
                 report.fruit_eaten += 1;
                 report.food_produced += 1;
+                self.co2 += CO2_PER_FOOD_EATEN;
             }
         }
 
@@ -665,13 +670,7 @@ impl EcoCycle {
             && self.rain + f32::EPSILON >= RAIN_PER_PLANT
         {
             let id = next_id_for(self.plants.iter().map(|plant| plant.id));
-            let kind = if id % 3 == 0 {
-                ResourceNodeKind::Flower
-            } else if id % 2 == 0 {
-                ResourceNodeKind::MushroomBrown
-            } else {
-                ResourceNodeKind::MushroomRed
-            };
+            let kind = ResourceNodeKind::Grass;
             let origin = self.cloud_anchor();
             self.plants.push(EcoPlantNode {
                 id,
@@ -807,6 +806,7 @@ impl EcoCycle {
                         + WILDLIFE_ENERGY_FROM_FOOD)
                         .min(12.0);
                     report.food_produced += 1;
+                    self.co2 += CO2_PER_FOOD_EATEN;
                 }
                 continue;
             }
@@ -854,10 +854,12 @@ impl EcoCycle {
                 report.fruit_eaten += 1;
             } else {
                 self.plants[target_index].stock -= 1;
+                report.plants_eaten += 1;
             }
             self.wildlife[wildlife_index].energy =
                 (self.wildlife[wildlife_index].energy + WILDLIFE_ENERGY_FROM_FOOD).min(12.0);
             report.food_produced += 1;
+            self.co2 += CO2_PER_FOOD_EATEN;
         }
     }
 
@@ -875,10 +877,7 @@ impl EcoCycle {
 }
 
 fn is_edible_wildlife_plant(kind: ResourceNodeKind) -> bool {
-    matches!(
-        kind,
-        ResourceNodeKind::MushroomRed | ResourceNodeKind::MushroomBrown | ResourceNodeKind::Flower
-    )
+    matches!(kind, ResourceNodeKind::Grass | ResourceNodeKind::Flower)
 }
 
 fn nearest_indexed_target(from: Vec2, targets: &[(usize, Vec2)]) -> Option<(usize, Vec2)> {
@@ -924,7 +923,7 @@ mod tests {
         assert_eq!(eco.berry_count(), BERRY_BUSH_CAP);
         assert_eq!(eco.total_fruit(), BERRY_BUSH_CAP as u32);
         assert!(eco.wildlife_count() >= 4);
-        assert!(eco.plant_count() >= 7);
+        assert!(eco.plant_count() >= 6);
     }
 
     #[test]
@@ -1007,7 +1006,7 @@ mod tests {
                 },
                 EcoPlantNode {
                     id: 1,
-                    kind: ResourceNodeKind::MushroomRed,
+                    kind: ResourceNodeKind::Flower,
                     pos: Vec2::X,
                     stock: 1,
                 },
@@ -1029,6 +1028,34 @@ mod tests {
     }
 
     #[test]
+    fn rain_growth_uses_flower_for_the_first_generated_decorative_plant() {
+        let mut eco = EcoCycle {
+            clouds: Vec::new(),
+            rabbits: Vec::new(),
+            berries: Vec::new(),
+            wildlife: Vec::new(),
+            plants: vec![EcoPlantNode {
+                id: 0,
+                kind: ResourceNodeKind::Flower,
+                pos: Vec2::ZERO,
+                stock: 1,
+            }],
+            co2: 0.0,
+            rain: RAIN_PER_PLANT,
+            rainfall: 0.0,
+            fruit_eaten: 0,
+            fruit_grown: 0,
+            plants_grown: 0,
+            rabbits_born: 0,
+            wildlife_born: 0,
+        };
+
+        eco.tick(&mut GlobalResourcePool::new());
+
+        assert_eq!(eco.plants[1].kind, ResourceNodeKind::Grass);
+    }
+
+    #[test]
     fn demo_visible_ecology_includes_animals_and_plants() {
         let eco = EcoCycle::default();
         let kinds = eco.visible_ecology_kinds();
@@ -1040,8 +1067,7 @@ mod tests {
             EcologyKind::Wildlife(WildlifeKind::Bear),
             EcologyKind::Wildlife(WildlifeKind::Wolf),
             EcologyKind::ResourceNode(ResourceNodeKind::BerryBush),
-            EcologyKind::ResourceNode(ResourceNodeKind::MushroomRed),
-            EcologyKind::ResourceNode(ResourceNodeKind::MushroomBrown),
+            EcologyKind::ResourceNode(ResourceNodeKind::Grass),
             EcologyKind::ResourceNode(ResourceNodeKind::Flower),
             EcologyKind::ResourceNode(ResourceNodeKind::RockMid),
             EcologyKind::ResourceNode(ResourceNodeKind::RockMoss),
@@ -1186,7 +1212,7 @@ mod tests {
             }],
             plants: vec![EcoPlantNode {
                 id: 0,
-                kind: ResourceNodeKind::MushroomRed,
+                kind: ResourceNodeKind::Grass,
                 pos: Vec2::new(0.5, 0.0),
                 stock: 1,
             }],
@@ -1254,7 +1280,7 @@ mod tests {
             wildlife: Vec::new(),
             plants: vec![EcoPlantNode {
                 id: 0,
-                kind: ResourceNodeKind::Flower,
+                kind: ResourceNodeKind::Grass,
                 pos: Vec2::ZERO,
                 stock: 0,
             }],
@@ -1407,7 +1433,7 @@ mod tests {
         assert_eq!(eco.rabbit_count(), RABBIT_CAP);
         assert_eq!(eco.berry_count(), BERRY_BUSH_CAP);
         assert_eq!(eco.wildlife_count(), WILDLIFE_CAP.min(5));
-        assert_eq!(eco.plant_count(), PLANT_NODE_CAP.min(8));
+        assert_eq!(eco.plant_count(), PLANT_NODE_CAP.min(7));
     }
 
     #[test]

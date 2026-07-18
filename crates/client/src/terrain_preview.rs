@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use bevy::camera::Exposure;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::pbr::{AtmosphereSettings, ScreenSpaceReflections};
-use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::render::{
@@ -20,6 +19,8 @@ use bevy::render::{
 use bevy::text::LetterSpacing;
 use bevy::window::{PresentMode, WindowResolution};
 use bevy_world_serialization::WorldAsset;
+
+use crate::crisp_image_plugin;
 
 pub const TERRAIN_PREVIEW_OUTPUT_DIR: &str = "screenshots/terrain_preview";
 
@@ -59,6 +60,7 @@ pub fn run_terrain_preview() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .set(crisp_image_plugin())
             .set(RenderPlugin {
                 render_creation: WgpuSettings {
                     backends: Some(Backends::VULKAN),
@@ -383,8 +385,9 @@ fn setup_camera(mut commands: Commands) {
         AtmosphereSettings::default(),
         Exposure { ev100: 12.6 },
         Tonemapping::AcesFitted,
-        Bloom::NATURAL,
-        Msaa::Off,
+        // Keep the terrain edge and small prop silhouettes crisp in the
+        // standalone preview as well.
+        Msaa::Sample4,
         ScreenSpaceReflections {
             min_perceptual_roughness: 0.0..0.0,
             ..default()

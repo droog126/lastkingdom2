@@ -30,13 +30,49 @@ pub struct WorldInput {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NatureEvent {
-    RainFell { amount: f32 },
-    PlantsGrown { count: u32 },
-    AnimalsBorn { rabbits: u32, wildlife: u32 },
-    FruitChanged { eaten: u32, grown: u32 },
+    RainFell {
+        #[serde(default)]
+        tick: SimulationTick,
+        amount: f32,
+    },
+    PlantsGrown {
+        #[serde(default)]
+        tick: SimulationTick,
+        count: u32,
+    },
+    AnimalsBorn {
+        #[serde(default)]
+        tick: SimulationTick,
+        rabbits: u32,
+        wildlife: u32,
+    },
+    FruitChanged {
+        #[serde(default)]
+        tick: SimulationTick,
+        eaten: u32,
+        grown: u32,
+    },
+    WildlifeForaged {
+        #[serde(default)]
+        tick: SimulationTick,
+        plants: u32,
+        fruit: u32,
+        food: u32,
+    },
 }
 
 impl NatureEvent {
+    #[must_use]
+    pub const fn tick(&self) -> SimulationTick {
+        match self {
+            Self::RainFell { tick, .. }
+            | Self::PlantsGrown { tick, .. }
+            | Self::AnimalsBorn { tick, .. }
+            | Self::FruitChanged { tick, .. }
+            | Self::WildlifeForaged { tick, .. } => *tick,
+        }
+    }
+
     /// Current ecology events are aggregate/global facts and therefore remain
     /// visible in every regional projection. Spatial events can later return
     /// `None` here without changing the replication API.
@@ -184,12 +220,16 @@ pub fn step_world_elapsed(
         .saturating_sub(u64::from(step_count.saturating_sub(1)));
     for offset in 0..step_count {
         let tick_report = ecology.tick_at(first_tick + u64::from(offset), resources);
-        events.extend(events_from_report(tick_report));
+        events.extend(events_from_report(
+            first_tick + u64::from(offset),
+            tick_report,
+        ));
         report.rain_fell += tick_report.rain_fell;
         report.plants_grown += tick_report.plants_grown;
         report.rabbits_born += tick_report.rabbits_born;
         report.wildlife_born += tick_report.wildlife_born;
         report.fruit_eaten += tick_report.fruit_eaten;
+        report.plants_eaten += tick_report.plants_eaten;
         report.fruit_grown += tick_report.fruit_grown;
         report.food_produced += tick_report.food_produced;
         report.apples_reserved += tick_report.apples_reserved;
@@ -202,28 +242,40 @@ pub fn step_world_elapsed(
     }
 }
 
-fn events_from_report(report: EcoTickReport) -> Vec<NatureEvent> {
+fn events_from_report(tick: SimulationTick, report: EcoTickReport) -> Vec<NatureEvent> {
     let mut events = Vec::with_capacity(4);
     if report.rain_fell > 0.0 {
         events.push(NatureEvent::RainFell {
+            tick,
             amount: report.rain_fell,
         });
     }
     if report.plants_grown > 0 {
         events.push(NatureEvent::PlantsGrown {
+            tick,
             count: report.plants_grown,
         });
     }
     if report.rabbits_born > 0 || report.wildlife_born > 0 {
         events.push(NatureEvent::AnimalsBorn {
+            tick,
             rabbits: report.rabbits_born,
             wildlife: report.wildlife_born,
         });
     }
     if report.fruit_eaten > 0 || report.fruit_grown > 0 {
         events.push(NatureEvent::FruitChanged {
+            tick,
             eaten: report.fruit_eaten,
             grown: report.fruit_grown,
+        });
+    }
+    if report.plants_eaten > 0 {
+        events.push(NatureEvent::WildlifeForaged {
+            tick,
+            plants: report.plants_eaten,
+            fruit: report.fruit_eaten,
+            food: report.food_produced as u32,
         });
     }
     events

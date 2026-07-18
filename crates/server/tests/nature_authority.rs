@@ -13,8 +13,8 @@ mod replication;
 
 use app::{NatureServerPlugin, NatureServerProjectionPlugin};
 use authority::{
-    LatestNatureReport, NatureAuthority, NatureAuthorityFault, NatureAuthorityPlugin,
-    RegionalNatureAuthority,
+    LatestNatureRegionReports, LatestNatureReport, NatureAuthority, NatureAuthorityFault,
+    NatureAuthorityPlugin, RegionalNatureAuthority, report_snapshot_for_region,
 };
 use bevy::prelude::*;
 use lk2_core::ecology::EcoCycle;
@@ -24,6 +24,31 @@ use lk2_core::simulation::{
     cadence::RegionLod,
     regions::{NatureRegionId, NatureRegionState},
 };
+
+#[test]
+fn network_snapshot_selection_reads_the_latest_region_report() {
+    let primary_id = NatureRegionId { x: 0, z: 0 };
+    let nearby_id = NatureRegionId { x: 1, z: 0 };
+    let mut authority = NatureAuthority::default();
+    let primary_report = authority.advance(WorldInput { tick: 1 }).unwrap();
+    let nearby_report = authority.advance(WorldInput { tick: 2 }).unwrap();
+    let mut reports = LatestNatureRegionReports::default();
+    reports.0.insert(primary_id, primary_report);
+    reports.0.insert(nearby_id, nearby_report);
+
+    assert_eq!(
+        report_snapshot_for_region(&reports, primary_id, nearby_id)
+            .expect("region report should be selected")
+            .tick,
+        2
+    );
+    assert_eq!(
+        report_snapshot_for_region(&reports, primary_id, NatureRegionId { x: 9, z: 9 })
+            .expect("primary report should be the fallback")
+            .tick,
+        1
+    );
+}
 
 #[test]
 fn concrete_authority_calls_shared_step_and_rejects_duplicate_tick() {

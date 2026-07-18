@@ -1,7 +1,6 @@
 id,key,display_name,category,status,description,source,model_path,scale,preferred_biome,source_block,produced_resources,stack_limit
 1978454099,drop.berry_fruit,drop berry fruit,drop,active,Registered ecology content: drop.berry_fruit,"{""Ecology"":{""ResourceDrop"":""BerryFruit""}}",procedural/eco/berry_fruit.glb,"0.52,0.52,0.52",Jungle,BerryThicket,273424627:resource.apple:1,
 3011426699,drop.stone,drop stone,drop,active,Registered ecology content: drop.stone,"{""Ecology"":{""ResourceDrop"":""Stone""}}",procedural/pretty/resource_stone.glb,"0.8,0.8,0.8",,Stone,1647199502:resource.stone:1,
-2739635055,drop.wood,drop wood,drop,active,Registered ecology content: drop.wood,"{""Ecology"":{""ResourceDrop"":""Wood""}}",procedural/pretty/resource_wood.glb,"0.8,0.8,0.8",,Wood,252128356:resource.wood:1,
 2309316802,item.dragon_katana,龙武士刀,item,active,Legendary equipment: item.dragon_katana,"{""Item"":""DragonKatana""}",procedural/pretty/hoplite_dragon_katana.glb,"1,1,1",,,,1
 88675769,plant.fallen_stick,plant fallen stick,plant,active,Registered ecology content: plant.fallen_stick,"{""Ecology"":{""Tree"":""FallenStick""}}",procedural/pretty/fallen_stick.glb,"0.62,0.62,0.62",,Wood,252128356:resource.wood:1,
 1750526820,plant.palm,plant palm,plant,active,Registered ecology content: plant.palm,"{""Ecology"":{""Tree"":""Palm""}}",procedural/pretty/palm.glb,"1,1,1",Desert,Wood,252128356:resource.wood:1,

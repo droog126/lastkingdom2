@@ -232,9 +232,10 @@ pub struct World {
     pub content: Option<std::sync::Arc<content::MaterializedContent>>,
 }
 
-pub mod content;
 pub mod chunk;
+pub mod content;
 pub mod generation;
+pub mod region;
 pub mod terrain;
 pub mod voxel_mesh;
 
@@ -264,8 +265,13 @@ impl Default for WorldConfig {
 }
 
 pub fn generate_world(config: &WorldConfig) -> World {
-    let mut pipeline = terrain::presets::by_name(&config.preset);
-    pipeline.seed = config.seed;
+    let pipeline = if config.preset == "default" {
+        terrain::presets::default_preset_with_seed(config.seed)
+    } else {
+        let mut pipeline = terrain::presets::by_name(&config.preset);
+        pipeline.seed = config.seed;
+        pipeline
+    };
     let mut world = World::with_pipeline(config.size, pipeline);
     world.seed = config.seed;
     if config.install_spawn_platform {
@@ -386,6 +392,8 @@ impl World {
             return;
         }
         let previous = self.get(x, y, z);
+        let was_edited = self.edited.contains(&(x, y, z));
+        let is_external = x < 0 || x >= s || z < 0 || z >= s;
         if x >= 0 && x < s && z >= 0 && z < s {
             let i = self.idx(x, y, z);
             self.blocks[i] = b;
@@ -405,7 +413,10 @@ impl World {
             let _ = self.loaded_chunks.set_block([x, y, z], b);
         }
         self.edited.insert((x, y, z));
-        if self.procedural && previous != b {
+        // An explicit override outside the legacy backing array must be
+        // persisted even when it happens to match the generated block. The
+        // generator is not durable state, while this edit is.
+        if self.procedural && (previous != b || (is_external && !was_edited)) {
             self.terrain_revision = self.terrain_revision.saturating_add(1);
             self.edit_log.push(TerrainEdit {
                 position: [x, y, z],
@@ -473,7 +484,15 @@ impl World {
                 }
             }
         }
-        chunk.revision = 0;
+        // Rebuild the chunk-local revision from persistent edits instead of
+        // resetting it after unload/re-entry. Generated material without
+        // edits remains revision zero; edits in other chunks do not advance
+        // this chunk's local stream.
+        chunk.revision = self
+            .edit_log
+            .iter()
+            .filter(|edit| TerrainChunkCoord::from_block(edit.position) == coord)
+            .count() as u64;
         let _ = self.loaded_chunks.insert(coord, chunk);
     }
 
@@ -919,9 +938,35 @@ pub fn visible_blocks(
 
 pub const PLAYER_BODY_CLEARANCE_BLOCKS: i32 = 2;
 pub const MAX_SMOOTH_DROP: f32 = 6.0;
+/// Shared squared reach used by offline and online mining validation.
+pub const MINE_REACH_SQUARED: i64 = 25;
 
 fn horizontal_in_bounds(world: &World, x: i32, z: i32) -> bool {
-    world.procedural || ((0..world.size).contains(&x) && (0..world.size).contains(&z))
+    // Procedural generation may answer queries beyond the backing array, but
+    // player collision and spawn safety still use the authored world bounds.
+    (0..world.size).contains(&x) && (0..world.size).contains(&z)
+}
+
+#[must_use]
+pub fn mine_target_reachable(player_block: [i32; 3], target: [i32; 3]) -> bool {
+    let dx = i128::from(target[0]) - i128::from(player_block[0]);
+    let dy = i128::from(target[1]) - i128::from(player_block[1]);
+    let dz = i128::from(target[2]) - i128::from(player_block[2]);
+    dx * dx + dy * dy + dz * dz <= i128::from(MINE_REACH_SQUARED)
+}
+
+/// Returns the first empty y coordinate above the highest solid block in a
+/// column. This is the shared surface-height query for edited terrain; water
+/// is intentionally ignored because it is not a solid mining surface.
+#[must_use]
+pub fn top_solid_surface_y(world: &World, x: i32, z: i32) -> Option<i32> {
+    if !horizontal_in_bounds(world, x, z) {
+        return None;
+    }
+    (0..world.size)
+        .rev()
+        .find(|y| world.get(x, *y, z).is_solid())
+        .map(|y| y + 1)
 }
 
 pub fn player_body_clear(world: &World, x: i32, foot_y: i32, z: i32) -> bool {
@@ -1262,7 +1307,10 @@ mod tests {
         world.materialize_chunk(coord);
         assert_eq!(world.get(position[0], position[1], position[2]), generated);
         world.set(position[0], position[1], position[2], BlockType::IronOre);
-        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::IronOre);
+        assert_eq!(
+            world.get(position[0], position[1], position[2]),
+            BlockType::IronOre
+        );
         assert_eq!(world.terrain_revision(), 1);
         let edits: Vec<_> = world.terrain_edits_since(0).copied().collect();
         assert_eq!(edits.len(), 1);
@@ -1270,7 +1318,10 @@ mod tests {
 
         let unloaded = world.unload_chunk(coord).expect("chunk should be loaded");
         assert!(unloaded.revision > 0);
-        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::IronOre);
+        assert_eq!(
+            world.get(position[0], position[1], position[2]),
+            BlockType::IronOre
+        );
     }
 
     #[test]
@@ -1279,14 +1330,53 @@ mod tests {
         let position = [-1, 6, 16];
 
         world.set(position[0], position[1], position[2], BlockType::Stone);
-        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::Stone);
+        assert_eq!(
+            world.get(position[0], position[1], position[2]),
+            BlockType::Stone
+        );
         let coord = TerrainChunkCoord::from_block(position);
         assert!(world.loaded_chunks.get(coord).is_some());
 
-        let unloaded = world.unload_chunk(coord).expect("edited chunk should be loaded");
-        assert_eq!(unloaded.get(TerrainChunkCoord::local_position(position)), Some(BlockType::Stone));
-        assert_eq!(world.get(position[0], position[1], position[2]), BlockType::Stone);
+        let unloaded = world
+            .unload_chunk(coord)
+            .expect("edited chunk should be loaded");
+        assert_eq!(
+            unloaded.get(TerrainChunkCoord::local_position(position)),
+            Some(BlockType::Stone)
+        );
+        assert_eq!(
+            world.get(position[0], position[1], position[2]),
+            BlockType::Stone
+        );
         assert_eq!(world.terrain_edits_since(0).count(), 1);
+    }
+
+    #[test]
+    fn reloaded_chunk_preserves_edit_content_and_latest_revision() {
+        let mut world = World::with_pipeline(32, terrain::presets::default_preset());
+        let coord = TerrainChunkCoord::new(1, 0, 1);
+        let position = [coord.origin()[0] + 2, 4, coord.origin()[2] + 3];
+
+        world.materialize_chunk(coord);
+        world.set(position[0], position[1], position[2], BlockType::Stone);
+        let edited_revision = world
+            .loaded_chunks
+            .get(coord)
+            .expect("edited chunk should be loaded")
+            .revision;
+        assert!(edited_revision > 0);
+
+        world
+            .unload_chunk(coord)
+            .expect("edited chunk should unload");
+        world.materialize_chunk(coord);
+
+        let reloaded = world.loaded_chunks.get(coord).expect("chunk should reload");
+        assert_eq!(
+            reloaded.get(TerrainChunkCoord::local_position(position)),
+            Some(BlockType::Stone)
+        );
+        assert_eq!(reloaded.revision, edited_revision);
     }
 
     #[test]
@@ -1415,6 +1505,28 @@ mod tests {
         assert_eq!(result, Some((BlockType::Dirt, None)));
         assert_eq!(world.get(2, 2, 2), BlockType::Air);
         assert_eq!(pool.get(ResourceKind::Stone), 0);
+    }
+
+    #[test]
+    fn mine_reach_is_shared_and_overflow_safe() {
+        assert!(mine_target_reachable([0, 0, 0], [3, 4, 0]));
+        assert!(!mine_target_reachable([0, 0, 0], [3, 4, 1]));
+        assert!(!mine_target_reachable(
+            [i32::MIN, i32::MIN, i32::MIN],
+            [i32::MAX, i32::MAX, i32::MAX]
+        ));
+    }
+
+    #[test]
+    fn top_solid_surface_y_tracks_mined_columns() {
+        let mut world = World::new(8);
+        world.set(2, 2, 2, BlockType::Dirt);
+        world.set(2, 3, 2, BlockType::Stone);
+        assert_eq!(top_solid_surface_y(&world, 2, 2), Some(4));
+
+        let mut pool = GlobalResourcePool::new();
+        mine_block(&mut world, &mut pool, 2, 3, 2, 0).expect("top block should be mineable");
+        assert_eq!(top_solid_surface_y(&world, 2, 2), Some(3));
     }
 
     #[test]

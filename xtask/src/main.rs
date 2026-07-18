@@ -7,6 +7,7 @@ mod doc_audit;
 mod health;
 mod loop_cmd;
 mod model_iter;
+mod model_optimize;
 mod motion;
 mod observer;
 mod tdd;
@@ -58,6 +59,7 @@ fn main() -> ExitCode {
 
     let result = match command.to_ascii_lowercase().as_str() {
         "loop" => loop_cmd::run(&root, &args),
+        "milestone" | "milestone-shot" => loop_cmd::milestone(&root),
         "health" => loop_cmd::health(&root, &args),
         "flicker-probe" | "flicker" => loop_cmd::flicker_probe(&root, &args),
         "play" => loop_cmd::play(&root, &args),
@@ -73,6 +75,7 @@ fn main() -> ExitCode {
         "audit-skills" => audit::skills(&root),
         "audit-visual" => audit::visual(&root),
         "model-preview-all" | "model-preview-iterate" => model_iter::run(&root, &args),
+        "model-optimize" | "model-optimize-task" => model_optimize::run(&root, &args),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -105,7 +108,8 @@ fn project_root() -> Result<PathBuf> {
 
 fn print_help() {
     println!("xtask commands:");
-    println!("  loop [--offline] [--seconds N] (currently unavailable)");
+    println!("  loop [--offline|--online] [--ai-client|--codex-client] [--seconds N]");
+    println!("  milestone (archive the latest loop PNG for long-term storage)");
     println!(
         "  flicker-probe [--seconds N] [--interval S] [--period S] [--warmup S] [--gpu-backend dx12|vulkan]"
     );
@@ -122,7 +126,8 @@ fn print_help() {
     println!("  motion-analyze [screenshots/online_motion_trace.jsonl]");
     println!("  scenario --json scenarios/*.json");
     println!("  export [--out=PATH] (alias: export-content)");
-    println!("  model-preview-all [--only=<stem>] [--limit=N] [--skip-build]");
+    println!("  model-preview-all [--only=<stem[,stem...]>] [--limit=N] [--skip-build]");
+    println!("  model-optimize <asset> [--skip-build] [--skip-render]");
 }
 
 fn run_dev(root: &std::path::Path, args: &[String]) -> Result<()> {
@@ -151,6 +156,7 @@ fn run_dev(root: &std::path::Path, args: &[String]) -> Result<()> {
             &["cargo", "fmt", "--all", "--", "--check"],
         ),
         "loop" => loop_cmd::run(root, &args[1..]),
+        "milestone" | "milestone-shot" => loop_cmd::milestone(root),
         "health" => loop_cmd::health(root, &args[1..]),
         "flicker-probe" | "flicker" => loop_cmd::flicker_probe(root, &args[1..]),
         "play" => loop_cmd::play(root, &args[1..]),

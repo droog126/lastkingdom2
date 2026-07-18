@@ -25,9 +25,31 @@ pub(crate) fn drag_ui_panels(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut drag_state: ResMut<UiDragState>,
     handles: Query<(&Interaction, &UiDragHandle)>,
-    mut panels: Query<(&mut UiTransform, &mut ZIndex), With<UiDragPanel>>,
+    mut panels: Query<
+        (
+            &mut UiTransform,
+            &mut ZIndex,
+            &ComputedNode,
+            &UiGlobalTransform,
+        ),
+        With<UiDragPanel>,
+    >,
 ) {
+    let viewport = windows
+        .single()
+        .ok()
+        .map(Window::size)
+        .unwrap_or(Vec2::new(1280.0, 720.0));
+
     if !mouse.pressed(MouseButton::Left) {
+        // A panel can be restored from a stale drag offset or be laid out
+        // against a smaller window than the one it was created for. Keep all
+        // draggable panels recoverable even when the user is not dragging.
+        for (mut transform, _, computed, global) in &mut panels {
+            let (_, _, current_center) = global.to_scale_angle_translation();
+            let delta = clamp_drag_delta(current_center, computed.size(), viewport, Vec2::ZERO);
+            apply_drag_delta(&mut transform, delta);
+        }
         drag_state.active_panel = None;
         drag_state.last_cursor = None;
         return;
@@ -44,7 +66,7 @@ pub(crate) fn drag_ui_panels(
         }) else {
             return;
         };
-        let Ok((_, mut z_index)) = panels.get_mut(handle.0) else {
+        let Ok((_, mut z_index, _, _)) = panels.get_mut(handle.0) else {
             return;
         };
         drag_state.frontmost_z = drag_state.frontmost_z.saturating_add(1);
@@ -65,12 +87,28 @@ pub(crate) fn drag_ui_panels(
     let Some(panel) = drag_state.active_panel else {
         return;
     };
-    let Ok((mut transform, _)) = panels.get_mut(panel) else {
+    let Ok((mut transform, _, computed, global)) = panels.get_mut(panel) else {
         drag_state.active_panel = None;
         drag_state.last_cursor = None;
         return;
     };
+    let (_, _, current_center) = global.to_scale_angle_translation();
+    let delta = clamp_drag_delta(current_center, computed.size(), viewport, delta);
     apply_drag_delta(&mut transform, delta);
+}
+
+fn clamp_drag_delta(
+    current_center: Vec2,
+    panel_size: Vec2,
+    viewport_size: Vec2,
+    delta: Vec2,
+) -> Vec2 {
+    const SCREEN_MARGIN: f32 = 16.0;
+    let half_size = panel_size * 0.5;
+    let min_center = half_size + Vec2::splat(SCREEN_MARGIN);
+    let max_center = (viewport_size - half_size - Vec2::splat(SCREEN_MARGIN)).max(min_center);
+    let desired = (current_center + delta).clamp(min_center, max_center);
+    desired - current_center
 }
 
 fn apply_drag_delta(transform: &mut UiTransform, delta: Vec2) {
@@ -87,7 +125,7 @@ fn val_as_px(value: Val) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_drag_delta, val_as_px};
+    use super::{apply_drag_delta, clamp_drag_delta, val_as_px};
     use bevy::prelude::{UiTransform, Val, Val2, Vec2};
 
     #[test]
@@ -105,5 +143,17 @@ mod tests {
 
         assert_eq!(transform.translation.x, Val::Px(23.0));
         assert_eq!(transform.translation.y, Val::Px(34.0));
+    }
+
+    #[test]
+    fn drag_delta_keeps_panel_inside_viewport() {
+        let delta = clamp_drag_delta(
+            Vec2::new(110.0, 100.0),
+            Vec2::new(180.0, 120.0),
+            Vec2::new(800.0, 600.0),
+            Vec2::new(-500.0, -500.0),
+        );
+
+        assert_eq!(delta, Vec2::new(-4.0, -24.0));
     }
 }

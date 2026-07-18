@@ -14,6 +14,7 @@ use super::authority::{LatestNatureReport, NatureAuthoritySet};
 use lk2_core::world::{TerrainEdit, World as GameWorld};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+const LEGACY_NATURE_SCHEMA_VERSION: u32 = 0;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NatureSave<S> {
@@ -244,6 +245,26 @@ struct NatureRegionSaveRecord {
     save: NatureRegionSave<NatureRegionPersistedState>,
 }
 
+#[derive(Debug, Deserialize)]
+struct NatureRegionSaveEnvelope {
+    schema_version: u32,
+    regions: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyNatureRegionSaveRecord {
+    id: NatureRegionId,
+    save: LegacyNatureRegionSave,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyNatureRegionSave {
+    tick: u64,
+    center: [f32; 2],
+    radius: f32,
+    state: NatureRegionPersistedState,
+}
+
 pub fn write_nature_region_saves_atomic(
     path: &Path,
     saves: &BTreeMap<NatureRegionId, NatureRegionSave<NatureRegionPersistedState>>,
@@ -320,20 +341,56 @@ pub fn read_nature_region_saves(
 fn decode_nature_region_saves(
     contents: &str,
 ) -> Result<BTreeMap<NatureRegionId, NatureRegionSave<NatureRegionPersistedState>>, String> {
-    let file = serde_json::from_str::<NatureRegionSaveFile>(&contents)
+    let file = serde_json::from_str::<NatureRegionSaveEnvelope>(contents)
         .map_err(|error| format!("decode nature region saves: {error}"))?;
-    if file.schema_version != CURRENT_SCHEMA_VERSION {
+
+    if !matches!(
+        file.schema_version,
+        CURRENT_SCHEMA_VERSION | LEGACY_NATURE_SCHEMA_VERSION
+    ) {
         return Err("unsupported nature region save file schema".to_owned());
     }
+
     let mut saves = BTreeMap::new();
+    let mut invalid_records = 0;
     for record in file.regions {
-        let save = record.save;
-        if saves.insert(record.id, save).is_some() {
+        let decoded = if file.schema_version == CURRENT_SCHEMA_VERSION {
+            serde_json::from_value::<NatureRegionSaveRecord>(record)
+                .map(|record| (record.id, record.save))
+        } else {
+            serde_json::from_value::<LegacyNatureRegionSaveRecord>(record).map(|record| {
+                let save = record.save;
+                (
+                    record.id,
+                    NatureRegionSave {
+                        schema_version: CURRENT_SCHEMA_VERSION,
+                        tick: save.tick,
+                        center: save.center,
+                        radius: save.radius,
+                        // Version zero did not persist scheduling state. Active
+                        // keeps the old one-tick semantics until a caller
+                        // applies its current interest-based LOD.
+                        lod: RegionLod::Active,
+                        state: save.state,
+                    },
+                )
+            })
+        };
+        let Ok((id, save)) = decoded else {
+            invalid_records += 1;
+            continue;
+        };
+        if save.validate_persisted().is_err() {
+            invalid_records += 1;
+            continue;
+        }
+        if saves.insert(id, save).is_some() {
             return Err("nature region save contains duplicate region ids".to_owned());
         }
     }
-    for save in saves.values() {
-        save.validate_persisted().map_err(str::to_owned)?;
+
+    if invalid_records > 0 && saves.is_empty() {
+        return Err("nature region save contains no valid records".to_owned());
     }
     Ok(saves)
 }
@@ -499,6 +556,109 @@ mod tests {
     }
 
     #[test]
+    fn legacy_nature_region_fixture_migrates_to_current_schema() {
+        let state = NatureRegionPersistedState {
+            snapshot: NatureSnapshot::from_ecology(7, &EcoCycle::default()),
+            resources: GlobalResourcePool::new(),
+        };
+        let fixture = serde_json::json!({
+            "schema_version": 0,
+            "regions": [{
+                "id": { "x": 2, "z": -1 },
+                "save": {
+                    "tick": 7,
+                    "center": [80.0, -16.0],
+                    "radius": 16.0,
+                    "state": state,
+                }
+            }]
+        });
+
+        let saves = decode_nature_region_saves(
+            &serde_json::to_string(&fixture).expect("legacy fixture should encode"),
+        )
+        .expect("legacy fixture should migrate");
+        let save = saves
+            .get(&NatureRegionId { x: 2, z: -1 })
+            .expect("migrated region should be retained");
+
+        assert_eq!(save.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(save.tick, 7);
+        assert_eq!(save.lod, RegionLod::Active);
+        assert_eq!(save.state.snapshot.tick, 7);
+        assert!(save.validate_persisted().is_ok());
+    }
+
+    #[test]
+    fn corrupted_region_record_is_skipped_when_other_records_are_valid() {
+        let id = NatureRegionId { x: 1, z: 1 };
+        let valid = NatureRegionSaveRecord {
+            id,
+            save: NatureRegionSave::new(
+                4,
+                id.center(DEFAULT_REGION_SIZE),
+                DEFAULT_REGION_SIZE * 0.5,
+                RegionLod::Nearby,
+                NatureRegionPersistedState {
+                    snapshot: NatureSnapshot::from_ecology(4, &EcoCycle::default()),
+                    resources: GlobalResourcePool::new(),
+                },
+            ),
+        };
+        let fixture = serde_json::json!({
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "regions": [
+                serde_json::to_value(valid).expect("valid record should encode"),
+                { "id": { "x": 9, "z": 9 }, "save": { "schema_version": CURRENT_SCHEMA_VERSION, "state": "broken" } }
+            ]
+        });
+
+        let saves = decode_nature_region_saves(
+            &serde_json::to_string(&fixture).expect("fixture should encode"),
+        )
+        .expect("one broken record must not reject valid regions");
+
+        assert_eq!(saves.len(), 1);
+        assert!(saves.contains_key(&id));
+    }
+
+    #[test]
+    fn corrupted_primary_nature_save_falls_back_to_backup() {
+        let id = NatureRegionId { x: 3, z: 2 };
+        let save = NatureRegionSave::new(
+            8,
+            id.center(DEFAULT_REGION_SIZE),
+            DEFAULT_REGION_SIZE * 0.5,
+            RegionLod::Active,
+            NatureRegionPersistedState {
+                snapshot: NatureSnapshot::from_ecology(8, &EcoCycle::default()),
+                resources: GlobalResourcePool::new(),
+            },
+        );
+        let mut expected = BTreeMap::new();
+        expected.insert(id, save);
+        let path = std::env::temp_dir().join(format!(
+            "lastkingdom2-nature-backup-test-{}.json",
+            std::process::id()
+        ));
+        let backup = backup_path(&path);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&backup);
+
+        write_nature_region_saves_atomic(&path, &expected).expect("nature save should write");
+        fs::copy(&path, &backup).expect("backup fixture should copy");
+        fs::write(&path, "{ not valid json").expect("primary fixture should corrupt");
+
+        assert_eq!(
+            read_nature_region_saves(&path).expect("backup should load"),
+            expected
+        );
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(backup);
+    }
+
+    #[test]
     fn terrain_save_round_trips_edits_and_rejects_duplicate_revisions() {
         let mut world = GameWorld::with_pipeline(32, terrain::presets::default_preset());
         let position = [TerrainChunkCoord::new(0, 0, 0).origin()[0] + 1, 4, 1];
@@ -510,7 +670,10 @@ mod tests {
         let mut restored = GameWorld::with_pipeline(32, terrain::presets::default_preset());
         save.apply_to_world(&mut restored)
             .expect("terrain save should apply to matching world");
-        assert_eq!(restored.get(position[0], position[1], position[2]), BlockType::Stone);
+        assert_eq!(
+            restored.get(position[0], position[1], position[2]),
+            BlockType::Stone
+        );
         let encoded = serde_json::to_string(&save).expect("terrain save should encode");
         let decoded: TerrainSave =
             serde_json::from_str(&encoded).expect("terrain save should decode");

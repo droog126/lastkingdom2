@@ -149,6 +149,39 @@ impl NatureRegionWorld {
         region.advance_to(world_tick).map(|report| (id, report))
     }
 
+    /// Copies gameplay mutations from the legacy external pool into the
+    /// primary region before an authority step.
+    ///
+    /// Returns whether the mirror changed. The region remains the owner; this
+    /// method only exists while older Bevy systems still write the external
+    /// resource directly.
+    pub fn sync_primary_resources_from_external(
+        &mut self,
+        external_pool: &GlobalResourcePool,
+    ) -> bool {
+        let Some(region) = self.primary_mut() else {
+            return false;
+        };
+        if region.resources == *external_pool {
+            return false;
+        }
+        region.resources.clone_from(external_pool);
+        true
+    }
+
+    /// Publishes the primary region's authoritative resource state back to
+    /// the legacy external pool after an authority step.
+    pub fn sync_external_pool_from_primary(&self, external_pool: &mut GlobalResourcePool) -> bool {
+        let Some(region) = self.primary() else {
+            return false;
+        };
+        if *external_pool == region.resources {
+            return false;
+        }
+        external_pool.clone_from(&region.resources);
+        true
+    }
+
     /// Transitional bridge for Bevy systems that still expose a standalone
     /// `GlobalResourcePool` resource. The region remains the owner; the
     /// external pool is a compatibility mirror for gameplay systems.
@@ -157,11 +190,10 @@ impl NatureRegionWorld {
         world_tick: u64,
         external_pool: &mut GlobalResourcePool,
     ) -> Option<(NatureRegionId, TickReport)> {
-        let region = self.primary_mut()?;
-        region.resources.clone_from(external_pool);
-        let result = region.advance_to(world_tick);
-        external_pool.clone_from(&region.resources);
-        result.map(|report| (region.id, report))
+        self.sync_primary_resources_from_external(external_pool);
+        let result = self.advance_primary(world_tick);
+        self.sync_external_pool_from_primary(external_pool);
+        result
     }
 
     #[must_use]
@@ -300,6 +332,47 @@ mod tests {
             external.get(crate::resource::ResourceKind::Food)
         );
         assert_eq!(world.primary().unwrap().scheduler.simulated_tick(), 1);
+    }
+
+    #[test]
+    fn primary_resource_mirror_sync_is_explicit_and_bidirectional() {
+        let id = NatureRegionId { x: 0, z: 0 };
+        let mut world = NatureRegionWorld::single(
+            id,
+            EcoCycle::default(),
+            GlobalResourcePool::new(),
+            RegionLod::Active,
+        );
+        let mut external = GlobalResourcePool::new();
+        external.force_add(crate::resource::ResourceKind::Wood, 5);
+
+        assert!(world.sync_primary_resources_from_external(&external));
+        assert_eq!(
+            world
+                .primary()
+                .unwrap()
+                .resources
+                .get(crate::resource::ResourceKind::Wood),
+            5
+        );
+        assert!(!world.sync_primary_resources_from_external(&external));
+
+        world
+            .primary_mut()
+            .unwrap()
+            .resources
+            .try_add(crate::resource::ResourceKind::Wood, 2)
+            .unwrap();
+        assert!(world.sync_external_pool_from_primary(&mut external));
+        assert_eq!(
+            external.get(crate::resource::ResourceKind::Wood),
+            world
+                .primary()
+                .unwrap()
+                .resources
+                .get(crate::resource::ResourceKind::Wood)
+        );
+        assert!(!world.sync_external_pool_from_primary(&mut external));
     }
 
     #[test]

@@ -74,42 +74,6 @@
       "stack_limit": null
     },
     {
-      "id": 2739635055,
-      "key": "drop.wood",
-      "display_name": "drop wood",
-      "category": "Drop",
-      "status": "Active",
-      "description": "Registered ecology content: drop.wood",
-      "tags": [
-        "drop"
-      ],
-      "source": {
-        "Ecology": {
-          "ResourceDrop": "Wood"
-        }
-      },
-      "visual": {
-        "model_path": "procedural/pretty/resource_wood.glb",
-        "scale": [
-          0.8,
-          0.8,
-          0.8
-        ],
-        "preferred_biome": null,
-        "source_block": "Wood"
-      },
-      "produced_resources": [
-        {
-          "content": {
-            "id": 252128356,
-            "key": "resource.wood"
-          },
-          "amount": 1
-        }
-      ],
-      "stack_limit": null
-    },
-    {
       "id": 2309316802,
       "key": "item.dragon_katana",
       "display_name": "龙武士刀",

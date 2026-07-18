@@ -99,7 +99,29 @@ pub fn evaluate_nature(
         "runtime error log budget exceeded",
         Some("error_logs"),
     ));
+    append_runtime_evidence_assertions(&mut out, after);
     out
+}
+
+fn append_runtime_evidence_assertions(out: &mut Vec<NatureAssertion>, after: &NatureObservation) {
+    let metrics = &after.metrics;
+    out.push(check(
+        "nature.runtime_evidence_consistent",
+        metrics.runtime_evidence_is_valid(after.events.len()),
+        AssertionSeverity::Fail,
+        json!({
+            "tick": metrics.tick,
+            "region_tick": metrics.region_tick,
+            "event_count": metrics.event_count,
+            "observed_events": after.events.len(),
+            "catch_up_remaining": metrics.catch_up_remaining,
+            "save_restored": metrics.save_restored,
+        }),
+        "consistent",
+        json!(true),
+        "optional region, event, catch-up, or persistence evidence is inconsistent",
+        Some("nature.runtime_evidence"),
+    ));
 }
 
 fn append_causal_assertions(
@@ -291,5 +313,41 @@ mod tests {
                 .iter()
                 .any(|item| { item.id == "nature.deterministic_repeat_matches" && !item.ok })
         );
+    }
+
+    #[test]
+    fn runtime_evidence_rejects_region_ahead_and_event_count_underflow() {
+        let after = observe_value(
+            &json!({
+                "nature": {
+                    "tick": 2,
+                    "cloud_count": 1,
+                    "rainfall": 0.5,
+                    "soil_moisture": 0.4,
+                    "plant_count": 2,
+                    "animal_count": 1,
+                    "animal_food_available": 2.0,
+                    "events": ["RainFell", "PlantsGrown"],
+                    "region_tick": 3,
+                    "event_count": 1
+                }
+            }),
+            "after",
+            Vec::new(),
+        );
+        let expectations = NatureExpectations {
+            require_determinism: false,
+            require_causal_progress: false,
+            require_presentation_consistency: false,
+            ..NatureExpectations::default()
+        };
+
+        let assertions = evaluate_nature(None, &after, None, &expectations);
+
+        let evidence = assertions
+            .iter()
+            .find(|item| item.id == "nature.runtime_evidence_consistent")
+            .expect("runtime evidence assertion");
+        assert!(!evidence.ok);
     }
 }

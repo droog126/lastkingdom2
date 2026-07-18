@@ -19,6 +19,14 @@ pub struct NatureMetrics {
     pub presented_clouds: Option<u64>,
     pub presented_plants: Option<u64>,
     pub presented_animals: Option<u64>,
+    /// Number of raw simulation events before labels are normalized.
+    pub event_count: Option<u64>,
+    /// Tick of the region represented by the reported snapshot.
+    pub region_tick: Option<u64>,
+    /// Unsimulated world ticks remaining after bounded catch-up.
+    pub catch_up_remaining: Option<u64>,
+    /// Whether the producer restored persisted natural-world state.
+    pub save_restored: Option<bool>,
 }
 
 impl NatureMetrics {
@@ -43,6 +51,18 @@ impl NatureMetrics {
         .into_iter()
         .flatten()
         .all(|value| value.is_finite() && value >= 0.0)
+    }
+
+    #[must_use]
+    pub fn runtime_evidence_is_valid(&self, observed_event_count: usize) -> bool {
+        let region_is_not_ahead = match (self.tick, self.region_tick) {
+            (Some(world_tick), Some(region_tick)) => region_tick <= world_tick,
+            _ => true,
+        };
+        let event_count_covers_observation = self
+            .event_count
+            .is_none_or(|count| count >= observed_event_count as u64);
+        region_is_not_ahead && event_count_covers_observation
     }
 }
 
@@ -163,6 +183,12 @@ impl NatureArtifact {
                 "total": self.assertions.len(),
                 "failed": failed,
                 "hard_failed": hard_failed
+            },
+            "runtime_evidence": {
+                "event_count": self.after.metrics.event_count,
+                "region_tick": self.after.metrics.region_tick,
+                "catch_up_remaining": self.after.metrics.catch_up_remaining,
+                "save_restored": self.after.metrics.save_restored
             }
         })
     }
@@ -186,6 +212,10 @@ mod tests {
             source: "final_state.json".to_owned(),
             metrics: NatureMetrics {
                 tick: Some(10),
+                event_count: Some(1),
+                region_tick: Some(9),
+                catch_up_remaining: Some(2),
+                save_restored: Some(true),
                 ..NatureMetrics::default()
             },
             events: Vec::new(),
@@ -220,5 +250,9 @@ mod tests {
         assert_eq!(health["verdict"], "FAIL");
         assert_eq!(health["assertions"]["failed"], 1);
         assert_eq!(health["assertions"]["hard_failed"], 1);
+        assert_eq!(health["runtime_evidence"]["event_count"], 1);
+        assert_eq!(health["runtime_evidence"]["region_tick"], 9);
+        assert_eq!(health["runtime_evidence"]["catch_up_remaining"], 2);
+        assert_eq!(health["runtime_evidence"]["save_restored"], true);
     }
 }

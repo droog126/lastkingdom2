@@ -8,9 +8,11 @@ use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
 pub const STYLIZED_TERRAIN_SHADER: &str = "shaders/stylized_terrain.wgsl";
+pub const STYLIZED_WATER_SHADER: &str = "shaders/stylized_water.wgsl";
 
 pub type StylizedTerrainMaterial = ExtendedMaterial<StandardMaterial, StylizedTerrainExtension>;
 pub type GrassWindMaterial = ExtendedMaterial<StandardMaterial, GrassWindExtension>;
+pub type WaterSurfaceMaterial = ExtendedMaterial<StandardMaterial, WaterSurfaceExtension>;
 
 #[derive(Resource, Clone)]
 pub struct TreeShadowAssets {
@@ -46,6 +48,21 @@ pub struct GrassWindExtension {
     pub wind: Vec4,
 }
 
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+pub struct WaterSurfaceExtension {
+    /// X: elapsed seconds, Y: wave contrast, Z: shoreline foam strength.
+    #[uniform(100)]
+    pub wave_settings: Vec4,
+}
+
+impl Default for WaterSurfaceExtension {
+    fn default() -> Self {
+        Self {
+            wave_settings: Vec4::new(0.0, 0.22, 0.70, 0.0),
+        }
+    }
+}
+
 impl GrassWindExtension {
     pub const fn new() -> Self {
         Self {
@@ -57,6 +74,16 @@ impl GrassWindExtension {
 impl MaterialExtension for GrassWindExtension {
     fn vertex_shader() -> ShaderRef {
         "shaders/grass_wind.wgsl".into()
+    }
+}
+
+impl MaterialExtension for WaterSurfaceExtension {
+    fn fragment_shader() -> ShaderRef {
+        STYLIZED_WATER_SHADER.into()
+    }
+
+    fn deferred_fragment_shader() -> ShaderRef {
+        STYLIZED_WATER_SHADER.into()
     }
 }
 
@@ -75,15 +102,46 @@ pub fn animate_grass_gpu_wind(
     }
 }
 
+pub fn animate_water_surface(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<WaterSurfaceMaterial>>,
+    water: Query<&MeshMaterial3d<WaterSurfaceMaterial>>,
+) {
+    let mut updated = std::collections::HashSet::new();
+    for handle in &water {
+        if updated.insert(handle.0.id()) {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
+                material.extension.wave_settings.x = time.elapsed_secs();
+            }
+        }
+    }
+}
+
 impl StylizedTerrainExtension {
     pub const fn new(shadow_floor: f32, shadow_lift: f32) -> Self {
-        Self::with_cel_steps(shadow_floor, shadow_lift, 4.0)
+        // Keep the palette stylized through authored colors and lighting, not
+        // through four hard color bands that make smooth terrain read as
+        // faceted low-poly geometry.
+        Self::with_cel_steps(shadow_floor, shadow_lift, 0.0)
     }
 
     pub const fn with_cel_steps(shadow_floor: f32, shadow_lift: f32, cel_steps: f32) -> Self {
         Self {
             shadow_settings: Vec4::new(shadow_floor, shadow_lift, cel_steps, 0.0),
         }
+    }
+
+    /// Adds a restrained view-dependent rim to readable world assets. The
+    /// value lives in the otherwise-unused fourth uniform lane so the
+    /// terrain/asset material keeps one stable bind group layout.
+    pub fn with_rim(mut self, strength: f32) -> Self {
+        self.shadow_settings = Vec4::new(
+            self.shadow_settings.x,
+            self.shadow_settings.y,
+            self.shadow_settings.z,
+            strength,
+        );
+        self
     }
 }
 
@@ -107,7 +165,13 @@ impl MaterialExtension for StylizedTerrainExtension {
 pub fn stylize_asset_materials(
     mut commands: Commands,
     roots: Query<
-        (Entity, &Children, &Transform, Option<&StylizedTreeAsset>),
+        (
+            Entity,
+            &Children,
+            &Transform,
+            Option<&StylizedTreeAsset>,
+            Option<&StylizedReadableAsset>,
+        ),
         (
             With<StylizedAssetRoot>,
             Without<StylizedAssetMaterialsApplied>,
@@ -120,7 +184,7 @@ pub fn stylize_asset_materials(
     shadow_assets: Res<TreeShadowAssets>,
     terrain: Res<super::state::ProceduralTerrainSurface>,
 ) {
-    for (root, root_children, root_transform, tree_asset) in &roots {
+    for (root, root_children, root_transform, tree_asset, readable_asset) in &roots {
         let mut pending_assets = false;
         let mut converted = 0;
         let mut stack = root_children.iter().collect::<Vec<_>>();
@@ -137,11 +201,13 @@ pub fn stylize_asset_materials(
             let material_id = mesh_material.0.id();
             let Some(handle) = cache.get(&material_id).cloned().or_else(|| {
                 let base = source_materials.get(&mesh_material.0)?.clone();
+                let extension = StylizedTerrainExtension::new(0.70, 0.045)
+                    .with_rim(readable_asset.is_some().then_some(0.18).unwrap_or(0.0));
                 let handle = stylized_materials.add(StylizedTerrainMaterial {
                     base,
                     // Preserve hue and silhouette detail in tree/building
                     // shadows while retaining the directional shadow shape.
-                    extension: StylizedTerrainExtension::new(0.70, 0.045),
+                    extension,
                 });
                 cache.insert(material_id, handle.clone());
                 Some(handle)

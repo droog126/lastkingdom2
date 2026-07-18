@@ -3,6 +3,7 @@
 
 use avian3d::prelude::{Collider, PhysicsPlugins, Position, RigidBody, Rotation};
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use lightyear::prelude::LocalAddr;
 use lightyear::prelude::server::ServerUdpIo;
@@ -10,12 +11,12 @@ use lightyear_avian3d::prelude::LightyearAvianPlugin;
 
 use leafwing_input_manager::prelude::ActionState;
 use lk2_core::protocol::components::{
-    CartMounted, CartState, EcoSnapshot, GameplayHudState, PlayerPos, VOXEL_CHUNK_SIZE_XZ,
-    VoxelChunkSnapshot, VoxelDelta,
+    CartMounted, CartState, CreatureState, EcoSnapshot, GameplayHudState, PlayerPos, SwimmingState,
+    VOXEL_CHUNK_SIZE_XZ, VoxelChunkSnapshot, VoxelDelta,
 };
 use lk2_core::protocol::messages::{
     BuildRecipe, ChatBroadcast, ChatMessage, GameplayCommand, GameplayCommandKind,
-    GameplayFeedback, PingMessage, PongMessage,
+    GameplayFeedback, PingMessage, PongMessage, TerrainSnapshotRequest,
 };
 use lk2_core::protocol::{ControlChannel, PlayerAction, StateChannel};
 use std::collections::{HashMap, HashSet};
@@ -36,8 +37,8 @@ use lk2_core::clock::SimClock;
 use lk2_core::constant;
 use lk2_core::ecology::EcoCycle;
 use lk2_core::ecology::animals::{
-    CREATURE_TRAINING_ATTACK_RANGE_SQ, Creature, CreatureAI, CreatureKind, CreatureSpawnerDone,
-    award_creature_drop, creature_attack_distance_sq,
+    CREATURE_INITIAL_WANDER_SECS, CREATURE_TRAINING_ATTACK_RANGE_SQ, Creature, CreatureAI,
+    CreatureKind, CreatureSpawnerDone, award_creature_drop, creature_attack_distance_sq,
 };
 use lk2_core::ecology::threats::MonsterEcosystem;
 use lk2_core::nation::NationRegistry;
@@ -46,11 +47,14 @@ use lk2_core::pvp::{FixedTick, Health, Hitbox, PvpCombatant, SimpleWeapon};
 use lk2_core::resource::{GlobalResourcePool, ResourceKind};
 use lk2_core::scenario::{Scenario, ScenarioState};
 use lk2_core::simulation::app_sets::SimSet;
-use lk2_core::simulation::{SimRole, advance_fixed_authority_tick_report};
 use lk2_core::simulation::regions::{NatureRegionId, NatureRegionState, NatureRegionWorld};
+use lk2_core::simulation::{SimRole, advance_fixed_authority_tick_report};
 use lk2_core::transport::{
     DEFAULT_PORT, NETCODE_CLIENT_TIMEOUT_SECS, PRIVATE_KEY, PROTOCOL_ID,
     SERVER_POS_UPDATE_INTERVAL_TICKS,
+};
+use lk2_core::vehicle::{
+    CartDriveInput, CartDriveState, cart_steering_from_right_input, step_cart_drive,
 };
 use lk2_core::world::{
     TERRAIN_CHUNK_SIZE, TerrainChunkCoord, World as GameWorld, WorldConfig, WorldGenerator,
@@ -62,7 +66,7 @@ use lk2_core::world::{
 use crate::app::NatureServerProjectionPlugin;
 use crate::authority::pvp::SimplePvpAuthorityPlugin;
 use crate::authority::{
-    LatestNatureRegionReports, LatestNatureReport, NatureAuthoritySet,
+    LatestNatureRegionReports, LatestNatureReport, NatureAuthoritySet, report_snapshot_for_region,
 };
 use crate::persistence::LatestNatureRegionSaves;
 use crate::persistence::LatestNatureSave;
@@ -71,7 +75,6 @@ const PLACE_WOOD_COST: i64 = 1;
 const PLANK_PACK_WOOD_COST: i64 = 5;
 const PLANK_PACK_OUTPUT: i64 = 1;
 const ONLINE_MOVE_SPEED: f32 = 4.5;
-const CART_MOVE_MULTIPLIER: f32 = 2.0;
 const ONLINE_INPUT_MAX_MAGNITUDE: f32 = 1.5;
 const RESPAWN_DELAY_TICKS: u32 = 90;
 const ONLINE_STEP_THRESHOLD: f32 = 0.85;
@@ -79,6 +82,9 @@ const PLAYER_COLLISION_RADIUS: f32 = 0.34;
 const JUMP_TAKEOFF_SPEED: f32 = 7.2;
 const JUMP_GRAVITY: f32 = 28.0;
 const JUMP_TERMINAL_SPEED: f32 = -18.0;
+const SWIM_MIN_DEPTH: f32 = 0.85;
+const SWIM_VERTICAL_SPEED: f32 = 3.0;
+const SWIM_SURFACE_CLEARANCE: f32 = 0.05;
 const ANTI_STUCK_SEARCH_RADIUS: i32 = 6;
 const ANTI_STUCK_FAILED_MOVE_LIMIT: u8 = 12;
 const TERRAIN_STREAM_RADIUS_CHUNKS: i32 = 3;
@@ -87,6 +93,11 @@ const TERRAIN_STREAM_RADIUS_CHUNKS: i32 = 3;
 struct ServerJumpState {
     velocity_y: f32,
     grounded: bool,
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+struct ServerCartDrive {
+    state: CartDriveState,
 }
 
 #[derive(Component, Debug, Clone, Copy, Default)]
@@ -205,6 +216,32 @@ struct LastVoxelDeltaState {
 struct VoxelChunkSnapshotCache {
     revision: u64,
     snapshots: HashMap<(i32, i32), VoxelChunkSnapshot>,
+}
+
+const SERVER_TERRAIN_RESYNC_COOLDOWN_TICKS: u64 = 15;
+
+#[derive(Resource, Default)]
+struct VoxelSnapshotResyncRequests {
+    pending: HashMap<Entity, TerrainSnapshotRequest>,
+    last_accepted_tick: HashMap<Entity, u64>,
+}
+
+impl VoxelSnapshotResyncRequests {
+    fn accept(&mut self, owner: Entity, tick: u64, request: TerrainSnapshotRequest) -> bool {
+        if request.request_id == 0 || self.pending.contains_key(&owner) {
+            return false;
+        }
+        if self
+            .last_accepted_tick
+            .get(&owner)
+            .is_some_and(|last| tick.saturating_sub(*last) < SERVER_TERRAIN_RESYNC_COOLDOWN_TICKS)
+        {
+            return false;
+        }
+        self.last_accepted_tick.insert(owner, tick);
+        self.pending.insert(owner, request);
+        true
+    }
 }
 
 impl Default for LastVoxelDeltaState {
@@ -403,6 +440,32 @@ fn sanitize_online_move_direction(dx_milli: i16, dz_milli: i16) -> Option<Vec2> 
     Some(direction.clamp_length_max(ONLINE_INPUT_MAX_MAGNITUDE))
 }
 
+fn sanitize_swim_vertical(dy_milli: i16) -> f32 {
+    (dy_milli as f32 / 1000.0).clamp(-1.0, 1.0)
+}
+
+fn water_floor_foot_y(world: &GameWorld, x: i32, z: i32) -> Option<i32> {
+    if world.get(x, constant::SEA_LEVEL, z) != lk2_core::world::BlockType::Water {
+        return None;
+    }
+    (1..=constant::SEA_LEVEL).rev().find(|foot_y| {
+        world.get(x, *foot_y - 1, z).is_solid() && player_body_clear(world, x, *foot_y, z)
+    })
+}
+
+fn water_depth_at(world: &GameWorld, position: Vec3) -> Option<f32> {
+    let x = position.x.floor() as i32;
+    let z = position.z.floor() as i32;
+    let floor_y = water_floor_foot_y(world, x, z)?;
+    Some((constant::SEA_LEVEL + 1 - floor_y).max(0) as f32)
+}
+
+fn can_swim_at(world: &GameWorld, position: Vec3) -> bool {
+    water_depth_at(world, position).is_some_and(|depth| {
+        depth >= SWIM_MIN_DEPTH && position.y <= constant::SEA_LEVEL as f32 + 1.0 + 0.9
+    })
+}
+
 fn player_inventory_can_receive(player: &PlayerState, kind: ResourceKind, amount: i64) -> bool {
     let current = player.inventory.get(&kind).copied().unwrap_or(0);
     amount >= 0 && amount <= kind.max() && current >= 0 && current <= kind.max() - amount
@@ -442,10 +505,7 @@ fn apply_gameplay_command(
             // reachability arithmetic. An i32 subtraction/multiplication here
             // would let a malformed remote command panic the server before
             // the bounds check runs.
-            let dx = i64::from(x) - i64::from(px);
-            let dy = i64::from(y) - i64::from(py);
-            let dz = i64::from(z) - i64::from(pz);
-            let reachable = dx * dx + dy * dy + dz * dz <= 25;
+            let reachable = lk2_core::world::mine_target_reachable([px, py, pz], [x, y, z]);
             if !terrain_editable(world, x, y, z) {
                 ok = false;
                 "mine target out of bounds".to_string()
@@ -639,6 +699,7 @@ fn apply_gameplay_command(
 }
 
 fn apply_gameplay_commands(
+    clock: Res<SimClock>,
     mut world: ResMut<GameWorld>,
     mut pool: ResMut<GlobalResourcePool>,
     mut nations: ResMut<NationRegistry>,
@@ -647,14 +708,16 @@ fn apply_gameplay_commands(
     mut feedback: MessageWriter<GameplayFeedback>,
     mut commands: Commands,
     creatures: Query<(Entity, &Creature, &CreatureAI)>,
-    mut carts: Query<&mut CartState>,
+    mut carts: Query<(&mut CartState, &mut ServerCartDrive)>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
+    mut snapshot_requests: ResMut<VoxelSnapshotResyncRequests>,
     mut player_q: Query<
         (
             &mut Transform,
             &mut PlayerPos,
             &mut PlayerStateComponent,
             &mut ServerJumpState,
+            &mut SwimmingState,
             &mut RespawnState,
             &mut CartMounted,
             &lightyear::prelude::ControlledBy,
@@ -666,6 +729,7 @@ fn apply_gameplay_commands(
         (
             Entity,
             &mut lightyear::prelude::MessageReceiver<GameplayCommand>,
+            &mut lightyear::prelude::MessageReceiver<TerrainSnapshotRequest>,
             &mut LastClientCommandSequence,
         ),
         With<lightyear_connection::client_of::ClientOf>,
@@ -673,14 +737,29 @@ fn apply_gameplay_commands(
 ) {
     diagnostics.receiver_entities = receivers.iter().len();
     let mut consumed_creatures = HashSet::new();
-    for (connection_entity, mut receiver, mut last_command_sequence) in receivers.iter_mut() {
+    for (connection_entity, mut receiver, mut terrain_receiver, mut last_command_sequence) in
+        receivers.iter_mut()
+    {
+        for request in terrain_receiver.receive() {
+            if snapshot_requests.accept(connection_entity, clock.tick, request) {
+                debug!(
+                    connection = ?connection_entity,
+                    "accepted terrain snapshot resync request"
+                );
+            } else {
+                debug!(
+                    connection = ?connection_entity,
+                    "dropped terrain snapshot resync request over budget"
+                );
+            }
+        }
         // Drain the receiver once. We deliberately keep ONLY the latest MoveWorld
         // per tick — clients send at their frame rate (often 144Hz) while we
         // tick at 60Hz, so a backlog of 2-3 MoveWorld commands per tick is
         // normal. Applying every queued command teleports the player; applying
         // only the latest gives us a clean per-tick movement step whose speed
         // is decoupled from the client's frame rate.
-        let mut latest_move: Option<(i16, i16)> = None;
+        let mut latest_move: Option<(i16, i16, i16)> = None;
         let mut jump_requested = false;
         let mut other_cmds: Vec<GameplayCommand> = Vec::new();
         for cmd in receiver.receive() {
@@ -694,8 +773,12 @@ fn apply_gameplay_commands(
                 continue;
             }
             match cmd.kind {
-                GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
-                    latest_move = Some((dx_milli, dz_milli));
+                GameplayCommandKind::MoveWorld {
+                    dx_milli,
+                    dz_milli,
+                    dy_milli,
+                } => {
+                    latest_move = Some((dx_milli, dz_milli, dy_milli));
                 }
                 GameplayCommandKind::Jump => {
                     jump_requested = true;
@@ -709,13 +792,14 @@ fn apply_gameplay_commands(
             mut player_pos,
             mut player_state,
             mut jump,
+            mut swimming,
             respawn,
             mut cart_mounted,
             _,
             player_tag,
         )) = player_q
             .iter_mut()
-            .find(|(_, _, _, _, _, _, owner, _)| owner.owner == connection_entity)
+            .find(|(_, _, _, _, _, _, _, owner, _)| owner.owner == connection_entity)
         else {
             continue;
         };
@@ -724,70 +808,85 @@ fn apply_gameplay_commands(
             continue;
         }
 
-        if jump_requested && jump.grounded && !cart_mounted.0 {
+        if jump_requested && jump.grounded && !swimming.0 && !cart_mounted.0 {
             jump.velocity_y = JUMP_TAKEOFF_SPEED;
             jump.grounded = false;
         }
 
-        if let Some((dx_milli, dz_milli)) = latest_move {
+        let requested_move = if let Some((dx_milli, dz_milli, dy_milli)) = latest_move {
             diagnostics.move_world_received = diagnostics.move_world_received.saturating_add(1);
             diagnostics.last_dx_milli = dx_milli;
             diagnostics.last_dz_milli = dz_milli;
-            // Magnitude is encoded by the client (1.0 walk / 1.5 sprint), so we
-            // pass the raw vector to apply_world_move without re-normalizing.
-            let Some(mut dir) = sanitize_online_move_direction(dx_milli, dz_milli) else {
-                continue;
-            };
-            if cart_mounted.0 {
-                dir *= CART_MOVE_MULTIPLIER;
-                if dir.length_squared() > 0.0001 {
-                    transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.y));
-                }
-            }
-            let moved = if jump.grounded {
-                apply_world_move(
+            let horizontal = sanitize_online_move_direction(dx_milli, dz_milli);
+            let vertical = sanitize_swim_vertical(dy_milli);
+            (horizontal.is_some() || vertical.abs() > 0.0001)
+                .then(|| (horizontal.unwrap_or(Vec2::ZERO), vertical))
+        } else {
+            None
+        };
+        let moved = if cart_mounted.0 {
+            if let Some((_, mut cart_drive)) = carts
+                .iter_mut()
+                .find(|(cart, _)| cart.player_id == player_tag.id())
+            {
+                let input = requested_move.map_or_else(CartDriveInput::default, |(dir, _)| {
+                    cart_input_from_world_direction(cart_drive.state.yaw, dir)
+                });
+                apply_cart_move(
                     &mut transform,
                     &mut player_pos,
                     &mut player_state.0,
                     &world,
-                    dir,
+                    &mut cart_drive,
+                    input,
+                    jump.grounded,
                     1.0 / 60.0,
-                    cart_mounted.0,
                 )
             } else {
-                apply_air_world_move(
+                false
+            }
+        } else {
+            requested_move.map_or(false, |(dir, vertical)| {
+                let grounded = jump.grounded;
+                apply_player_move(
                     &mut transform,
                     &mut player_pos,
                     &mut player_state.0,
                     &world,
+                    &mut jump,
+                    &mut swimming,
                     dir,
+                    vertical,
                     1.0 / 60.0,
+                    grounded,
                     cart_mounted.0,
                 )
-            };
-            diagnostics.last_move_applied = moved;
-            if moved {
-                feedback.write(GameplayFeedback {
-                    ok: true,
-                    summary: "moved".to_string(),
-                });
-            }
+            })
+        };
+        diagnostics.last_move_applied = moved;
+        if moved {
+            feedback.write(GameplayFeedback {
+                ok: true,
+                summary: "moved".to_string(),
+            });
         }
 
-        let _ = step_authoritative_jump(
-            &mut transform,
-            &mut player_pos,
-            &mut player_state.0,
-            &world,
-            &mut jump,
-            1.0 / 60.0,
-        );
+        if !swimming.0 {
+            let _ = step_authoritative_jump(
+                &mut transform,
+                &mut player_pos,
+                &mut player_state.0,
+                &world,
+                &mut jump,
+                1.0 / 60.0,
+            );
+        }
 
         for cmd in other_cmds {
             if matches!(cmd.kind, GameplayCommandKind::MountCart) {
-                let Some(mut cart) = carts
+                let Some((mut cart, mut cart_drive)) = carts
                     .iter_mut()
-                    .find(|cart| cart.player_id == player_tag.id())
+                    .find(|(cart, _)| cart.player_id == player_tag.id())
                 else {
                     feedback.write(GameplayFeedback {
                         ok: false,
@@ -804,6 +903,10 @@ fn apply_gameplay_commands(
                 }
                 cart_mounted.0 = !cart_mounted.0;
                 cart.occupied = cart_mounted.0;
+                cart_drive.state = CartDriveState {
+                    yaw: cart.yaw,
+                    ..default()
+                };
                 feedback.write(GameplayFeedback {
                     ok: true,
                     summary: if cart_mounted.0 {
@@ -862,14 +965,14 @@ fn apply_gameplay_commands(
             feedback.write(result);
         }
 
-        if let Some(mut cart) = carts
+        if let Some((mut cart, mut cart_drive)) = carts
             .iter_mut()
-            .find(|cart| cart.player_id == player_tag.id())
+            .find(|(cart, _)| cart.player_id == player_tag.id())
         {
             cart.occupied = cart_mounted.0;
             if cart_mounted.0 {
                 cart.position = transform.translation - Vec3::Y * 0.55;
-                cart.yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+                cart.yaw = cart_drive.state.yaw;
             }
         }
     }
@@ -878,7 +981,7 @@ fn apply_gameplay_commands(
 fn apply_leafwing_input(
     world: Res<GameWorld>,
     mut diagnostics: ResMut<ServerCommandDiagnostics>,
-    mut carts: Query<&mut CartState>,
+    mut carts: Query<(&mut CartState, &mut ServerCartDrive)>,
     mut player_q: Query<
         (
             &mut Transform,
@@ -886,6 +989,7 @@ fn apply_leafwing_input(
             &mut PlayerStateComponent,
             &ActionState<PlayerAction>,
             &mut ServerJumpState,
+            &mut SwimmingState,
             &RespawnState,
             &mut AntiStuckState,
             &CartMounted,
@@ -901,6 +1005,7 @@ fn apply_leafwing_input(
         mut player_state,
         actions,
         mut jump,
+        mut swimming,
         respawn,
         mut anti_stuck,
         cart_mounted,
@@ -911,7 +1016,11 @@ fn apply_leafwing_input(
         if respawn.ticks_remaining > 0 {
             continue;
         }
-        if actions.just_pressed(&PlayerAction::Jump) && jump.grounded && !cart_mounted.0 {
+        if actions.just_pressed(&PlayerAction::Jump)
+            && jump.grounded
+            && !swimming.0
+            && !cart_mounted.0
+        {
             jump.velocity_y = JUMP_TAKEOFF_SPEED;
             jump.grounded = false;
         }
@@ -929,44 +1038,72 @@ fn apply_leafwing_input(
         if actions.pressed(&PlayerAction::MoveRight) {
             dir.x += 1.0;
         }
-        if dir.length_squared() > 0.0001 {
+        let vertical: f32 = if actions.pressed(&PlayerAction::Jump) {
+            1.0
+        } else if actions.pressed(&PlayerAction::Crouch) {
+            -1.0
+        } else {
+            0.0
+        };
+        let moved = if cart_mounted.0 {
+            if let Some((_, mut cart_drive)) = carts
+                .iter_mut()
+                .find(|(cart, _)| cart.player_id == player_tag.id())
+            {
+                let input = CartDriveInput {
+                    throttle: (-dir.y).clamp(-1.0, 1.0),
+                    steering: cart_steering_from_right_input(dir.x),
+                };
+                let moved = apply_cart_move(
+                    &mut transform,
+                    &mut player_pos,
+                    &mut player_state.0,
+                    &world,
+                    &mut cart_drive,
+                    input,
+                    jump.grounded,
+                    1.0 / 60.0,
+                );
+                let input_dir = Vec2::new(input.steering, -input.throttle);
+                if input_dir.length_squared() > 0.0001 {
+                    diagnostics.move_world_received =
+                        diagnostics.move_world_received.saturating_add(1);
+                    diagnostics.last_dx_milli = (input_dir.x * 1000.0).round() as i16;
+                    diagnostics.last_dz_milli = (input_dir.y * 1000.0).round() as i16;
+                }
+                moved
+            } else {
+                false
+            }
+        } else if dir.length_squared() > 0.0001 || vertical.abs() > 0.0001 {
             if actions.pressed(&PlayerAction::Sprint) {
                 dir *= 1.5;
             }
             dir = dir.clamp_length_max(ONLINE_INPUT_MAX_MAGNITUDE);
-            if cart_mounted.0 {
-                dir *= CART_MOVE_MULTIPLIER;
-                if dir.length_squared() > 0.0001 {
-                    transform.rotation = Quat::from_rotation_y(dir.x.atan2(dir.y));
-                }
-            }
             let dx_milli = (dir.x * 1000.0).round() as i16;
             let dz_milli = (dir.y * 1000.0).round() as i16;
             diagnostics.move_world_received = diagnostics.move_world_received.saturating_add(1);
             diagnostics.last_dx_milli = dx_milli;
             diagnostics.last_dz_milli = dz_milli;
-            let moved = if jump.grounded {
-                apply_world_move(
-                    &mut transform,
-                    &mut player_pos,
-                    &mut player_state.0,
-                    &world,
-                    dir,
-                    1.0 / 60.0,
-                    cart_mounted.0,
-                )
-            } else {
-                apply_air_world_move(
-                    &mut transform,
-                    &mut player_pos,
-                    &mut player_state.0,
-                    &world,
-                    dir,
-                    1.0 / 60.0,
-                    cart_mounted.0,
-                )
-            };
-            diagnostics.last_move_applied = moved;
+            let grounded = jump.grounded;
+            apply_player_move(
+                &mut transform,
+                &mut player_pos,
+                &mut player_state.0,
+                &world,
+                &mut jump,
+                &mut swimming,
+                dir,
+                vertical,
+                1.0 / 60.0,
+                grounded,
+                cart_mounted.0,
+            )
+        } else {
+            false
+        };
+        diagnostics.last_move_applied = moved;
+        if cart_mounted.0 || dir.length_squared() > 0.0001 || vertical.abs() > 0.0001 {
             maintain_anti_stuck(
                 &world,
                 &mut player_state.0,
@@ -977,22 +1114,24 @@ fn apply_leafwing_input(
             );
         }
 
-        let _ = step_authoritative_jump(
-            &mut transform,
-            &mut player_pos,
-            &mut player_state.0,
-            &world,
-            &mut jump,
-            1.0 / 60.0,
-        );
+        if !swimming.0 {
+            let _ = step_authoritative_jump(
+                &mut transform,
+                &mut player_pos,
+                &mut player_state.0,
+                &world,
+                &mut jump,
+                1.0 / 60.0,
+            );
+        }
 
         if cart_mounted.0 {
-            if let Some(mut cart) = carts
+            if let Some((mut cart, cart_drive)) = carts
                 .iter_mut()
-                .find(|cart| cart.player_id == player_tag.id())
+                .find(|(cart, _)| cart.player_id == player_tag.id())
             {
                 cart.position = transform.translation - Vec3::Y * 0.55;
-                cart.yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+                cart.yaw = cart_drive.state.yaw;
                 cart.occupied = true;
             }
         }
@@ -1002,7 +1141,7 @@ fn apply_leafwing_input(
 fn recover_dead_players(
     world: Res<GameWorld>,
     tick: Res<FixedTick>,
-    mut carts: Query<&mut CartState>,
+    mut carts: Query<(&mut CartState, &mut ServerCartDrive)>,
     mut players: Query<(
         &PlayerTag,
         &mut Health,
@@ -1011,6 +1150,7 @@ fn recover_dead_players(
         &mut PlayerPos,
         &mut PlayerStateComponent,
         &mut ServerJumpState,
+        &mut SwimmingState,
         &mut RespawnState,
         &mut AntiStuckState,
         &mut CartMounted,
@@ -1024,6 +1164,7 @@ fn recover_dead_players(
         mut player_pos,
         mut player_state,
         mut jump,
+        mut swimming,
         mut respawn,
         mut anti_stuck,
         mut cart_mounted,
@@ -1056,14 +1197,16 @@ fn recover_dead_players(
         player_state.0.pos = position;
         player_state.0.block_pos = block_pos;
         *jump = ServerJumpState::default();
+        swimming.0 = false;
         cart_mounted.0 = false;
-        if let Some(mut cart) = carts
+        if let Some((mut cart, mut cart_drive)) = carts
             .iter_mut()
-            .find(|cart| cart.player_id == player_tag.id())
+            .find(|(cart, _)| cart.player_id == player_tag.id())
         {
             cart.position = position - Vec3::Y * 0.55;
             cart.yaw = 0.0;
             cart.occupied = false;
+            cart_drive.state = CartDriveState::default();
         }
         anti_stuck.last_safe_pos = position;
         anti_stuck.last_safe_block = block_pos;
@@ -1104,7 +1247,7 @@ fn echo_ping_messages(
                 client_time_secs: ping.client_time_secs,
                 server_tick: clock.tick as u32,
             };
-            sender.send::<ControlChannel>(pong);
+            sender.send::<StateChannel>(pong);
         }
     }
 }
@@ -1215,6 +1358,67 @@ fn maintain_anti_stuck(
     warn!("[anti-stuck] resolved player to {:?}", block_pos);
 }
 
+fn apply_cart_move(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    world: &GameWorld,
+    drive: &mut ServerCartDrive,
+    input: CartDriveInput,
+    grounded: bool,
+    dt: f32,
+) -> bool {
+    let displacement = step_cart_drive(&mut drive.state, input, dt);
+    if displacement.length_squared() <= 0.0001 {
+        transform.rotation = Quat::from_rotation_y(drive.state.yaw);
+        return false;
+    }
+
+    let moved = if grounded {
+        apply_world_displacement(
+            transform,
+            player_pos,
+            player,
+            world,
+            Vec3::new(displacement.x, 0.0, displacement.y),
+            true,
+        )
+    } else {
+        apply_air_world_displacement(
+            transform,
+            player_pos,
+            player,
+            world,
+            Vec3::new(displacement.x, 0.0, displacement.y),
+            true,
+        )
+    };
+    transform.rotation = Quat::from_rotation_y(drive.state.yaw);
+    if !moved {
+        // Grid collision is the vehicle's equivalent of STK's wheel/ground
+        // impulse limit: hitting a solid cell should not keep the car's full
+        // momentum alive for several ticks.
+        drive.state.speed = 0.0;
+    }
+    moved
+}
+
+fn cart_input_from_world_direction(yaw: f32, direction: Vec2) -> CartDriveInput {
+    let forward = Vec2::new(yaw.sin(), yaw.cos());
+    let reverse = direction.dot(forward) < -0.35;
+    let desired_yaw =
+        direction.x.atan2(direction.y) + if reverse { std::f32::consts::PI } else { 0.0 };
+    let heading_error = normalize_angle(desired_yaw - yaw);
+    CartDriveInput {
+        throttle: (if reverse { -1.0 } else { 1.0 }) * direction.length().clamp(0.0, 1.0),
+        steering: (heading_error / 0.9).clamp(-1.0, 1.0),
+    }
+}
+
+fn normalize_angle(angle: f32) -> f32 {
+    (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+
 fn apply_world_move(
     transform: &mut Transform,
     player_pos: &mut PlayerPos,
@@ -1232,6 +1436,20 @@ fn apply_world_move(
     // we drop exactly one MoveWorld per tick on the caller side, so speed stays
     // at ONLINE_MOVE_SPEED (× sprint factor) regardless of client frame rate.
     let step = Vec3::new(dir.x, 0.0, dir.y) * ONLINE_MOVE_SPEED * dt;
+    apply_world_displacement(transform, player_pos, player, world, step, cart_mounted)
+}
+
+fn apply_world_displacement(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    world: &GameWorld,
+    step: Vec3,
+    cart_mounted: bool,
+) -> bool {
+    if step.length_squared() <= 0.0001 {
+        return false;
+    }
     let next = player.pos + step;
     let next_x = next.x.floor() as i32;
     let next_z = next.z.floor() as i32;
@@ -1256,6 +1474,61 @@ fn apply_world_move(
     true
 }
 
+fn apply_player_move(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    world: &GameWorld,
+    jump: &mut ServerJumpState,
+    swimming: &mut SwimmingState,
+    dir: Vec2,
+    vertical: f32,
+    dt: f32,
+    grounded: bool,
+    cart_mounted: bool,
+) -> bool {
+    let horizontal_step = Vec3::new(dir.x, 0.0, dir.y) * ONLINE_MOVE_SPEED * dt;
+    let swim_probe = player.pos + horizontal_step;
+    let was_swimming = swimming.0;
+    if swimming.0 || can_swim_at(world, player.pos) || can_swim_at(world, swim_probe) {
+        let next = player.pos + horizontal_step + Vec3::Y * vertical * SWIM_VERTICAL_SPEED * dt;
+        if can_swim_at(world, next) {
+            let x = next.x.floor() as i32;
+            let z = next.z.floor() as i32;
+            let Some(floor_y) = water_floor_foot_y(world, x, z) else {
+                swimming.0 = false;
+                return false;
+            };
+            let min_y = floor_y as f32 + 0.05;
+            let max_y = constant::SEA_LEVEL as f32 + 1.0 - SWIM_SURFACE_CLEARANCE;
+            if min_y <= max_y {
+                let next_pos = Vec3::new(next.x, next.y.clamp(min_y, max_y), next.z);
+                if player_volume_clear_at(world, next_pos) {
+                    transform.translation = next_pos;
+                    player_pos.0 = next_pos;
+                    player.pos = next_pos;
+                    player.block_pos = [x, next_pos.y.floor() as i32, z];
+                    swimming.0 = true;
+                    jump.grounded = false;
+                    jump.velocity_y = 0.0;
+                    return true;
+                }
+            }
+        }
+        // Moving out of the water falls back to the ordinary step solver.
+        swimming.0 = false;
+        if was_swimming {
+            return apply_world_move(transform, player_pos, player, world, dir, dt, cart_mounted);
+        }
+    }
+
+    if grounded {
+        apply_world_move(transform, player_pos, player, world, dir, dt, cart_mounted)
+    } else {
+        apply_air_world_move(transform, player_pos, player, world, dir, dt, cart_mounted)
+    }
+}
+
 fn apply_air_world_move(
     transform: &mut Transform,
     player_pos: &mut PlayerPos,
@@ -1269,6 +1542,20 @@ fn apply_air_world_move(
         return false;
     }
     let step = Vec3::new(dir.x, 0.0, dir.y) * ONLINE_MOVE_SPEED * dt;
+    apply_air_world_displacement(transform, player_pos, player, world, step, cart_mounted)
+}
+
+fn apply_air_world_displacement(
+    transform: &mut Transform,
+    player_pos: &mut PlayerPos,
+    player: &mut PlayerState,
+    world: &GameWorld,
+    step: Vec3,
+    cart_mounted: bool,
+) -> bool {
+    if step.length_squared() <= 0.0001 {
+        return false;
+    }
     let next_pos = player.pos + step;
     if !vehicle_volume_clear_at(world, next_pos, cart_mounted) {
         return false;
@@ -1388,8 +1675,7 @@ fn player_volume_clear_at(world: &GameWorld, pos: Vec3) -> bool {
             for oz in [-PLAYER_COLLISION_RADIUS, PLAYER_COLLISION_RADIUS] {
                 let x = (pos.x + ox).floor() as i32;
                 let z = (pos.z + oz).floor() as i32;
-                if (!world.procedural
-                    && (x < 0 || x >= world.size || z < 0 || z >= world.size))
+                if (!world.procedural && (x < 0 || x >= world.size || z < 0 || z >= world.size))
                     || y < 0
                     || y >= world.size
                 {
@@ -1411,10 +1697,12 @@ fn sync_authoritative_snapshot_components(
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
     regions: Res<NatureRegionWorld>,
+    reports: Res<LatestNatureRegionReports>,
     obs: Res<TickObserver>,
     revision: Res<WorldRevision>,
     last_delta: Res<LastVoxelDeltaState>,
     mut snapshot_cache: ResMut<VoxelChunkSnapshotCache>,
+    mut snapshot_requests: ResMut<VoxelSnapshotResyncRequests>,
     mut q: Query<
         (
             &mut GameplayHudState,
@@ -1422,6 +1710,7 @@ fn sync_authoritative_snapshot_components(
             &mut VoxelDelta,
             &mut VoxelChunkSnapshot,
             &PlayerStateComponent,
+            Option<&lightyear::prelude::ControlledBy>,
         ),
         With<PlayerPos>,
     >,
@@ -1429,7 +1718,10 @@ fn sync_authoritative_snapshot_components(
     let Some(primary) = regions.primary() else {
         return;
     };
-    let primary_snapshot = primary.latest_snapshot();
+    let primary_snapshot = report_snapshot_for_region(&reports, primary.id, primary.id);
+    let Some(primary_snapshot) = primary_snapshot else {
+        return;
+    };
     if !primary_snapshot.is_finite() {
         warn!(
             "[nature] retaining previous replicated snapshot after non-finite state at tick {}",
@@ -1437,14 +1729,14 @@ fn sync_authoritative_snapshot_components(
         );
         return;
     }
-    for (mut hud_state, mut eco_state, mut delta, mut chunk, player) in q.iter_mut() {
+    for (mut hud_state, mut eco_state, mut delta, mut chunk, player, controlled_by) in q.iter_mut()
+    {
         let region_id = NatureRegionId::from_position(
             [player.0.block_pos[0] as f32, player.0.block_pos[2] as f32],
             lk2_core::simulation::regions::DEFAULT_REGION_SIZE,
         );
-        let nature_snapshot = regions
-            .get(region_id)
-            .map_or_else(|| primary_snapshot.clone(), NatureRegionState::latest_snapshot);
+        let nature_snapshot =
+            report_snapshot_for_region(&reports, primary.id, region_id).unwrap_or(primary_snapshot);
         let eco_snapshot = nature_snapshot
             .for_region(
                 [player.0.block_pos[0] as f32, player.0.block_pos[2] as f32],
@@ -1458,9 +1750,14 @@ fn sync_authoritative_snapshot_components(
             player.0.block_pos,
             &mut snapshot_cache,
         );
+        let requested = controlled_by
+            .and_then(|controlled| snapshot_requests.pending.remove(&controlled.owner));
+        let requested_current_chunk = requested.as_ref().is_some_and(|request| {
+            request.chunk_x == chunk_snapshot.chunk_x && request.chunk_z == chunk_snapshot.chunk_z
+        });
         *hud_state = hud.clone();
         *eco_state = eco_snapshot.clone();
-        if *chunk != *chunk_snapshot {
+        if requested_current_chunk || *chunk != *chunk_snapshot {
             *chunk = chunk_snapshot.clone();
         }
         if last_delta.revision > 0 {
@@ -1550,6 +1847,7 @@ fn main() {
         .add_message::<ChatBroadcast>()
         .add_message::<ChatMessage>()
         .add_message::<GameplayCommand>()
+        .add_message::<TerrainSnapshotRequest>()
         .add_message::<GameplayFeedback>()
         .add_message::<PingMessage>()
         .add_message::<PongMessage>()
@@ -1562,6 +1860,7 @@ fn main() {
         .init_resource::<MonsterEcosystem>()
         .init_resource::<NatureRegionWorld>()
         .init_resource::<LatestNatureRegionReports>()
+        .init_resource::<NatureRestoreStatus>()
         .init_resource::<TickObserver>()
         .init_resource::<TickRecorder>()
         .init_resource::<CreatureSpawnerDone>()
@@ -1573,6 +1872,7 @@ fn main() {
         .init_resource::<WorldRevision>()
         .init_resource::<LastVoxelDeltaState>()
         .init_resource::<VoxelChunkSnapshotCache>()
+        .init_resource::<VoxelSnapshotResyncRequests>()
         .init_resource::<ServerCommandDiagnostics>()
         .init_resource::<ServerConnectionDiagnostics>()
         .insert_resource(scenario_state)
@@ -1607,7 +1907,13 @@ fn main() {
             // early "100 ticks all green" diagnostic.
             run_startup_self_check_once,
         )
-        .add_systems(Update, lk2_core::ecology::animals::update_creatures)
+        .add_systems(
+            Update,
+            (
+                lk2_core::ecology::animals::update_creatures,
+                sync_server_creature_states.after(lk2_core::ecology::animals::update_creatures),
+            ),
+        )
         .add_systems(
             FixedUpdate,
             (
@@ -1646,7 +1952,9 @@ fn main() {
                 echo_ping_messages,
                 broadcast_gameplay_feedback,
                 relay_chat_messages,
-                sync_authoritative_snapshot_components.after(simulation_tick),
+                sync_authoritative_snapshot_components
+                    .after(simulation_tick)
+                    .after(NatureAuthoritySet::PublishReport),
                 broadcast_player_pos,
             )
                 .chain(),
@@ -1737,6 +2045,7 @@ fn spawn_server_player(
         .insert(Collider::capsule(0.38, 1.0))
         .insert(PlayerPos(position))
         .insert(CartMounted(mounted))
+        .insert(SwimmingState::default())
         .insert(PlayerStateComponent(state))
         .insert(jump)
         .insert(RespawnState::default())
@@ -1765,8 +2074,13 @@ fn spawn_server_player(
     commands.spawn((
         Name::new(format!("{name}-Cart")),
         cart,
-        Transform::from_translation(cart.position)
-            .with_rotation(Quat::from_rotation_y(cart.yaw)),
+        ServerCartDrive {
+            state: CartDriveState {
+                yaw: cart.yaw,
+                ..default()
+            },
+        },
+        Transform::from_translation(cart.position).with_rotation(Quat::from_rotation_y(cart.yaw)),
         lightyear::prelude::Replicate::to_clients(lightyear::prelude::NetworkTarget::All),
     ));
     entity_id
@@ -1804,12 +2118,13 @@ fn spawn_server_creatures(
         };
         commands.spawn((
             Creature { kind, block_pos },
-            CreatureAI {
-                wander_timer: 0.0,
-                next_wander_secs: 9999.0,
-                bob_phase: 0.0,
-            },
+            server_creature_ai(),
             Transform::from_translation(position),
+            CreatureState {
+                kind: kind.to_u8(),
+                position,
+            },
+            lightyear::prelude::Replicate::to_clients(lightyear::prelude::NetworkTarget::All),
         ));
         spawned += 1;
     }
@@ -1817,6 +2132,27 @@ fn spawn_server_creatures(
         "[creature] spawned {} authoritative online creatures",
         spawned
     );
+}
+
+fn server_creature_ai() -> CreatureAI {
+    CreatureAI {
+        wander_timer: 0.0,
+        next_wander_secs: CREATURE_INITIAL_WANDER_SECS,
+        bob_phase: 0.0,
+    }
+}
+
+fn sync_server_creature_states(creatures: Query<(&Creature, &Transform, &mut CreatureState)>) {
+    for (creature, transform, mut state) in creatures {
+        if !transform.translation.is_finite() {
+            continue;
+        }
+        let kind = creature.kind.to_u8();
+        if state.kind != kind || state.position != transform.translation {
+            state.kind = kind;
+            state.position = transform.translation;
+        }
+    }
 }
 
 fn spawn_player(
@@ -1932,7 +2268,10 @@ fn replicate_player_for_connected(
 ) {
     let client_of_entity = trigger.entity;
     diagnostics.record_connected();
-    let remote_id = remote_ids.get(client_of_entity).ok().map(|id| id.0.to_bits());
+    let remote_id = remote_ids
+        .get(client_of_entity)
+        .ok()
+        .map(|id| id.0.to_bits());
     info!(
         "[net] client {:?} connected on {:?}; active={}, connected_total={}",
         remote_id, client_of_entity, diagnostics.active_connections, diagnostics.connected_total,
@@ -1941,6 +2280,7 @@ fn replicate_player_for_connected(
     commands.entity(client_of_entity).insert((
         lightyear::prelude::ReplicationSender::default(),
         lightyear::prelude::MessageReceiver::<PingMessage>::default(),
+        lightyear::prelude::MessageReceiver::<TerrainSnapshotRequest>::default(),
         LastClientCommandSequence::default(),
     ));
     info!(
@@ -1964,15 +2304,17 @@ fn replicate_player_for_connected(
         );
         let session = remote_id.and_then(|key| sessions.0.remove(&key));
         let (state, mounted, saved_cart) = session.map_or_else(
-            || (
-                PlayerState {
-                    pos: spawn,
-                    block_pos: spawn_block,
-                    ..default()
-                },
-                false,
-                None,
-            ),
+            || {
+                (
+                    PlayerState {
+                        pos: spawn,
+                        block_pos: spawn_block,
+                        ..default()
+                    },
+                    false,
+                    None,
+                )
+            },
             |session| (session.state, session.mounted, session.cart),
         );
         let restored_pos = state.pos;
@@ -2016,19 +2358,25 @@ fn record_disconnected_client(
     mut diagnostics: ResMut<ServerConnectionDiagnostics>,
     mut sessions: ResMut<DisconnectedPlayerSessions>,
     mut reserved_players: ResMut<ReservedPlayerEntities>,
-    players: Query<(
-        Entity,
-        &lightyear::prelude::ControlledBy,
-        &PlayerTag,
-        &PlayerStateComponent,
-        &CartMounted,
-    ), With<PlayerPos>>,
+    mut snapshot_requests: ResMut<VoxelSnapshotResyncRequests>,
+    players: Query<
+        (
+            Entity,
+            &lightyear::prelude::ControlledBy,
+            &PlayerTag,
+            &PlayerStateComponent,
+            &CartMounted,
+        ),
+        With<PlayerPos>,
+    >,
     carts: Query<(Entity, &CartState)>,
 ) {
     let Ok((disconnected, remote_id)) = connections.get(trigger.entity) else {
         return;
     };
     diagnostics.record_disconnected(disconnected.reason.as_deref());
+    snapshot_requests.pending.remove(&trigger.entity);
+    snapshot_requests.last_accepted_tick.remove(&trigger.entity);
     let session_key = remote_id.map(|id| id.0.to_bits());
     for (player, owner, player_tag, player_state, mounted) in &players {
         if owner.owner == trigger.entity {
@@ -2118,6 +2466,7 @@ fn setup_world(
     mut monsters: ResMut<MonsterEcosystem>,
     mut regions: ResMut<NatureRegionWorld>,
     saves: Res<LatestNatureRegionSaves>,
+    mut restore_status: ResMut<NatureRestoreStatus>,
 ) {
     let world_config = scenario_state
         .scenario
@@ -2172,11 +2521,12 @@ fn setup_world(
         ],
         lk2_core::simulation::regions::DEFAULT_REGION_SIZE,
     );
-    let primary_region = if saves
+    let primary_restored = saves
         .0
         .get(&primary_id)
-        .is_some_and(|save| save.validate_persisted().is_ok())
-    {
+        .is_some_and(|save| save.validate_persisted().is_ok());
+    restore_status.primary_restored = primary_restored;
+    let primary_region = if primary_restored {
         restored_or_generated_region(
             primary_id,
             lk2_core::simulation::cadence::RegionLod::Active,
@@ -2190,8 +2540,8 @@ fn setup_world(
             lk2_core::simulation::cadence::RegionLod::Active,
         )
     };
-    (*pool).clone_from(&primary_region.resources);
     regions.insert(primary_region);
+    regions.sync_external_pool_from_primary(&mut pool);
 
     info!("🌍 世界已生成: {}³ (server)", constant::WORLD_SIZE);
 }
@@ -2247,10 +2597,8 @@ fn sync_nature_regions(
     players: Query<&PlayerStateComponent, With<PlayerTag>>,
 ) {
     let mut wanted = Vec::new();
-    let mut region_lods: HashMap<
-        NatureRegionId,
-        lk2_core::simulation::cadence::RegionLod,
-    > = HashMap::new();
+    let mut region_lods: HashMap<NatureRegionId, lk2_core::simulation::cadence::RegionLod> =
+        HashMap::new();
     let active_radius = constant::PLAYER_VISION_RADIUS as f32;
     let nearby_radius = active_radius * 3.0;
 
@@ -2317,12 +2665,7 @@ fn restored_or_generated_region(
     {
         let mut ecology = EcoCycle::default();
         ecology.apply_snapshot(&save.state.snapshot.detailed_ecology);
-        let mut region = NatureRegionState::new(
-            id,
-            ecology,
-            save.state.resources.clone(),
-            lod,
-        );
+        let mut region = NatureRegionState::new(id, ecology, save.state.resources.clone(), lod);
         region.scheduler.sync_to_tick(save.tick);
         return region;
     }
@@ -2433,16 +2776,16 @@ fn simulation_tick(
     mut latest_nature: ResMut<LatestNatureReport>,
     mut latest_regions: ResMut<LatestNatureRegionReports>,
 ) {
+    // The regional pool is authoritative. The legacy global resource is a
+    // compatibility mirror because gameplay systems still query it.
+    // Synchronize it through NatureRegionWorld so every migration caller uses
+    // the same ownership boundary.
+    regions.sync_primary_resources_from_external(&pool);
     let (primary_id, report) = {
         let Some(primary) = regions.primary_mut() else {
             return;
         };
         let id = primary.id;
-        // The regional pool is authoritative. The legacy global resource is
-        // a compatibility mirror because gameplay systems still query it.
-        // Copy gameplay mutations into the region before stepping and publish
-        // the resulting authoritative state back to the mirror afterwards.
-        primary.resources.clone_from(&*pool);
         let report = advance_fixed_authority_tick_report(
             fixed_time.delta_secs(),
             &mut clock,
@@ -2452,12 +2795,12 @@ fn simulation_tick(
             &mut obs,
             SimRole::ServerAuthority,
         );
-        (*pool).clone_from(&primary.resources);
         if let Some(report) = report.as_ref() {
             primary.scheduler.sync_to_tick(report.tick);
         }
         (id, report)
     };
+    regions.sync_external_pool_from_primary(&mut pool);
     if let Some(report) = report {
         if report.snapshot.is_finite() {
             latest_regions.0.insert(primary_id, report.clone());
@@ -2479,9 +2822,7 @@ fn simulation_tick(
             );
         }
     }
-    latest_regions
-        .0
-        .retain(|id, _| regions.get(*id).is_some());
+    latest_regions.0.retain(|id, _| regions.get(*id).is_some());
 }
 
 fn end_tick_system(
@@ -2520,6 +2861,34 @@ pub struct TickRecorder {
     pub current_iter: u32,
 }
 
+#[derive(Resource, Default)]
+struct NatureRestoreStatus {
+    primary_restored: bool,
+}
+
+#[derive(SystemParam)]
+struct TickRecorderNature<'w> {
+    regions: Res<'w, NatureRegionWorld>,
+    reports: Res<'w, LatestNatureRegionReports>,
+    save: Res<'w, LatestNatureSave>,
+    restore_status: Res<'w, NatureRestoreStatus>,
+}
+
+fn nature_capture_evidence(
+    world_tick: u64,
+    region_tick: u64,
+    event_count: usize,
+    save_restored: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "tick": world_tick,
+        "event_count": event_count,
+        "region_tick": region_tick,
+        "catch_up_remaining": world_tick.saturating_sub(region_tick),
+        "save_restored": save_restored,
+    })
+}
+
 fn tick_recorder(
     time: Res<Time>,
     mut rec: ResMut<TickRecorder>,
@@ -2528,14 +2897,15 @@ fn tick_recorder(
     pool: Res<GlobalResourcePool>,
     nations: Res<NationRegistry>,
     monsters: Res<MonsterEcosystem>,
-    regions: Res<NatureRegionWorld>,
+    nature: TickRecorderNature,
     obs: Res<TickObserver>,
     game_world: Res<GameWorld>,
-    save: Res<LatestNatureSave>,
     diagnostics: Res<ServerCommandDiagnostics>,
-    server_q: Query<Entity, With<lightyear::prelude::Server>>,
-    started_q: Query<Entity, With<lightyear_connection::server::Started>>,
-    link_of_q: Query<Entity, With<lightyear::prelude::server::LinkOf>>,
+    network_entities: Query<(
+        Option<&lightyear::prelude::Server>,
+        Option<&lightyear_connection::server::Started>,
+        Option<&lightyear::prelude::server::LinkOf>,
+    )>,
 ) {
     if std::env::var("LK2_CAPTURE").is_err() {
         return;
@@ -2546,9 +2916,18 @@ fn tick_recorder(
     let Some((player_state, chunk)) = players.iter().next() else {
         return;
     };
-    let Some(eco) = regions.primary().map(|region| &region.ecology) else {
+    let Some(eco) = nature.regions.primary().map(|region| &region.ecology) else {
         return;
     };
+    let Some(primary) = nature.regions.primary() else {
+        return;
+    };
+    let primary_tick = primary.scheduler.simulated_tick();
+    let primary_event_count = nature
+        .reports
+        .0
+        .get(&primary.id)
+        .map_or(0, |report| report.events.len());
     let player = &player_state.0;
     rec.last_dump_tick = clock.tick;
     rec.current_iter = clock.tick as u32;
@@ -2567,12 +2946,30 @@ fn tick_recorder(
     );
     if let Some(obj) = state.as_object_mut() {
         obj.insert(
+            "nature".to_string(),
+            nature_capture_evidence(
+                clock.tick,
+                primary_tick,
+                primary_event_count,
+                nature.restore_status.primary_restored,
+            ),
+        );
+        obj.insert(
             "network_command".to_string(),
             serde_json::json!({
                 "receiver_entities": diagnostics.receiver_entities,
-                "server_entities": server_q.iter().count(),
-                "started_servers": started_q.iter().count(),
-                "link_of_entities": link_of_q.iter().count(),
+                "server_entities": network_entities
+                    .iter()
+                    .filter(|(server, _, _)| server.is_some())
+                    .count(),
+                "started_servers": network_entities
+                    .iter()
+                    .filter(|(_, started, _)| started.is_some())
+                    .count(),
+                "link_of_entities": network_entities
+                    .iter()
+                    .filter(|(_, _, link_of)| link_of.is_some())
+                    .count(),
                 "move_world_received": diagnostics.move_world_received,
                 "last_dx_milli": diagnostics.last_dx_milli,
                 "last_dz_milli": diagnostics.last_dz_milli,
@@ -2582,9 +2979,9 @@ fn tick_recorder(
         obj.insert(
             "persistence".to_string(),
             serde_json::json!({
-                "schema_version": save.0.as_ref().map(|value| value.schema_version),
-                "tick": save.0.as_ref().map(|value| value.tick),
-                "valid": save.0.as_ref().is_some_and(|value| value.validate().is_ok()),
+                "schema_version": nature.save.0.as_ref().map(|value| value.schema_version),
+                "tick": nature.save.0.as_ref().map(|value| value.tick),
+                "valid": nature.save.0.as_ref().is_some_and(|value| value.validate().is_ok()),
             }),
         );
         obj.insert(
@@ -2612,12 +3009,52 @@ mod tests {
     use lk2_core::world::BlockType;
 
     #[test]
+    fn server_creatures_start_wandering_after_a_short_delay() {
+        let ai = server_creature_ai();
+
+        assert_eq!(ai.wander_timer, 0.0);
+        assert_eq!(ai.next_wander_secs, CREATURE_INITIAL_WANDER_SECS);
+        assert!(ai.next_wander_secs <= 3.0);
+    }
+
+    #[test]
     fn block_type_wire_codes_keep_existing_values_and_append_grass() {
         assert_eq!(block_type_to_u8(BlockType::Air), 0);
         assert_eq!(block_type_to_u8(BlockType::Dirt), 1);
         assert_eq!(block_type_to_u8(BlockType::Stone), 2);
         assert_eq!(block_type_to_u8(BlockType::BerryThicket), 12);
         assert_eq!(block_type_to_u8(BlockType::Grass), 13);
+    }
+
+    #[test]
+    fn water_column_exposes_a_swimmable_floor_and_bounded_vertical_input() {
+        // The normal server fixture installs a large spawn platform that
+        // intentionally covers the finite test window. Disable that authored
+        // platform here so this test exercises the procedural water columns.
+        let world = generate_world(&WorldConfig {
+            install_spawn_platform: false,
+            generate_content: false,
+            ..WorldConfig::default()
+        });
+        let water = (0..world.size)
+            .flat_map(|x| (0..world.size).map(move |z| (x, z)))
+            .find_map(|(x, z)| {
+                let position =
+                    Vec3::new(x as f32 + 0.5, constant::SEA_LEVEL as f32, z as f32 + 0.5);
+                can_swim_at(&world, position).then_some((x, z))
+            })
+            .expect("generated world should contain water");
+        let position = Vec3::new(
+            water.0 as f32 + 0.5,
+            constant::SEA_LEVEL as f32,
+            water.1 as f32 + 0.5,
+        );
+        let depth = water_depth_at(&world, position).expect("water should expose a floor");
+
+        assert!(depth >= 0.0);
+        assert!(can_swim_at(&world, position));
+        assert_eq!(sanitize_swim_vertical(i16::MAX), 1.0);
+        assert_eq!(sanitize_swim_vertical(i16::MIN), -1.0);
     }
 
     #[test]
@@ -2629,8 +3066,7 @@ mod tests {
         let snapshot_size = VOXEL_CHUNK_SIZE_XZ + snapshot.border * 2;
         let x_min = snapshot.chunk_x * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
         let z_min = snapshot.chunk_z * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
-        let index = (((treasure[1] - 1 - snapshot.y_min) * snapshot_size
-            + (treasure[2] - z_min))
+        let index = (((treasure[1] - 1 - snapshot.y_min) * snapshot_size + (treasure[2] - z_min))
             * snapshot_size
             + (treasure[0] - x_min)) as usize;
 
@@ -2640,6 +3076,23 @@ mod tests {
         );
         assert_eq!(snapshot.border, 1);
         assert_eq!(snapshot.blocks.len(), (18 * 18 * snapshot.y_size) as usize);
+    }
+
+    #[test]
+    fn chunk_snapshot_includes_adjacent_chunk_border_content() {
+        let mut world =
+            GameWorld::with_pipeline(32, lk2_core::world::terrain::presets::default_preset());
+        world.set(16, 1, 8, BlockType::Stone);
+
+        let snapshot = build_voxel_chunk_snapshot(&world, 3, [8, 1, 8]);
+        let snapshot_size = VOXEL_CHUNK_SIZE_XZ + snapshot.border * 2;
+        let x_min = snapshot.chunk_x * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
+        let z_min = snapshot.chunk_z * VOXEL_CHUNK_SIZE_XZ - snapshot.border;
+        let index = (((1 - snapshot.y_min) * snapshot_size + (8 - z_min)) * snapshot_size
+            + (16 - x_min)) as usize;
+
+        assert_eq!(snapshot.border, 1);
+        assert_eq!(snapshot.blocks[index], block_type_to_u8(BlockType::Stone));
     }
 
     #[test]
@@ -2686,6 +3139,38 @@ mod tests {
             diagnostics.last_disconnect_reason.as_deref(),
             Some("timeout")
         );
+    }
+
+    #[test]
+    fn terrain_resync_budget_coalesces_pending_requests_per_connection() {
+        let mut world = World::new();
+        let owner = world.spawn_empty().id();
+        let request = |request_id| TerrainSnapshotRequest {
+            request_id,
+            chunk_x: 1,
+            chunk_z: -2,
+            known_revision: 7,
+        };
+        let mut budget = VoxelSnapshotResyncRequests::default();
+
+        assert!(budget.accept(owner, 1, request(1)));
+        assert!(!budget.accept(owner, 1, request(2)));
+        assert_eq!(budget.pending.len(), 1);
+
+        budget.pending.remove(&owner);
+        assert!(!budget.accept(owner, 15, request(3)));
+        assert!(budget.accept(owner, 16, request(4)));
+    }
+
+    #[test]
+    fn nature_capture_evidence_reports_bounded_catch_up_and_restore_status() {
+        let evidence = nature_capture_evidence(12, 9, 3, true);
+
+        assert_eq!(evidence["tick"], 12);
+        assert_eq!(evidence["event_count"], 3);
+        assert_eq!(evidence["region_tick"], 9);
+        assert_eq!(evidence["catch_up_remaining"], 3);
+        assert_eq!(evidence["save_restored"], true);
     }
 
     #[test]

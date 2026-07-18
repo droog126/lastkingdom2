@@ -596,15 +596,13 @@ fn builtin_status(source: ContentSource) -> ContentStatus {
             EcologyKind::Wildlife(_)
             | EcologyKind::Tree(_)
             | EcologyKind::ResourceNode(ResourceNodeKind::BerryBush)
-            | EcologyKind::ResourceNode(ResourceNodeKind::MushroomRed)
-            | EcologyKind::ResourceNode(ResourceNodeKind::MushroomBrown)
+            | EcologyKind::ResourceNode(ResourceNodeKind::Grass)
             | EcologyKind::ResourceNode(ResourceNodeKind::Flower)
             | EcologyKind::ResourceNode(ResourceNodeKind::RockMid)
             | EcologyKind::ResourceNode(ResourceNodeKind::RockMoss)
             | EcologyKind::ResourceNode(ResourceNodeKind::SunstoneCrystal)
             | EcologyKind::ResourceNode(ResourceNodeKind::FrostCrystal)
             | EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit)
-            | EcologyKind::ResourceDrop(ResourceDropKind::Wood)
             | EcologyKind::ResourceDrop(ResourceDropKind::Stone) => ContentStatus::Active,
             EcologyKind::Creature(_) => ContentStatus::Planned,
         },
@@ -685,10 +683,7 @@ fn ecology_key(kind: EcologyKind) -> &'static str {
         EcologyKind::Tree(TreeKind::FallenStick) => "plant.fallen_stick",
         EcologyKind::Tree(TreeKind::Palm) => "plant.palm",
         EcologyKind::ResourceNode(ResourceNodeKind::BerryBush) => "resource_node.berry_bush",
-        EcologyKind::ResourceNode(ResourceNodeKind::MushroomRed) => "resource_node.mushroom_red",
-        EcologyKind::ResourceNode(ResourceNodeKind::MushroomBrown) => {
-            "resource_node.mushroom_brown"
-        }
+        EcologyKind::ResourceNode(ResourceNodeKind::Grass) => "resource_node.grass",
         EcologyKind::ResourceNode(ResourceNodeKind::Flower) => "resource_node.flower",
         EcologyKind::ResourceNode(ResourceNodeKind::RockMid) => "resource_node.rock_mid",
         EcologyKind::ResourceNode(ResourceNodeKind::RockMoss) => "resource_node.rock_moss",
@@ -697,7 +692,6 @@ fn ecology_key(kind: EcologyKind) -> &'static str {
         }
         EcologyKind::ResourceNode(ResourceNodeKind::FrostCrystal) => "resource_node.frost_crystal",
         EcologyKind::ResourceDrop(ResourceDropKind::BerryFruit) => "drop.berry_fruit",
-        EcologyKind::ResourceDrop(ResourceDropKind::Wood) => "drop.wood",
         EcologyKind::ResourceDrop(ResourceDropKind::Stone) => "drop.stone",
     }
 }
@@ -731,7 +725,7 @@ mod tests {
             registry
                 .definitions_in(ContentCategory::ResourceNode)
                 .count()
-                >= 8
+                >= 6
         );
     }
 
@@ -825,7 +819,7 @@ mod tests {
 
         let active = game_content_registry().export_status(ContentStatus::Active);
         let planned = game_content_registry().export_status(ContentStatus::Planned);
-        assert_eq!(active.content.len(), 30);
+        assert_eq!(active.content.len(), 28);
         assert_eq!(planned.content.len(), 30);
         assert_eq!(active.recipes.len(), 1);
     }

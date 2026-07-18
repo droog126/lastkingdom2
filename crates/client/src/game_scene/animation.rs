@@ -6,7 +6,10 @@ use avian3d::prelude::{LinearVelocity, Rotation};
 use bevy::prelude::*;
 
 use super::content_visuals::ExportedContentVisual;
-use super::creature_ai::{AiContext, AiMood, AiTarget, CreatureAiProfile, decide_creature_intent};
+use super::creature_ai::{
+    AiContext, AiMood, AiTarget, CreatureAiProfile, WOLF_ATTACK_SEPARATION, decide_creature_intent,
+    separated_target_position,
+};
 use super::offline::OfflineNature;
 use super::procedural_motion::{
     GrassWind, ProceduralTreeSway, WindField, alternating_step_lift, alternating_step_offset,
@@ -14,18 +17,24 @@ use super::procedural_motion::{
     wind_scale, wind_sway,
 };
 use super::procedural_rig::{
-    DragonRig, DragonSolvedRig, DragonTargets, QuadrupedRig, QuadrupedSolvedRig,
-    QuadrupedTargets,
+    DragonRig, DragonSolvedRig, DragonTargets, QuadrupedRig, QuadrupedSolvedRig, QuadrupedTargets,
 };
 use super::state::{
-    BerryBush, BossActor, Cloud, GrassTuft, HitImpactFx, HitReaction, LivingSceneState, LivingSun,
-    PlantNode, PlayerActor, ProceduralTerrainSurface, Rabbit, RabbitAi, RabbitMood, RainDrop,
-    SceneMaterials, SlashFx, WildlifeAi, WildlifeAnimal, Wolf, WolfAi, WolfMood,
+    BerryBush, BossActor, Cloud, CreatureHitSettings, DefeatedCreature, GrassTuft, HitImpactFx,
+    HitReaction, LivingSceneState, LivingSun, PlantNode, PlayerActor, ProceduralTerrainSurface,
+    Rabbit, RabbitAi, RabbitMood, RainDrop, SceneMaterials, SlashFx, WaterFish, WaterSeaweed,
+    WildlifeAi, WildlifeAnimal, Wolf, WolfAi, WolfMood,
 };
 use super::stylized_material::StylizedTerrainMaterial;
-use super::util::smoothstep;
+use super::util::{CLOUD_VISUAL_HEIGHT, CLOUD_VISUAL_SCALE, smoothstep};
 use lk2_core::ecology::{ResourceNodeKind, WildlifeKind};
 use lk2_core::pvp::Health;
+
+fn projected_nature_position(terrain: Option<&ProceduralTerrainSurface>, position: Vec3) -> Vec3 {
+    terrain
+        .and_then(|terrain| terrain.nearest_land_position(position, 26))
+        .unwrap_or(Vec3::new(position.x, 0.0, position.z))
+}
 
 #[derive(Component)]
 pub(super) struct QuadrupedVisualBinding;
@@ -62,6 +71,22 @@ pub(super) enum QuadrupedVisualPartKind {
     DragonFrontLeftLower,
     DragonFrontRightUpper,
     DragonFrontRightLower,
+    DragonHindLeftUpper,
+    DragonHindLeftLower,
+    DragonHindRightUpper,
+    DragonHindRightLower,
+    DragonWingLeftUpper,
+    DragonWingLeftLower,
+    DragonWingRightUpper,
+    DragonWingRightLower,
+    DragonFrontLeftClaw,
+    DragonFrontRightClaw,
+    DragonHindLeftClaw,
+    DragonHindRightClaw,
+    DragonWingLeftEdge,
+    DragonWingRightEdge,
+    WildlifeLeg0,
+    WildlifeLeg1,
 }
 
 pub fn bind_quadruped_visual_parts(
@@ -70,37 +95,43 @@ pub fn bind_quadruped_visual_parts(
         Query<(Entity, &Children, Option<&QuadrupedVisualBinding>), With<Rabbit>>,
         Query<(Entity, &Children, Option<&QuadrupedVisualBinding>), With<Wolf>>,
         Query<(Entity, &Children, Option<&QuadrupedVisualBinding>), With<BossActor>>,
+        Query<(Entity, &Children, Option<&QuadrupedVisualBinding>), With<WildlifeAnimal>>,
     )>,
     names: Query<&Name>,
     children: Query<&Children>,
 ) {
-    let mut bind_root = |root: Entity, root_children: &Children, bound: bool, dragon: bool| {
-        if bound {
-            return;
-        }
-        let mut found = 0;
-        for child in root_children.iter() {
-            found += collect_quadruped_parts(
-                child,
-                root,
-                dragon,
-                &names,
-                &children,
-                &mut commands,
-            );
-        }
-        if found > 0 {
-            commands.entity(root).insert(QuadrupedVisualBinding);
-        }
-    };
+    let mut bind_root =
+        |root: Entity, root_children: &Children, bound: bool, dragon: bool, wildlife: bool| {
+            if bound {
+                return;
+            }
+            let mut found = 0;
+            for child in root_children.iter() {
+                found += collect_quadruped_parts(
+                    child,
+                    root,
+                    dragon,
+                    wildlife,
+                    &names,
+                    &children,
+                    &mut commands,
+                );
+            }
+            if found > 0 {
+                commands.entity(root).insert(QuadrupedVisualBinding);
+            }
+        };
     for (root, children, bound) in &mut roots.p0() {
-        bind_root(root, children, bound.is_some(), false);
+        bind_root(root, children, bound.is_some(), false, false);
     }
     for (root, children, bound) in &mut roots.p1() {
-        bind_root(root, children, bound.is_some(), false);
+        bind_root(root, children, bound.is_some(), false, false);
     }
     for (root, children, bound) in &mut roots.p2() {
-        bind_root(root, children, bound.is_some(), true);
+        bind_root(root, children, bound.is_some(), true, false);
+    }
+    for (root, children, bound) in &mut roots.p3() {
+        bind_root(root, children, bound.is_some(), false, true);
     }
 }
 
@@ -108,13 +139,14 @@ fn collect_quadruped_parts(
     entity: Entity,
     owner: Entity,
     dragon: bool,
+    wildlife: bool,
     names: &Query<&Name>,
     children: &Query<&Children>,
     commands: &mut Commands,
 ) -> usize {
     let mut found = 0;
     if let Ok(name) = names.get(entity) {
-        if let Some(kind) = quadruped_part_kind(name.as_str(), dragon) {
+        if let Some(kind) = quadruped_part_kind(name.as_str(), dragon, wildlife) {
             commands
                 .entity(entity)
                 .insert(QuadrupedVisualPart { owner, kind });
@@ -123,28 +155,46 @@ fn collect_quadruped_parts(
     }
     if let Ok(child_list) = children.get(entity) {
         for child in child_list.iter() {
-            found += collect_quadruped_parts(child, owner, dragon, names, children, commands);
+            found +=
+                collect_quadruped_parts(child, owner, dragon, wildlife, names, children, commands);
         }
     }
     found
 }
 
-fn quadruped_part_kind(name: &str, dragon: bool) -> Option<QuadrupedVisualPartKind> {
+fn quadruped_part_kind(
+    name: &str,
+    dragon: bool,
+    wildlife: bool,
+) -> Option<QuadrupedVisualPartKind> {
     if dragon {
-        return if name.contains("dragon_leg_-1.0") {
-            Some(if name.ends_with("upper") {
-                QuadrupedVisualPartKind::DragonFrontLeftUpper
-            } else {
-                QuadrupedVisualPartKind::DragonFrontLeftLower
-            })
-        } else if name.contains("dragon_leg_1.0") {
-            Some(if name.ends_with("upper") {
-                QuadrupedVisualPartKind::DragonFrontRightUpper
-            } else {
-                QuadrupedVisualPartKind::DragonFrontRightLower
-            })
-        } else {
-            None
+        return match name {
+            "dragon_leg_front_left_upper" => Some(QuadrupedVisualPartKind::DragonFrontLeftUpper),
+            "dragon_leg_front_left_lower" => Some(QuadrupedVisualPartKind::DragonFrontLeftLower),
+            "dragon_leg_front_right_upper" => Some(QuadrupedVisualPartKind::DragonFrontRightUpper),
+            "dragon_leg_front_right_lower" => Some(QuadrupedVisualPartKind::DragonFrontRightLower),
+            "dragon_leg_hind_left_upper" => Some(QuadrupedVisualPartKind::DragonHindLeftUpper),
+            "dragon_leg_hind_left_lower" => Some(QuadrupedVisualPartKind::DragonHindLeftLower),
+            "dragon_leg_hind_right_upper" => Some(QuadrupedVisualPartKind::DragonHindRightUpper),
+            "dragon_leg_hind_right_lower" => Some(QuadrupedVisualPartKind::DragonHindRightLower),
+            "dragon_wing_left_upper" => Some(QuadrupedVisualPartKind::DragonWingLeftUpper),
+            "dragon_wing_left_lower" => Some(QuadrupedVisualPartKind::DragonWingLeftLower),
+            "dragon_wing_right_upper" => Some(QuadrupedVisualPartKind::DragonWingRightUpper),
+            "dragon_wing_right_lower" => Some(QuadrupedVisualPartKind::DragonWingRightLower),
+            "claw_front_left" => Some(QuadrupedVisualPartKind::DragonFrontLeftClaw),
+            "claw_front_right" => Some(QuadrupedVisualPartKind::DragonFrontRightClaw),
+            "claw_hind_left" => Some(QuadrupedVisualPartKind::DragonHindLeftClaw),
+            "claw_hind_right" => Some(QuadrupedVisualPartKind::DragonHindRightClaw),
+            "wing_edge_left" => Some(QuadrupedVisualPartKind::DragonWingLeftEdge),
+            "wing_edge_right" => Some(QuadrupedVisualPartKind::DragonWingRightEdge),
+            _ => None,
+        };
+    }
+    if wildlife {
+        return match name {
+            "leg_0" => Some(QuadrupedVisualPartKind::WildlifeLeg0),
+            "leg_1" => Some(QuadrupedVisualPartKind::WildlifeLeg1),
+            _ => None,
         };
     }
     if name == "rabbit_brown_front_leg_-1_upper" {
@@ -298,9 +348,7 @@ fn apply_wolf_visual_parts(
             QuadrupedVisualPartKind::WolfFrontRightLower => {
                 (rig.front_right.joint, rig.front_right.target)
             }
-            QuadrupedVisualPartKind::WolfHindLeftUpper => {
-                (rig.hind_left.root, rig.hind_left.joint)
-            }
+            QuadrupedVisualPartKind::WolfHindLeftUpper => (rig.hind_left.root, rig.hind_left.joint),
             QuadrupedVisualPartKind::WolfHindLeftLower => {
                 (rig.hind_left.joint, rig.hind_left.target)
             }
@@ -316,6 +364,30 @@ fn apply_wolf_visual_parts(
     }
 }
 
+fn apply_wildlife_visual_parts(
+    parts: &mut Query<(&QuadrupedVisualPart, &mut Transform), Without<WildlifeAnimal>>,
+    owner: Entity,
+    body: &Transform,
+    reaction: Option<&HitReaction>,
+    settings: CreatureHitSettings,
+) {
+    let (brace, lift) =
+        hit_reaction_ik_offset(body, reaction, settings).unwrap_or((Vec3::ZERO, Vec3::ZERO));
+    for (part, mut transform) in parts.iter_mut() {
+        if part.owner != owner {
+            continue;
+        }
+        let (x, top) = match part.kind {
+            QuadrupedVisualPartKind::WildlifeLeg0 => (-0.28, 0.48),
+            QuadrupedVisualPartKind::WildlifeLeg1 => (0.28, 0.48),
+            _ => continue,
+        };
+        let start = Vec3::new(x, top, 0.0);
+        let target = Vec3::new(x, 0.10, 0.0) + brace + lift;
+        apply_visual_segment(&mut transform, start, target, Vec3::Y, top - 0.10);
+    }
+}
+
 fn apply_dragon_visual_parts(
     parts: &mut Query<(&QuadrupedVisualPart, &mut Transform), Without<BossActor>>,
     owner: Entity,
@@ -325,22 +397,68 @@ fn apply_dragon_visual_parts(
         if part.owner != owner {
             continue;
         }
-        let (start, target) = match part.kind {
+        let (start, target, source_length) = match part.kind {
             QuadrupedVisualPartKind::DragonFrontLeftUpper => {
-                (rig.front_left_leg.root, rig.front_left_leg.joint)
+                (rig.front_left_leg.root, rig.front_left_leg.joint, 0.42)
             }
             QuadrupedVisualPartKind::DragonFrontLeftLower => {
-                (rig.front_left_leg.joint, rig.front_left_leg.target)
+                (rig.front_left_leg.joint, rig.front_left_leg.target, 0.34)
             }
             QuadrupedVisualPartKind::DragonFrontRightUpper => {
-                (rig.front_right_leg.root, rig.front_right_leg.joint)
+                (rig.front_right_leg.root, rig.front_right_leg.joint, 0.42)
             }
             QuadrupedVisualPartKind::DragonFrontRightLower => {
-                (rig.front_right_leg.joint, rig.front_right_leg.target)
+                (rig.front_right_leg.joint, rig.front_right_leg.target, 0.34)
+            }
+            QuadrupedVisualPartKind::DragonHindLeftUpper => {
+                (rig.hind_left_leg.root, rig.hind_left_leg.joint, 0.42)
+            }
+            QuadrupedVisualPartKind::DragonHindLeftLower => {
+                (rig.hind_left_leg.joint, rig.hind_left_leg.target, 0.34)
+            }
+            QuadrupedVisualPartKind::DragonHindRightUpper => {
+                (rig.hind_right_leg.root, rig.hind_right_leg.joint, 0.42)
+            }
+            QuadrupedVisualPartKind::DragonHindRightLower => {
+                (rig.hind_right_leg.joint, rig.hind_right_leg.target, 0.34)
+            }
+            QuadrupedVisualPartKind::DragonWingLeftUpper => {
+                (rig.left_wing.root, rig.left_wing.joint, 1.0)
+            }
+            QuadrupedVisualPartKind::DragonWingLeftLower => {
+                (rig.left_wing.joint, rig.left_wing.target, 1.0)
+            }
+            QuadrupedVisualPartKind::DragonWingRightUpper => {
+                (rig.right_wing.root, rig.right_wing.joint, 1.0)
+            }
+            QuadrupedVisualPartKind::DragonWingRightLower => {
+                (rig.right_wing.joint, rig.right_wing.target, 1.0)
+            }
+            QuadrupedVisualPartKind::DragonFrontLeftClaw => {
+                transform.translation = rig.front_left_leg.target;
+                continue;
+            }
+            QuadrupedVisualPartKind::DragonFrontRightClaw => {
+                transform.translation = rig.front_right_leg.target;
+                continue;
+            }
+            QuadrupedVisualPartKind::DragonHindLeftClaw => {
+                transform.translation = rig.hind_left_leg.target;
+                continue;
+            }
+            QuadrupedVisualPartKind::DragonHindRightClaw => {
+                transform.translation = rig.hind_right_leg.target;
+                continue;
+            }
+            QuadrupedVisualPartKind::DragonWingLeftEdge => {
+                (rig.left_wing.root, rig.left_wing.target, 1.16)
+            }
+            QuadrupedVisualPartKind::DragonWingRightEdge => {
+                (rig.right_wing.root, rig.right_wing.target, 1.16)
             }
             _ => continue,
         };
-        apply_visual_segment(&mut transform, start, target, Vec3::Z, 0.55);
+        apply_visual_segment(&mut transform, start, target, Vec3::Y, source_length);
     }
 }
 
@@ -373,6 +491,9 @@ const DRAGON_CRUISE_ALTITUDE: f32 = 5.8;
 const DRAGON_ATTACK_ALTITUDE: f32 = 3.8;
 const DRAGON_CRUISE_RADIUS: f32 = 5.5;
 const DRAGON_ATTACK_RADIUS: f32 = 3.2;
+// The exported boss has a six-metre presentation extent. Keep the flying
+// silhouette readable without letting it swallow the opening composition.
+const DRAGON_VISUAL_SCALE: f32 = 0.48;
 
 pub fn animate_sun(state: Res<LivingSceneState>, mut suns: Query<&mut Transform, With<LivingSun>>) {
     let transform = living_sun_transform(state.elapsed);
@@ -395,6 +516,40 @@ pub fn animate_exported_content_visuals(
                 }
                 + visual.phase * 0.01,
         );
+    }
+}
+
+pub fn animate_water_fish(time: Res<Time>, mut fish: Query<(&WaterFish, &mut Transform)>) {
+    let elapsed = time.elapsed_secs();
+    for (fish, mut transform) in &mut fish {
+        let phase = elapsed * 0.8 + fish.phase;
+        let heading = Vec3::new(phase.cos(), 0.0, phase.sin()).normalize_or_zero();
+        transform.translation = fish.origin
+            + Vec3::new(
+                phase.sin() * 0.35,
+                (phase * 1.7).sin() * 0.06,
+                phase.cos() * 0.24,
+            );
+        if heading.length_squared() > 0.0 {
+            transform.rotation = Quat::from_rotation_y(heading.x.atan2(heading.z));
+        }
+    }
+}
+
+pub fn animate_water_seaweed(time: Res<Time>, mut seaweed: Query<(&WaterSeaweed, &mut Transform)>) {
+    let elapsed = time.elapsed_secs();
+    for (plant, mut transform) in &mut seaweed {
+        let phase = elapsed * 0.9 + plant.phase;
+        transform.translation = plant.origin
+            + Vec3::new(
+                phase.sin() * 0.045,
+                (phase * 1.3).sin() * 0.018,
+                phase.cos() * 0.035,
+            );
+        transform.rotation = Quat::from_rotation_y(plant.phase)
+            * Quat::from_rotation_z(phase.sin() * 0.16)
+            * Quat::from_rotation_x(phase.cos() * 0.08);
+        transform.scale = Vec3::new(1.0, plant.height, 1.0);
     }
 }
 
@@ -433,10 +588,10 @@ pub fn animate_clouds_and_rain(
             continue;
         };
         let phase = state.elapsed * 0.12 + cloud.phase;
-        let base = Vec3::new(snapshot.x, 11.0, snapshot.z);
+        let base = Vec3::new(snapshot.x, CLOUD_VISUAL_HEIGHT, snapshot.z);
         transform.translation =
             base + Vec3::new(phase.sin() * 1.6, phase.cos() * 0.22, phase.cos() * 0.8);
-        transform.scale = Vec3::splat(1.6);
+        transform.scale = Vec3::splat(CLOUD_VISUAL_SCALE);
         cloud_transforms[cloud.snapshot_index] = transform.translation;
     }
     for (drop, mut transform) in &mut cloud_and_drop_transforms.p1() {
@@ -479,10 +634,7 @@ pub fn animate_grass_wind(
     state: Res<LivingSceneState>,
     wind: Res<WindField>,
     mut scene_queries: ParamSet<(
-        Query<
-            &Transform,
-            (With<super::state::LivingSceneCamera>, Without<GrassWind>),
-        >,
+        Query<&Transform, (With<super::state::LivingSceneCamera>, Without<GrassWind>)>,
         Query<(&GrassWind, &mut Transform)>,
     )>,
 ) {
@@ -492,8 +644,8 @@ pub fn animate_grass_wind(
     };
     for (sway, mut transform) in scene_queries.p1().iter_mut() {
         let mut sway = *sway;
-        // Grass cards are camera-facing around Y. The wind tilt is applied
-        // after billboard alignment, so the silhouette stays readable.
+        // Grass tufts are camera-facing around Y. The wind tilt is applied
+        // after billboard alignment, so the blade silhouette stays readable.
         if let Some(camera) = camera {
             let to_camera = camera - transform.translation;
             if to_camera.xz().length_squared() > 0.001 {
@@ -504,7 +656,11 @@ pub fn animate_grass_wind(
     }
 }
 
-pub fn grow_berries(nature: Res<OfflineNature>, mut berries: Query<(&BerryBush, &mut Transform)>) {
+pub fn grow_berries(
+    nature: Res<OfflineNature>,
+    terrain: Res<ProceduralTerrainSurface>,
+    mut berries: Query<(&BerryBush, &mut Transform)>,
+) {
     for (berry, mut transform) in &mut berries {
         let Some(snapshot) = nature
             .snapshot
@@ -516,9 +672,38 @@ pub fn grow_berries(nature: Res<OfflineNature>, mut berries: Query<(&BerryBush, 
             transform.scale = Vec3::ZERO;
             continue;
         };
-        transform.translation = Vec3::new(snapshot.x, 0.0, snapshot.z);
+        let flat =
+            projected_nature_position(Some(&terrain), Vec3::new(snapshot.x, 0.0, snapshot.z));
+        transform.translation = Vec3::new(flat.x, terrain.ground_height(flat) + 0.04, flat.z);
         let growth = smoothstep(snapshot.fruit as f32 / 2.0);
         transform.scale = berry.mature_scale * growth;
+    }
+}
+
+/// Project authoritative edible-plant stock into the visible forage patch.
+/// Decorative grass remains presentation-only; this query only touches the
+/// `PlantNode` entities that came from the shared ecology snapshot.
+pub fn grow_nature_plants(
+    nature: Res<OfflineNature>,
+    mut plants: Query<(&PlantNode, &mut Transform)>,
+) {
+    for (plant, mut transform) in &mut plants {
+        let Some(snapshot) = nature
+            .snapshot
+            .detailed_ecology
+            .plants
+            .iter()
+            .find(|snapshot| snapshot.id == plant.id)
+        else {
+            transform.scale = Vec3::ZERO;
+            continue;
+        };
+        if matches!(
+            ResourceNodeKind::from_u8(snapshot.kind),
+            ResourceNodeKind::Grass | ResourceNodeKind::Flower
+        ) {
+            transform.scale = Vec3::splat(0.58 * smoothstep(snapshot.stock as f32));
+        }
     }
 }
 
@@ -571,19 +756,11 @@ pub fn animate_rabbits(
     state: Res<LivingSceneState>,
     nature: Res<OfflineNature>,
     terrain: Option<Res<ProceduralTerrainSurface>>,
+    hit_settings: Option<Res<CreatureHitSettings>>,
     players: Query<
         &Transform,
         (
             With<PlayerActor>,
-            Without<Rabbit>,
-            Without<QuadrupedVisualPart>,
-        ),
-    >,
-    grass: Query<
-        &Transform,
-        (
-            With<GrassTuft>,
-            Without<PlayerActor>,
             Without<Rabbit>,
             Without<QuadrupedVisualPart>,
         ),
@@ -596,35 +773,35 @@ pub fn animate_rabbits(
             &mut Transform,
             &mut LinearVelocity,
             &mut Rotation,
+            Option<&HitReaction>,
         ),
         (
             Without<PlayerActor>,
             Without<GrassTuft>,
             Without<QuadrupedVisualPart>,
+            Without<DefeatedCreature>,
         ),
     >,
     mut visual_parts: Query<(&QuadrupedVisualPart, &mut Transform), Without<Rabbit>>,
 ) {
+    let hit_settings = hit_settings.as_deref().copied().unwrap_or_default();
     let player_pos = players.single().ok().map(|transform| transform.translation);
-    let mut food_targets = nature
+    let food_targets = nature
         .snapshot
         .detailed_ecology
         .berries
         .iter()
         .map(|berry| RabbitFoodTarget {
-            position: Vec3::new(berry.x, 0.0, berry.z),
+            position: projected_nature_position(
+                terrain.as_deref(),
+                Vec3::new(berry.x, 0.0, berry.z),
+            ),
             value: berry.fruit as f32,
         })
         .collect::<Vec<_>>();
-    food_targets.extend(grass.iter().filter_map(|transform| {
-        let value = transform.scale.max_element().clamp(0.0, 1.0);
-        (value > 0.08).then_some(RabbitFoodTarget {
-            position: Vec3::new(transform.translation.x, 0.0, transform.translation.z),
-            value: value * 0.45,
-        })
-    }));
-
-    for (entity, rabbit, mut ai, mut transform, mut velocity, mut rotation) in &mut rabbits {
+    for (entity, rabbit, mut ai, mut transform, mut velocity, mut rotation, hit_reaction) in
+        &mut rabbits
+    {
         let Some(snapshot) = nature
             .snapshot
             .detailed_ecology
@@ -636,7 +813,8 @@ pub fn animate_rabbits(
             velocity.0 = Vec3::ZERO;
             continue;
         };
-        let authoritative_pos = Vec3::new(snapshot.x, 0.0, snapshot.z);
+        let authoritative_pos =
+            projected_nature_position(terrain.as_deref(), Vec3::new(snapshot.x, 0.0, snapshot.z));
         let visual_pos = if transform.scale.max_element() > 0.0 {
             transform.translation
         } else {
@@ -663,7 +841,8 @@ pub fn animate_rabbits(
         };
         let alpha = smooth_follow_alpha(dt, speed);
         let current_position = transform.translation;
-        let flat = current_position.lerp(desired, alpha);
+        let flat =
+            projected_nature_position(terrain.as_deref(), current_position.lerp(desired, alpha));
         let hop = match ai.mood {
             RabbitMood::Graze => hop_height(ai.hop_phase * 2.0, 0.05),
             RabbitMood::Idle => hop_height(ai.hop_phase, 0.06),
@@ -688,16 +867,22 @@ pub fn animate_rabbits(
             rotation: Quat::from_rotation_y(yaw) * Quat::from_rotation_x(graze_pitch),
             ..*transform
         };
-        let rabbit_targets = terrain.as_deref().map_or(
-            rabbit_quadruped_targets(ai.hop_phase, ai.mood),
-            |terrain| {
-                ground_quadruped_targets(
-                    &ik_body,
-                    terrain,
-                    rabbit_quadruped_targets(ai.hop_phase, ai.mood),
-                    0.02,
-                )
-            },
+        let mut rabbit_targets =
+            terrain
+                .as_deref()
+                .map_or(rabbit_quadruped_targets(ai.hop_phase, ai.mood), |terrain| {
+                    ground_quadruped_targets(
+                        &ik_body,
+                        terrain,
+                        rabbit_quadruped_targets(ai.hop_phase, ai.mood),
+                        0.02,
+                    )
+                });
+        apply_hit_reaction_to_quadruped_targets(
+            &ik_body,
+            &mut rabbit_targets,
+            hit_reaction,
+            hit_settings,
         );
         let virtual_limbs = QuadrupedRig::rabbit().solve(rabbit_targets);
         apply_rabbit_visual_parts(&mut visual_parts, entity, rabbit_targets, virtual_limbs);
@@ -705,10 +890,15 @@ pub fn animate_rabbits(
             ((virtual_limbs.hind_left.joint.y + virtual_limbs.hind_right.joint.y) * 0.5 - 0.17)
                 .clamp(-0.05, 0.05);
         velocity.0 = (target_position - current_position) / dt.max(0.0001);
+        // The GLB is authored at roughly one metre tall and is spawned at a
+        // 0.62 presentation scale. Keep the runtime scale in that same
+        // space; the previous values silently overwrote the spawn scale on
+        // the first frame and made rabbits read much too large.
         let base_scale = match ai.mood {
-            RabbitMood::Flee => 1.02,
-            RabbitMood::Graze => 0.86,
-            _ => 0.92,
+            RabbitMood::Flee => 0.70,
+            RabbitMood::Graze => 0.58,
+            RabbitMood::Forage => 0.66,
+            RabbitMood::Idle => 0.62,
         };
         transform.scale = Vec3::splat(base_scale)
             * Vec3::new(
@@ -725,9 +915,15 @@ pub fn animate_wolves(
     state: Res<LivingSceneState>,
     nature: Res<OfflineNature>,
     terrain: Option<Res<ProceduralTerrainSurface>>,
+    hit_settings: Option<Res<CreatureHitSettings>>,
     rabbits: Query<
         &Transform,
-        (With<Rabbit>, Without<Wolf>, Without<QuadrupedVisualPart>),
+        (
+            With<Rabbit>,
+            Without<Wolf>,
+            Without<QuadrupedVisualPart>,
+            Without<DefeatedCreature>,
+        ),
     >,
     mut wolves: Query<
         (
@@ -737,15 +933,18 @@ pub fn animate_wolves(
             &mut Transform,
             &mut LinearVelocity,
             &mut Rotation,
+            Option<&HitReaction>,
         ),
         (
             With<Wolf>,
             Without<Rabbit>,
             Without<QuadrupedVisualPart>,
+            Without<DefeatedCreature>,
         ),
     >,
     mut visual_parts: Query<(&QuadrupedVisualPart, &mut Transform), Without<Wolf>>,
 ) {
+    let hit_settings = hit_settings.as_deref().copied().unwrap_or_default();
     let prey = rabbits
         .iter()
         .map(|transform| AiTarget {
@@ -754,7 +953,9 @@ pub fn animate_wolves(
         })
         .collect::<Vec<_>>();
 
-    for (entity, wolf, mut ai, mut transform, mut velocity, mut rotation) in &mut wolves {
+    for (entity, wolf, mut ai, mut transform, mut velocity, mut rotation, hit_reaction) in
+        &mut wolves
+    {
         let Some(snapshot) = nature
             .snapshot
             .detailed_ecology
@@ -766,7 +967,8 @@ pub fn animate_wolves(
             velocity.0 = Vec3::ZERO;
             continue;
         };
-        let authoritative_pos = Vec3::new(snapshot.x, 0.0, snapshot.z);
+        let authoritative_pos =
+            projected_nature_position(terrain.as_deref(), Vec3::new(snapshot.x, 0.0, snapshot.z));
         let visual_pos = if transform.scale.max_element() > 0.0 {
             transform.translation
         } else {
@@ -800,8 +1002,16 @@ pub fn animate_wolves(
             WolfMood::Idle => authoritative_pos + idle_drift(state.elapsed, wolf.phase, 0.28, 0.22),
             WolfMood::Chase | WolfMood::Pounce => ai.target,
         };
+        let desired = if ai.mood == WolfMood::Pounce {
+            separated_target_position(visual_pos, desired, WOLF_ATTACK_SEPARATION)
+        } else {
+            desired
+        };
         let current_position = transform.translation;
-        let flat = current_position.lerp(desired, smooth_follow_alpha(dt, speed));
+        let flat = projected_nature_position(
+            terrain.as_deref(),
+            current_position.lerp(desired, smooth_follow_alpha(dt, speed)),
+        );
         let lope = match ai.mood {
             WolfMood::Idle => hop_height(ai.run_phase, 0.03),
             WolfMood::Chase => hop_height(ai.run_phase, 0.11),
@@ -825,16 +1035,22 @@ pub fn animate_wolves(
             rotation: Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pounce_pitch),
             ..*transform
         };
-        let wolf_targets = terrain.as_deref().map_or(
-            wolf_quadruped_targets(ai.run_phase, ai.mood),
-            |terrain| {
-                ground_quadruped_targets(
-                    &ik_body,
-                    terrain,
-                    wolf_quadruped_targets(ai.run_phase, ai.mood),
-                    0.04,
-                )
-            },
+        let mut wolf_targets =
+            terrain
+                .as_deref()
+                .map_or(wolf_quadruped_targets(ai.run_phase, ai.mood), |terrain| {
+                    ground_quadruped_targets(
+                        &ik_body,
+                        terrain,
+                        wolf_quadruped_targets(ai.run_phase, ai.mood),
+                        0.04,
+                    )
+                });
+        apply_hit_reaction_to_quadruped_targets(
+            &ik_body,
+            &mut wolf_targets,
+            hit_reaction,
+            hit_settings,
         );
         let rig = QuadrupedRig::wolf().solve(wolf_targets);
         apply_wolf_visual_parts(&mut visual_parts, entity, rig);
@@ -859,21 +1075,51 @@ pub fn animate_wildlife(
     state: Res<LivingSceneState>,
     nature: Res<OfflineNature>,
     terrain: Option<Res<ProceduralTerrainSurface>>,
-    players: Query<&Transform, (With<PlayerActor>, Without<WildlifeAnimal>)>,
-    rabbits: Query<&Transform, (With<Rabbit>, Without<WildlifeAnimal>)>,
-    grass: Query<&Transform, (With<GrassTuft>, Without<WildlifeAnimal>, Without<Rabbit>)>,
-    plants: Query<(&PlantNode, &Transform), Without<WildlifeAnimal>>,
+    hit_settings: Option<Res<CreatureHitSettings>>,
+    players: Query<
+        &Transform,
+        (
+            With<PlayerActor>,
+            Without<WildlifeAnimal>,
+            Without<QuadrupedVisualPart>,
+        ),
+    >,
+    rabbits: Query<
+        &Transform,
+        (
+            With<Rabbit>,
+            Without<WildlifeAnimal>,
+            Without<DefeatedCreature>,
+            Without<QuadrupedVisualPart>,
+        ),
+    >,
+    plants: Query<
+        (&PlantNode, &Transform),
+        (Without<WildlifeAnimal>, Without<QuadrupedVisualPart>),
+    >,
     mut animals: Query<
         (
+            Entity,
             &WildlifeAnimal,
             &mut WildlifeAi,
             &mut Transform,
             &mut LinearVelocity,
             &mut Rotation,
+            Option<&HitReaction>,
         ),
-        (Without<PlayerActor>, Without<Rabbit>, Without<Wolf>),
+        (
+            Without<PlayerActor>,
+            Without<Rabbit>,
+            Without<Wolf>,
+            Without<GrassTuft>,
+            Without<PlantNode>,
+            Without<QuadrupedVisualPart>,
+            Without<DefeatedCreature>,
+        ),
     >,
+    mut visual_parts: Query<(&QuadrupedVisualPart, &mut Transform), Without<WildlifeAnimal>>,
 ) {
+    let hit_settings = hit_settings.as_deref().copied().unwrap_or_default();
     let player_pos = players.single().ok().map(|transform| transform.translation);
     let prey = rabbits
         .iter()
@@ -888,17 +1134,13 @@ pub fn animate_wildlife(
         .berries
         .iter()
         .map(|berry| AiTarget {
-            position: Vec3::new(berry.x, 0.0, berry.z),
+            position: projected_nature_position(
+                terrain.as_deref(),
+                Vec3::new(berry.x, 0.0, berry.z),
+            ),
             value: berry.fruit as f32,
         })
         .collect::<Vec<_>>();
-    food.extend(grass.iter().filter_map(|transform| {
-        let value = transform.scale.max_element().clamp(0.0, 1.0);
-        (value > 0.08).then_some(AiTarget {
-            position: Vec3::new(transform.translation.x, 0.0, transform.translation.z),
-            value: value * 0.45,
-        })
-    }));
     food.extend(plants.iter().filter_map(|(plant, transform)| {
         let snapshot = nature
             .snapshot
@@ -908,17 +1150,20 @@ pub fn animate_wildlife(
             .find(|snapshot| snapshot.id == plant.id)?;
         let edible = matches!(
             ResourceNodeKind::from_u8(snapshot.kind),
-            ResourceNodeKind::MushroomRed
-                | ResourceNodeKind::MushroomBrown
-                | ResourceNodeKind::Flower
+            ResourceNodeKind::Grass | ResourceNodeKind::Flower
         );
         edible.then_some(AiTarget {
-            position: Vec3::new(transform.translation.x, 0.0, transform.translation.z),
+            position: projected_nature_position(
+                terrain.as_deref(),
+                Vec3::new(transform.translation.x, 0.0, transform.translation.z),
+            ),
             value: snapshot.stock as f32,
         })
     }));
 
-    for (animal, mut ai, mut transform, mut velocity, mut rotation) in &mut animals {
+    for (entity, animal, mut ai, mut transform, mut velocity, mut rotation, hit_reaction) in
+        &mut animals
+    {
         let Some(snapshot) = nature
             .snapshot
             .detailed_ecology
@@ -937,7 +1182,8 @@ pub fn animate_wildlife(
             WildlifeKind::Fox => CreatureAiProfile::fox(),
             WildlifeKind::Bear | WildlifeKind::Wolf => CreatureAiProfile::bear(),
         };
-        let authoritative_pos = Vec3::new(snapshot.x, 0.0, snapshot.z);
+        let authoritative_pos =
+            projected_nature_position(terrain.as_deref(), Vec3::new(snapshot.x, 0.0, snapshot.z));
         let visual_pos = if transform.scale.max_element() > 0.0 {
             transform.translation
         } else {
@@ -982,7 +1228,10 @@ pub fn animate_wildlife(
             _ => ai.target,
         };
         let current_position = transform.translation;
-        let flat = current_position.lerp(desired, smooth_follow_alpha(dt, speed));
+        let flat = projected_nature_position(
+            terrain.as_deref(),
+            current_position.lerp(desired, smooth_follow_alpha(dt, speed)),
+        );
         let hop = match kind {
             WildlifeKind::Deer => hop_height(ai.phase, 0.07),
             WildlifeKind::Fox => hop_height(ai.phase, 0.09),
@@ -1002,17 +1251,146 @@ pub fn animate_wildlife(
             WildlifeKind::Rabbit | WildlifeKind::Wolf => 0.62,
         };
         transform.scale = Vec3::splat(base_scale);
-        rotation.0 = Quat::from_rotation_y(heading_yaw(
+        let yaw = heading_yaw(
             current_position,
             target_position,
             (state.elapsed * 0.45 + ai.phase).sin() * 0.28,
-        ));
+        );
+        let ik_body = Transform {
+            rotation: Quat::from_rotation_y(yaw),
+            ..*transform
+        };
+        apply_wildlife_visual_parts(
+            &mut visual_parts,
+            entity,
+            &ik_body,
+            hit_reaction,
+            hit_settings,
+        );
+        rotation.0 = ik_body.rotation;
+    }
+}
+
+fn hit_reaction_progress(reaction: &HitReaction) -> f32 {
+    if reaction.impact_hold_secs > 0.0 {
+        return 1.0;
+    }
+    let duration = if reaction.duration_secs > 0.0 {
+        reaction.duration_secs
+    } else {
+        CreatureHitSettings::default().reaction_secs
+    };
+    (reaction.timer / duration).clamp(0.0, 1.0)
+}
+
+fn hit_reaction_ik_offset(
+    body: &Transform,
+    reaction: Option<&HitReaction>,
+    settings: CreatureHitSettings,
+) -> Option<(Vec3, Vec3)> {
+    let reaction = reaction.filter(|reaction| reaction.timer > 0.0)?;
+    let progress = hit_reaction_progress(reaction).powf(0.65);
+    let strength = (reaction.strength / 0.18).clamp(0.0, 2.0);
+    let local_direction = body.rotation.inverse() * reaction.direction;
+    let direction = Vec3::new(local_direction.x, 0.0, local_direction.z).normalize_or_zero();
+    let brace = -direction * settings.ik_recoil * progress * strength;
+    let lift = Vec3::Y * settings.ik_lift * progress * strength;
+    Some((brace, lift))
+}
+
+fn apply_hit_reaction_to_quadruped_targets(
+    body: &Transform,
+    targets: &mut QuadrupedTargets,
+    reaction: Option<&HitReaction>,
+    settings: CreatureHitSettings,
+) {
+    let Some((brace, lift)) = hit_reaction_ik_offset(body, reaction, settings) else {
+        return;
+    };
+    let front_offset = brace + lift;
+    let hind_offset = brace * 0.65 + lift * 0.75;
+    let front_pole_offset = brace * 0.45 + lift * 0.35;
+    let hind_pole_offset = brace * 0.35 + lift * 0.30;
+    targets.front_left_foot += front_offset;
+    targets.front_right_foot += front_offset;
+    targets.hind_left_foot += hind_offset;
+    targets.hind_right_foot += hind_offset;
+    targets.front_left_pole += front_pole_offset;
+    targets.front_right_pole += front_pole_offset;
+    targets.hind_left_pole += hind_pole_offset;
+    targets.hind_right_pole += hind_pole_offset;
+}
+
+fn apply_hit_reaction_to_dragon_targets(
+    body: &Transform,
+    targets: &mut DragonTargets,
+    reaction: Option<&HitReaction>,
+    settings: CreatureHitSettings,
+) {
+    let Some((brace, lift)) = hit_reaction_ik_offset(body, reaction, settings) else {
+        return;
+    };
+    let front_offset = brace + lift;
+    let hind_offset = brace * 0.65 + lift * 0.75;
+    targets.front_left_foot += front_offset;
+    targets.front_right_foot += front_offset;
+    targets.hind_left_foot += hind_offset;
+    targets.hind_right_foot += hind_offset;
+    targets.front_left_pole += brace * 0.45 + lift * 0.35;
+    targets.front_right_pole += brace * 0.45 + lift * 0.35;
+    targets.hind_left_pole += brace * 0.35 + lift * 0.30;
+    targets.hind_right_pole += brace * 0.35 + lift * 0.30;
+    targets.left_wing_tip += brace * 0.35 + lift * 0.45;
+    targets.right_wing_tip += brace * 0.35 + lift * 0.45;
+}
+
+/// Apply a short presentation-only recoil after the movement/AI systems have
+/// posed the animal. The next frame rebuilds the locomotion transform first,
+/// so this pulse never accumulates into a permanent offset.
+pub fn animate_creature_hit_reactions(
+    time: Res<Time>,
+    mut creatures: Query<
+        (&mut Transform, &mut HitReaction),
+        (
+            Without<PlayerActor>,
+            Without<BossActor>,
+            Without<DefeatedCreature>,
+            Or<(With<Rabbit>, With<Wolf>, With<WildlifeAnimal>)>,
+        ),
+    >,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut reaction) in &mut creatures {
+        if reaction.timer <= 0.0 {
+            continue;
+        }
+        let progress = hit_reaction_progress(&reaction);
+        let recoil = progress.powf(0.65);
+        // The locomotion systems rebuild the base pose before this system
+        // runs. Add a short, non-accumulating visual displacement so a hit
+        // reads as physical contact instead of only a scale pulse.
+        transform.translation += reaction.direction * reaction.strength * recoil;
+        let side = reaction.direction.x.clamp(-1.0, 1.0);
+        let forward = reaction.direction.z.clamp(-1.0, 1.0);
+        transform.rotation *= Quat::from_rotation_x(-forward * recoil * 0.16)
+            * Quat::from_rotation_z(side * recoil * 0.13);
+        transform.scale *= Vec3::new(
+            1.0 + recoil * 0.07,
+            1.0 - recoil * 0.10,
+            1.0 + recoil * 0.07,
+        );
+        if reaction.impact_hold_secs > 0.0 {
+            reaction.impact_hold_secs = (reaction.impact_hold_secs - dt).max(0.0);
+        } else {
+            reaction.timer = (reaction.timer - dt).max(0.0);
+        }
     }
 }
 
 pub fn animate_boss(
     time: Res<Time>,
     state: Res<LivingSceneState>,
+    hit_settings: Option<Res<CreatureHitSettings>>,
     players: Query<
         &Transform,
         (
@@ -1062,6 +1440,7 @@ pub fn animate_boss(
     mut commands: Commands,
 ) {
     let dt = time.delta_secs();
+    let hit_settings = hit_settings.as_deref().copied().unwrap_or_default();
     let player_pos = players.single().ok().map(|transform| transform.translation);
     for (entity, boss, health, mut transform, reaction) in &mut bosses {
         // The dragon's AI is presentation-side in this vertical slice, but it
@@ -1101,8 +1480,24 @@ pub fn animate_boss(
         } else {
             flight_target
         };
+        let current_position = transform.translation;
+        let flight_direction = target_position - current_position;
+        let yaw = heading_yaw(current_position, target_position, 0.0);
+        let horizontal_distance = Vec2::new(flight_direction.x, flight_direction.z).length();
+        let pitch = flight_direction.y.atan2(horizontal_distance.max(0.001));
+        let base_rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch * 0.35);
+        let ik_body = Transform {
+            rotation: base_rotation,
+            ..*transform
+        };
         let idle = state.elapsed * 4.6;
-        let dragon_targets = dragon_boss_targets(idle);
+        let mut dragon_targets = dragon_boss_targets(idle);
+        apply_hit_reaction_to_dragon_targets(
+            &ik_body,
+            &mut dragon_targets,
+            reaction.as_ref().map(|reaction| &**reaction),
+            hit_settings,
+        );
         let virtual_rig = DragonRig::hoplite_boss().solve(dragon_targets);
         apply_dragon_visual_parts(&mut visual_parts, entity, virtual_rig);
         let wing_lift = ((virtual_rig.left_wing.joint.y + virtual_rig.right_wing.joint.y) * 0.5
@@ -1117,8 +1512,12 @@ pub fn animate_boss(
             .clamp(-0.10, 0.10);
         let (hit_offset, hit_pulse, hit_tilt) = reaction
             .map(|mut reaction| {
-                let progress = (reaction.timer / 0.22).clamp(0.0, 1.0);
-                reaction.timer = (reaction.timer - dt).max(0.0);
+                let progress = hit_reaction_progress(&reaction);
+                if reaction.impact_hold_secs > 0.0 {
+                    reaction.impact_hold_secs = (reaction.impact_hold_secs - dt).max(0.0);
+                } else {
+                    reaction.timer = (reaction.timer - dt).max(0.0);
+                }
                 let recoil = progress.powf(0.65);
                 (
                     reaction.direction * reaction.strength * recoil,
@@ -1127,18 +1526,11 @@ pub fn animate_boss(
                 )
             })
             .unwrap_or((Vec3::ZERO, 1.0, 0.0));
-        let current_position = transform.translation;
         transform.translation = target_position + hit_offset;
         let health_scale = if health.is_dead() { 0.72 } else { 1.0 };
-        transform.scale = Vec3::splat(0.92 * hit_pulse * health_scale)
+        transform.scale = Vec3::splat(DRAGON_VISUAL_SCALE * hit_pulse * health_scale)
             * Vec3::new(1.0, 1.0 + leg_drive * 0.08, 1.0 + leg_drive * 0.05);
-        let flight_direction = target_position - current_position;
-        let yaw = heading_yaw(current_position, target_position, 0.0);
-        let horizontal_distance = Vec2::new(flight_direction.x, flight_direction.z).length();
-        let pitch = flight_direction.y.atan2(horizontal_distance.max(0.001));
-        transform.rotation = Quat::from_rotation_y(yaw)
-            * Quat::from_rotation_x(-pitch * 0.35)
-            * Quat::from_rotation_z(wing_lift * 0.04 + hit_tilt);
+        transform.rotation = base_rotation * Quat::from_rotation_z(wing_lift * 0.04 + hit_tilt);
     }
     for (entity, mut transform) in &mut slashes {
         transform.scale *= 0.88;
@@ -1149,8 +1541,11 @@ pub fn animate_boss(
     for (entity, mut transform, mut impact) in &mut impacts {
         impact.age += dt;
         let progress = (impact.age / impact.lifetime).clamp(0.0, 1.0);
-        let growth = 0.24 + progress * 0.92;
-        transform.scale = Vec3::new(growth, 0.22 + progress * 0.18, growth);
+        // Start at the authored burst size and collapse out. The previous
+        // curve shrank a newly spawned impact from 0.72 to 0.24 on the first
+        // frame, which made confirmed hits feel delayed and soft.
+        let growth = (0.78 - progress * 0.54).max(0.0) * impact.scale;
+        transform.scale = Vec3::new(growth, 0.34 - progress * 0.16, growth);
         transform.rotation *= Quat::from_rotation_y(dt * 8.0);
         if progress >= 1.0 {
             commands.entity(entity).despawn();
@@ -1194,11 +1589,21 @@ fn ground_quadruped_targets(
     contact_y: f32,
 ) -> QuadrupedTargets {
     let project = |local: Vec3| {
-        let world = body.translation + body.rotation * Vec3::new(local.x, 0.0, local.z);
+        // Rig coordinates are local to the visual root, while the root is
+        // scaled for the authored GLB. Sample the terrain in the same
+        // prospective world space that the child mesh will occupy, then
+        // convert the contact point back through rotation and scale.
+        let scaled_xz = body.scale * Vec3::new(local.x, 0.0, local.z);
+        let world = body.translation + body.rotation * scaled_xz;
         let ground_y = terrain.ground_height(Vec3::new(world.x, 0.0, world.z));
-        let lift = (local.y - contact_y).max(0.0);
-        body.rotation.inverse()
-            * (Vec3::new(world.x, ground_y + 0.03 + lift, world.z) - body.translation)
+        let lift = (local.y - contact_y).max(0.0) * body.scale.y.abs();
+        let local_contact = body.rotation.inverse()
+            * (Vec3::new(world.x, ground_y + 0.03 + lift, world.z) - body.translation);
+        Vec3::new(
+            local_contact.x / body.scale.x.abs().max(0.001),
+            local_contact.y / body.scale.y.abs().max(0.001),
+            local_contact.z / body.scale.z.abs().max(0.001),
+        )
     };
     targets.front_left_foot = project(targets.front_left_foot);
     targets.front_right_foot = project(targets.front_right_foot);

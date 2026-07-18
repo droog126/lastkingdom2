@@ -16,7 +16,7 @@ class GeneratorSpec:
 
 GENERATORS: tuple[GeneratorSpec, ...] = (
     GeneratorSpec(
-        "build_all_models.py",
+        "build_fresh_pretty.py",
         "pretty",
         "pretty",
         (
@@ -24,147 +24,38 @@ GENERATORS: tuple[GeneratorSpec, ...] = (
             "monster_frost_elf",
             "monster_sand_wurm",
             "monster_treant",
-            "monster_aether_wraith",
-            "cloud_puff",
-            "rock_dark",
-            "rock_mid",
-            "rock_moss",
-            "flower_0",
-            "flower_1",
-            "flower_2",
-            "flower_3",
-            "flower_4",
-            "hill",
-            "poi_pillar_red",
-            "poi_pillar_cyan",
-            "poi_pillar_pink",
-            "poi_pillar_gold",
-            "ground_disc_outer",
-            "ground_disc_inner",
+            "monster_aether_wraith", "cloud_puff", "rock_dark", "rock_mid", "rock_moss",
+            "sokpop_gatherer", "flower_0", "flower_1", "flower_2", "flower_3", "flower_4", "hill",
+            "poi_pillar_red", "poi_pillar_cyan", "poi_pillar_pink", "poi_pillar_gold",
+            "ground_disc_outer", "ground_disc_inner", "fallen_stick",
+            "sokpop_tree", "granular_round_tree", "granular_pine_tree", "forest_stone_spire",
+            "granular_birch_tree", "granular_autumn_tree", "granular_willow_tree",
+            "granular_wildflowers", "granular_reed_bank", "mushroom_red", "mushroom_brown",
+            "crystal_blue", "crystal_pink", "treasure_chest", "boat", "arch_stone", "cart",
+            "tombstone", "haystack", "palm", "resource_wood", "resource_stone", "cauldron",
+            "cooking_station", "spit_roast", "campfire", "lantern_post", "crate", "barrel",
+            "signpost", "market_stall", "bench", "fountain", "statue", "forge", "chapel", "pier",
+            "tavern", "wolf", "bear", "villager", "ground_patch", "lake", "swamp", "beach",
+            "mountain_snow", "volcano", "desert_dune", "cliff", "cave_entrance", "house_small",
+            "watchtower", "windmill", "bridge_stone", "well", "barn", "fence", "shrine",
+            "lighthouse", "hoplite_reaper_scythe", "hoplite_dragon_katana",
+            "hoplite_golem_hammer", "hoplite_midas_sword", "hoplite_ender_dragon",
         ),
     ),
     GeneratorSpec(
-        "build_sokpop_gathering_models.py",
+        "build_reference_pair.py",
         "pretty",
         "pretty",
-        ("sokpop_gatherer", "fallen_stick", "sokpop_tree"),
+        ("sword",),
     ),
     GeneratorSpec(
-        "build_granular_flora.py",
-        "pretty",
-        "pretty",
-        (
-            "granular_round_tree",
-            "granular_pine_tree",
-            "forest_stone_spire",
-            "granular_birch_tree",
-            "granular_autumn_tree",
-            "granular_willow_tree",
-            "granular_wildflowers",
-            "granular_reed_bank",
-        ),
-    ),
-    GeneratorSpec(
-        "build_models_v3.py",
-        "pretty",
-        "decor",
-        (
-            "mushroom_red",
-            "mushroom_brown",
-            "crystal_blue",
-            "crystal_pink",
-            "treasure_chest",
-            "boat",
-            "arch_stone",
-            "cart",
-            "tombstone",
-            "haystack",
-            "palm",
-            "resource_wood",
-            "resource_stone",
-        ),
-    ),
-    GeneratorSpec(
-        "build_models_v4.py",
-        "pretty",
-        "decor",
-        ("cauldron", "cooking_station", "spit_roast"),
-    ),
-    GeneratorSpec(
-        "build_more_models.py",
-        "pretty",
-        "decor",
-        (
-            "campfire",
-            "lantern_post",
-            "crate",
-            "barrel",
-            "signpost",
-            "market_stall",
-            "bench",
-            "fountain",
-            "statue",
-            "forge",
-            "chapel",
-            "pier",
-            "tavern",
-            "wolf",
-            "bear",
-        ),
-    ),
-    GeneratorSpec(
-        "build_sokpop_style_pass.py",
-        "pretty",
-        "pretty",
-        ("villager", "ground_patch", "lake", "swamp", "beach"),
-    ),
-    GeneratorSpec(
-        "build_terrain_buildings.py",
-        "pretty",
-        "terrain",
-        (
-            "mountain_snow",
-            "volcano",
-            "desert_dune",
-            "cliff",
-            "cave_entrance",
-            "house_small",
-            "watchtower",
-            "windmill",
-            "bridge_stone",
-            "well",
-            "barn",
-            "fence",
-            "shrine",
-            "lighthouse",
-        ),
-    ),
-    GeneratorSpec(
-        "build_hoplite_legendaries.py",
-        "pretty",
-        "weapons",
-        (
-            "sword",
-            "hoplite_reaper_scythe",
-            "hoplite_dragon_katana",
-            "hoplite_golem_hammer",
-            "hoplite_midas_sword",
-        ),
-    ),
-    GeneratorSpec(
-        "build_hoplite_dragon.py",
-        "pretty",
-        "bosses",
-        ("hoplite_ender_dragon",),
-    ),
-    GeneratorSpec(
-        "create_eco_models.py",
+        "build_fresh_eco.py",
         "eco",
         "eco",
         ("rabbit", "berry_bush", "berry_fruit", "co2_bubble"),
     ),
     GeneratorSpec(
-        "build_animals_blender.py",
+        "build_fresh_animals.py",
         "animals",
         "animals",
         (
@@ -178,15 +69,28 @@ GENERATORS: tuple[GeneratorSpec, ...] = (
             "deer_fawn",
             "fox",
             "fox_silver",
+            "fish",
         ),
     ),
 )
 
 
 RETIRED_GENERATORS: dict[str, str] = {
-    "build_all_flat.py": "build_all_models.py",
-    "build_player_v2.py": "build_hoplite_legendaries.py",
-    "build_player_v3.py": "build_sokpop_gathering_models.py",
+    "build_all_models.py": "build_fresh_pretty.py",
+    "build_sokpop_gathering_models.py": "build_fresh_pretty.py",
+    "build_granular_flora.py": "build_fresh_pretty.py",
+    "build_models_v3.py": "build_fresh_pretty.py",
+    "build_models_v4.py": "build_fresh_pretty.py",
+    "build_more_models.py": "build_fresh_pretty.py",
+    "build_sokpop_style_pass.py": "build_fresh_pretty.py",
+    "build_terrain_buildings.py": "build_fresh_pretty.py",
+    "build_hoplite_legendaries.py": "build_fresh_pretty.py",
+    "build_hoplite_dragon.py": "build_fresh_pretty.py",
+    "create_eco_models.py": "build_fresh_eco.py",
+    "build_animals_blender.py": "build_fresh_animals.py",
+    "build_all_flat.py": "build_fresh_pretty.py",
+    "build_player_v2.py": "build_fresh_pretty.py",
+    "build_player_v3.py": "build_fresh_pretty.py",
     "build_v5_cute.py": "model_pipeline.py build --all",
     "build_v6_balanced.py": "model_pipeline.py build --all",
 }
@@ -210,6 +114,8 @@ PRETTY_GROUPS: dict[str, tuple[str, ...]] = {
         "granular_willow_tree",
         "granular_wildflowers",
         "granular_reed_bank",
+        "mushroom_red",
+        "mushroom_brown",
         "fallen_stick",
         "rock_dark",
         "rock_mid",
@@ -220,10 +126,10 @@ PRETTY_GROUPS: dict[str, tuple[str, ...]] = {
         "flower_3",
         "flower_4",
         "hill",
-        "poi_pillar_red",
         "poi_pillar_cyan",
         "poi_pillar_pink",
         "poi_pillar_gold",
+        "poi_pillar_red",
         "ground_disc_outer",
         "ground_disc_inner",
     ),
@@ -263,8 +169,6 @@ PRETTY_GROUPS: dict[str, tuple[str, ...]] = {
         "bench",
         "fountain",
         "statue",
-        "mushroom_red",
-        "mushroom_brown",
         "crystal_blue",
         "crystal_pink",
         "treasure_chest",
@@ -329,16 +233,18 @@ _scale("pretty", "height", 5.2, "granular_autumn_tree")
 _scale("pretty", "height", 5.0, "granular_willow_tree")
 _scale("pretty", "height", 0.65, "granular_wildflowers")
 _scale("pretty", "height", 1.4, "granular_reed_bank")
+_scale("pretty", "height", 0.8, "mushroom_red")
+_scale("pretty", "height", 0.6, "mushroom_brown")
 _scale("pretty", "max_extent", 1.2, "fallen_stick", height_meters=0.25)
 _scale("pretty", "max_extent", 0.9, "rock_dark", height_meters=0.5)
 _scale("pretty", "max_extent", 0.75, "rock_mid", height_meters=0.45)
 _scale("pretty", "max_extent", 0.65, "rock_moss", height_meters=0.4)
 _scale("pretty", "height", 0.45, "flower_0", "flower_1", "flower_2", "flower_3", "flower_4")
 _scale("pretty", "max_extent", 8.0, "hill", height_meters=2.5)
-_scale("pretty", "height", 3.8, "poi_pillar_red")
 _scale("pretty", "height", 2.8, "poi_pillar_cyan")
 _scale("pretty", "height", 2.5, "poi_pillar_pink")
 _scale("pretty", "height", 2.4, "poi_pillar_gold")
+_scale("pretty", "height", 3.8, "poi_pillar_red")
 _scale("pretty", "max_extent", 12.0, "ground_disc_outer", height_meters=0.2)
 _scale("pretty", "max_extent", 5.0, "ground_disc_inner", height_meters=0.2)
 
@@ -349,7 +255,6 @@ _scale("pretty", "max_extent", 8.0, "lake", height_meters=0.8)
 _scale("pretty", "max_extent", 8.0, "beach", height_meters=2.5)
 _scale("pretty", "max_extent", 7.0, "swamp", height_meters=1.0)
 _scale("pretty", "max_extent", 8.0, "cliff", height_meters=6.0)
-_scale("pretty", "height", 5.0, "cave_entrance")
 _scale("pretty", "max_extent", 6.0, "ground_patch", height_meters=0.5)
 
 _scale("pretty", "height", 4.0, "house_small")
@@ -368,19 +273,19 @@ _scale("pretty", "height", 3.0, "lantern_post", "market_stall", "statue")
 _scale("pretty", "height", 2.4, "fountain")
 _scale("pretty", "max_extent", 1.0, "crate")
 _scale("pretty", "height", 2.3, "signpost")
-_scale("pretty", "height", 0.8, "mushroom_red")
-_scale("pretty", "height", 0.6, "mushroom_brown")
-_scale("pretty", "height", 1.2, "crystal_blue")
-_scale("pretty", "height", 1.0, "crystal_pink", "treasure_chest")
+_scale("pretty", "height", 1.0, "crystal_pink")
 _scale("pretty", "max_extent", 5.0, "boat", height_meters=2.5)
 _scale("pretty", "height", 3.5, "arch_stone")
-_scale("pretty", "max_extent", 3.0, "cart", height_meters=1.8)
 _scale("pretty", "height", 1.5, "tombstone")
 _scale("pretty", "height", 2.0, "haystack", "cooking_station")
 _scale("pretty", "height", 1.8, "spit_roast")
-_scale("pretty", "height", 4.5, "palm")
 _scale("pretty", "max_extent", 1.0, "resource_wood")
+_scale("pretty", "height", 1.2, "crystal_blue")
+_scale("pretty", "height", 1.0, "treasure_chest")
 _scale("pretty", "max_extent", 0.8, "resource_stone")
+_scale("pretty", "max_extent", 3.0, "cart", height_meters=1.8)
+_scale("pretty", "height", 4.5, "palm")
+_scale("pretty", "height", 5.0, "cave_entrance")
 _scale("pretty", "max_extent", 2.2, "wolf", height_meters=1.2)
 _scale("pretty", "height", 1.7, "bear")
 
@@ -406,6 +311,7 @@ _scale("animals", "height", 1.4, "deer")
 _scale("animals", "height", 1.15, "deer_fawn")
 _scale("animals", "height", 0.9, "fox")
 _scale("animals", "height", 0.9, "fox_silver")
+_scale("animals", "max_extent", 1.35, "fish", height_meters=0.70)
 
 
 def _asset_index() -> dict[tuple[str, str], GeneratorSpec]:

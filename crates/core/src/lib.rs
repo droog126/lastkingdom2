@@ -21,12 +21,14 @@ pub mod protocol;
 pub mod pvp;
 pub mod resource;
 pub mod scenario;
+pub mod settlement;
 #[cfg(feature = "experimental-gameplay")]
 pub mod sovereign_spark;
 pub mod status;
 #[cfg(feature = "experimental-gameplay")]
 pub mod terrain_overlay;
 pub mod transport;
+pub mod vehicle;
 pub mod world;
 
 pub mod ai;

@@ -23,8 +23,18 @@ human-readable `content.md` catalog, complete registry JSON, active-content and 
 JSON/CSV views, recipes, and a manifest. `just export-content` remains an alias. Use
 `just export --out=PATH` to choose another output directory.
 
-The historical closed-loop artifact contract remains in the repository, but `just loop` is
-temporarily unavailable while its runtime producer is migrated to the focused client.
+`just loop` runs the online closed loop with a focused rendered client and a second client. The
+direct `just codex-client` command enters the complete Living Forest main scene and replaces human
+input with Codex decisions. Use `just loop-offline` when an offline-only run is needed; `just loop-codex` is the
+explicit Codex loop, while `just loop-ai` remains the deterministic local fallback.
+The Codex path uses the local `codex exec` command with read-only sandboxing; authenticate it with
+`codex login` first, or override the executable with `LK2_CODEX_BIN`.
+
+After a loop, run `just milestone` to copy its latest primary PNG into the top-level
+`milestones/` directory. Milestone captures are Git-visible and survive `just clean-runs`;
+ordinary `screenshots/iter_NN/` output remains temporary and unchanged.
+While playing the offline or online scene, press `F12` to capture the current game window directly
+to the same `milestones/` directory without touching loop artifacts.
 
 Useful validation entry points:
 
@@ -48,7 +58,8 @@ just fmt
 - `assets/`: runtime art and generated models.
 - `tools/`: reproducible Blender/model generation and focused asset analysis.
 - `scenarios/`: scenario JSON scripts.
-- `screenshots/`: closed-loop output.
+- `screenshots/`: temporary closed-loop output.
+- `milestones/`: durable, Git-visible copies of selected loop screenshots.
 - `run-logs/`: play/build logs and extracted error archives.
 - `docs/`: current guides, reference material, proposals, and archives.
 - `.codex/skills/`: project-specific agent workflows.
@@ -81,6 +92,15 @@ blender --background --python tools/create_eco_models.py
 python tools/validate_pretty_glbs.py
 python tools/verify_poly_budget.py
 ```
+
+To prepare a model for AI visual optimization, render its front, side, and top views and
+write a task bundle under screenshots/model_optimize/:
+
+```powershell
+just model-optimize animals/rabbit
+```
+
+Use an assets-relative path when a stem exists in more than one collection.
 
 Use the project `$ai-modeling` skill for asset generation or manifest changes. Do not commit local
 launcher paths, Python caches, Blender backups, temporary exports, or generated run logs.

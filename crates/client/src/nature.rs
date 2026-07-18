@@ -158,8 +158,11 @@ mod tests {
             buffer.push_with_events(
                 snapshot,
                 [
-                    NatureEvent::RainFell { amount: 1.25 },
-                    NatureEvent::PlantsGrown { count: 2 },
+                    NatureEvent::RainFell {
+                        tick: 1,
+                        amount: 1.25,
+                    },
+                    NatureEvent::PlantsGrown { tick: 1, count: 2 },
                 ],
             ),
             SnapshotAcceptance::Accepted
@@ -169,8 +172,11 @@ mod tests {
         assert_eq!(
             drained,
             vec![
-                NatureEvent::RainFell { amount: 1.25 },
-                NatureEvent::PlantsGrown { count: 2 },
+                NatureEvent::RainFell {
+                    tick: 1,
+                    amount: 1.25,
+                },
+                NatureEvent::PlantsGrown { tick: 1, count: 2 },
             ]
         );
         assert!(buffer.drain_events().next().is_none());

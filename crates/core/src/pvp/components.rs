@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::rules::apply_damage;
 
+/// Default fixed-tick invulnerability window after a confirmed hit.
+pub const CREATURE_HIT_INVULNERABILITY_TICKS: u32 = 8;
+
 #[derive(Component, Reflect, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Health {
     pub current: f32,

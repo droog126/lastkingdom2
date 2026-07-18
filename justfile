@@ -37,24 +37,35 @@ play *ARGS:
     just xtask play {{ARGS}}
 
 model-preview:
-    just play --gpu-backend=vulkan --model-preview
+    just client-fast --gpu-backend=vulkan --model-preview
 
 # Iterate every GLB under assets/, screenshot each individually, and write a
 # self-evaluation summary to screenshots/model_preview/decision.md. Use this
 # when you want to spot-check the whole catalog without manually clicking
 # through every featured model.
 model-preview-all:
-    just xtask model-preview-all
+    $env:CARGO_BUILD_JOBS="12"; just xtask model-preview-all
 
 # Same as model-preview-all but only renders the named model (stem or path).
 model-preview-all-only MODEL:
-    just xtask model-preview-all --only={{MODEL}}
+    $env:CARGO_BUILD_JOBS="12"; just xtask model-preview-all --only={{MODEL}}
+
+# Render several selected models by comma-separated stems or asset-relative paths.
+model-preview-selected MODELS:
+    $env:CARGO_BUILD_JOBS="12"; just xtask model-preview-all --only={{MODELS}}
 
 model-preview-one MODEL:
-    just play --gpu-backend=vulkan --model-preview --model-preview-one={{MODEL}}
+    just client-fast --gpu-backend=vulkan --model-preview --model-preview-one={{MODEL}}
 
 model-preview-shot MODEL:
-    just play --gpu-backend=vulkan --model-preview --model-preview-one={{MODEL}} --model-preview-shot
+    $env:CARGO_BUILD_JOBS="12"; cargo build -p lk2-client
+    & .\target\debug\lk2-client.exe --model-preview --model-preview-one={{MODEL}} --model-preview-view=front --model-preview-shot
+    & .\target\debug\lk2-client.exe --model-preview --model-preview-one={{MODEL}} --model-preview-view=side --model-preview-shot
+    & .\target\debug\lk2-client.exe --model-preview --model-preview-one={{MODEL}} --model-preview-view=top --model-preview-shot
+
+# Render front/side/top views and create an AI-readable optimization task bundle.
+model-optimize MODEL:
+    just xtask model-optimize {{MODEL}}
 
 game-scene-shot:
     just play --gpu-backend=vulkan --game-scene-shot
@@ -134,10 +145,29 @@ clean-runs:
     just xtask clean-runs
 
 loop:
+    just loop-codex
+
+loop-offline:
     just xtask loop --offline --seconds 60
 
 loop-online:
     just xtask loop --online --refresh-after-fail --first-person --seconds 60
+
+loop-ai:
+    just xtask loop --online --ai-client --refresh-after-fail --first-person --seconds 60
+
+loop-codex:
+    just xtask loop --online --codex-client --refresh-after-fail --first-person --seconds 60
+
+# Preserve the latest loop PNG outside the temporary screenshots directory.
+milestone:
+    just xtask milestone
+
+ai-client *ARGS:
+    cargo run -p lk2-client -- --ai-client {{ARGS}}
+
+codex-client *ARGS:
+    cargo run -p lk2-client -- --codex-client {{ARGS}}
 
 loop-skip-build:
     just xtask loop --offline --skip-build --seconds 60

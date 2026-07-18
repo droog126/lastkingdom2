@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+pub const WOLF_ATTACK_SEPARATION: f32 = 1.05;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AiMood {
     Idle,
@@ -64,7 +66,7 @@ impl CreatureAiProfile {
             threat_radius: 0.0,
             flee_distance: 0.0,
             forage_distance: 0.0,
-            attack_range: 0.85,
+            attack_range: WOLF_ATTACK_SEPARATION,
             aggression: 1.0,
             feeds: false,
         }
@@ -102,6 +104,21 @@ impl CreatureAiProfile {
             feeds: true,
         }
     }
+}
+
+/// Return a flat-ground target that keeps two presentation actors separated.
+/// This does not replace authoritative collision or combat rules.
+pub fn separated_target_position(self_pos: Vec3, target: Vec3, minimum_distance: f32) -> Vec3 {
+    let minimum_distance = minimum_distance.max(0.0);
+    let delta = Vec3::new(target.x - self_pos.x, 0.0, target.z - self_pos.z);
+    let distance = delta.length();
+    if distance <= 0.0001 {
+        return target - Vec3::X * minimum_distance;
+    }
+    if distance >= minimum_distance {
+        return target;
+    }
+    target - delta / distance * minimum_distance
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -305,6 +305,122 @@ impl Default for HeightmapModule {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandformArchetype {
+    RiverGrove,
+    BasinMeadow,
+    HighlandShallows,
+    CoastalSteps,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LandformProfile {
+    pub archetype: LandformArchetype,
+    pub river_source_x: f32,
+    pub river_width_scale: f32,
+    pub river_wander: f32,
+    pub lake_center_x: f32,
+    pub lake_center_z: f32,
+    pub lake_radius_x: f32,
+    pub lake_radius_z: f32,
+    pub lake_depth: f32,
+    pub region_cell_size: i32,
+    pub region_height_amplitude: f32,
+    pub detail_frequency_scale: f32,
+    pub split_inlet: bool,
+}
+
+impl LandformProfile {
+    fn from_seed(seed: u64, world_size: i32) -> Self {
+        let archetype = match (seed as u32) & 3 {
+            0 => LandformArchetype::BasinMeadow,
+            1 => LandformArchetype::HighlandShallows,
+            2 => LandformArchetype::CoastalSteps,
+            _ => LandformArchetype::RiverGrove,
+        };
+        let size = world_size.max(32) as f32;
+        let variation_options = [0.90, 1.0, 1.15];
+        let variation_index =
+            ((hash01(0, 0, 0, (seed ^ 0x4D41_5041) as u32) * 3.0) as usize).min(2);
+        let variation = variation_options[variation_index];
+        let (lake_x, lake_z, lake_rx, lake_rz, base_river_width, wander, region_size) =
+            match archetype {
+                LandformArchetype::RiverGrove => (
+                    size * 0.70,
+                    size * 0.28,
+                    size * 0.16,
+                    size * 0.095,
+                    1.10,
+                    5.5,
+                    24,
+                ),
+                LandformArchetype::BasinMeadow => (
+                    size * 0.53,
+                    size * 0.34,
+                    size * 0.20,
+                    size * 0.13,
+                    1.28,
+                    3.5,
+                    32,
+                ),
+                LandformArchetype::HighlandShallows => (
+                    size * 0.63,
+                    size * 0.24,
+                    size * 0.13,
+                    size * 0.085,
+                    0.92,
+                    7.5,
+                    24,
+                ),
+                LandformArchetype::CoastalSteps => (
+                    size * 0.76,
+                    size * 0.38,
+                    size * 0.17,
+                    size * 0.11,
+                    1.04,
+                    6.0,
+                    24,
+                ),
+            };
+
+        Self {
+            archetype,
+            river_source_x: size * 0.55,
+            river_width_scale: base_river_width * variation,
+            river_wander: wander
+                * ([0.85, 1.0, 1.18])
+                    [((hash01(1, 0, 0, (seed ^ 0x5249_5645) as u32) * 3.0) as usize).min(2)],
+            lake_center_x: lake_x,
+            lake_center_z: lake_z,
+            lake_radius_x: lake_rx
+                * ([0.9, 1.0, 1.12])
+                    [((hash01(2, 0, 0, (seed ^ 0x4C41_4B45) as u32) * 3.0) as usize).min(2)],
+            lake_radius_z: lake_rz
+                * ([0.9, 1.0, 1.12])
+                    [((hash01(3, 0, 0, (seed ^ 0x4C41_4B45) as u32) * 3.0) as usize).min(2)],
+            lake_depth: ([1.8, 2.4, 3.2])
+                [((hash01(4, 0, 0, (seed ^ 0x5741_5445) as u32) * 3.0) as usize).min(2)],
+            region_cell_size: region_size,
+            region_height_amplitude: match archetype {
+                LandformArchetype::RiverGrove => 2.4,
+                LandformArchetype::BasinMeadow => 1.2,
+                LandformArchetype::HighlandShallows => 4.0,
+                LandformArchetype::CoastalSteps => 2.8,
+            },
+            detail_frequency_scale: ([0.82, 1.0, 1.18])
+                [((hash01(5, 0, 0, (seed ^ 0x4445_5441) as u32) * 3.0) as usize).min(2)],
+            split_inlet: hash01(6, 0, 0, (seed ^ 0x5350_4C49) as u32) < 0.12,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LandformRegion {
+    Meadow,
+    Woodland,
+    Ridge,
+}
+
 #[derive(Debug, Clone)]
 pub struct LandformModule {
     pub name: String,
@@ -321,22 +437,71 @@ pub struct LandformModule {
 
 impl Default for LandformModule {
     fn default() -> Self {
+        Self::for_seed(0xDEAD_BEEF, WORLD_SIZE)
+    }
+}
+
+impl LandformModule {
+    pub fn for_seed(seed: u64, world_size: i32) -> Self {
         Self {
             name: "landform".into(),
-            seed: 0xDEAD_BEEF,
+            seed,
             base_height: SEA_LEVEL as f32 + 1.0,
             land_amplitude: 12.0,
             detail_amplitude: 4.0,
             mountain_height: 48.0,
             ocean_depth: 7.0,
             river_width: 3.5,
-            world_size: WORLD_SIZE,
+            world_size,
             weight: 0.1,
         }
     }
-}
 
-impl LandformModule {
+    pub fn profile(&self) -> LandformProfile {
+        LandformProfile::from_seed(self.seed, self.world_size)
+    }
+
+    pub fn region_variant(&self, x: i32, z: i32) -> LandformRegion {
+        let cell_size = self.profile().region_cell_size.max(1);
+        let cell_x = x.div_euclid(cell_size);
+        let cell_z = z.div_euclid(cell_size);
+        match (hash01(cell_x, 0, cell_z, (self.seed ^ 0x5245_4749) as u32) * 3.0) as usize {
+            0 => LandformRegion::Meadow,
+            1 => LandformRegion::Woodland,
+            _ => LandformRegion::Ridge,
+        }
+    }
+
+    fn region_bias(region: LandformRegion) -> f32 {
+        match region {
+            LandformRegion::Meadow => -0.8,
+            LandformRegion::Woodland => 0.25,
+            LandformRegion::Ridge => 1.0,
+        }
+    }
+
+    fn spatial_region_bias(&self, x: i32, z: i32) -> f32 {
+        let cell_size = self.profile().region_cell_size.max(1) as f32;
+        let gx = x as f32 / cell_size;
+        let gz = z as f32 / cell_size;
+        let x0 = gx.floor() as i32;
+        let z0 = gz.floor() as i32;
+        let tx = smoothstep(0.0, 1.0, gx - x0 as f32);
+        let tz = smoothstep(0.0, 1.0, gz - z0 as f32);
+        let a =
+            Self::region_bias(self.region_variant(x0 * cell_size as i32, z0 * cell_size as i32));
+        let b = Self::region_bias(
+            self.region_variant((x0 + 1) * cell_size as i32, z0 * cell_size as i32),
+        );
+        let c = Self::region_bias(
+            self.region_variant(x0 * cell_size as i32, (z0 + 1) * cell_size as i32),
+        );
+        let d = Self::region_bias(
+            self.region_variant((x0 + 1) * cell_size as i32, (z0 + 1) * cell_size as i32),
+        );
+        lerp(lerp(a, b, tx), lerp(c, d, tx), tz)
+    }
+
     pub fn ocean_factor(&self, x: i32, z: i32) -> f32 {
         let continental = value_noise2(x as f32, z as f32, 0.028, (self.seed ^ 0xC011_0CEA) as u32);
         let broad_ocean = 1.0 - smoothstep(0.23, 0.40, continental);
@@ -354,20 +519,45 @@ impl LandformModule {
     }
 
     pub fn river_factor(&self, x: i32, z: i32) -> f32 {
+        let profile = self.profile();
         let phase =
             value_noise2(0.0, 0.0, 1.0, (self.seed ^ 0xA11C_EA5E) as u32) * std::f32::consts::TAU;
-        let wander = (value_noise2(x as f32, z as f32, 0.018, (self.seed ^ 0xBADC_0FFE) as u32)
-            - 0.5)
-            * 14.0;
-        let main_axis =
-            self.world_size as f32 * 0.5 + (x as f32 * 0.060 + phase).sin() * 16.0 + wander;
-        let branch_axis = self.world_size as f32 * 0.5
-            + (z as f32 * 0.052 + phase * 0.7).cos() * 18.0
-            - wander * 0.5;
-        let distance = (z as f32 - main_axis)
-            .abs()
-            .min((x as f32 - branch_axis).abs());
-        (1.0 - distance / self.river_width.max(0.1)).clamp(0.0, 1.0)
+        let width = self.river_width.max(0.1) * profile.river_width_scale;
+        let x = x as f32;
+        let z = z as f32;
+        let river_end = profile.lake_center_z + profile.lake_radius_z * 1.15;
+        let main_gate = 1.0 - smoothstep(river_end, river_end + 5.0, z);
+        let wander = (value_noise2(x, z, 0.018, (self.seed ^ 0xBADC_0FFE) as u32) - 0.5)
+            * profile.river_wander
+            * smoothstep(0.0, 16.0, z);
+        let main_wave = ((z * 0.060 + phase).sin() - phase.sin()) * profile.river_wander;
+        let main_axis = profile.river_source_x + main_wave + wander;
+        let main = (1.0 - (x - main_axis).abs() / width).clamp(0.0, 1.0) * main_gate;
+
+        let along = (x - profile.river_source_x)
+            / (profile.lake_center_x - profile.river_source_x).max(0.1);
+        let branch_gate = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.88, 1.08, along));
+        let branch_axis =
+            profile.lake_center_z + (x * 0.065 + phase * 0.7).sin() * profile.river_wander * 0.28;
+        let branch = (1.0 - (z - branch_axis).abs() / (width * 0.86)).clamp(0.0, 1.0) * branch_gate;
+
+        let split = if profile.split_inlet {
+            let split_axis = profile.lake_center_z + profile.lake_radius_z * 0.42;
+            let split_gate = smoothstep(0.18, 0.32, along) * (1.0 - smoothstep(0.72, 0.95, along));
+            (1.0 - (z - split_axis).abs() / (width * 0.56)).clamp(0.0, 1.0) * split_gate
+        } else {
+            0.0
+        };
+
+        main.max(branch).max(split)
+    }
+
+    pub fn lake_factor(&self, x: i32, z: i32) -> f32 {
+        let profile = self.profile();
+        let dx = (x as f32 - profile.lake_center_x) / profile.lake_radius_x.max(0.1);
+        let dz = (z as f32 - profile.lake_center_z) / profile.lake_radius_z.max(0.1);
+        let distance = (dx * dx + dz * dz).sqrt();
+        1.0 - smoothstep(0.72, 1.08, distance)
     }
 
     pub fn mountain_factor(&self, x: i32, z: i32) -> f32 {
@@ -383,24 +573,40 @@ impl LandformModule {
     }
 
     pub fn surface_at(&self, x: i32, z: i32) -> f32 {
+        let profile = self.profile();
         let continental = value_noise2(x as f32, z as f32, 0.035, (self.seed ^ 0xC011_1A0D) as u32);
-        let detail = value_noise2(x as f32, z as f32, 0.13, (self.seed ^ 0xD37A_11) as u32);
+        let detail = value_noise2(
+            x as f32,
+            z as f32,
+            0.13 * profile.detail_frequency_scale,
+            (self.seed ^ 0xD37A_11) as u32,
+        );
         let mountain = self.mountain_factor(x, z);
         let ocean = self.ocean_factor(x, z);
         let river = self.river_factor(x, z) * (1.0 - ocean);
+        let lake = self.lake_factor(x, z) * (1.0 - ocean);
         let land = self.base_height
             + (continental - 0.5) * self.land_amplitude
             + (detail - 0.5) * self.detail_amplitude
-            + mountain * self.mountain_height;
+            + mountain * self.mountain_height
+            + self.spatial_region_bias(x, z) * profile.region_height_amplitude;
         let seabed = SEA_LEVEL as f32 - 2.0 - ocean * self.ocean_depth;
         let riverbed = SEA_LEVEL as f32 - 1.0;
         let river_carve = smoothstep(0.22, 0.82, river);
         let river_surface = lerp(land, riverbed, river_carve);
-        lerp(river_surface, seabed, ocean)
+        let lake_surface = lerp(
+            river_surface,
+            SEA_LEVEL as f32 - 1.0 - profile.lake_depth,
+            lake,
+        );
+        lerp(lake_surface, seabed, ocean)
     }
 
     fn surface_block(&self, x: i32, z: i32, surface: f32) -> BlockType {
-        if self.ocean_factor(x, z) > 0.35 || self.river_factor(x, z) > 0.35 {
+        if self.ocean_factor(x, z) > 0.35
+            || self.river_factor(x, z) > 0.35
+            || self.lake_factor(x, z) > 0.35
+        {
             return BlockType::Sand;
         }
         if surface > SEA_LEVEL as f32 + 25.0 {
@@ -858,8 +1064,12 @@ pub mod presets {
     use rand::{RngExt, SeedableRng};
 
     pub fn default_preset() -> TerrainPipeline {
+        default_preset_with_seed(0xDEAD_BEEF)
+    }
+
+    pub fn default_preset_with_seed(seed: u64) -> TerrainPipeline {
         let landform = LandformModule {
-            seed: 0xDEADBEEF,
+            seed,
             land_amplitude: 14.0,
             detail_amplitude: 5.0,
             ..Default::default()
@@ -896,7 +1106,7 @@ pub mod presets {
             ],
             vertical_min: 0,
             vertical_max: crate::world::VERTICAL_SIZE,
-            seed: 0xDEADBEEF,
+            seed,
         }
     }
 
@@ -1112,6 +1322,54 @@ pub mod presets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oatmeal_profile_is_seeded_and_discrete() {
+        let a = LandformModule::for_seed(0xDEAD_BEEF, WORLD_SIZE).profile();
+        let b = LandformModule::for_seed(0xDEAD_BEEF, WORLD_SIZE).profile();
+        let c = LandformModule::for_seed(0, WORLD_SIZE).profile();
+
+        assert_eq!(
+            a, b,
+            "the same world seed must reuse one correlated profile"
+        );
+        assert_ne!(a.archetype, c.archetype);
+        assert!(a.river_width_scale > 0.0);
+        assert!(a.lake_radius_x > 0.0 && a.lake_radius_z > 0.0);
+        assert!(a.region_cell_size >= 16);
+    }
+
+    #[test]
+    fn oatmeal_profile_connects_a_river_to_its_lake() {
+        let landform = LandformModule::for_seed(0xDEAD_BEEF, WORLD_SIZE);
+        let profile = landform.profile();
+        let lake_x = profile.lake_center_x.round() as i32;
+        let lake_z = profile.lake_center_z.round() as i32;
+        let source_x = profile.river_source_x.round() as i32;
+        let mid_x = ((profile.river_source_x + profile.lake_center_x) * 0.5).round() as i32;
+
+        assert!(landform.lake_factor(lake_x, lake_z) > 0.9);
+        assert!(landform.surface_at(lake_x, lake_z) < SEA_LEVEL as f32);
+        assert!(landform.river_factor(source_x, 1) > 0.35);
+        assert!(landform.river_factor(mid_x, lake_z) > 0.35);
+    }
+
+    #[test]
+    fn oatmeal_profile_has_multiple_spatial_region_variants() {
+        let landform = LandformModule::for_seed(0xDEAD_BEEF, WORLD_SIZE);
+        let cell_size = landform.profile().region_cell_size as usize;
+        let mut variants = std::collections::HashSet::new();
+        for z in (0..WORLD_SIZE).step_by(cell_size) {
+            for x in (0..WORLD_SIZE).step_by(cell_size) {
+                variants.insert(landform.region_variant(x, z));
+            }
+        }
+
+        assert!(
+            variants.len() >= 2,
+            "the map should make a few large spatial decisions, got {variants:?}"
+        );
+    }
 
     #[test]
     fn default_preset_spawn_hill_is_above_player_y() {

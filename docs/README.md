@@ -13,7 +13,7 @@ Documents are classified by the first-line `doc-status` marker:
 - [Run guide](STARTING.md)
 - [Engineering baseline](architecture/engineering-baseline.md)
 - [TDD workflow](notes/tdd.md)
-- [Closed-loop contract](plans/closed-loop-iteration.md)
+- [Current rendering optimization](notes/rendering-optimization.md)
 
 Agent routing lives in [AGENTS.md](../AGENTS.md), with operational instructions under
 [project skills](../.codex/skills/). Code, Cargo metadata, `justfile`, and `xtask` behavior take
@@ -34,7 +34,6 @@ precedence when a current document drifts.
 ## Proposals
 
 - [Architecture evolution plan](architecture/architecture_plan_v2.md)
-- [Four-agent natural-world refactor plan](plans/natural-world-parallel-refactor.md)
 - [Veloren lessons implementation plan](plans/veloren-lessons-action-plan.md)
 - [Destructible terrain and mining proposal](proposals/destructible-terrain-and-mining.md)
 

@@ -2,6 +2,46 @@
 
 use bevy::prelude::*;
 
+/// Runtime tuning values for the presentation-only humanoid IK pose.
+///
+/// These values intentionally live outside the authoritative player state. The
+/// settings panel can change them while the scene is running, which makes it
+/// possible to tune the silhouette without rebuilding the player asset.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct ProceduralAnimationConfig {
+    pub stride_length: f32,
+    pub foot_lift: f32,
+    pub torso_lean: f32,
+    pub body_bob: f32,
+    pub arm_swing: f32,
+    pub ik_leg_upper_length: f32,
+    pub ik_leg_lower_length: f32,
+    pub crouch_depth: f32,
+    pub crouch_lean: f32,
+    pub crouch_arm_drop: f32,
+    pub crouch_knee_forward: f32,
+    pub crouch_transition_speed: f32,
+}
+
+impl Default for ProceduralAnimationConfig {
+    fn default() -> Self {
+        Self {
+            stride_length: 0.30,
+            foot_lift: 0.18,
+            torso_lean: 0.13,
+            body_bob: 0.040,
+            arm_swing: 0.08,
+            ik_leg_upper_length: 0.25,
+            ik_leg_lower_length: 0.25,
+            crouch_depth: 0.32,
+            crouch_lean: 0.18,
+            crouch_arm_drop: 0.10,
+            crouch_knee_forward: 0.20,
+            crouch_transition_speed: 10.0,
+        }
+    }
+}
+
 /// One presentation-only wind field shared by all vegetation.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct WindField {
@@ -89,7 +129,8 @@ pub fn alternating_step_offset(phase: f32, stride: f32, opposite: bool) -> f32 {
         phase + std::f32::consts::PI
     } else {
         phase
-    };
+    }
+    .rem_euclid(std::f32::consts::TAU);
     phase.sin() * stride * 0.5
 }
 
@@ -98,7 +139,8 @@ pub fn alternating_step_lift(phase: f32, height: f32, opposite: bool) -> f32 {
         phase + std::f32::consts::PI
     } else {
         phase
-    };
+    }
+    .rem_euclid(std::f32::consts::TAU);
     phase.sin().max(0.0) * height
 }
 

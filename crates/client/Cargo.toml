@@ -15,7 +15,11 @@ path = "src/main.rs"
 dev-dynamic-linking = ["bevy/dynamic_linking"]
 
 [dependencies]
-bevy = { workspace = true, features = ["system_font_discovery"] }
+bevy = { workspace = true, features = [
+    "system_font_discovery",
+    "system_clipboard",
+    "area_light_luts",
+] }
 bevy_hanabi = { workspace = true }
 bevy_world_serialization = { workspace = true }
 avian3d = { workspace = true, features = [

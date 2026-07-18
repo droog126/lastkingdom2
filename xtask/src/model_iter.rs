@@ -35,6 +35,9 @@ pub struct ModelEntry {
     pub stem: String,
     pub asset_path: String,
     pub category: String,
+    pub file_size_bytes: u64,
+    pub asset_info: Option<serde_json::Value>,
+    pub asset_info_error: Option<String>,
     pub png_path: String,
     pub png_bytes: u64,
     pub rendered: bool,
@@ -53,7 +56,8 @@ pub struct ModelSummary {
 }
 
 pub fn run(root: &Path, raw: &[String]) -> Result<()> {
-    let mut only: Option<String> = None;
+    let mut only: Vec<String> = Vec::new();
+    let mut only_requested = false;
     let mut skip_build = false;
     let mut skip_render = false;
     let mut limit: Option<usize> = None;
@@ -62,8 +66,9 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         let (name, inline) = args::split_flag(&raw[i]);
         match name.as_deref() {
             Some("only") => {
+                only_requested = true;
                 if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
-                    only = Some(value);
+                    only.extend(parse_model_filters(&value));
                 }
             }
             Some("limit") => {
@@ -77,7 +82,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             }
             Some("help") | Some("h") | Some("?") => {
                 println!(
-                    "xtask model-preview-all [--only=<stem>] [--limit=N] [--skip-build] [--skip-render]"
+                    "xtask model-preview-all [--only=<stem[,stem...]>] [--limit=N] [--skip-build] [--skip-render]"
                 );
                 return Ok(());
             }
@@ -109,43 +114,28 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         return Err(format!("binary not found: {}", client_exe.display()));
     }
 
+    if only_requested && only.is_empty() {
+        return Err("--only requires at least one model stem or path".to_string());
+    }
     let asset_root = root.join("assets");
     let mut glbs = collect_glbs(&asset_root);
-    if let Some(filter) = only.as_deref() {
-        let needle = filter.to_ascii_lowercase();
-        let needle_stem = needle
-            .rsplit('/')
-            .next()
-            .unwrap_or(&needle)
-            .trim_end_matches(".glb")
-            .to_string();
-        let needle_no_ext = needle.trim_end_matches(".glb").to_string();
-        glbs.retain(|(rel, _)| {
-            let lower = rel.to_ascii_lowercase();
-            let stem = lower
-                .rsplit('/')
-                .next()
-                .unwrap_or("")
-                .trim_end_matches(".glb");
-            // Match: exact relative path, exact stem, path-ending, or the
-            // unique asset path under `assets/`. We do NOT keep all models
-            // that share a stem — that's too loose when several packs share
-            // a name (e.g. two `rabbit.glb` files).
-            lower == needle_no_ext
-                || lower == needle
-                || stem == needle_stem
-                || lower.ends_with(&format!("/{needle_no_ext}"))
-        });
+    if !only.is_empty() {
+        glbs.retain(|(rel, _)| only.iter().any(|filter| model_path_matches(rel, filter)));
         if glbs.is_empty() {
             return Err(format!(
-                "no GLB matched --only='{filter}' (try stem or assets-relative path)"
+                "no GLB matched --only='{}' (try stem or assets-relative path)",
+                only.join(",")
             ));
         }
     }
     if glbs.is_empty() {
         return Err(format!(
             "no GLB matched under assets/ (filter={})",
-            only.as_deref().unwrap_or("<none>")
+            if only.is_empty() {
+                "<none>".to_string()
+            } else {
+                only.join(",")
+            }
         ));
     }
     if let Some(n) = limit {
@@ -168,7 +158,7 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         if !skip_render {
             let _ = fs::remove_file(&png_abs);
         }
-        let entry = if skip_render {
+        let mut entry = if skip_render {
             evaluate_png(root, &stem, asset_path, category, &png_abs)
         } else {
             match run_one(root, &client_exe, &envs, &stem, &png_abs) {
@@ -179,6 +169,11 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
                 }
             }
         };
+        let (file_size_bytes, asset_info, asset_info_error) =
+            read_preview_manifest_entry(root, asset_path);
+        entry.file_size_bytes = file_size_bytes;
+        entry.asset_info = asset_info;
+        entry.asset_info_error = asset_info_error;
         println!(
             "  verdict={} bytes={} problems={:?}",
             entry.verdict, entry.png_bytes, entry.problems
@@ -293,6 +288,57 @@ fn append_run_header(root: &Path, stem: &str, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn read_preview_manifest_entry(
+    root: &Path,
+    asset_path: &str,
+) -> (u64, Option<serde_json::Value>, Option<String>) {
+    let path = root.join(OUTPUT_DIR).join("manifest.json");
+    let Ok(body) = fs::read_to_string(path) else {
+        return (0, None, Some("model preview manifest missing".to_string()));
+    };
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return (
+            0,
+            None,
+            Some("model preview manifest is not valid JSON".to_string()),
+        );
+    };
+    let models = document
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| document.as_array());
+    let Some(entry) = models.and_then(|models| {
+        models
+            .iter()
+            .find(|entry| entry.get("path").and_then(serde_json::Value::as_str) == Some(asset_path))
+    }) else {
+        return (
+            0,
+            None,
+            Some(format!(
+                "model preview manifest has no entry for {asset_path}"
+            )),
+        );
+    };
+    let asset_info = entry
+        .get("asset_info")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let asset_info_error = entry["asset_info_error"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            asset_info
+                .is_none()
+                .then_some("asset metadata missing".to_string())
+        });
+    (
+        entry["file_size_bytes"].as_u64().unwrap_or_default(),
+        asset_info,
+        asset_info_error,
+    )
+}
+
 fn evaluate_png(
     root: &Path,
     stem: &str,
@@ -355,6 +401,9 @@ fn evaluate_png(
         stem: stem.to_string(),
         asset_path: asset_path.to_string(),
         category: category.to_string(),
+        file_size_bytes: 0,
+        asset_info: None,
+        asset_info_error: None,
         png_path: format!("{OUTPUT_DIR}/{stem}.png"),
         png_bytes,
         rendered,
@@ -632,6 +681,7 @@ fn write_decision(
     md.push_str("tests:\n");
     md.push_str("- ran `cargo run -p lk2-client -- --model-preview-one=<stem> --model-preview-shot` per GLB\n");
     md.push_str("- inspected each PNG via Pillow for top-color ratio, mean saturation, and silhouette aspect\n");
+    md.push_str("- copied per-model GLB metadata from manifest.json (triangles, vertices, nodes, materials, dimensions)\n");
     md.push_str("- wrote machine-readable summary to model_preview_results.json\n\n");
 
     md.push_str("next:\n");
@@ -702,6 +752,40 @@ fn collect_glbs(asset_root: &Path) -> Vec<(String, String)> {
     walk(asset_root, asset_root, &mut out);
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+fn parse_model_filters(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(normalize_model_filter)
+        .filter(|filter| !filter.is_empty())
+        .collect()
+}
+
+fn normalize_model_filter(raw: &str) -> String {
+    let normalized = raw
+        .trim()
+        .trim_matches('"')
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
+    let normalized = normalized.strip_prefix("assets/").unwrap_or(normalized);
+    normalized
+        .strip_suffix(".glb")
+        .unwrap_or(normalized)
+        .to_string()
+}
+
+fn model_path_matches(asset_path: &str, filter: &str) -> bool {
+    let needle = normalize_model_filter(filter);
+    if needle.is_empty() {
+        return false;
+    }
+    let normalized_path = normalize_model_filter(asset_path);
+    let stem = normalized_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&normalized_path);
+    normalized_path == needle || stem == needle || normalized_path.ends_with(&format!("/{needle}"))
 }
 
 fn runtime_env(root: &Path) -> Result<Vec<(String, String)>> {
@@ -780,3 +864,27 @@ fn exe_path(root: &Path, package: &str) -> PathBuf {
 }
 
 // (no dead-code anchor)
+
+#[cfg(test)]
+mod tests {
+    use super::{model_path_matches, parse_model_filters};
+
+    #[test]
+    fn parses_comma_separated_model_filters() {
+        assert_eq!(
+            parse_model_filters(" fish, deer.glb, ,animals/fish.glb "),
+            vec!["fish", "deer", "animals/fish"]
+        );
+    }
+
+    #[test]
+    fn matches_stems_and_assets_relative_paths() {
+        assert!(model_path_matches("animals/fish.glb", "fish"));
+        assert!(model_path_matches(
+            "animals/fish.glb",
+            "assets/animals/fish.glb"
+        ));
+        assert!(model_path_matches("procedural/pretty/deer.glb", "deer.glb"));
+        assert!(!model_path_matches("animals/fish.glb", "fox"));
+    }
+}

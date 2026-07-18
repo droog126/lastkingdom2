@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import math
 import os
+import colorsys
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -21,6 +22,69 @@ from model_style import (
 
 RGB = tuple[float, float, float]
 Vec3Like = Sequence[float]
+
+
+def _sokpop_color(name: str, color: RGB) -> RGB:
+    """Keep every generator's hand-authored color inside one toy-world palette."""
+    token = name.lower()
+    if any(word in token for word in ("eye", "pupil", "ink", "coal", "shadow")):
+        return (0.075, 0.055, 0.045)
+    if any(word in token for word in ("wood", "bark", "trunk", "branch", "rope", "hay")):
+        anchor = (0.52, 0.30, 0.14)
+    elif any(word in token for word in ("leaf", "grass", "moss", "fern", "reed", "stem")):
+        anchor = (0.28, 0.55, 0.24)
+    elif any(word in token for word in ("stone", "rock", "cliff", "slate", "iron")):
+        anchor = (0.42, 0.45, 0.48)
+    elif any(word in token for word in ("gold", "coin", "brass", "sand", "dune", "wheat")):
+        anchor = (0.86, 0.58, 0.18)
+    elif any(word in token for word in ("water", "lake", "river", "ice", "crystal_blue", "cyan")):
+        anchor = (0.22, 0.62, 0.72)
+    elif any(word in token for word in ("red", "pink", "rose", "fire", "flame", "berry", "meat")):
+        anchor = (0.86, 0.24, 0.22)
+    elif any(word in token for word in ("purple", "violet", "magenta", "wraith")):
+        anchor = (0.58, 0.30, 0.70)
+    elif any(word in token for word in ("white", "cream", "cloud", "snow", "light", "ivory")):
+        anchor = (0.91, 0.84, 0.68)
+    else:
+        hue, saturation, value = colorsys.rgb_to_hsv(*color)
+        saturation = min(0.78, max(0.30, saturation * 0.92))
+        value = min(0.90, max(0.34, value * 0.92 + 0.04))
+        return colorsys.hsv_to_rgb(hue, saturation, value)
+
+    # Preserve authored light/dark roles while sharing the same family anchor.
+    authored_value = sum(color) / 3.0
+    factor = 0.78 + min(0.30, max(-0.16, authored_value - 0.52))
+    return tuple(min(1.0, max(0.0, channel * factor)) for channel in anchor)
+
+
+def _apply_sokpop_geometry_pass(objects: Iterable[bpy.types.Object]) -> None:
+    """Make primitive-heavy generators read as one deliberate low-poly toy set."""
+    for obj in objects:
+        if obj.type != "MESH" or not obj.data.polygons:
+            continue
+        surface_role = obj.get("lk2_surface_role", "auto")
+        # Large collection blobs stay softly shaded; thin structure remains flat.
+        if surface_role == "organic" or len(obj.data.polygons) > 40:
+            shade_smooth(obj)
+        else:
+            shade_flat(obj)
+        if surface_role not in {"hard_surface", "auto"} or len(obj.data.polygons) != 6:
+            continue
+        dimensions = obj.dimensions
+        smallest = min(float(value) for value in dimensions)
+        if smallest <= 0.025:
+            continue
+        modifier = obj.modifiers.new("lk2_style_bevel", "BEVEL")
+        modifier.width = min(0.08, max(0.018, smallest * 0.07))
+        modifier.segments = 2
+        modifier.limit_method = "ANGLE"
+        modifier.harden_normals = True
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+        obj.select_set(False)
+        weighted_normal(obj)
 
 
 def output_dir(collection: str = "pretty") -> Path:
@@ -75,6 +139,7 @@ def mat(
     bsdf = next((node for node in nodes if node.type == "BSDF_PRINCIPLED"), None)
     if bsdf is None:
         bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
+    color = _sokpop_color(name, color)
     bsdf.inputs["Base Color"].default_value = (*color, alpha)
     bsdf.inputs["Roughness"].default_value = roughness
     bsdf.inputs["Metallic"].default_value = metallic
@@ -85,6 +150,7 @@ def mat(
         elif hasattr(material, "blend_method"):
             material.blend_method = "BLEND"
     if any(component > 0.0 for component in emissive):
+        emissive = tuple(min(0.28, max(0.0, component)) for component in emissive)
         emission_input = bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
         if emission_input is not None:
             emission_input.default_value = (*emissive, 1.0)
@@ -110,6 +176,21 @@ def shade_smooth(obj: bpy.types.Object) -> None:
     obj.select_set(False)
 
 
+def weighted_normal(obj: bpy.types.Object) -> None:
+    """Stabilize broad hard-surface planes after beveling their edges."""
+    if obj.type != "MESH" or not obj.data.polygons:
+        return
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    shade_smooth(obj)
+    modifier = obj.modifiers.new("lk2_weighted_normals", "WEIGHTED_NORMAL")
+    modifier.keep_sharp = True
+    modifier.weight = 50
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    obj.select_set(False)
+
+
 def _set_mat(obj: bpy.types.Object, material: bpy.types.Material) -> None:
     obj.data.materials.clear()
     obj.data.materials.append(material)
@@ -128,6 +209,7 @@ def cube(
     obj.name = name
     obj.scale = scale
     _set_mat(obj, material)
+    obj["lk2_surface_role"] = "hard_surface"
     shade_flat(obj)
     return obj
 
@@ -148,8 +230,10 @@ def bevel_box(
     if bevel > 0.0:
         modifier = obj.modifiers.new("lk2_bevel", "BEVEL")
         modifier.width = bevel
-        modifier.segments = 1
+        modifier.segments = 2
+        modifier.harden_normals = True
         bpy.ops.object.modifier_apply(modifier=modifier.name)
+        weighted_normal(obj)
     obj.select_set(False)
     return obj
 
@@ -172,7 +256,29 @@ def uv_sphere(
     obj.name = name
     obj.scale = scale
     _set_mat(obj, material)
+    obj["lk2_surface_role"] = "organic"
     shade_smooth(obj)
+    return obj
+
+
+def smooth_organic(obj: bpy.types.Object, *, subdivision_levels: int = 1) -> bpy.types.Object:
+    """Apply a small Catmull-Clark pass to a rounded organic form."""
+    if obj.type != "MESH":
+        raise ValueError(f"{obj.name} must be a mesh")
+    if not 0 <= subdivision_levels <= 2:
+        raise ValueError("organic subdivision levels must be between 0 and 2")
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    if subdivision_levels:
+        modifier = obj.modifiers.new("lk2_organic_subdivision", "SUBSURF")
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = subdivision_levels
+        modifier.render_levels = subdivision_levels
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+    shade_smooth(obj)
+    obj.select_set(False)
     return obj
 
 
@@ -316,6 +422,35 @@ def prism(
         bpy.ops.object.modifier_apply(modifier=modifier.name)
         obj.select_set(False)
     shade_flat(obj)
+    return obj
+
+
+def soft_fin(
+    name: str,
+    points: Sequence[tuple[float, float]],
+    depth: float,
+    material: bpy.types.Material,
+    *,
+    y: float = 0.0,
+    bevel: float = 0.035,
+    bevel_segments: int = 3,
+) -> bpy.types.Object:
+    """Create a thick, rounded fin from a side-profile outline."""
+    if depth <= 0.0:
+        raise ValueError("soft fin depth must be positive")
+    if not 1 <= bevel_segments <= 6:
+        raise ValueError("soft fin bevel segments must be between 1 and 6")
+    obj = prism(name, points, depth, material, y=y, bevel=0.0)
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    modifier = obj.modifiers.new("lk2_soft_fin_bevel", "BEVEL")
+    modifier.width = min(bevel, depth * 0.42)
+    modifier.segments = bevel_segments
+    modifier.limit_method = "NONE"
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    shade_smooth(obj)
+    obj.select_set(False)
     return obj
 
 
@@ -566,6 +701,7 @@ def export_glb(name: str, *, collection: str = "pretty") -> Path | None:
         print(f"skip {collection}/{name}; LK2_MODEL_ONLY={selected_asset}")
         return None
 
+    _apply_sokpop_geometry_pass(_mesh_objects())
     objects = _consolidate_static_meshes(name, _mesh_objects())
     root = objects[0]
     mesh_objects = [obj for obj in objects if obj.type == "MESH"]

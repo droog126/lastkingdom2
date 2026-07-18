@@ -16,6 +16,7 @@ use serde_json::json;
 use crate::{Result, args, audit, health as rust_health};
 
 const DEV_DYNAMIC_FEATURES: &[&str] = &["dev-dynamic-linking", "lk2-core/dev-dynamic-linking"];
+const CODEX_ARTIFACT_SETTLE_TIMEOUT_SECS: u64 = 95;
 
 fn default_gpu_backend() -> &'static str {
     if cfg!(windows) { "dx12" } else { "vulkan" }
@@ -32,6 +33,8 @@ struct LoopArgs {
     online: bool,
     offline: bool,
     no_server: bool,
+    ai_client: bool,
+    codex_client: bool,
     server_addr: String,
     audit_pretty_models: bool,
     refresh_after_fail: bool,
@@ -75,6 +78,8 @@ impl Default for LoopArgs {
             online: false,
             offline: false,
             no_server: false,
+            ai_client: false,
+            codex_client: false,
             server_addr: "127.0.0.1:5000".to_string(),
             audit_pretty_models: false,
             refresh_after_fail: false,
@@ -165,6 +170,9 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             "crates/client/src/game_scene/mod.rs",
             "crates/client/src/game_scene/capture.rs",
             "crates/client/src/game_scene/offline.rs",
+            "crates/client/src/online.rs",
+            "crates/client/src/ai_client.rs",
+            "crates/client/src/codex_client.rs",
             "crates/core/src/clock.rs",
         ],
     )?;
@@ -176,9 +184,15 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         .join(format!("iter_{:02}", before + 1));
     fs::create_dir_all(&iter_dir).map_err(|e| e.to_string())?;
     set_env_pair(&mut envs, "LK2_ITER_DIR", &iter_dir.display().to_string());
+    // The server owns the authoritative snapshot in online mode. Enable its
+    // recorder for the same loop invocation so health can compare authority
+    // and client state instead of relying on stale files from an older run.
+    set_env_pair(&mut envs, "LK2_CAPTURE", "1");
     let server_log = root.join("screenshots/loop_server.log");
     let client_log = root.join("screenshots/loop_run.log");
-    let (mode, mut client_args) = if use_offline {
+    let ai_log = root.join("screenshots/loop_ai_client.log");
+    let codex_log = root.join("screenshots/loop_codex_client.log");
+    let (mode, client_args) = if use_offline {
         println!(
             ">>> Mode: OFFLINE (no server, client --offline --auto-demo) {}s ...",
             parsed.seconds
@@ -212,6 +226,19 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             ],
         )
     };
+    if parsed.ai_client && mode != "online" {
+        return Err(
+            "--ai-client requires --online so the autonomous client can join a server".to_string(),
+        );
+    }
+    if parsed.codex_client && mode != "online" {
+        return Err(
+            "--codex-client requires --online so the Codex client can join a server".to_string(),
+        );
+    }
+    if parsed.ai_client && parsed.codex_client {
+        return Err("--ai-client and --codex-client are mutually exclusive".to_string());
+    }
 
     let mut server_proc = None;
     if mode == "online" {
@@ -221,6 +248,66 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
 
     println!(">>> Starting lk2-client ({mode}) ...");
     let mut client_proc = spawn_logged(root, &client_exe, &client_args, &envs, &client_log)?;
+    let mut ai_proc = None;
+    let mut codex_proc = None;
+    if parsed.ai_client {
+        // Let the focused client complete its first connection and claim the
+        // primary spawn before the autonomous client joins. This makes the
+        // two-client loop deterministic: the AI receives the second,
+        // independently controlled replicated player instead of racing the
+        // connection observer for the startup entity.
+        thread::sleep(Duration::from_secs(3));
+        let ai_output = iter_dir.join("ai_client.json");
+        set_env_pair(&mut envs, "LK2_AI_OUTPUT", &ai_output.display().to_string());
+        let ai_args = vec![
+            "--ai-client".to_string(),
+            format!("--connect={}", parsed.server_addr),
+            format!(
+                "--seconds={}",
+                parsed.seconds.saturating_add(parsed.max_extra_wait)
+            ),
+            format!("--ai-output={}", ai_output.display()),
+        ];
+        println!(
+            ">>> Starting lk2-ai-client; state={}",
+            audit::rel(root, &ai_output)
+        );
+        ai_proc = Some(spawn_logged(root, &client_exe, &ai_args, &envs, &ai_log)?);
+    }
+    if parsed.codex_client {
+        // Let the focused client claim the primary spawn before the Codex
+        // client joins with its own independently controlled player.
+        thread::sleep(Duration::from_secs(3));
+        let codex_output = iter_dir.join("codex_client.json");
+        set_env_pair(
+            &mut envs,
+            "LK2_CODEX_OUTPUT",
+            &codex_output.display().to_string(),
+        );
+        let codex_args = vec![
+            "--codex-client".to_string(),
+            format!("--connect={}", parsed.server_addr),
+            format!(
+                "--seconds={}",
+                parsed
+                    .seconds
+                    .saturating_add(parsed.max_extra_wait)
+                    .saturating_add(CODEX_ARTIFACT_SETTLE_TIMEOUT_SECS)
+            ),
+            format!("--codex-output={}", codex_output.display()),
+        ];
+        println!(
+            ">>> Starting lk2-codex-client; state={}",
+            audit::rel(root, &codex_output)
+        );
+        codex_proc = Some(spawn_logged(
+            root,
+            &client_exe,
+            &codex_args,
+            &envs,
+            &codex_log,
+        )?);
+    }
     let ready = wait_for_iter(
         root,
         &mut client_proc,
@@ -238,7 +325,23 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
             ">>> Loop capture did not reach ready state before timeout; stopping for health check"
         );
     }
+    if ready.is_some() && parsed.codex_client {
+        let settled = wait_for_codex_artifact(
+            &iter_dir,
+            Duration::from_secs(CODEX_ARTIFACT_SETTLE_TIMEOUT_SECS),
+        );
+        println!(
+            ">>> Codex client artifact {} before stopping auxiliary clients",
+            if settled { "settled" } else { "did not settle" }
+        );
+    }
     stop_child(&mut client_proc);
+    if let Some(mut child) = ai_proc {
+        stop_child(&mut child);
+    }
+    if let Some(mut child) = codex_proc {
+        stop_child(&mut child);
+    }
     if let Some(mut child) = server_proc {
         stop_child(&mut child);
     }
@@ -258,6 +361,37 @@ pub fn run(root: &Path, raw: &[String]) -> Result<()> {
         write_auto_decision(root, "runtime", &message)?;
         print_latest(root)?;
         return Err(message);
+    }
+
+    if parsed.ai_client {
+        if let Err(err) = verify_ai_client_artifact(&iter_dir) {
+            write_loop_diagnosis(
+                root,
+                &diagnosis_json(
+                    "ai_client",
+                    "ai_client_artifact_invalid",
+                    &err,
+                    "fix_ai_client_connection_or_decision_loop",
+                ),
+            )?;
+            write_auto_decision(root, "ai_client", &err)?;
+            return Err(err);
+        }
+    }
+    if parsed.codex_client {
+        if let Err(err) = verify_codex_client_artifact(&iter_dir) {
+            write_loop_diagnosis(
+                root,
+                &diagnosis_json(
+                    "codex_client",
+                    "codex_client_artifact_invalid",
+                    &err,
+                    "fix_codex_cli_auth_or_codex_client_decision_loop",
+                ),
+            )?;
+            write_auto_decision(root, "codex_client", &err)?;
+            return Err(err);
+        }
     }
 
     print_latest(root)?;
@@ -440,6 +574,74 @@ pub fn clean_runs(root: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn milestone(root: &Path) -> Result<()> {
+    let iter = latest_iter(root).ok_or_else(|| {
+        "no loop iteration found under screenshots/; run `just loop` first".to_string()
+    })?;
+    let iter_name = iter
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| format!("invalid loop iteration path: {}", iter.display()))?;
+    let source = iter.join(format!("{iter_name}.png"));
+    let metadata = fs::metadata(&source).map_err(|e| {
+        format!(
+            "latest loop screenshot missing at {}: {e}",
+            source.display()
+        )
+    })?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        return Err(format!(
+            "latest loop screenshot is not a non-empty file: {}",
+            source.display()
+        ));
+    }
+
+    let archive_dir = root.join("milestones");
+    fs::create_dir_all(&archive_dir).map_err(|e| {
+        format!(
+            "failed to create milestone archive {}: {e}",
+            archive_dir.display()
+        )
+    })?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("system clock is before UNIX epoch: {e}"))?
+        .as_secs();
+    let destination = unique_milestone_path(&archive_dir, timestamp, iter_name);
+    fs::copy(&source, &destination).map_err(|e| {
+        format!(
+            "failed to archive {} to {}: {e}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+
+    println!(
+        ">>> Milestone saved: {} -> {}",
+        audit::rel(root, &source),
+        audit::rel(root, &destination)
+    );
+    println!(
+        ">>> Milestones live outside screenshots/, survive `just clean-runs`, and are visible to Git."
+    );
+    Ok(())
+}
+
+fn unique_milestone_path(archive_dir: &Path, timestamp: u64, iter_name: &str) -> PathBuf {
+    let base = format!("{timestamp}_{iter_name}");
+    let first = archive_dir.join(format!("{base}.png"));
+    if !first.exists() {
+        return first;
+    }
+    for suffix in 2.. {
+        let candidate = archive_dir.join(format!("{base}_{suffix}.png"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    unreachable!("an unused milestone filename must exist")
+}
+
 pub fn play(root: &Path, raw: &[String]) -> Result<()> {
     if raw.iter().any(|a| a == "--help" || a == "-h" || a == "-?") {
         println!("xtask play [--skip-build] [--gpu-backend vulkan|dx12] [client flags...]");
@@ -617,6 +819,10 @@ fn parse_loop(raw: &[String]) -> LoopArgs {
             Some("online") => parsed.online = true,
             Some("offline") => parsed.offline = true,
             Some("noserver") | Some("no-server") => parsed.no_server = true,
+            Some("aiclient") | Some("ai-client") | Some("ai") => parsed.ai_client = true,
+            Some("codexclient") | Some("codex-client") | Some("codex") => {
+                parsed.codex_client = true
+            }
             Some("serveraddr") | Some("server-addr") => {
                 if let Some(value) = inline.or_else(|| args::take_next(raw, &mut i)) {
                     parsed.server_addr = value;
@@ -1016,28 +1222,9 @@ fn cargo_build_once(
         package: package.to_string(),
         text: e.to_string(),
     })?;
-    let mut text = stdout_thread
-        .join()
-        .map_err(|_| BuildFailure {
-            package: package.to_string(),
-            text: "cargo stdout reader thread panicked".to_string(),
-        })?
-        .map_err(|e| BuildFailure {
-            package: package.to_string(),
-            text: format!("failed to read cargo stdout: {e}"),
-        })?;
-    text.push_str(
-        &stderr_thread
-            .join()
-            .map_err(|_| BuildFailure {
-                package: package.to_string(),
-                text: "cargo stderr reader thread panicked".to_string(),
-            })?
-            .map_err(|e| BuildFailure {
-                package: package.to_string(),
-                text: format!("failed to read cargo stderr: {e}"),
-            })?,
-    );
+    let mut text = String::new();
+    append_build_output(&mut text, "stdout", stdout_thread.join());
+    append_build_output(&mut text, "stderr", stderr_thread.join());
     if !status.success() {
         return Err(BuildFailure {
             package: package.to_string(),
@@ -1047,13 +1234,36 @@ fn cargo_build_once(
     Ok(())
 }
 
+fn append_build_output(
+    text: &mut String,
+    stream: &str,
+    result: thread::Result<std::io::Result<String>>,
+) {
+    match result {
+        Ok(Ok(output)) => text.push_str(&output),
+        Ok(Err(error)) => {
+            text.push_str(&format!("cargo {stream} reader failed: {error}\n"));
+        }
+        Err(_) => {
+            text.push_str(&format!("cargo {stream} reader thread panicked\n"));
+        }
+    }
+}
+
 fn stream_build_output<R: BufRead>(reader: R, log: Arc<Mutex<File>>) -> std::io::Result<String> {
     let mut text = String::new();
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
     for line in reader.lines() {
         let line = line?;
-        println!("{line}");
         text.push_str(&line);
         text.push('\n');
+        // A parent command can close stdout while Cargo is still draining
+        // its pipes (for example when a terminal wrapper times out). `println!`
+        // panics on that broken pipe, which used to turn a successful/ongoing
+        // Cargo build into the misleading "stderr reader thread panicked"
+        // failure. Keep logging the build even when live forwarding is gone.
+        let _ = writeln!(stdout, "{line}");
         let mut log = log
             .lock()
             .map_err(|_| std::io::Error::other("build log mutex poisoned"))?;
@@ -1425,6 +1635,123 @@ fn runtime_failure_message(client_log: &Path) -> String {
     )
 }
 
+fn verify_ai_client_artifact(iter_dir: &Path) -> Result<()> {
+    let path = iter_dir.join("ai_client.json");
+    let text = fs::read_to_string(&path)
+        .map_err(|err| format!("AI client artifact missing at {}: {err}", path.display()))?;
+    let value: Value = serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "AI client artifact is invalid JSON at {}: {err}",
+            path.display()
+        )
+    })?;
+    let connected = value
+        .get("connected")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let moves = value
+        .pointer("/decision/move_commands")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let actions = value
+        .pointer("/decision/action_commands")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let feedback_ok = value
+        .pointer("/decision/feedback_ok")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let applied_actions = value
+        .pointer("/player/nations_founded")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        + value
+            .pointer("/player/blocks_gathered")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+        + value
+            .pointer("/player/monsters_killed")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+    let observed_ticks = value
+        .get("observed_ticks")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let has_position_probe = value.pointer("/movement_probe/first_pos").is_some()
+        && value.pointer("/movement_probe/current_pos").is_some();
+    if !connected
+        || moves == 0
+        || actions == 0
+        || observed_ticks == 0
+        || !has_position_probe
+        || (feedback_ok == 0 && applied_actions == 0)
+    {
+        return Err(format!(
+            "AI client did not produce a valid observe-decide-act run: connected={connected}, observed_ticks={observed_ticks}, moves={moves}, actions={actions}, feedback_ok={feedback_ok}, applied_actions={applied_actions}, position_probe={has_position_probe}; see {}",
+            path.display()
+        ));
+    }
+    println!(
+        ">>> AI client artifact verified: connected=true, observed_ticks={observed_ticks}, moves={moves}, actions={actions}, feedback_ok={feedback_ok}, applied_actions={applied_actions}"
+    );
+    Ok(())
+}
+
+fn verify_codex_client_artifact(iter_dir: &Path) -> Result<()> {
+    let path = iter_dir.join("codex_client.json");
+    let text = fs::read_to_string(&path)
+        .map_err(|err| format!("Codex client artifact missing at {}: {err}", path.display()))?;
+    let value: Value = serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "Codex client artifact is invalid JSON at {}: {err}",
+            path.display()
+        )
+    })?;
+    let connected = value
+        .get("connected")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let requests = value
+        .pointer("/decision/requests")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let successful = value
+        .pointer("/decision/successful_decisions")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let actions = value
+        .pointer("/decision/action_commands")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let feedback_ok = value
+        .pointer("/decision/feedback_ok")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let observed_ticks = value
+        .get("observed_ticks")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let has_position_probe = value.pointer("/movement_probe/first_pos").is_some()
+        && value.pointer("/movement_probe/current_pos").is_some();
+    if !connected
+        || requests == 0
+        || successful == 0
+        || actions == 0
+        || observed_ticks == 0
+        || feedback_ok == 0
+        || !has_position_probe
+    {
+        return Err(format!(
+            "Codex client did not produce a real observe-decide-act run: connected={connected}, observed_ticks={observed_ticks}, requests={requests}, successful={successful}, actions={actions}, feedback_ok={feedback_ok}, position_probe={has_position_probe}; see {}",
+            path.display()
+        ));
+    }
+    println!(
+        ">>> Codex client artifact verified: connected=true, observed_ticks={observed_ticks}, requests={requests}, successful={successful}, actions={actions}, feedback_ok={feedback_ok}"
+    );
+    Ok(())
+}
+
 fn read_tail(path: &Path, lines: usize) -> String {
     fs::read_to_string(path)
         .map(|text| {
@@ -1471,6 +1798,19 @@ fn wait_for_iter(
     None
 }
 
+fn wait_for_codex_artifact(iter_dir: &Path, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if verify_codex_client_artifact(iter_dir).is_ok() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
 fn iter_ready(iter: &Path) -> bool {
     let state = iter.join("final_state.json");
     let Ok(text) = fs::read_to_string(state) else {
@@ -1482,10 +1822,10 @@ fn iter_ready(iter: &Path) -> bool {
     // iter_210: in online mode SimClock.tick stays at 0 (server runs the
     // authoritative sim), so the offline tick gate would never fire. Accept
     // either an offline tick at the health completion threshold OR an online iter that has run at least
-    // 4 wall seconds and produced a >= 30KB screenshot.
+    // 30 wall seconds and produced a >= 30KB screenshot.
     let role = json.get("role").and_then(Value::as_str).unwrap_or("");
     let tick_ok = json.get("tick").and_then(Value::as_i64).unwrap_or(0) >= 100;
-    let wall_ok = json.get("wall_secs").and_then(Value::as_f64).unwrap_or(0.0) >= 4.0;
+    let wall_ok = json.get("wall_secs").and_then(Value::as_f64).unwrap_or(0.0) >= 30.0;
     if json
         .pointer("/visual/movement_probe/first_player_pos")
         .is_none()
@@ -2246,6 +2586,23 @@ mod tests {
     }
 
     #[test]
+    fn loop_args_can_start_a_second_autonomous_client() {
+        let parsed = parse_loop(&["--online".into(), "--ai-client".into()]);
+
+        assert!(parsed.online);
+        assert!(parsed.ai_client);
+    }
+
+    #[test]
+    fn loop_args_can_start_a_codex_client() {
+        let parsed = parse_loop(&["--online".into(), "--codex-client".into()]);
+
+        assert!(parsed.online);
+        assert!(parsed.codex_client);
+        assert!(!parsed.ai_client);
+    }
+
+    #[test]
     fn play_args_default_to_offline_no_scenario() {
         let parsed = parse_play(&[]);
 
@@ -2545,13 +2902,58 @@ mod tests {
         fs::create_dir_all(root.join("screenshots/iter_1")).unwrap();
         fs::write(root.join("run-logs/play.log"), "log").unwrap();
         fs::write(root.join("screenshots/iter_1/health.json"), "{}").unwrap();
+        fs::create_dir_all(root.join("milestones")).unwrap();
+        fs::write(root.join("milestones/kept.png"), "milestone").unwrap();
         fs::write(root.join("keep.txt"), "keep").unwrap();
 
         clean_runs(&root).unwrap();
 
         assert!(!root.join("run-logs").exists());
         assert!(!root.join("screenshots").exists());
+        assert!(root.join("milestones/kept.png").exists());
         assert!(root.join("keep.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn milestone_archives_latest_loop_png_without_overwriting() {
+        let root = temp_root("xtask_milestone");
+        let older = root.join("screenshots/iter_1");
+        let latest = root.join("screenshots/iter_2");
+        fs::create_dir_all(&older).unwrap();
+        fs::create_dir_all(&latest).unwrap();
+        fs::write(older.join("iter_1.png"), b"older").unwrap();
+        fs::write(latest.join("iter_2.png"), b"latest milestone").unwrap();
+
+        milestone(&root).unwrap();
+        milestone(&root).unwrap();
+
+        let archive = root.join("milestones");
+        let mut files = fs::read_dir(&archive)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        files.sort();
+        assert_eq!(files.len(), 2);
+        for file in files {
+            assert_eq!(fs::read(file).unwrap(), b"latest milestone");
+        }
+        assert_eq!(
+            fs::read(latest.join("iter_2.png")).unwrap(),
+            b"latest milestone"
+        );
+        assert!(!root.join("screenshots/_archive").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn milestone_requires_latest_loop_png() {
+        let root = temp_root("xtask_milestone_missing_png");
+        fs::create_dir_all(root.join("screenshots/iter_7")).unwrap();
+
+        let err = milestone(&root).unwrap_err();
+
+        assert!(err.contains("iter_7.png"), "got: {err}");
         let _ = fs::remove_dir_all(root);
     }
 

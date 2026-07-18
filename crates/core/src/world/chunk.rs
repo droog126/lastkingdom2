@@ -121,7 +121,11 @@ impl TerrainChunkStore {
         self.chunks.remove(&coord)
     }
 
-    pub fn insert(&mut self, coord: TerrainChunkCoord, chunk: TerrainChunk) -> Option<TerrainChunk> {
+    pub fn insert(
+        &mut self,
+        coord: TerrainChunkCoord,
+        chunk: TerrainChunk,
+    ) -> Option<TerrainChunk> {
         self.chunks.insert(coord, chunk)
     }
 
@@ -157,9 +161,15 @@ mod tests {
     fn chunk_revision_changes_only_when_material_changes() {
         let mut chunk = TerrainChunk::empty(TerrainChunkCoord::new(1, 2, 3));
         assert_eq!(chunk.get([15, 15, 15]), Some(BlockType::Air));
-        assert_eq!(chunk.set([15, 15, 15], BlockType::Stone), Some(BlockType::Air));
+        assert_eq!(
+            chunk.set([15, 15, 15], BlockType::Stone),
+            Some(BlockType::Air)
+        );
         assert_eq!(chunk.revision, 1);
-        assert_eq!(chunk.set([15, 15, 15], BlockType::Stone), Some(BlockType::Stone));
+        assert_eq!(
+            chunk.set([15, 15, 15], BlockType::Stone),
+            Some(BlockType::Stone)
+        );
         assert_eq!(chunk.revision, 1);
         assert_eq!(chunk.set([16, 0, 0], BlockType::Stone), None);
     }
@@ -168,9 +178,18 @@ mod tests {
     fn chunk_store_handles_world_coordinates_across_boundaries() {
         let mut store = TerrainChunkStore::default();
         assert_eq!(store.get_block([-1, 0, 16]), None);
-        assert_eq!(store.set_block([-1, 0, 16], BlockType::IronOre), Some(BlockType::Air));
+        assert_eq!(
+            store.set_block([-1, 0, 16], BlockType::IronOre),
+            Some(BlockType::Air)
+        );
         assert_eq!(store.get_block([-1, 0, 16]), Some(BlockType::IronOre));
         assert_eq!(store.loaded_coords().count(), 1);
-        assert_eq!(store.unload(TerrainChunkCoord::new(-1, 0, 1)).unwrap().revision, 1);
+        assert_eq!(
+            store
+                .unload(TerrainChunkCoord::new(-1, 0, 1))
+                .unwrap()
+                .revision,
+            1
+        );
     }
 }

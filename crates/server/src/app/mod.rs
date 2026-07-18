@@ -6,7 +6,7 @@ use super::authority::NatureAuthorityPlugin;
 use super::authority::{LatestNatureReport, NatureAuthoritySet};
 use super::observation::NatureObservationPlugin;
 use super::persistence::NaturePersistencePlugin;
-use super::replication::NatureReplicationPlugin;
+use super::replication::{NatureReplicationPlugin, PlayerInterestPlugin};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ServerModuleRegistration {
@@ -30,6 +30,7 @@ impl Plugin for NatureServerPlugin {
         app.add_plugins((
             NatureAuthorityPlugin,
             NatureReplicationPlugin,
+            PlayerInterestPlugin,
             NatureObservationPlugin,
             NaturePersistencePlugin,
         ));
@@ -53,6 +54,7 @@ impl Plugin for NatureServerProjectionPlugin {
             )
             .add_plugins((
                 NatureReplicationPlugin,
+                PlayerInterestPlugin,
                 NatureObservationPlugin,
                 NaturePersistencePlugin,
             ));

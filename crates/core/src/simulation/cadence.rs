@@ -108,15 +108,16 @@ impl RegionScheduler {
             return 0;
         }
         let interval = self.lod.tick_interval();
-        let due_updates = ((world_tick - self.simulated_tick) / interval)
-            .min(MAX_REGION_CATCH_UP_UPDATES);
+        let due_updates =
+            ((world_tick - self.simulated_tick) / interval).min(MAX_REGION_CATCH_UP_UPDATES);
         let due = due_updates
             .saturating_mul(interval)
             .min(u64::from(u32::MAX));
         let due_u32 = due as u32;
-        self.simulated_tick = self
-            .simulated_tick
-            .saturating_add(u64::from(due_u32) * interval);
+        // `due` is already expressed in world ticks. Multiplying it by the
+        // interval again would make a nearby region jump from tick 0 to 9
+        // when only three world ticks have elapsed.
+        self.simulated_tick = self.simulated_tick.saturating_add(u64::from(due_u32));
         due_u32
     }
 }

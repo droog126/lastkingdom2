@@ -10,6 +10,7 @@ pub enum PlayerAction {
     MoveLeft,
     MoveRight,
     Jump,
+    Crouch,
     Sprint,
     Attack,
     Block,
@@ -51,9 +52,15 @@ pub mod messages {
 
     #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
     pub enum GameplayCommandKind {
-        MoveWorld { dx_milli: i16, dz_milli: i16 },
+        MoveWorld {
+            dx_milli: i16,
+            dz_milli: i16,
+            dy_milli: i16,
+        },
         Jump,
-        MineTarget { target: [i32; 3] },
+        MineTarget {
+            target: [i32; 3],
+        },
         GatherFootBlock,
         PlaceWoodFootBlock,
         Craft(BuildRecipe),
@@ -71,6 +78,18 @@ pub mod messages {
         pub tick: u64,
         pub player_block: [i32; 3],
         pub kind: GameplayCommandKind,
+    }
+
+    /// Requests a fresh authoritative terrain snapshot after the client
+    /// detects a revision gap. The server derives the actual interest region
+    /// from the controlled player's position; these fields are resync context
+    /// and are validated server-side.
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
+    pub struct TerrainSnapshotRequest {
+        pub request_id: u64,
+        pub chunk_x: i32,
+        pub chunk_z: i32,
+        pub known_revision: u64,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, bevy::prelude::Message)]
@@ -131,12 +150,23 @@ pub mod components {
     )]
     pub struct CartMounted(pub bool);
 
+    #[derive(
+        Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect, Default,
+    )]
+    pub struct SwimmingState(pub bool);
+
     #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
     pub struct CartState {
         pub player_id: u32,
         pub position: Vec3,
         pub yaw: f32,
         pub occupied: bool,
+    }
+
+    #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+    pub struct CreatureState {
+        pub kind: u8,
+        pub position: Vec3,
     }
 
     #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
@@ -310,6 +340,8 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<messages::GameplayCommand>()
             .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<messages::TerrainSnapshotRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
 
         app.register_message::<messages::AttackResult>()
             .add_direction(NetworkDirection::ServerToClient);
@@ -331,7 +363,9 @@ impl Plugin for ProtocolPlugin {
         app.component::<components::PlayerPos>().replicate();
         app.component::<components::PlayerRot>().replicate();
         app.component::<components::CartMounted>().replicate();
+        app.component::<components::SwimmingState>().replicate();
         app.component::<components::CartState>().replicate();
+        app.component::<components::CreatureState>().replicate();
         app.component::<components::MonsterKind>().replicate();
         app.component::<components::MonsterHealth>().replicate();
         app.component::<components::GameplayHudState>().replicate();
@@ -838,6 +872,7 @@ mod tests {
             PlayerAction::MoveLeft,
             PlayerAction::MoveRight,
             PlayerAction::Jump,
+            PlayerAction::Crouch,
             PlayerAction::Sprint,
             PlayerAction::Attack,
             PlayerAction::Block,
@@ -849,7 +884,7 @@ mod tests {
             PlayerAction::KillCreature,
         ]
         .len();
-        assert_eq!(count, 14);
+        assert_eq!(count, 15);
     }
 
     #[test]
@@ -865,11 +900,17 @@ mod tests {
         let move_cmd = GameplayCommandKind::MoveWorld {
             dx_milli: 100,
             dz_milli: -50,
+            dy_milli: 25,
         };
         match move_cmd {
-            GameplayCommandKind::MoveWorld { dx_milli, dz_milli } => {
+            GameplayCommandKind::MoveWorld {
+                dx_milli,
+                dz_milli,
+                dy_milli,
+            } => {
                 assert_eq!(dx_milli, 100);
                 assert_eq!(dz_milli, -50);
+                assert_eq!(dy_milli, 25);
             }
             _ => panic!("expected MoveWorld"),
         }
@@ -931,6 +972,20 @@ mod tests {
         assert_eq!(decoded.tick, 1000);
         assert_eq!(decoded.player_block, [16, 8, 32]);
         assert!(matches!(decoded.kind, GameplayCommandKind::FoundNation));
+    }
+
+    #[test]
+    fn terrain_snapshot_request_json_roundtrip() {
+        let request = messages::TerrainSnapshotRequest {
+            request_id: 12,
+            chunk_x: -3,
+            chunk_z: 8,
+            known_revision: 41,
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: messages::TerrainSnapshotRequest = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, request);
     }
 
     #[test]

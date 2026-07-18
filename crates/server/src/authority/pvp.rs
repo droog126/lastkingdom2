@@ -7,8 +7,8 @@ use lk2_core::protection::{Protection, can_attack};
 use lk2_core::protocol::ControlChannel;
 use lk2_core::protocol::messages::{AttackInput, AttackResult};
 use lk2_core::pvp::{
-    FixedTick, Health, Hitbox, PvpCombatant, SimpleWeapon, increment_fixed_tick,
-    resolve_melee_attack,
+    CREATURE_HIT_INVULNERABILITY_TICKS, FixedTick, Health, Hitbox, PvpCombatant, SimpleWeapon,
+    increment_fixed_tick, resolve_melee_attack,
 };
 use lk2_core::world::World as GameWorld;
 
@@ -150,8 +150,14 @@ fn resolve_attacks(
                 continue;
             }
 
-            let damage = health.damage(hit.damage, tick.0, 0);
-            transform.translation += hit.knockback * 0.08;
+            let damage = health.damage(hit.damage, tick.0, CREATURE_HIT_INVULNERABILITY_TICKS);
+            // A blocked hit is not a confirmed contact. Do not move the
+            // victim or advertise knockback when its invulnerability window
+            // rejected the damage; otherwise rapid attacks feel like phantom
+            // impacts and the server/client states diverge.
+            if damage > 0.0 {
+                transform.translation += hit.knockback * 0.08;
+            }
             let victim_id = owner
                 .and_then(|owner| remote_ids.get(owner.owner).ok())
                 .map_or(PeerId::Server, |remote| remote.0.clone());
@@ -161,7 +167,11 @@ fn resolve_attacks(
                 new_health: health.current,
                 is_dead: health.is_dead(),
                 hit_pos: hit.hit_pos,
-                knockback: hit.knockback,
+                knockback: if damage > 0.0 {
+                    hit.knockback
+                } else {
+                    Vec3::ZERO
+                },
                 server_tick: tick.0,
             });
             break;

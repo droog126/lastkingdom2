@@ -20,6 +20,16 @@ just loop
 just health
 ```
 
+To retain the latest loop PNG as a long-lived milestone without rerunning the loop:
+
+```sh
+just milestone
+```
+
+This copies only the primary PNG to the top-level `milestones/` directory. The archive is
+Git-visible, survives `just clean-runs`, and does not modify `screenshots/`; continue to use the
+source iteration's JSON and `decision.md` for health and simulation claims.
+
 Direct form:
 
 ```sh
@@ -34,9 +44,11 @@ Build the affected executable first unless `xtask loop` is allowed to build it. 
 2. Read `regression.json` for newly failed or newly passed assertions.
 3. If health is `PARTIAL` or `FAIL`, read `assertions.json` and copy concrete failure messages.
 4. Read `final_state.json` and `diff.json` only to explain state, authority, or progression.
-5. Inspect the PNG when the claim depends on visibility, framing, HUD, terrain, player, or presentation.
-6. Use `$screenshot-scoring` only when a numeric score, comparison, or scored `decision.md` is requested.
-7. Complete `decision.md` from the generated template with result, evidence, problems, tests, and one next action.
+5. When present, read natural-world `event_count`, `region_tick`, `catch_up_remaining`, and
+   `save_restored`; these fields are optional for backward compatibility.
+6. Inspect the PNG when the claim depends on visibility, framing, HUD, terrain, player, or presentation.
+7. Use `$screenshot-scoring` only when a numeric score, comparison, or scored `decision.md` is requested.
+8. Complete `decision.md` from the generated template with result, evidence, problems, tests, and one next action.
 
 If an artifact is absent, report it as missing instead of fabricating a score or state conclusion.
 
@@ -52,4 +64,4 @@ If an artifact is absent, report it as missing instead of fabricating a score or
 
 ## Completion
 
-Report the iteration path, health/regression verdict, inspected evidence, validation commands, and remaining failure. Do not modify unrelated code merely because the loop reveals a new issue; record it unless the user asked to fix it.
+Report the iteration path, health/regression verdict, inspected evidence, validation commands, and remaining failure. When a milestone was requested, also report its archive path. Do not modify unrelated code merely because the loop reveals a new issue; record it unless the user asked to fix it.

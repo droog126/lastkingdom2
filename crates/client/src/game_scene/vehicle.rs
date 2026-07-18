@@ -3,8 +3,9 @@
 use bevy::prelude::*;
 
 use super::keybindings::{GameAction, KeyBindings};
-use super::state::{PlayerActor, ProceduralTerrainSurface};
-use super::util::{CART_PATH, spawn_asset};
+use super::state::{CameraMode, LivingCameraRig, PlayerActor, ProceduralTerrainSurface};
+use super::util::{CART_FRONT_YAW_OFFSET, CART_PATH, spawn_asset};
+use lk2_core::vehicle::CartDriveState;
 
 #[derive(Component)]
 pub struct PlayCart;
@@ -12,6 +13,7 @@ pub struct PlayCart;
 #[derive(Resource, Default)]
 pub struct CartRideState {
     pub mounted: bool,
+    pub drive: CartDriveState,
 }
 
 pub fn setup_cart(
@@ -19,14 +21,14 @@ pub fn setup_cart(
     asset_server: Res<AssetServer>,
     terrain: Res<ProceduralTerrainSurface>,
 ) {
-    let position = Vec3::new(-2.0, terrain.ground_height(Vec3::new(-2.0, 0.0, 8.0)), 8.0);
+    let position = Vec3::new(-6.0, terrain.ground_height(Vec3::new(-6.0, 0.0, 10.0)), 10.0);
     spawn_asset(
         &mut commands,
         &asset_server,
         CART_PATH,
         position,
-        1.2,
-        std::f32::consts::PI,
+        0.72,
+        std::f32::consts::PI + CART_FRONT_YAW_OFFSET,
         "play_cart",
     )
     .insert(PlayCart);
@@ -45,12 +47,12 @@ pub fn toggle_cart_ride(
     if bindings.menu_open || !bindings.just_pressed(GameAction::RideCart, &keys, &mouse) {
         return;
     }
-    let cart_translation = {
+    let (cart_translation, cart_rotation) = {
         let cart_query = actors.p1();
         let Ok(cart) = cart_query.single() else {
             return;
         };
-        cart.translation
+        (cart.translation, cart.rotation)
     };
     let mut player_query = actors.p0();
     let Ok(mut player) = player_query.single_mut() else {
@@ -60,8 +62,16 @@ pub fn toggle_cart_ride(
         state.mounted = !state.mounted;
         if state.mounted {
             player.translation = cart_translation + Vec3::Y * 1.15;
+            // The cart mesh faces local +X; the avatar faces local +Z.
+            player.rotation = cart_rotation * Quat::from_rotation_y(-CART_FRONT_YAW_OFFSET);
+            state.drive = CartDriveState {
+                yaw: player.rotation.to_euler(EulerRot::YXZ).0,
+                ..default()
+            };
         } else {
-            player.translation = cart_translation + Vec3::new(1.8, 0.9, 0.0);
+            player.translation = cart_translation + cart_rotation * Vec3::X * 1.8 + Vec3::Y * 0.9;
+            state.drive.speed = 0.0;
+            state.drive.steer = 0.0;
         }
     }
 }
@@ -78,16 +88,33 @@ pub fn sync_cart_to_rider(
     let (Ok(player), Ok(mut cart)) = (player.single(), cart.single_mut()) else {
         return;
     };
-    let planar_delta = Vec3::new(
-        player.translation.x - cart.translation.x,
-        0.0,
-        player.translation.z - cart.translation.z,
-    );
-    let speed = planar_delta.length() / time.delta_secs().max(0.001);
+    let speed = state.drive.speed.abs();
     let moving = speed > 0.05;
     let phase = time.elapsed_secs() * (3.0 + speed * 1.5);
-    let bob = if moving { phase.sin().abs() * 0.025 } else { 0.0 };
+    let bob = if moving {
+        phase.sin().abs() * 0.025
+    } else {
+        0.0
+    };
     let roll = if moving { phase.sin() * 0.025 } else { 0.0 };
     cart.translation = player.translation - Vec3::Y * 1.15 + Vec3::Y * bob;
-    cart.rotation = player.rotation * Quat::from_rotation_z(roll);
+    cart.rotation = Quat::from_rotation_y(state.drive.yaw + CART_FRONT_YAW_OFFSET)
+        * Quat::from_rotation_z(roll);
+}
+
+/// The first-person camera starts close to the rider and can look through the
+/// cart body. Hide only the presentation root in first-person mode; the cart
+/// remains present for physics, interaction, third-person, and free-camera views.
+pub fn sync_cart_visibility(
+    camera_rig: Res<LivingCameraRig>,
+    mut carts: Query<&mut Visibility, With<PlayCart>>,
+) {
+    let visible = camera_rig.mode != CameraMode::FirstPerson;
+    for mut visibility in &mut carts {
+        *visibility = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
 }

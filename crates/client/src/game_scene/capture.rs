@@ -8,7 +8,9 @@ use serde_json::json;
 
 use super::offline::OfflineNature;
 use super::player::first_person_eye;
-use super::state::{LivingCameraRig, LivingSceneState, PlayerActor};
+use super::state::{
+    LivingCameraRig, LivingSceneState, PlayerActor, PlayerSwimState, ProceduralTerrainSurface,
+};
 use super::util::{PLAYER_PHYSICS_CENTER_HEIGHT, SCREENSHOT_MIN_FRAME, SCREENSHOT_SCENE_SECS};
 
 pub fn maybe_take_screenshot(
@@ -16,7 +18,8 @@ pub fn maybe_take_screenshot(
     mut state: ResMut<LivingSceneState>,
     mut nature: ResMut<OfflineNature>,
     camera_rig: Res<LivingCameraRig>,
-    players: Query<&Transform, With<PlayerActor>>,
+    terrain: Res<ProceduralTerrainSurface>,
+    players: Query<(&Transform, Option<&PlayerSwimState>), With<PlayerActor>>,
 ) {
     if !state.auto_shot
         || state.shot_requested
@@ -28,10 +31,24 @@ pub fn maybe_take_screenshot(
     if state.auto_demo {
         if let Some(iter_dir) = &state.iter_dir {
             let _ = std::fs::create_dir_all(iter_dir);
-            let player = players.iter().next().map_or(Vec3::ZERO, |transform| {
+            let player_entry = players.iter().next();
+            let swimming =
+                player_entry.is_some_and(|(_, swim)| swim.is_some_and(|swim| swim.active));
+            let player = player_entry.map_or(Vec3::ZERO, |(transform, _)| {
                 transform.translation - Vec3::Y * PLAYER_PHYSICS_CENTER_HEIGHT
             });
-            let eye = first_person_eye(player);
+            let eye = if swimming {
+                player_entry.map_or(Vec3::ZERO, |(transform, _)| {
+                    let desired_y = transform.translation.y + 0.22;
+                    Vec3::new(
+                        transform.translation.x,
+                        desired_y.min(terrain.water_surface_height() - 0.18),
+                        transform.translation.z,
+                    )
+                })
+            } else {
+                first_person_eye(player)
+            };
             let snapshot = nature.snapshot.clone();
             let events = nature.buffer.drain_events().collect::<Vec<_>>();
             let events_json = serde_json::to_value(&events).unwrap_or_else(|_| json!([]));
@@ -44,10 +61,11 @@ pub fn maybe_take_screenshot(
                 "wall_secs": state.elapsed,
                 "frame": state.frame,
                 "world": {"size": 96},
-                "player": {"block_pos": player_block, "pos": [player.x, player.y, player.z], "blocks_gathered": 0, "monsters_killed": 0, "nations_founded": 1},
+                "player": {"block_pos": player_block, "pos": [player.x, player.y, player.z], "swimming": swimming, "blocks_gathered": 0, "monsters_killed": 0, "nations_founded": 1},
                 "nations": {"total_nations": 1},
                 "observer": {"anomalies": 0, "invariant_violations": 0},
                 "camera": {"mode": camera_rig.mode.label(), "first_person_eye": [eye.x, eye.y, eye.z]},
+                "water": {"surface_y": terrain.water_surface_height(), "camera_below_surface": swimming && eye.y < terrain.water_surface_height()},
                 "visual": {
                     "static_world": static_world.clone(),
                     "movement_probe": {

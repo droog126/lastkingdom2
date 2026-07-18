@@ -25,6 +25,8 @@ Do not duplicate dependency constraints in another current document.
   than client-only copies.
 - `lk2-server` owns authority and network ingress. It must not depend on client rendering, UI,
   camera, or pretty-asset code.
+- `lk2-client --ai-client` is a headless online client, not a second authority. It observes
+  replicated player state and sends the existing validated gameplay commands through Lightyear.
 - `tools/` owns reproducible asset generation.
 - `xtask/` owns durable workflow automation, state files, JSON contracts, retries, audits, and
   cross-platform error handling.
@@ -70,6 +72,8 @@ just audit-architecture
 just audit-docs
 just audit-skills
 just loop
+just loop-ai
+just milestone
 just health
 ```
 
@@ -112,6 +116,7 @@ screenshots/iter_NN/
   regression.json
   decision.template.md
   decision.md
+  ai_client.json
 ```
 
 Read `health.json` first. A later loop must not begin until the preceding iteration has a completed
@@ -122,6 +127,21 @@ The focused client now has basic offline and online auto-demo producers for `ite
 `final_state.json`, and `diff.json`. Health, assertions, regression summaries, and decision
 templates are still owned by `xtask`; a generated iteration is runtime evidence only after the
 requested loop/health command has actually been run and inspected.
+
+`just loop` is the default online closed loop: it starts the focused rendered client and a
+headless AI client, and requires `ai_client.json` to prove connection, replicated observations,
+movement, and decisions. `just loop-ai` is an explicit alias for the same workflow; use
+`just loop-offline` for the offline-only loop.
+
+`just milestone` copies the newest loop's primary PNG to a unique timestamped path under the
+top-level `milestones/` directory. Unlike ordinary runtime output, this directory is Git-visible
+and `just clean-runs` preserves it without special-casing `screenshots/`. The command archives
+presentation evidence only; the unchanged source iteration remains the owner of health and
+simulation evidence.
+
+The rendered offline and online gameplay scenes also install the shared milestone capture plugin.
+Pressing `F12` writes the current primary window directly to `milestones/`; preview-only modes and
+closed-loop JSON producers remain separate.
 
 Normal offline and online play aliases route through `xtask play` and archive client logs and error
 summaries under `run-logs/`. `just play --online` builds the client and server, starts the server,
