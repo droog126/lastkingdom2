@@ -6,7 +6,7 @@ members = ["crates/*"]
 # 用法: `bevy.workspace = true`
 [workspace.dependencies]
 bevy = "0.18.1"
-avian3d = "0.6.1"
+avian3d = "0.7.0"
 rand = "0.10.1"
 bevy-inspector-egui = "0.36"
 serde = { version = "1", features = ["derive"] }
